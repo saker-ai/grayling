@@ -1,0 +1,42 @@
+# Build artifacts
+/bin/
+/golab
+/golab-proxy
+*.exe
+
+# Test & coverage
+*.test
+*.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# Dependencies
+node_modules/
+vendor/
+
+# Frontend build
+/dist/
+/web/build/
+
+# Runtime state
+/data/
+*.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+# OMC runtime state
+.omc/
