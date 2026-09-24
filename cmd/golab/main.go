@@ -9,8 +9,10 @@
 //     API, which enforces authorization gonacos does not.
 //
 // Storage topology (docs/技术方案.md §3): GoLab server + same-process
-// gonacos + platform store file. The dev/default platform store is the
-// file-backed JSON store; PostgreSQL is the production path (§10.2).
+// gonacos + platform store. The dev/default platform store is the
+// file-backed JSON store; -pg switches to the production PostgreSQL backend
+// (schema auto-migrated, events monthly-partitioned, HMAC key-ring rotation
+// migration — docs/技术方案.md §10.2).
 package main
 
 import (
@@ -39,7 +41,8 @@ import (
 func main() {
 	var (
 		listenAddr    = flag.String("addr", "127.0.0.1:8688", "GoLab HTTP listen address")
-		dataFile      = flag.String("data", filepath.Join("data", "golab-store.json"), "platform store file ('' = memory-only)")
+		dataFile      = flag.String("data", filepath.Join("data", "golab-store.json"), "platform store file ('' = memory-only; ignored when -pg is set)")
+		pgDSN         = flag.String("pg", "", "PostgreSQL DSN for the production platform store (e.g. postgres://golab:secret@127.0.0.1:5432/golab); overrides -data")
 		gonacosRoot   = flag.String("gonacos-root", "", "gonacos contract root (repo with api/openapi/upstream); empty disables 501-stub registration")
 		gonacosData   = flag.String("gonacos-data", "", "gonacos embedded-redis dump dir (default <data dir>/gonacos)")
 		gonacosAddr   = flag.String("gonacos-addr", "127.0.0.1:18848", "gonacos HTTP bind — KEEP LOOPBACK/PRIVATE (§9)")
@@ -106,15 +109,25 @@ func main() {
 	logger.Printf("gonacos substrate: http=%s grpc=%s (loopback-only by design)", gsrv.HTTPAddr(), gsrv.GRPCAddr())
 
 	// ---- platform store ----
-	store, err := platform.NewStore(*dataFile)
-	if err != nil {
-		logger.Fatalf("platform store: %v", err)
-	}
-	if *dataFile != "" {
-		logger.Printf("platform store: %s", *dataFile)
+	var store *platform.Store
+	if *pgDSN != "" {
+		store, err = platform.NewPGStore(ctx, *pgDSN)
+		if err != nil {
+			logger.Fatalf("platform store (postgres): %v", err)
+		}
+		logger.Printf("platform store: postgresql (schema migrated, state loaded)")
 	} else {
-		logger.Printf("platform store: memory-only (no persistence)")
+		store, err = platform.NewStore(*dataFile)
+		if err != nil {
+			logger.Fatalf("platform store: %v", err)
+		}
+		if *dataFile != "" {
+			logger.Printf("platform store: %s", *dataFile)
+		} else {
+			logger.Printf("platform store: memory-only (no persistence)")
+		}
 	}
+	defer func() { _ = store.Close() }()
 
 	// ---- API + AI gate ----
 	apiSrv := api.NewServer(store, configstore.NewGonacosStore(bundle.Config), api.Options{

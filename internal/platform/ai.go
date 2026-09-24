@@ -57,8 +57,10 @@ func (s *Store) RegisterAIResource(workspaceID, environmentID, typ, logicalID, o
 		CreatedAt:  s.now(),
 	}
 	s.data.NextCounter++
+	s.changes.Meta = true
 	s.data.AIResources[key] = ref
-	return ref, s.saveLocked()
+	s.changes.markDirty(collAIResources, key)
+	return ref, s.commitLocked()
 }
 
 // GetAIResource resolves one ownership index entry. Cross-workspace lookups
@@ -118,7 +120,8 @@ func (s *Store) DeleteAIResource(workspaceID, environmentID, typ, logicalID stri
 		return fmt.Errorf("%w: AI resource %s/%q", ErrNotFound, typ, logicalID)
 	}
 	delete(s.data.AIResources, key)
-	return s.saveLocked()
+	s.changes.markDeleted(collAIResources, key)
+	return s.commitLocked()
 }
 
 // PinAIVersion records an immutable version binding (§7: 默认发布时把 label
@@ -152,7 +155,8 @@ func (s *Store) PinAIVersion(pin *PinnedVersion) error {
 		pin.PinnedAt = s.now()
 	}
 	s.data.PinnedVersions[key] = append(s.data.PinnedVersions[key], pin)
-	return s.saveLocked()
+	s.changes.markDirty(collPinnedVersions, key)
+	return s.commitLocked()
 }
 
 // GetPinnedVersion returns the recorded digest for one pinned version.
@@ -192,7 +196,8 @@ func (s *Store) SetModelAllowlist(workspaceID string, entries []ModelAllowEntry)
 		}
 	}
 	s.data.ModelAllowlist[workspaceID] = entries
-	return s.saveLocked()
+	s.changes.markDirty(collModelAllowlist, workspaceID)
+	return s.commitLocked()
 }
 
 // ModelAllowed checks one (provider, model) pair against the allowlist.
@@ -232,7 +237,8 @@ func (s *Store) RevokeAIResource(workspaceID, environmentID, typ, logicalID, rea
 	}
 	key := aiKey(workspaceID, environmentID, typ, logicalID)
 	s.data.AIRevocations[key] = fmt.Sprintf("%s (by %s)", reason, actor)
-	return s.saveLocked()
+	s.changes.markDirty(collAIRevocations, key)
+	return s.commitLocked()
 }
 
 // ReinstateAIResource lifts a revocation.
@@ -244,7 +250,8 @@ func (s *Store) ReinstateAIResource(workspaceID, environmentID, typ, logicalID s
 		return fmt.Errorf("%w: %s/%q not revoked", ErrNotFound, typ, logicalID)
 	}
 	delete(s.data.AIRevocations, key)
-	return s.saveLocked()
+	s.changes.markDeleted(collAIRevocations, key)
+	return s.commitLocked()
 }
 
 // IsAIRevoked reports the live revocation state.

@@ -1,9 +1,13 @@
 package platform
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,6 +132,73 @@ func TestMemoryOnlyStore(t *testing.T) {
 	}
 	if _, err := s.CreateWorkspace("mem", ""); err != nil {
 		t.Fatalf("ws: %v", err)
+	}
+}
+
+// TestFileBackwardCompatSingleKey proves store files written before the HMAC
+// key ring existed (single "hmacKey" field, no "hmacKeyRing") load unchanged
+// and keep producing byte-identical unit hashes — attribution must not break
+// across the upgrade.
+func TestFileBackwardCompatSingleKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "store.json")
+	legacy := `{
+        "schemaVersion": 1,
+        "nextCounter": 7,
+        "workspaces": {}, "envBySlugKey": {}, "environments": {},
+        "tokens": {}, "tokensByHash": {},
+        "flagDrafts": {}, "flagRevisions": {}, "currentFlagRev": {}, "nextFlagRev": {},
+        "flagTombstones": {}, "segmentDrafts": {}, "segmentRevisions": {},
+        "currentSegmentRev": {}, "nextSegmentRev": {}, "manifestRevisions": {},
+        "experiments": {}, "events": [], "eventIndex": {}, "unitAggs": {},
+        "exposedUnits": {}, "splitExposedUnits": {}, "eventCounts": {},
+        "audit": [], "nextAudit": 0,
+        "aiResources": {}, "pinnedVersions": {}, "modelAllowlist": {}, "aiRevocations": {},
+        "quotas": {},
+        "hmacKey": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("write legacy store: %v", err)
+	}
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("open legacy store: %v", err)
+	}
+	defer s.Close()
+
+	// Historical single-key scheme: hex(HMAC-SHA256(key, ws || 0x00 || unit)).
+	mac := hmac.New(sha256.New, []byte("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"))
+	mac.Write([]byte("ws-1"))
+	mac.Write([]byte{0})
+	mac.Write([]byte("user-1"))
+	want := hex.EncodeToString(mac.Sum(nil))
+	if got := s.HashUnit("ws-1", "user-1"); got != want {
+		t.Fatalf("legacy key hash changed: %s, want %s", got, want)
+	}
+	if s.data.NextCounter != 7 {
+		t.Fatalf("counters not preserved: %d", s.data.NextCounter)
+	}
+	// Rotating extends the chain without breaking the legacy layer.
+	newKey := strings.Repeat("cd", 32)
+	if err := s.RotateHMACKey(newKey); err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	mac2 := hmac.New(sha256.New, []byte(newKey))
+	mac2.Write([]byte("ws-1"))
+	mac2.Write([]byte{0})
+	mac2.Write([]byte(want))
+	chained := hex.EncodeToString(mac2.Sum(nil))
+	if got := s.HashUnit("ws-1", "user-1"); got != chained {
+		t.Fatalf("rotated hash %s, want %s", got, chained)
+	}
+	// The file backend must persist the ring across reopens.
+	s2, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer s2.Close()
+	if len(s2.data.HMACKeyRing) != 2 || s2.HashUnit("ws-1", "user-1") != chained {
+		t.Fatalf("ring not persisted: %v", s2.data.HMACKeyRing)
 	}
 }
 

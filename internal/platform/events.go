@@ -48,6 +48,12 @@ func (s *Store) IngestEvents(events []*Event) (IngestResult, error) {
 	defer s.mu.Unlock()
 
 	now := s.now()
+
+	// Pass 1: validate + in-memory dedup, collecting candidates. `seen`
+	// preserves the historical intra-batch dedup: a repeated event ID
+	// within ONE batch counts as duplicate, not as a second exposure.
+	candidates := make([]*Event, 0, len(events))
+	seen := make(map[string]bool, len(events))
 	for _, ev := range events {
 		if err := s.validateEventLocked(ev, now); err != nil {
 			res.Rejected++
@@ -60,12 +66,79 @@ func (s *Store) IngestEvents(events []*Event) (IngestResult, error) {
 			res.Duplicates++
 			continue
 		}
+		if seen[ev.EventID] {
+			res.Duplicates++
+			continue
+		}
+		seen[ev.EventID] = true
+		candidates = append(candidates, ev)
+	}
+
+	// Pass 2: backends with a durable dedup ledger (PostgreSQL event_index)
+	// extend dedup across the FULL retention window, not just the in-memory
+	// eviction window. Failures abort the batch — the collector retries.
+	if s.dedup != nil && len(candidates) > 0 {
+		ids := make([]string, len(candidates))
+		for i, ev := range candidates {
+			ids[i] = ev.EventID
+		}
+		known, err := s.dedup.KnownEventIDs(ids)
+		if err != nil {
+			return res, fmt.Errorf("platform: dedup ledger: %w", err)
+		}
+		filtered := candidates[:0]
+		for _, ev := range candidates {
+			if known[ev.EventID] {
+				res.Duplicates++
+				continue
+			}
+			filtered = append(filtered, ev)
+		}
+		candidates = filtered
+	}
+
+	// Pass 3: apply. touchedAggs/touchedCounts remember which absolute
+	// aggregate rows changed so the ChangeSet can carry their FINAL values
+	// (replay-idempotent upserts, never blind deltas).
+	touchedAggs := map[string]*Event{}
+	touchedCounts := map[string]*Event{}
+	for _, ev := range candidates {
 		ev.ServerTime = now
-		s.appendEventLocked(ev)
+		aggKey, countKey := s.appendEventLocked(ev)
 		res.Accepted++
+		s.changes.Events = append(s.changes.Events, ev)
+		if aggKey != "" {
+			touchedAggs[aggKey] = ev
+		}
+		touchedCounts[countKey] = ev
 	}
 	if res.Accepted > 0 {
-		if err := s.saveLocked(); err != nil {
+		for aggKey, ev := range touchedAggs {
+			agg := s.data.UnitAggs[aggKey]
+			if agg == nil {
+				continue
+			}
+			s.changes.Aggs = append(s.changes.Aggs, AggUpsert{
+				WorkspaceID: ev.WorkspaceID, EnvironmentID: ev.EnvironmentID,
+				ExperimentID: ev.ExperimentID, Epoch: ev.Epoch,
+				Variant: ev.Variant, UnitHash: ev.UnitHash, MetricKey: ev.MetricKey,
+				Count: agg.Count, Sum: agg.Sum, SumSquares: agg.SumSquares,
+				First: agg.First, Last: agg.Last,
+			})
+		}
+		for countKey, ev := range touchedCounts {
+			kind := "exposure"
+			if ev.Type == EventConversion {
+				kind = "conversion"
+			}
+			s.changes.Counts = append(s.changes.Counts, CountUpsert{
+				WorkspaceID: ev.WorkspaceID, EnvironmentID: ev.EnvironmentID,
+				ExperimentID: ev.ExperimentID, Epoch: ev.Epoch,
+				Variant: ev.Variant, Kind: kind,
+				Count: s.data.EventCounts[countKey],
+			})
+		}
+		if err := s.commitLocked(); err != nil {
 			return res, err
 		}
 	}
@@ -119,7 +192,10 @@ func (s *Store) validateEventLocked(ev *Event, now time.Time) error {
 }
 
 // appendEventLocked stores the event and updates aggregates. Caller holds mu.
-func (s *Store) appendEventLocked(ev *Event) {
+// It returns the aggregate key (conversions only, "" for exposures) and the
+// event-count key this event touched, so IngestEvents can record absolute
+// row upserts in the ChangeSet.
+func (s *Store) appendEventLocked(ev *Event) (aggKey, countKey string) {
 	// Lazy map init: store files written before a field existed unmarshal
 	// with nil maps.
 	if s.data.EventIndex == nil {
@@ -174,8 +250,9 @@ func (s *Store) appendEventLocked(ev *Event) {
 			splitSet[ev.UnitHash] = true
 		}
 		s.data.EventCounts[expScope+"/exposure"]++
+		return "", expScope + "/exposure"
 	case EventConversion:
-		aggKey := expScope + "/" + ev.UnitHash + "/" + ev.MetricKey
+		aggKey = expScope + "/" + ev.UnitHash + "/" + ev.MetricKey
 		agg, ok := s.data.UnitAggs[aggKey]
 		if !ok {
 			agg = &UnitAgg{First: ev.ClientTime}
@@ -186,7 +263,9 @@ func (s *Store) appendEventLocked(ev *Event) {
 		agg.SumSquares += ev.Value * ev.Value
 		agg.Last = ev.ClientTime
 		s.data.EventCounts[expScope+"/conversion"]++
+		return aggKey, expScope + "/conversion"
 	}
+	return "", ""
 }
 
 // VariantStats is the aggregated analysis input for one variant.
@@ -337,6 +416,12 @@ func (s *Store) EventsForExperiment(workspaceID, environmentID, experimentID str
 // PruneEvents removes raw events older than the retention window (§10.2:
 // 按保留期分区删除). Aggregates are kept — they are the sufficient
 // statistics for in-flight and analyzed experiments.
+//
+// The durable backend prunes its OWN raw-event store (PostgreSQL drops whole
+// time partitions plus a boundary delete, and shrinks the dedup ledger to
+// match), which may remove more rows than the in-memory working set held —
+// the returned count is what left memory, backend-side totals are logged by
+// the backend itself.
 func (s *Store) PruneEvents(retention time.Duration) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -351,14 +436,14 @@ func (s *Store) PruneEvents(retention time.Duration) int {
 		}
 		kept = append(kept, ev)
 	}
-	if removed == 0 {
-		return 0
-	}
 	s.data.Events = kept
 	for i, e := range s.data.Events {
 		s.data.EventIndex[e.EventID] = i
 	}
-	_ = s.saveLocked()
+	// Always commit the retention boundary: the backend store can contain
+	// events beyond the in-memory cap that only this pass can remove.
+	s.changes.PruneEventsBefore = cutoff
+	_ = s.commitLocked()
 	return removed
 }
 

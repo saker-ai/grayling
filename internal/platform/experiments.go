@@ -73,7 +73,8 @@ func (s *Store) CreateExperiment(exp *Experiment) (*Experiment, error) {
 		exp.Power = 0.8
 	}
 	s.data.Experiments[exp.ID] = exp
-	return exp, s.saveLocked()
+	s.changes.markDirty(collExperiments, exp.ID)
+	return exp, s.commitLocked()
 }
 
 func validateExperimentInvariants(exp *Experiment) error {
@@ -189,7 +190,8 @@ func (s *Store) TransitionExperiment(id string, to model.ExperimentState, actor 
 	}
 	e.State = to
 	e.UpdatedAt = now
-	return e, s.saveLocked()
+	s.changes.markDirty(collExperiments, id)
+	return e, s.commitLocked()
 }
 
 // NextEpoch returns the next unused epoch for one flag (epochs are never
@@ -265,7 +267,8 @@ func (s *Store) SetExperimentLayerSlot(id string, slot *model.BucketRange) error
 	}
 	e.LayerSlot = slot
 	e.UpdatedAt = s.now()
-	return s.saveLocked()
+	s.changes.markDirty(collExperiments, id)
+	return s.commitLocked()
 }
 
 // LiveExperiments returns experiments currently affecting evaluation

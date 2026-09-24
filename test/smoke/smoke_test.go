@@ -3,8 +3,10 @@ package smoke
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/godeps/gonacos/pkg/config"
@@ -14,12 +16,19 @@ import (
 	gffflag "github.com/thomaspoignant/go-feature-flag/modules/core/flag"
 )
 
-// gonacosRoot resolves the sibling gonacos repository from this test's
-// package directory (test/smoke → repo root → godeps/gonacos). WithRoot makes
-// gonacos register its OpenAPI contract stubs; the repo layout is fixed by the
-// godeps workspace convention (docs/技术方案.md §3).
+// gonacosRoot resolves the gonacos contract root (api/openapi/upstream).
+// It PREFERS the pinned module's own directory from the module cache so the
+// contract test exercises exactly the dependency go.mod pins (docs/技术方案.md
+// §12.1); the sibling checkout is only a development fallback.
 func gonacosRoot(t *testing.T) string {
 	t.Helper()
+	if out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}",
+		"github.com/godeps/gonacos").Output(); err == nil {
+		dir := strings.TrimSpace(string(out))
+		if _, err := os.Stat(filepath.Join(dir, "api", "openapi", "upstream")); err == nil {
+			return dir
+		}
+	}
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("cannot resolve test file path")
@@ -30,7 +39,7 @@ func gonacosRoot(t *testing.T) string {
 		t.Fatalf("abs: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(abs, "api", "openapi", "upstream")); err != nil {
-		t.Fatalf("gonacos contract root not found at %s: %v", abs, err)
+		t.Fatalf("gonacos contract root not found (module cache or %s): %v", abs, err)
 	}
 	return abs
 }

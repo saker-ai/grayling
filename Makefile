@@ -13,6 +13,7 @@ all: vet test build
 build:
 	$(GO) build ./...
 	$(GO) build -o bin/golab ./cmd/golab
+	$(GO) build -o bin/golab-proxy ./cmd/golab-proxy
 
 test:
 	$(GO) test ./... -count=1

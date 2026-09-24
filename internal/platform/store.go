@@ -1,16 +1,14 @@
 package platform
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -77,52 +75,117 @@ type Data struct {
 
 	Quotas map[string]Quotas `json:"quotas"` // wsID; missing = DefaultQuotas
 
-	// HMACKey pseudonymizes randomization units per deployment (§10.2:
-	// 单元 ID 做租户范围内 HMAC). Rotation requires re-hashing stored
-	// events — a migration, not a hot swap; kept out of API responses.
+	// HMACKey is the CURRENT pseudonymization key (last ring entry), kept as
+	// a top-level field for store-file compatibility.
 	HMACKey string `json:"hmacKey"`
+	// HMACKeyRing is the ordered key chain (oldest first). HashUnit applies
+	// every layer, so rotating the key extends the ring and a migration
+	// re-hashes stored pseudonyms with the new layer (RotateHMACKey,
+	// §10.2: 单元 ID 做租户范围内 HMAC，密钥轮换有迁移方案). A single-entry
+	// ring hashes identically to the historical single-key scheme.
+	HMACKeyRing []string `json:"hmacKeyRing,omitempty"`
 }
 
-// Store is the concurrency-safe platform store.
+// Store is the concurrency-safe platform store. Reads are served from the
+// in-memory working set; every mutation is durably committed through the
+// Persistence backend as one transactional unit (file JSON for dev, or
+// PostgreSQL for production — docs/技术方案.md §3, §10.2).
 type Store struct {
-	mu   sync.RWMutex
-	path string // "" = memory-only
-	data *Data
+	mu      sync.RWMutex
+	persist Persistence
+	dedup   eventDedup // optional backend dedup ledger (PostgreSQL)
+	changes *ChangeSet
+	data    *Data
 }
 
 const dataSchemaVersion = 1
 
 // MaxRetainedEvents caps in-memory raw event retention (aggregates are
-// unbounded). Oldest events are evicted first; the cap exists so the dev
-// store cannot exhaust memory — production retention lives in PostgreSQL
-// (§10.2).
+// unbounded). Oldest events are evicted first; the cap exists so the
+// working set cannot exhaust memory. The PostgreSQL backend retains raw
+// events for the full retention window regardless of this cap (§10.2).
 const MaxRetainedEvents = 200_000
 
 // NewStore opens (or creates) a store. When path != "", state is loaded from
 // the JSON file if present and persisted atomically on every mutation.
 func NewStore(path string) (*Store, error) {
-	s := &Store{path: path}
-	if path != "" {
-		if err := s.load(); err != nil {
-			return nil, err
-		}
+	if path == "" {
+		return newStore(nopPersistence{})
 	}
-	if s.data == nil {
-		s.data = newData()
+	return newStore(&filePersistence{path: path})
+}
+
+// NewPGStore opens (or creates) a PostgreSQL-backed store. The DSN is a
+// standard postgres connection string; the schema is migrated automatically
+// and the full state is loaded into memory on open (production path, §10.2).
+func NewPGStore(ctx context.Context, dsn string) (*Store, error) {
+	p, err := newPGPersistence(ctx, dsn)
+	if err != nil {
+		return nil, err
 	}
-	if s.data.HMACKey == "" {
-		key := make([]byte, 32)
-		if _, err := rand.Read(key); err != nil {
-			return nil, fmt.Errorf("platform: generate HMAC key: %w", err)
-		}
-		s.data.HMACKey = hex.EncodeToString(key)
-	}
-	if path != "" {
-		if err := s.saveLocked(); err != nil {
-			return nil, err
-		}
+	s, err := newStore(p)
+	if err != nil {
+		_ = p.Close()
+		return nil, err
 	}
 	return s, nil
+}
+
+func newStore(p Persistence) (*Store, error) {
+	s := &Store{persist: p, changes: newChangeSet()}
+	if dd, ok := p.(eventDedup); ok {
+		s.dedup = dd
+	}
+	d, err := p.Load()
+	if err != nil {
+		return nil, err
+	}
+	if d == nil {
+		d = newData()
+	}
+	s.data = d
+	if err := s.normalizeKeyRing(); err != nil {
+		return nil, err
+	}
+	// Persist bootstrap state (counters + key ring) — matches the historical
+	// behavior of NewStore writing the store file on open.
+	s.changes.Meta = true
+	if err := s.commitLocked(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// normalizeKeyRing migrates single-key state to the ring representation and
+// generates the deployment key when none exists yet.
+func (s *Store) normalizeKeyRing() error {
+	d := s.data
+	if len(d.HMACKeyRing) == 0 {
+		if d.HMACKey != "" {
+			d.HMACKeyRing = []string{d.HMACKey}
+		} else {
+			key := make([]byte, 32)
+			if _, err := rand.Read(key); err != nil {
+				return fmt.Errorf("platform: generate HMAC key: %w", err)
+			}
+			d.HMACKeyRing = []string{hex.EncodeToString(key)}
+		}
+	}
+	d.HMACKey = d.HMACKeyRing[len(d.HMACKeyRing)-1]
+	return nil
+}
+
+// Close releases backend resources (connection pools, file handles).
+func (s *Store) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dedup = nil
+	if s.persist == nil {
+		return nil
+	}
+	err := s.persist.Close()
+	s.persist = nopPersistence{}
+	return err
 }
 
 func newData() *Data {
@@ -158,55 +221,18 @@ func newData() *Data {
 	}
 }
 
-func (s *Store) load() error {
-	raw, err := os.ReadFile(s.path)
-	if errors.Is(err, os.ErrNotExist) {
+// commitLocked persists the accumulated ChangeSet as one transactional unit.
+// Caller holds mu. On failure the ChangeSet is RETAINED and replayed with the
+// next commit, so backends only ever see idempotent operations.
+func (s *Store) commitLocked() error {
+	if s.persist == nil || s.changes.empty() {
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("platform: read %s: %w", s.path, err)
+	if err := s.persist.Commit(s.data, s.changes); err != nil {
+		return fmt.Errorf("platform: persist: %w", err)
 	}
-	var d Data
-	if err := json.Unmarshal(raw, &d); err != nil {
-		return fmt.Errorf("platform: parse %s: %w", s.path, err)
-	}
-	if d.SchemaVersion != dataSchemaVersion {
-		return fmt.Errorf("platform: store file schema %d, want %d", d.SchemaVersion, dataSchemaVersion)
-	}
-	s.data = &d
+	s.changes = newChangeSet()
 	return nil
-}
-
-// saveLocked persists state atomically (tmp file + rename). Caller holds mu.
-func (s *Store) saveLocked() error {
-	if s.path == "" {
-		return nil
-	}
-	raw, err := json.Marshal(s.data)
-	if err != nil {
-		return fmt.Errorf("platform: encode state: %w", err)
-	}
-	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".golab-store-*.json")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpName, 0o600); err != nil { // contains HMAC key material
-		return err
-	}
-	return os.Rename(tmpName, s.path)
 }
 
 // nextID returns a server-generated surrogate ID with the given prefix.
@@ -214,6 +240,7 @@ func (s *Store) saveLocked() error {
 func (s *Store) nextID(prefix string) string {
 	id := fmt.Sprintf("%s-%d", prefix, s.data.NextCounter)
 	s.data.NextCounter++
+	s.changes.Meta = true
 	return id
 }
 
@@ -260,7 +287,8 @@ func (s *Store) CreateWorkspace(slug, name string) (*Workspace, error) {
 		w.Name = slug
 	}
 	s.data.Workspaces[w.ID] = w
-	return w, s.saveLocked()
+	s.changes.markDirty(collWorkspaces, w.ID)
+	return w, s.commitLocked()
 }
 
 // GetWorkspace resolves by ID or slug.
@@ -317,7 +345,8 @@ func (s *Store) CreateEnvironment(workspaceID, slug, name string) (*Environment,
 	env.NamespaceID = "golab-" + ws.ID + "-" + env.ID
 	s.data.Environments[env.ID] = env
 	s.data.EnvBySlugKey[slugKey] = env.ID
-	return env, s.saveLocked()
+	s.changes.markDirty(collEnvironments, env.ID)
+	return env, s.commitLocked()
 }
 
 // GetEnvironment resolves by ID, or by (workspaceID, slug).
@@ -409,7 +438,8 @@ func (s *Store) CreateToken(kind TokenKind, name string, role Role, workspaceID,
 	}
 	s.data.Tokens[tok.ID] = tok
 	s.data.TokensByHash[hash] = tok.ID
-	if err := s.saveLocked(); err != nil {
+	s.changes.markDirty(collTokens, tok.ID)
+	if err := s.commitLocked(); err != nil {
 		return nil, err
 	}
 	return &CreatedToken{Token: tok, Secret: secret}, nil
@@ -442,6 +472,9 @@ func (s *Store) ResolveToken(secret string) (*Token, error) {
 	now := s.now()
 	if now.Sub(tok.LastUsedAt) >= time.Minute {
 		tok.LastUsedAt = now
+		// Marked dirty but NOT committed here: the touch rides along with
+		// the next mutation that saves (see doc comment above).
+		s.changes.markDirty(collTokens, tok.ID)
 	}
 	return tok, nil
 }
@@ -455,7 +488,8 @@ func (s *Store) RevokeToken(tokenID string) error {
 		return fmt.Errorf("%w: token %q", ErrNotFound, tokenID)
 	}
 	tok.Revoked = true
-	return s.saveLocked()
+	s.changes.markDirty(collTokens, tok.ID)
+	return s.commitLocked()
 }
 
 // ListTokens returns metadata (never hashes/secrets) for one workspace, or
@@ -490,7 +524,9 @@ func (s *Store) Audit(actor string, role Role, action, workspaceID, environmentI
 	}
 	s.data.NextAudit++
 	s.data.Audit = append(s.data.Audit, entry)
-	return s.saveLocked()
+	s.changes.Audit = append(s.changes.Audit, entry)
+	s.changes.Meta = true
+	return s.commitLocked()
 }
 
 // AuditList returns the most recent entries first, limited to n (0 = all).
@@ -522,7 +558,8 @@ func (s *Store) SetQuotas(workspaceID string, q Quotas) error {
 		return fmt.Errorf("%w: workspace %q", ErrNotFound, workspaceID)
 	}
 	s.data.Quotas[workspaceID] = q
-	return s.saveLocked()
+	s.changes.markDirty(collQuotas, workspaceID)
+	return s.commitLocked()
 }
 
 // GetQuotas returns configured or default quotas.
@@ -536,14 +573,134 @@ func (s *Store) GetQuotas(workspaceID string) Quotas {
 }
 
 // HashUnit pseudonymizes a randomization unit within this deployment
-// (tenant-scoped HMAC, §10.2). Deterministic per store lifetime/key.
+// (tenant-scoped HMAC, §10.2). The hash chains through the full key ring, so
+// a single-key ring is byte-identical to the historical scheme and rotation
+// preserves unit identity: RotateHMACKey re-hashes stored pseudonyms with
+// exactly the layer new events now gain.
 func (s *Store) HashUnit(workspaceID, unit string) string {
 	s.mu.RLock()
-	key := s.data.HMACKey
+	ring := s.data.HMACKeyRing
 	s.mu.RUnlock()
+	h := unit
+	for _, key := range ring {
+		h = hashUnitLayer(key, workspaceID, h)
+	}
+	return h
+}
+
+// hashUnitLayer applies one HMAC ring layer: hex(HMAC-SHA256(key, ws||0||v)).
+// Exported to no one — but shared by RotateHMACKey and the PostgreSQL
+// migration so memory and storage can never drift apart.
+func hashUnitLayer(key, workspaceID, v string) string {
 	mac := hmac.New(sha256.New, []byte(key))
 	mac.Write([]byte(workspaceID))
 	mac.Write([]byte{0})
-	mac.Write([]byte(unit))
+	mac.Write([]byte(v))
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// RotateHMACKey appends a new pseudonymization key to the ring and migrates
+// every stored unit hash (raw events, exposed-unit sets, unit aggregates)
+// through the new layer — the 密钥轮换迁移路径 of §10.2. Rotation is a
+// migration, not a hot swap: it runs synchronously, is atomic per backend
+// commit, and preserves unit identity linkage (the chain property of
+// HashUnit means new events for the same unit land on the SAME migrated
+// hash). The new key must be 32 bytes of hex; old keys stay in the ring as
+// chain layers (each layer alone is useless for reversing the final hash).
+func (s *Store) RotateHMACKey(newKeyHex string) error {
+	if _, err := hex.DecodeString(newKeyHex); err != nil || len(newKeyHex) != 64 {
+		return fmt.Errorf("%w: HMAC key must be 64 hex chars (32 bytes)", ErrValidation)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ring := s.data.HMACKeyRing
+	if len(ring) > 0 && ring[len(ring)-1] == newKeyHex {
+		return nil // already current
+	}
+	// Re-hash every stored pseudonym in memory with the new layer.
+	for _, ev := range s.data.Events {
+		ev.UnitHash = hashUnitLayer(newKeyHex, ev.WorkspaceID, ev.UnitHash)
+	}
+	s.data.UnitAggs = rehashAggKeys(s.data.UnitAggs, newKeyHex)
+	s.data.ExposedUnits = rehashUnitSets(s.data.ExposedUnits, newKeyHex)
+	s.data.SplitExposedUnits = rehashUnitSets(s.data.SplitExposedUnits, newKeyHex)
+	// Pending (not yet committed) aggregate upserts carry unit hashes as
+	// plain copies — rotate them too so a commit-failure window can never
+	// persist pre-rotation hashes after the migration ran.
+	for i := range s.changes.Aggs {
+		a := &s.changes.Aggs[i]
+		a.UnitHash = hashUnitLayer(newKeyHex, a.WorkspaceID, a.UnitHash)
+	}
+	s.data.HMACKeyRing = append(append([]string(nil), ring...), newKeyHex)
+	s.data.HMACKey = newKeyHex
+	s.changes.Meta = true
+	s.changes.Rotation = true
+	return s.commitLocked()
+}
+
+// rehashAggKeys rebuilds the UnitAggs map with rotated unit hashes. The agg
+// key format is ws/env/exp/epoch/variant/unitHash/metric (the same layout
+// MetricAggregate parses): the workspace is the first segment and the unit
+// hash the sixth — surrogate IDs never contain '/', and metric keys keep any
+// '/' inside the trailing segment.
+func rehashAggKeys(aggs map[string]*UnitAgg, newKeyHex string) map[string]*UnitAgg {
+	out := make(map[string]*UnitAgg, len(aggs))
+	for key, agg := range aggs {
+		parts := splitN(key, '/', 7)
+		if len(parts) < 7 {
+			out[key] = agg // malformed key; cannot exist by construction
+			continue
+		}
+		parts[5] = hashUnitLayer(newKeyHex, parts[0], parts[5])
+		joined := parts[0]
+		for _, p := range parts[1:] {
+			joined += "/" + p
+		}
+		out[joined] = agg
+	}
+	return out
+}
+
+// rehashUnitSets rebuilds exposed-unit set maps (scope → unitHash set).
+func rehashUnitSets(sets map[string]map[string]bool, newKeyHex string) map[string]map[string]bool {
+	out := make(map[string]map[string]bool, len(sets))
+	for scope, set := range sets {
+		ws := scope
+		if j := indexOf(scope, '/'); j >= 0 {
+			ws = scope[:j]
+		}
+		rehashed := make(map[string]bool, len(set))
+		for h := range set {
+			rehashed[hashUnitLayer(newKeyHex, ws, h)] = true
+		}
+		out[scope] = rehashed
+	}
+	return out
+}
+
+func indexOf(s string, c byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
+}
+
+func splitN(s string, sep byte, n int) []string {
+	out := make([]string, 0, n)
+	for i := 0; i < len(s); {
+		if len(out) == n-1 {
+			out = append(out, s[i:])
+			return out
+		}
+		j := indexOf(s[i:], sep)
+		if j < 0 {
+			out = append(out, s[i:])
+			return out
+		}
+		out = append(out, s[i:i+j])
+		i += j + 1
+	}
+	return out
 }

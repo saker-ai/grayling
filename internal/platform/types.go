@@ -3,13 +3,15 @@
 // experiments, collected events with unit-level aggregates, audit trail and
 // the AI-resource ownership index (docs/技术方案.md §5, §9, §10).
 //
-// Storage backends: the reference implementation in this package is an
-// in-memory store with optional atomic JSON-file persistence (dev and
-// single-node deployments; gonacos Config remains the distribution
-// substrate). The production PostgreSQL backend described in §3/§10.2
-// plugs in behind the same method surface — every method is a single
-// transactional unit of work with explicit keys, no cross-store
-// transactions are assumed (§3: Config 与 PostgreSQL 没有跨库原子事务).
+// Storage backends plug in behind the Persistence interface (see
+// persistence.go): every Store method is a single transactional unit of
+// work with explicit keys, no cross-store transactions are assumed (§3:
+// Config 与 PostgreSQL 没有跨库原子事务). Shipped backends: in-memory with
+// optional atomic JSON-file persistence (dev/single-node default) and
+// PostgreSQL (pgstore.go — production path per §3/§10.2: versioned schema
+// migrations, unit-level aggregate tables, monthly-partitioned raw events
+// with partition-drop retention, and an HMAC key-ring rotation migration).
+// gonacos Config remains the distribution substrate in all topologies.
 package platform
 
 import (

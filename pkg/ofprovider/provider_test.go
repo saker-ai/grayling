@@ -1,0 +1,511 @@
+// OpenFeature contract validation for the golab provider. These tests drive
+// the OFFICIAL OpenFeature Go SDK surface (isolated API → client → provider)
+// against a REAL golab server (HTTP, gonacos config substrate, admin
+// pipeline), asserting the spec-visible contract: values, variants, reasons,
+// error codes, provider state transitions and exposure attribution
+// (docs/技术方案.md §8).
+package ofprovider
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/godeps/golab/internal/api"
+	"github.com/godeps/golab/internal/configstore"
+	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/golab/pkg/bucketing"
+	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/golab/pkg/sdk"
+	of "github.com/open-feature/go-sdk/openfeature"
+	"github.com/open-feature/go-sdk/openfeature/isolated"
+	gconfig "github.com/godeps/gonacos/pkg/config"
+)
+
+// ---------------------------------------------------------------------------
+// Harness: a real golab server + admin provisioning
+// ---------------------------------------------------------------------------
+
+type harness struct {
+	t       *testing.T
+	store   *platform.Store
+	srv     *httptest.Server
+	owner   string
+	sdkTok  string
+	colTok  string
+	ws      *platform.Workspace
+	env     *platform.Environment
+	baseURL string
+}
+
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	store, err := platform.NewStore("")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	cfg := configstore.NewGonacosStore(gconfig.NewService())
+	apiSrv := api.NewServer(store, cfg, api.Options{})
+	srv := httptest.NewServer(apiSrv.Handler())
+	t.Cleanup(srv.Close)
+
+	h := &harness{t: t, store: store, srv: srv, baseURL: srv.URL}
+	ct, err := store.CreateToken(platform.TokenAdmin, "root", platform.RoleOwner, "", "", "bootstrap")
+	if err != nil {
+		t.Fatalf("owner token: %v", err)
+	}
+	h.owner = ct.Secret
+	h.ws, err = store.CreateWorkspace("acme", "Acme")
+	if err != nil {
+		t.Fatalf("ws: %v", err)
+	}
+	h.env, err = store.CreateEnvironment(h.ws.ID, "prod", "")
+	if err != nil {
+		t.Fatalf("env: %v", err)
+	}
+	sdkCT, err := store.CreateToken(platform.TokenSDK, "sdk", "", h.ws.ID, h.env.ID, "root")
+	if err != nil {
+		t.Fatalf("sdk token: %v", err)
+	}
+	h.sdkTok = sdkCT.Secret
+	colCT, err := store.CreateToken(platform.TokenCollect, "col", "", h.ws.ID, h.env.ID, "root")
+	if err != nil {
+		t.Fatalf("collect token: %v", err)
+	}
+	h.colTok = colCT.Secret
+	return h
+}
+
+func (h *harness) do(method, path, token string, body any) int {
+	h.t.Helper()
+	var rdr io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		rdr = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, h.srv.URL+path, rdr)
+	if err != nil {
+		h.t.Fatalf("request: %v", err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		h.t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		h.t.Logf("%s %s → %d: %s", method, path, resp.StatusCode, data)
+	}
+	return resp.StatusCode
+}
+
+// publishFlag runs the draft→submit→approve→publish pipeline (normal risk,
+// so the owner may approve their own submission).
+func (h *harness) publishFlag(flag *model.Flag) {
+	h.t.Helper()
+	base := fmt.Sprintf("/api/v1/admin/workspaces/acme/environments/prod/flags/%s", flag.Key)
+	if code := h.do("PUT", base+"/draft", h.owner, map[string]any{"content": flag}); code != http.StatusOK {
+		h.t.Fatalf("draft %s: %d", flag.Key, code)
+	}
+	if code := h.do("POST", base+"/submit", h.owner, nil); code != http.StatusOK {
+		h.t.Fatalf("submit %s: %d", flag.Key, code)
+	}
+	if code := h.do("POST", base+"/approve", h.owner, map[string]any{"note": "ok"}); code != http.StatusOK {
+		h.t.Fatalf("approve %s: %d", flag.Key, code)
+	}
+	if code := h.do("POST", base+"/publish", h.owner, map[string]any{"note": "ship"}); code != http.StatusOK {
+		h.t.Fatalf("publish %s: %d", flag.Key, code)
+	}
+}
+
+func boolFlag(key string, disabled bool) *model.Flag {
+	return &model.Flag{
+		SchemaVersion: model.SchemaVersion, Key: key, Type: model.FlagBool,
+		Disable:     disabled,
+		Variations:  map[string]any{"on": true, "off": false},
+		DefaultRule: &model.Rule{Variation: "off"},
+	}
+}
+
+// newOFAPI registers a golab provider on a fresh isolated OpenFeature API
+// and waits for readiness. Returns the OF client and the provider.
+func newOFAPI(t *testing.T, h *harness, mutate func(*sdk.Options)) (*of.Client, *Provider) {
+	t.Helper()
+	opts := sdk.Options{
+		BaseURL: h.baseURL, Token: h.sdkTok, CollectToken: h.colTok,
+		PollInterval: 100 * time.Millisecond, MaxStaleness: 2 * time.Minute,
+		ExposureFlushInterval: 100 * time.Millisecond, ExposureBatchSize: 100,
+	}
+	if mutate != nil {
+		mutate(&opts)
+	}
+	provider := NewProvider(Options{ClientOptions: opts, MonitorInterval: 50 * time.Millisecond})
+	api := isolated.NewAPI()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := api.SetProviderAndWait(ctx, provider); err != nil {
+		t.Fatalf("SetProviderAndWait: %v", err)
+	}
+	t.Cleanup(provider.Shutdown)
+	return api.NewClient(), provider
+}
+
+// ---------------------------------------------------------------------------
+// Contract tests
+// ---------------------------------------------------------------------------
+
+func TestOFReasonAndVariantMapping(t *testing.T) {
+	h := newHarness(t)
+
+	h.publishFlag(boolFlag("of-bool", false))
+	h.publishFlag(boolFlag("of-killed", true))
+
+	h.publishFlag(&model.Flag{
+		SchemaVersion: model.SchemaVersion, Key: "of-string", Type: model.FlagString,
+		Fields:    []string{"tenant"},
+		Variations: map[string]any{"base": "base-v", "targeted": "targeted-v"},
+		Targeting: []model.Rule{{
+			Name:        "acme-only",
+			Constraints: []model.Constraint{{Field: "tenant", Op: model.OpEq, Value: "acme"}},
+			Variation:   "targeted",
+		}},
+		DefaultRule: &model.Rule{Variation: "base"},
+	})
+
+	h.publishFlag(&model.Flag{
+		SchemaVersion: model.SchemaVersion, Key: "of-split", Type: model.FlagString,
+		Fields:    []string{"user_id"},
+		Bucketing: &model.Bucketing{Algorithm: bucketing.AlgorithmID, Unit: "user_id", Salt: "of"},
+		Variations: map[string]any{"a": "A", "b": "B"},
+		Targeting: []model.Rule{{
+			Name:       "fifty",
+			Percentage: map[string]float64{"a": 50, "b": 50},
+		}},
+		DefaultRule: &model.Rule{Variation: "a"},
+	})
+
+	h.publishFlag(&model.Flag{
+		SchemaVersion: model.SchemaVersion, Key: "of-json", Type: model.FlagJSON,
+		Variations: map[string]any{"cfg": map[string]any{"mode": "fast", "retries": float64(3)}},
+		DefaultRule: &model.Rule{Variation: "cfg"},
+	})
+
+	client, _ := newOFAPI(t, h, nil)
+	ctx := context.Background()
+
+	// DEFAULT reason, variant reported.
+	bd, err := client.BooleanValueDetails(ctx, "of-bool", true, of.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("bool eval: %v", err)
+	}
+	if bd.Value != false || bd.Variant != "off" || bd.Reason != of.DefaultReason {
+		t.Fatalf("bool: %+v", bd)
+	}
+	if bd.FlagMetadata["golabReason"] != string(model.ReasonDefault) {
+		t.Fatalf("golab reason metadata: %v", bd.FlagMetadata)
+	}
+
+	// DISABLED kill switch.
+	bd, err = client.BooleanValueDetails(ctx, "of-killed", true, of.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("killed eval: %v", err)
+	}
+	if bd.Value != false || bd.Reason != of.DisabledReason || bd.Variant != "off" {
+		t.Fatalf("killed: %+v", bd)
+	}
+
+	// TARGETING_MATCH via constraint.
+	sd, err := client.StringValueDetails(ctx, "of-string", "fallback",
+		of.NewEvaluationContext("", map[string]any{"tenant": "acme"}))
+	if err != nil {
+		t.Fatalf("string eval: %v", err)
+	}
+	if sd.Value != "targeted-v" || sd.Reason != of.TargetingMatchReason || sd.Variant != "targeted" {
+		t.Fatalf("targeting match: %+v", sd)
+	}
+	sd, err = client.StringValueDetails(ctx, "of-string", "fallback",
+		of.NewEvaluationContext("", map[string]any{"tenant": "globex"}))
+	if err != nil {
+		t.Fatalf("string eval 2: %v", err)
+	}
+	if sd.Value != "base-v" || sd.Reason != of.DefaultReason {
+		t.Fatalf("non-match: %+v", sd)
+	}
+
+	// SPLIT via targetingKey mirrored into the bucketing unit field.
+	sd, err = client.StringValueDetails(ctx, "of-split", "fallback",
+		of.NewEvaluationContext("user-42", nil))
+	if err != nil {
+		t.Fatalf("split eval: %v", err)
+	}
+	if sd.Reason != of.SplitReason || (sd.Value != "A" && sd.Value != "B") {
+		t.Fatalf("split: %+v", sd)
+	}
+	// Determinism: same targetingKey → same value.
+	sd2, _ := client.StringValueDetails(ctx, "of-split", "fallback",
+		of.NewEvaluationContext("user-42", nil))
+	if sd2.Value != sd.Value || sd2.Variant != sd.Variant {
+		t.Fatalf("split not deterministic: %+v vs %+v", sd, sd2)
+	}
+
+	// Object evaluation.
+	od, err := client.ObjectValueDetails(ctx, "of-json", map[string]any{}, of.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("object eval: %v", err)
+	}
+	obj, ok := od.Value.(map[string]any)
+	if !ok || obj["mode"] != "fast" {
+		t.Fatalf("object: %+v", od)
+	}
+}
+
+func TestOFErrorCodes(t *testing.T) {
+	h := newHarness(t)
+	h.publishFlag(&model.Flag{
+		SchemaVersion: model.SchemaVersion, Key: "need-unit", Type: model.FlagString,
+		Fields:    []string{"user_id"},
+		Bucketing: &model.Bucketing{Algorithm: bucketing.AlgorithmID, Unit: "user_id", Salt: "s"},
+		Variations: map[string]any{"a": "A", "b": "B"},
+		Targeting: []model.Rule{{
+			Name:       "fifty",
+			Percentage: map[string]float64{"a": 50, "b": 50},
+		}},
+		DefaultRule: &model.Rule{Variation: "a"},
+	})
+	client, _ := newOFAPI(t, h, nil)
+	ctx := context.Background()
+
+	// FLAG_NOT_FOUND → caller default + error.
+	sd, err := client.StringValueDetails(ctx, "does-not-exist", "safe", of.EvaluationContext{})
+	if err == nil {
+		t.Fatalf("unknown flag must error: %+v", sd)
+	}
+	if sd.Value != "safe" || sd.Reason != of.ErrorReason || sd.ErrorCode != of.FlagNotFoundCode {
+		t.Fatalf("flag-not-found: %+v (%v)", sd, err)
+	}
+
+	// Missing randomization unit → TARGETING_KEY_MISSING (§6: 缺单元 →
+	// MISSING_BUCKET_KEY 返回显式默认值、绝不随机), caller default served.
+	sd, err = client.StringValueDetails(ctx, "need-unit", "safe", of.EvaluationContext{})
+	if err == nil {
+		t.Fatalf("missing unit must error: %+v", sd)
+	}
+	if sd.Value != "safe" || sd.ErrorCode != of.TargetingKeyMissingCode || sd.Reason != of.ErrorReason {
+		t.Fatalf("targeting-key-missing: %+v (%v)", sd, err)
+	}
+}
+
+func TestOFNumericMapping(t *testing.T) {
+	h := newHarness(t)
+	h.publishFlag(&model.Flag{
+		SchemaVersion: model.SchemaVersion, Key: "of-int", Type: model.FlagNumber,
+		Variations:  map[string]any{"answer": float64(42)},
+		DefaultRule: &model.Rule{Variation: "answer"},
+	})
+	h.publishFlag(&model.Flag{
+		SchemaVersion: model.SchemaVersion, Key: "of-frac", Type: model.FlagNumber,
+		Variations:  map[string]any{"half": 0.5},
+		DefaultRule: &model.Rule{Variation: "half"},
+	})
+	client, _ := newOFAPI(t, h, nil)
+	ctx := context.Background()
+
+	id, err := client.IntValueDetails(ctx, "of-int", 7, of.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("int eval: %v", err)
+	}
+	if id.Value != 42 || id.Variant != "answer" || id.Reason != of.DefaultReason {
+		t.Fatalf("int: %+v", id)
+	}
+	fd, err := client.FloatValueDetails(ctx, "of-frac", 1.0, of.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("float eval: %v", err)
+	}
+	if fd.Value != 0.5 {
+		t.Fatalf("float: %+v", fd)
+	}
+	// Fractional value on an Int evaluation → TYPE_MISMATCH + caller default.
+	id, err = client.IntValueDetails(ctx, "of-frac", 7, of.EvaluationContext{})
+	if err == nil {
+		t.Fatalf("fractional int must error: %+v", id)
+	}
+	if id.Value != 7 || id.ErrorCode != of.TypeMismatchCode {
+		t.Fatalf("type mismatch: %+v (%v)", id, err)
+	}
+}
+
+// TestOFExperimentExposureAttribution proves the full chain: OpenFeature
+// evaluation → golab local split → enrollment in a RUNNING experiment →
+// exposure batched to /api/v1/collect → server-side aggregate under the
+// tenant-scoped unit hash derived from the OpenFeature targetingKey.
+func TestOFExperimentExposureAttribution(t *testing.T) {
+	h := newHarness(t)
+	flag := &model.Flag{
+		SchemaVersion: model.SchemaVersion, Key: "of-exp", Type: model.FlagString,
+		Fields:    []string{"user_id"},
+		Bucketing: &model.Bucketing{Algorithm: bucketing.AlgorithmID, Unit: "user_id", Salt: "of-exp"},
+		Variations: map[string]any{"control": "c", "treatment": "t"},
+		Targeting: []model.Rule{{
+			Name:       "fifty",
+			Percentage: map[string]float64{"control": 50, "treatment": 50},
+		}},
+		DefaultRule: &model.Rule{Variation: "control"},
+	}
+	h.publishFlag(flag)
+
+	// Register + run the experiment through the admin API (binding is
+	// high-risk → two-person approval with a second publisher token).
+	var exp platform.Experiment
+	expReq := map[string]any{
+		"flagKey": "of-exp", "unit": "user_id",
+		"variants":    []string{"control", "treatment"},
+		"proportions": map[string]float64{"control": 50, "treatment": 50},
+		"primaryMetric": map[string]any{
+			"key": "conversion", "type": "proportion", "direction": "increase",
+		},
+		"alpha": 0.05, "power": 0.8, "mde": 0.02, "minSamplePerArm": 10,
+		"analysisWindow": int64(7 * 24 * time.Hour),
+	}
+	// Capture the created experiment from the response body.
+	reqBody, _ := json.Marshal(expReq)
+	req, _ := http.NewRequest("POST",
+		h.srv.URL+"/api/v1/admin/workspaces/acme/environments/prod/experiments",
+		bytes.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer "+h.owner)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create experiment: %v", err)
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create experiment: %d %s", resp.StatusCode, respBody)
+	}
+	if err := json.Unmarshal(respBody, &exp); err != nil {
+		t.Fatalf("experiment decode: %v", err)
+	}
+	if code := h.do("POST", "/api/v1/admin/experiments/"+exp.ID+"/review",
+		h.owner, map[string]any{"note": "pre"}); code != http.StatusOK {
+		t.Fatalf("review: %d", code)
+	}
+	if code := h.do("POST", "/api/v1/admin/experiments/"+exp.ID+"/bind",
+		h.owner, nil); code != http.StatusOK {
+		t.Fatalf("bind: %d", code)
+	}
+	pubCT, err := h.store.CreateToken(platform.TokenAdmin, "publisher-b", platform.RolePublisher, h.ws.ID, "", "root")
+	if err != nil {
+		t.Fatalf("publisher token: %v", err)
+	}
+	if code := h.do("POST", "/api/v1/admin/workspaces/acme/environments/prod/flags/of-exp/approve",
+		pubCT.Secret, map[string]any{"note": "second pair of eyes"}); code != http.StatusOK {
+		t.Fatalf("approve: %d", code)
+	}
+	if code := h.do("POST", "/api/v1/admin/workspaces/acme/environments/prod/flags/of-exp/publish",
+		h.owner, map[string]any{"note": "bind"}); code != http.StatusOK {
+		t.Fatalf("publish binding: %d", code)
+	}
+	if code := h.do("POST", "/api/v1/admin/experiments/"+exp.ID+"/transition",
+		h.owner, map[string]any{"to": "running"}); code != http.StatusOK {
+		t.Fatalf("run: %d", code)
+	}
+
+	client, provider := newOFAPI(t, h, nil)
+	_ = provider
+	ctx := context.Background()
+
+	// Wait until the running binding reached the SDK snapshot.
+	var sd of.StringEvaluationDetails
+	deadline := time.Now().Add(5 * time.Second)
+	evalCtx := of.NewEvaluationContext("user-77", nil)
+	for time.Now().Before(deadline) {
+		sd, err = client.StringValueDetails(ctx, "of-exp", "?", evalCtx)
+		if err == nil && sd.Reason == of.SplitReason && sd.FlagMetadata["golabExperimentId"] == exp.ID {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if sd.Reason != of.SplitReason {
+		t.Fatalf("experiment split never observed: %+v (%v)", sd, err)
+	}
+	if sd.FlagMetadata["golabExperimentId"] != exp.ID || sd.FlagMetadata["golabExposureSource"] != "split" {
+		t.Fatalf("experiment metadata: %v", sd.FlagMetadata)
+	}
+
+	// The exposure must land server-side under the HMAC of the OF
+	// targetingKey (flush interval 100ms; generous CI bound).
+	wantHash := h.store.HashUnit(h.ws.ID, "user-77")
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		set := h.store.SplitExposedUnitSet(h.ws.ID, h.env.ID, exp.ID, exp.Epoch)
+		if units, ok := set[sd.Variant]; ok && units[wantHash] {
+			return // attributed ✓
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("exposure from OpenFeature evaluation never reached the store (variant %s)", sd.Variant)
+}
+
+func TestOFProviderStateLifecycle(t *testing.T) {
+	h := newHarness(t)
+	h.publishFlag(boolFlag("of-state", false))
+
+	client, provider := newOFAPI(t, h, func(o *sdk.Options) {
+		o.MaxStaleness = 400 * time.Millisecond
+		o.PollInterval = 100 * time.Millisecond
+	})
+	if st := client.State(); st != of.ReadyState {
+		t.Fatalf("state after SetProviderAndWait: %s, want READY", st)
+	}
+
+	// Kill the server: after MaxStaleness the monitor must degrade the
+	// provider to STALE (§5.2 kill-switch window) and evaluations must fall
+	// back to caller defaults with an error.
+	h.srv.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && client.State() != of.StaleState {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if st := client.State(); st != of.StaleState {
+		t.Fatalf("state after staleness: %s, want STALE", st)
+	}
+	bd, err := client.BooleanValueDetails(context.Background(), "of-state", true, of.EvaluationContext{})
+	if err == nil {
+		t.Fatalf("stale evaluation must error: %+v", bd)
+	}
+	if bd.Value != true || bd.Reason != of.ErrorReason {
+		t.Fatalf("stale details: %+v", bd)
+	}
+
+	// Shutdown must be clean and idempotent-ish (monitor stopped, client closed).
+	provider.Shutdown()
+}
+
+func TestOFNotReadyWithoutInit(t *testing.T) {
+	// Evaluations before Init (or with a failed provider) must serve caller
+	// defaults with PROVIDER_NOT_READY, never a random assignment.
+	p := NewProvider(Options{ClientOptions: sdk.Options{BaseURL: "http://127.0.0.1:1", Token: "x"}})
+	d := p.BooleanEvaluation(context.Background(), "anything", true, of.FlattenedContext{})
+	if d.Value != true || d.Reason != of.ErrorReason || d.ResolutionError.Error() == "" {
+		t.Fatalf("uninitialized provider: %+v", d)
+	}
+}
+
+func TestOFInitValidation(t *testing.T) {
+	p := NewProvider(Options{}) // no client, no BaseURL/Token
+	if err := p.Init(of.EvaluationContext{}); err == nil {
+		t.Fatal("Init without BaseURL/Token must fail")
+	}
+}

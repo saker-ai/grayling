@@ -68,7 +68,8 @@ func (s *Store) SaveFlagDraft(workspaceID, environmentID string, content *model.
 		draft.Deleted = existing.Deleted
 	}
 	s.data.FlagDrafts[scope] = draft
-	return draft, s.saveLocked()
+	s.changes.markDirty(collFlagDrafts, scope)
+	return draft, s.commitLocked()
 }
 
 // MarkFlagDraftDeleted flags a draft for tombstone publication. The draft
@@ -83,7 +84,8 @@ func (s *Store) MarkFlagDraftDeleted(workspaceID, environmentID, key, actor stri
 	d.Deleted = true
 	d.UpdatedBy = actor
 	d.UpdatedAt = s.now()
-	return s.saveLocked()
+	s.changes.markDirty(collFlagDrafts, flagScopeKey(workspaceID, environmentID, key))
+	return s.commitLocked()
 }
 
 // SubmitFlagDraft moves editing → submitted.
@@ -101,7 +103,8 @@ func (s *Store) SubmitFlagDraft(workspaceID, environmentID, key, actor string) e
 	d.SubmittedBy = actor
 	now := s.now()
 	d.SubmittedAt = &now
-	return s.saveLocked()
+	s.changes.markDirty(collFlagDrafts, flagScopeKey(workspaceID, environmentID, key))
+	return s.commitLocked()
 }
 
 // ApproveFlagDraft moves submitted → approved, enforcing the two-person rule
@@ -124,7 +127,8 @@ func (s *Store) ApproveFlagDraft(workspaceID, environmentID, key, actor string, 
 	d.ReviewNote = note
 	now := s.now()
 	d.ApprovedAt = &now
-	return s.saveLocked()
+	s.changes.markDirty(collFlagDrafts, flagScopeKey(workspaceID, environmentID, key))
+	return s.commitLocked()
 }
 
 // RejectFlagDraft returns submitted → editing with a note.
@@ -144,7 +148,8 @@ func (s *Store) RejectFlagDraft(workspaceID, environmentID, key, actor, note str
 	d.UpdatedAt = s.now()
 	d.SubmittedBy = ""
 	d.SubmittedAt = nil
-	return s.saveLocked()
+	s.changes.markDirty(collFlagDrafts, flagScopeKey(workspaceID, environmentID, key))
+	return s.commitLocked()
 }
 
 // GetFlagDraft returns one draft.
@@ -191,7 +196,8 @@ func (s *Store) AppendFlagRevision(rev *FlagRevision) error {
 			// same revision number is a hard inconsistency.
 			if existing.Hash == rev.Hash {
 				s.data.CurrentFlagRev[scope] = rev.Revision
-				return s.saveLocked()
+				s.changes.markDirty(collFlagState, scope)
+				return s.commitLocked()
 			}
 			return fmt.Errorf("%w: revision %d of %q already exists with different content",
 				ErrConflict, rev.Revision, rev.Key)
@@ -206,6 +212,8 @@ func (s *Store) AppendFlagRevision(rev *FlagRevision) error {
 		s.data.NextFlagRev[scope] = rev.Revision + 1
 	}
 	s.data.CurrentFlagRev[scope] = rev.Revision
+	s.changes.markDirty(collFlagRevisions, scope)
+	s.changes.markDirty(collFlagState, scope)
 	// An approved draft becomes the published state; reset it to editing so
 	// further changes start a fresh review cycle against the new base.
 	if d, ok := s.data.FlagDrafts[scope]; ok && d.State == DraftApproved && !d.Deleted {
@@ -215,11 +223,13 @@ func (s *Store) AppendFlagRevision(rev *FlagRevision) error {
 		d.SubmittedAt = nil
 		d.ApprovedBy = ""
 		d.ApprovedAt = nil
+		s.changes.markDirty(collFlagDrafts, scope)
 	}
 	if d, ok := s.data.FlagDrafts[scope]; ok && d.Deleted {
 		delete(s.data.FlagDrafts, scope)
+		s.changes.markDeleted(collFlagDrafts, scope)
 	}
-	return s.saveLocked()
+	return s.commitLocked()
 }
 
 // NextFlagRevision allocates the next revision number for a flag.
@@ -303,10 +313,12 @@ func (s *Store) SetCurrentFlagRevision(workspaceID, environmentID, key string, r
 		return fmt.Errorf("%w: revision %d of %q not retained", ErrNotFound, rev, key)
 	}
 	s.data.CurrentFlagRev[scope] = rev
+	s.changes.markDirty(collFlagState, scope)
 	if d, ok := s.data.FlagDrafts[scope]; ok {
 		d.BaseRevision = rev
+		s.changes.markDirty(collFlagDrafts, scope)
 	}
-	return s.saveLocked()
+	return s.commitLocked()
 }
 
 // TombstoneWindow is how many manifest revisions a deleted key keeps
@@ -327,7 +339,9 @@ func (s *Store) DeleteFlagCurrent(workspaceID, environmentID, key string, manife
 	delete(s.data.CurrentFlagRev, scope)
 	delete(s.data.FlagDrafts, scope)
 	s.data.FlagTombstones[scope] = manifestRev
-	return s.saveLocked()
+	s.changes.markDirty(collFlagState, scope)
+	s.changes.markDeleted(collFlagDrafts, scope)
+	return s.commitLocked()
 }
 
 // FlagTombstones returns tombstone manifest entries whose deletion is within
@@ -366,8 +380,9 @@ func (s *Store) SetManifestRevision(workspaceID, environmentID string, rev int64
 	scope := scopeKey(workspaceID, environmentID)
 	if rev > s.data.ManifestRevisions[scope] {
 		s.data.ManifestRevisions[scope] = rev
+		s.changes.markDirty(collManifestRevisions, scope)
 	}
-	return s.saveLocked()
+	return s.commitLocked()
 }
 
 // ManifestRevision returns the last published manifest revision (0 = none).
@@ -415,7 +430,8 @@ func (s *Store) SaveSegmentDraft(workspaceID, environmentID string, content *mod
 		UpdatedBy: actor, UpdatedAt: s.now(),
 	}
 	s.data.SegmentDrafts[scope] = d
-	return d, s.saveLocked()
+	s.changes.markDirty(collSegmentDrafts, scope)
+	return d, s.commitLocked()
 }
 
 // SubmitSegmentDraft / ApproveSegmentDraft mirror the flag workflow.
@@ -431,7 +447,8 @@ func (s *Store) SubmitSegmentDraft(workspaceID, environmentID, key, actor string
 	}
 	d.State = DraftSubmitted
 	d.SubmittedBy = actor
-	return s.saveLocked()
+	s.changes.markDirty(collSegmentDrafts, flagScopeKey(workspaceID, environmentID, key))
+	return s.commitLocked()
 }
 
 func (s *Store) ApproveSegmentDraft(workspaceID, environmentID, key, actor string) error {
@@ -449,7 +466,8 @@ func (s *Store) ApproveSegmentDraft(workspaceID, environmentID, key, actor strin
 	}
 	d.State = DraftApproved
 	d.ApprovedBy = actor
-	return s.saveLocked()
+	s.changes.markDirty(collSegmentDrafts, flagScopeKey(workspaceID, environmentID, key))
+	return s.commitLocked()
 }
 
 // GetSegmentDraft returns one segment draft.
@@ -487,7 +505,8 @@ func (s *Store) AppendSegmentRevision(rev *SegmentRevision) error {
 		if existing.Revision == rev.Revision {
 			if existing.Hash == rev.Hash {
 				s.data.CurrentSegmentRev[scope] = rev.Revision
-				return s.saveLocked()
+				s.changes.markDirty(collSegmentState, scope)
+				return s.commitLocked()
 			}
 			return fmt.Errorf("%w: segment revision %d exists with different content", ErrConflict, rev.Revision)
 		}
@@ -501,10 +520,13 @@ func (s *Store) AppendSegmentRevision(rev *SegmentRevision) error {
 		s.data.NextSegmentRev[scope] = rev.Revision + 1
 	}
 	s.data.CurrentSegmentRev[scope] = rev.Revision
+	s.changes.markDirty(collSegmentRevisions, scope)
+	s.changes.markDirty(collSegmentState, scope)
 	if d, ok := s.data.SegmentDrafts[scope]; ok && d.State == DraftApproved {
 		d.State = DraftEditing
+		s.changes.markDirty(collSegmentDrafts, scope)
 	}
-	return s.saveLocked()
+	return s.commitLocked()
 }
 
 // NextSegmentRevision allocates the next segment revision number.
@@ -623,7 +645,8 @@ func (s *Store) PruneFlagRevisions(workspaceID, environmentID, key string, keep 
 		return nil, nil
 	}
 	s.data.FlagRevisions[scope] = kept
-	if err := s.saveLocked(); err != nil {
+	s.changes.markDirty(collFlagRevisions, scope)
+	if err := s.commitLocked(); err != nil {
 		return nil, err
 	}
 	return removed, nil
