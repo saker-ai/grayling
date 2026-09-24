@@ -10,7 +10,7 @@
 | AI Agent | prompt / 模型 / skill / AgentSpec / MCP / pipeline 版本 |
 | 前端 / 移动端 | 页面元素、实验分流 |
 
-**能力边界**：golab 做**功能灰度**（代码内 `if (flag)` 分支），不做**流量路由**（网关按 header 转发到不同服务实例）—— 后者是 Istio / Spring Cloud Gateway 的职责。
+**能力边界**：golab 做**功能灰度**（代码内 `if (flag)` 分支），不做**流量路由** —— 但可与网关协同执行后者：Traefik 插件可内嵌 golab SDK 在网关层本地求值并注入 header，由 router 按 header 路由（见技术方案 §3.4）。
 
 ## 定位
 
