@@ -88,6 +88,30 @@
 - 响应：`{accepted, duplicates, rejected, rejectMessages}`。
 - 批量与字节上限来自工作空间配额；超限 400 `batch_too_large`。
 
+## 独立 proxy（cmd/golab-proxy）
+
+把远程评估数据面打包为**独立部署的无状态中继**（技术方案 §3：proxy 可选，用于浏览器/瘦服务，不要求全部应用请求经过）。转发到上游 GoLab server（`-upstream`）：
+
+| 端点 | 说明 |
+|---|---|
+| `POST /api/v1/sdk/eval` | 远程求值中继（服务端曝光在上游落库） |
+| `GET /api/v1/sdk/stream` | SSE 中继：逐块 flush，事件边界不缓冲；客户端断开即取消上游订阅 |
+| `POST /api/v1/collect` | 曝光/转化中继 |
+| `GET /api/v1/sdk/config` | 快照拉取中继（ETag/304 透传） |
+| `GET /healthz` | **liveness**：proxy 自身存活，不探测上游（上游故障不应导致编排系统杀掉 proxy 机队） |
+| `GET /api/v1/health` | **readiness**：探测上游 `/api/v1/health`；不可达/不健康 → 503 |
+
+- 凭证原样透传：认证、受众分离、租户作用域与每 token 限流仍全部由上游执行；proxy 不持有任何凭证或状态，可水平扩展、随时重启。
+- 管理 API 与 AI 端点**不转发**（404）：proxy 的暴露面就是远程评估。
+- 错误映射：上游不可达 → 502 `upstream_unreachable`；超过 `-timeout`（一元请求，默认 10s）→ 504 `upstream_timeout`；其余状态码与响应体按上游原样透传。
+- 连接池：`-max-idle-conns-per-host`（默认 100）、`-max-conns-per-host`（0=不限）、`-dial-timeout`（默认 5s）；`-health-timeout` 约束 readiness 探测（默认 3s）。
+- SIGTERM/SIGINT 优雅关停。
+
+```bash
+GOWORK=off go build ./cmd/golab-proxy
+./bin/golab-proxy -addr 127.0.0.1:8689 -upstream http://127.0.0.1:8688
+```
+
 ## Flag DSL（schemaVersion 1）
 
 见 `pkg/model/types.go` 与技术方案 §5.2。要点：`type ∈ bool|string|number|json`；规则必须有且仅有 `variation|percentage` 之一；约束字段必须在 `fields` 注册（`targetingKey` 隐式注册）；操作符闭集 `eq,ne,in,not_in,gt,gte,lt,lte,time_before,time_after,regex,in_cidr,semver_gt,semver_gte,semver_lt,semver_lte,semver_eq`；`bucketing.algorithm` 固定 `golab-fnv1a-10000-v1`；实验绑定 flag 的 `defaultRule.variation` 必填（未入组回退）。
