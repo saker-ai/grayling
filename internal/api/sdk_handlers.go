@@ -1,0 +1,323 @@
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/golab/pkg/evaluation"
+	"github.com/godeps/golab/pkg/model"
+)
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/sdk/config — scoped snapshot with ETag/304 (§8)
+// ---------------------------------------------------------------------------
+//
+// The workspace/environment come from the token ONLY: there are no query
+// parameters that could select another tenant (§8: 不接受 query 参数越权
+// 选择租户). The response is the FULL server-side snapshot for that
+// environment; browsers should use restricted projections or remote
+// evaluation instead — SDK tokens are server-side credentials.
+
+func (s *Server) handleSDKConfig(w http.ResponseWriter, r *http.Request) {
+	tok := tokenFrom(r)
+	env, err := s.Store.GetEnvironment(tok.WorkspaceID, tok.EnvironmentID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+
+	// Cheap freshness probe: read only the manifest, serve cache on match.
+	manifest, err := s.Config.GetManifest(env.NamespaceID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	etag := snapshotETag(manifest.Revision)
+	if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
+		w.Header().Set("ETag", etag)
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	cached := s.lookupSnapshot(env.NamespaceID, manifest.Revision)
+	if cached == nil {
+		snapshot, err := s.Config.LoadSnapshot(env.NamespaceID)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		// An evaluator build validates the whole snapshot; a broken
+		// snapshot never reaches clients (they keep their last good one
+		// via 304/ETag or the error below).
+		ev, err := evaluation.NewEvaluator(snapshot)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "snapshot_invalid", err.Error())
+			return
+		}
+		body, err := json.Marshal(snapshot)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "encode", err.Error())
+			return
+		}
+		cached = &cachedSnapshot{
+			revision: manifest.Revision, etag: etag, body: body, snapshot: snapshot,
+		}
+		s.snapshotCache.Store(env.NamespaceID, &evaluatorCacheEntry{
+			revision: manifest.Revision, evaluator: ev, snapshot: cached,
+		})
+	}
+
+	s.Hub.SetCurrent(tok.WorkspaceID, tok.EnvironmentID, manifest.Revision)
+	w.Header().Set("ETag", cached.etag)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(cached.body)
+}
+
+func snapshotETag(revision int64) string {
+	return fmt.Sprintf(`"golab-r%d"`, revision)
+}
+
+// evaluatorCacheEntry couples the serialized snapshot with its compiled
+// evaluator, keyed by manifest revision.
+type evaluatorCacheEntry struct {
+	revision  int64
+	evaluator *evaluation.Evaluator
+	snapshot  *cachedSnapshot
+}
+
+func (s *Server) lookupSnapshot(namespaceID string, revision int64) *cachedSnapshot {
+	if v, ok := s.snapshotCache.Load(namespaceID); ok {
+		entry := v.(*evaluatorCacheEntry)
+		if entry.revision == revision {
+			return entry.snapshot
+		}
+	}
+	return nil
+}
+
+// evaluatorFor returns a compiled evaluator at the CURRENT manifest
+// revision, rebuilding the cache when the substrate moved.
+func (s *Server) evaluatorFor(env *platform.Environment) (*evaluation.Evaluator, *model.Snapshot, int64, error) {
+	manifest, err := s.Config.GetManifest(env.NamespaceID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if v, ok := s.snapshotCache.Load(env.NamespaceID); ok {
+		entry := v.(*evaluatorCacheEntry)
+		if entry.revision == manifest.Revision {
+			return entry.evaluator, entry.snapshot.snapshot, manifest.Revision, nil
+		}
+	}
+	snapshot, err := s.Config.LoadSnapshot(env.NamespaceID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	ev, err := evaluation.NewEvaluator(snapshot)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	body, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	s.snapshotCache.Store(env.NamespaceID, &evaluatorCacheEntry{
+		revision: manifest.Revision, evaluator: ev,
+		snapshot: &cachedSnapshot{
+			revision: manifest.Revision, etag: snapshotETag(manifest.Revision),
+			body: body, snapshot: snapshot,
+		},
+	})
+	return ev, snapshot, manifest.Revision, nil
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/sdk/eval — remote evaluation (§8)
+// ---------------------------------------------------------------------------
+
+type evalRequest struct {
+	FlagKey string                  `json:"flagKey"`
+	Context model.EvaluationContext `json:"context"`
+}
+
+type evalResponse struct {
+	Result     model.Result `json:"result"`
+	Value      any          `json:"value"`
+	Revision   int64        `json:"manifestRevision"`
+	ExposureID string       `json:"exposureEventId,omitempty"`
+}
+
+func (s *Server) handleSDKEval(w http.ResponseWriter, r *http.Request) {
+	tok := tokenFrom(r)
+	env, err := s.Store.GetEnvironment(tok.WorkspaceID, tok.EnvironmentID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	var req evalRequest
+	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	ev, snapshot, revision, err := s.evaluatorFor(env)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	res := ev.Evaluate(req.FlagKey, req.Context)
+
+	resp := evalResponse{Result: res, Value: res.Value, Revision: revision}
+
+	// Server-side exposure capture: remote clients (browsers, thin
+	// services) cannot be trusted to report exposures, so the server
+	// records them itself when the evaluation enrolled the unit in a
+	// running experiment. The event ID is deterministic per
+	// (experiment, epoch, unit, variant) which makes repeated remote evals
+	// idempotent — unique-unit analytics are unaffected (§10.1).
+	if res.TrackEvents && res.Experiment != nil {
+		if id := s.recordRemoteExposure(tok, env, snapshot, req, res); id != "" {
+			resp.ExposureID = id
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) recordRemoteExposure(tok *platform.Token, env *platform.Environment,
+	snapshot *model.Snapshot, req evalRequest, res model.Result) string {
+
+	flag := snapshot.Flags[res.FlagKey]
+	if flag == nil || flag.Bucketing == nil {
+		return ""
+	}
+	unitRaw, ok := req.Context.Field(flag.Bucketing.Unit)
+	if !ok {
+		return ""
+	}
+	// Same canonicalization the evaluator hashes with, so server-captured
+	// exposures and SDK-reported ones land on the identical unit hash.
+	unitStr, ok := evaluation.CanonicalUnitString(unitRaw)
+	if !ok {
+		return ""
+	}
+	unitHash := s.Store.HashUnit(env.WorkspaceID, unitStr)
+	eventID := fmt.Sprintf("srv-%s-%d-%s-%s", res.Experiment.ExperimentID, res.Experiment.Epoch,
+		unitHash[:16], res.Experiment.Variant)
+	flagRev := flagRevisionIn(snapshot, res.FlagKey)
+	now := time.Now().UTC()
+	_, err := s.Store.IngestEvents([]*platform.Event{{
+		EventID: eventID, WorkspaceID: env.WorkspaceID, EnvironmentID: env.ID,
+		Type: platform.EventExposure, ExperimentID: res.Experiment.ExperimentID,
+		Epoch: res.Experiment.Epoch, FlagKey: res.FlagKey, FlagRevision: flagRev,
+		Variant: res.Experiment.Variant, UnitHash: unitHash, Source: res.Experiment.Source,
+		ClientTime: now,
+	}})
+	if err != nil {
+		s.logger.Printf("api: remote exposure ingest failed: %v", err)
+		return ""
+	}
+	return eventID
+}
+
+func flagRevisionIn(snapshot *model.Snapshot, key string) int64 {
+	if f, ok := snapshot.Flags[key]; ok && f.Version != "" {
+		var rev int64
+		if _, err := fmt.Sscanf(f.Version, "%d", &rev); err == nil {
+			return rev
+		}
+	}
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/collect — batched exposure/conversion ingestion (§8, §10)
+// ---------------------------------------------------------------------------
+
+type collectEventDTO struct {
+	EventID      string    `json:"eventId"`
+	Type         string    `json:"type"`
+	ExperimentID string    `json:"experimentId"`
+	Epoch        int64     `json:"epoch"`
+	FlagKey      string    `json:"flagKey"`
+	FlagRevision int64     `json:"flagRevision"`
+	Variant      string    `json:"variant"`
+	Unit         string    `json:"unit"` // plaintext; HMAC'd server-side, never stored
+	Source       string    `json:"source"`
+	MetricKey    string    `json:"metricKey"`
+	Value        float64   `json:"value"`
+	SessionID    string    `json:"sessionId"`
+	TaskID       string    `json:"taskId"`
+	ClientTime   time.Time `json:"clientTime"`
+}
+
+type collectRequest struct {
+	Events []collectEventDTO `json:"events"`
+}
+
+func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
+	tok := tokenFrom(r)
+	env, err := s.Store.GetEnvironment(tok.WorkspaceID, tok.EnvironmentID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	q := s.Store.GetQuotas(env.WorkspaceID)
+
+	// Transport-level byte cap: batch size × per-event quota (§9: 采集端
+	// 限制事件大小、速率).
+	maxBody := int64(q.MaxEventsPerBatch) * int64(q.MaxEventBytes)
+	if maxBody <= 0 || maxBody > 64*1024*1024 {
+		maxBody = 64 * 1024 * 1024
+	}
+	var req collectRequest
+	if err := decodeJSON(r, &req, maxBody); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if len(req.Events) == 0 {
+		writeJSON(w, http.StatusOK, platform.IngestResult{})
+		return
+	}
+	if len(req.Events) > q.MaxEventsPerBatch {
+		writeError(w, http.StatusBadRequest, "batch_too_large",
+			fmt.Sprintf("%d events exceed batch quota %d", len(req.Events), q.MaxEventsPerBatch))
+		return
+	}
+
+	events := make([]*platform.Event, 0, len(req.Events))
+	skippedNoUnit := 0
+	for _, dto := range req.Events {
+		if dto.Unit == "" {
+			// No unit → no attribution; reject loudly instead of storing
+			// anonymous noise (§6).
+			skippedNoUnit++
+			continue
+		}
+		events = append(events, &platform.Event{
+			EventID: dto.EventID, WorkspaceID: env.WorkspaceID, EnvironmentID: env.ID,
+			Type: platform.EventType(dto.Type), ExperimentID: dto.ExperimentID,
+			Epoch: dto.Epoch, FlagKey: dto.FlagKey, FlagRevision: dto.FlagRevision,
+			Variant:  dto.Variant,
+			UnitHash: s.Store.HashUnit(env.WorkspaceID, dto.Unit),
+			Source:   dto.Source, MetricKey: dto.MetricKey, Value: dto.Value,
+			SessionID: dto.SessionID, TaskID: dto.TaskID, ClientTime: dto.ClientTime.UTC(),
+		})
+	}
+	res, err := s.Store.IngestEvents(events)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	msgs := res.RejectMsgs
+	if skippedNoUnit > 0 {
+		msgs = append(msgs, fmt.Sprintf(
+			"%d events skipped: missing unit (no attribution without a randomization unit)", skippedNoUnit))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"accepted": res.Accepted, "duplicates": res.Duplicates,
+		"rejected": res.Rejected + skippedNoUnit, "rejectMessages": msgs,
+	})
+}
