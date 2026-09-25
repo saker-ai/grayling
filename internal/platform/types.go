@@ -158,16 +158,34 @@ type SegmentRevision struct {
 	PublishedBy   string         `json:"publishedBy"`
 }
 
-// MetricSpec declares the primary metric of an experiment (§10.1: 首版指标
-// 仅支持 proportion 与 mean，明确分母、零值、方向).
+// MetricSpec declares the primary metric of an experiment (§10.1: 明确分母、
+// 零值、方向). v1 supports proportion and mean; P5 (§10.3) adds ratio, quantile
+// and CUPED (covariate-adjusted mean), each pre-registered here.
 type MetricSpec struct {
 	Key       string `json:"key"`
-	Type      string `json:"type"`      // "proportion" | "mean"
+	Type      string `json:"type"`      // "proportion" | "mean" | "ratio" | "quantile"
 	Direction string `json:"direction"` // "increase" | "decrease" — what "better" means
 	Unit      string `json:"unit,omitempty"`
-	// MinValue clamps conversion values for mean metrics (0 = no clamp).
+	// Floor/Ceil clamp conversion values for mean metrics (nil = no clamp).
 	Floor *float64 `json:"floor,omitempty"`
 	Ceil  *float64 `json:"ceil,omitempty"`
+
+	// Ratio metrics (§10.1: ratio 需每单元分子/分母及交叉乘积). NumeratorKey
+	// and DenominatorKey name the two collected metrics whose per-unit totals
+	// form the ratio R = Σ numerator / Σ denominator. When NumeratorKey is
+	// empty, Key is used as the numerator.
+	NumeratorKey   string `json:"numeratorKey,omitempty"`
+	DenominatorKey string `json:"denominatorKey,omitempty"`
+
+	// Quantile metrics (§10.1: p95 推断需保留单元明细). QuantileLevel is the
+	// percentile p ∈ (0,1) taken over per-unit values (e.g. 0.95 for p95).
+	QuantileLevel float64 `json:"quantileLevel,omitempty"`
+
+	// CovariateKey names the PRE-EXPERIMENT covariate metric for CUPED
+	// (§10.1: CUPED 需实验前协变量和实验后结果的同单元配对数据). When set on a
+	// mean metric and paired data exists, the report uses the CUPED-adjusted
+	// (variance-reduced) test as the primary result.
+	CovariateKey string `json:"covariateKey,omitempty"`
 }
 
 // GuardrailSpec is an operational protection rule, evaluated separately from

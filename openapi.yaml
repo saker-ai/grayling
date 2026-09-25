@@ -2857,14 +2857,17 @@ components:
           description: 调试求值永不记录曝光。
     MetricSpec:
       type: object
-      description: 实验主指标预注册（v1 仅 proportion 与 mean）。
+      description: >-
+        实验主指标预注册。v1 支持 proportion 与 mean；P5（§10.3）新增 ratio、
+        quantile 与 CUPED（带协变量的方差缩减 mean）。ratio/quantile/CUPED 的
+        额外字段在此声明，均可预注册选用，SRM/护栏阻断对其同样生效。
       required: [key, type, direction]
       properties:
         key:
           type: string
         type:
           type: string
-          enum: [proportion, mean]
+          enum: [proportion, mean, ratio, quantile]
         direction:
           type: string
           enum: [increase, decrease]
@@ -2878,6 +2881,18 @@ components:
         ceil:
           type: number
           nullable: true
+        numeratorKey:
+          type: string
+          description: ratio 指标分子 metric key（缺省用 key 作分子）。
+        denominatorKey:
+          type: string
+          description: ratio 指标分母 metric key（ratio 必填）。R = Σ分子/Σ分母。
+        quantileLevel:
+          type: number
+          description: quantile 指标的分位点 p ∈ (0,1)（quantile 必填，如 0.95=p95）。
+        covariateKey:
+          type: string
+          description: CUPED 实验前协变量 metric key（仅 mean 指标；设置且有配对数据时报告用 CUPED 调整检验）。
     GuardrailSpec:
       type: object
       description: 运营护栏规则，与主指标统计显著性分开评估。
@@ -2977,7 +2992,7 @@ components:
           type: string
         analysisMethod:
           type: string
-          enum: [welch, two-proportion-z]
+          enum: [welch, two-proportion-z, ratio-delta, quantile, cuped]
           description: 预注册；缺省按 primaryMetric.type 推导（mean→welch，proportion→two-proportion-z）。
         releasePlan:
           $ref: "#/components/schemas/ReleasePlan"
@@ -3144,7 +3159,7 @@ components:
           format: date-time
         analysisMethod:
           type: string
-          enum: [welch, two-proportion-z]
+          enum: [welch, two-proportion-z, ratio-delta, quantile, cuped]
         alpha:
           type: number
         mde:
@@ -3180,6 +3195,18 @@ components:
           $ref: "#/components/schemas/Decision"
         minRuntimeSatisfied:
           type: boolean
+        sequential:
+          allOf:
+            - $ref: "#/components/schemas/SequentialResult"
+          description: >-
+            always-valid（mSPRT）序贯视图，用于持续监控；与固定样本 primary
+            分离，绝不驱动 ship/rollback 决策门（§10.3）。仅 mean 指标计算。
+        bayesian:
+          allOf:
+            - $ref: "#/components/schemas/BayesianSection"
+          description: >-
+            贝叶斯后验/期望损失/胜出概率视图，与频率派结论分离呈现，绝不与
+            固定样本 95% CI 混成同一决策规则（§10.3）。
     VariantReport:
       type: object
       description: >-
@@ -3211,7 +3238,7 @@ components:
       properties:
         type:
           type: string
-          enum: [welch, two-proportion-z]
+          enum: [welch, two-proportion-z, ratio-delta, quantile, cuped]
         pValue:
           type: number
         diff:
@@ -3231,6 +3258,15 @@ components:
           $ref: "#/components/schemas/WelchResult"
         proportion:
           $ref: "#/components/schemas/ProportionResult"
+        ratio:
+          $ref: "#/components/schemas/RatioResult"
+        quantile:
+          $ref: "#/components/schemas/QuantileResult"
+        cuped:
+          $ref: "#/components/schemas/CUPEDResult"
+        varianceReduction:
+          type: number
+          description: type=cuped 时的方差缩减比例（≈ρ²）。
     SRMResult:
       type: object
       description: 观测 per-variant 单元数对预注册分配的卡方拟合优度检验。
@@ -3356,6 +3392,263 @@ components:
           type: boolean
         relativeMeaningful:
           type: boolean
+    RatioResult:
+      type: object
+      description: >-
+        ratio 指标的 delta-method 检验（R = Σ分子/Σ分母，逐随机化单元配对；
+        Budylin et al. WSDM 2018）。
+      properties:
+        ratioA:
+          type: number
+        ratioB:
+          type: number
+        diff:
+          type: number
+          description: ratioB − ratioA。
+        relativeDiff:
+          type: number
+        relativeMeaningful:
+          type: boolean
+        varA:
+          type: number
+          description: A 臂比值的 delta-method 方差。
+        varB:
+          type: number
+        na:
+          type: integer
+          format: int64
+        nb:
+          type: integer
+          format: int64
+        se:
+          type: number
+        z:
+          type: number
+        pValue:
+          type: number
+        ciDiffLow:
+          type: number
+        ciDiffHigh:
+          type: number
+        significant:
+          type: boolean
+    QuantileResult:
+      type: object
+      description: >-
+        quantile 指标：每臂分位数的分布式无关（二项/阶次统计）置信区间 +
+        两样本渐近检验（KDE 密度估计）。尾部百分位（如 p95）在小样本下仅作诊断。
+      properties:
+        level:
+          type: number
+          description: 分位点 p（0.5=中位数，0.95=p95）。
+        quantileA:
+          type: number
+        quantileB:
+          type: number
+        diff:
+          type: number
+          description: quantileB − quantileA。
+        na:
+          type: integer
+          format: int64
+        nb:
+          type: integer
+          format: int64
+        ciALow:
+          type: number
+        ciAHigh:
+          type: number
+        ciBLow:
+          type: number
+        ciBHigh:
+          type: number
+        seA:
+          type: number
+        seB:
+          type: number
+        se:
+          type: number
+        z:
+          type: number
+        pValue:
+          type: number
+        ciDiffLow:
+          type: number
+        ciDiffHigh:
+          type: number
+        significant:
+          type: boolean
+    CUPEDResult:
+      type: object
+      description: >-
+        CUPED 协方差调整（Deng et al. WSDM 2013）：用实验前协变量把方差缩减
+        ≈ρ²，效应估计保持无偏。同时给出未调整的 rawDiff 以便审计。
+      properties:
+        meanYA:
+          type: number
+        meanYB:
+          type: number
+        rawDiff:
+          type: number
+          description: 未调整的均值差 meanYB − meanYA。
+        theta:
+          type: number
+          description: 合并协方差调整系数 Cov(X,Y)/Var(X)。
+        correlation:
+          type: number
+          description: 合并 corr(X,Y)；varianceReduction ≈ ρ²。
+        diff:
+          type: number
+          description: CUPED 调整后的效应估计（对 rawDiff 无偏）。
+        relativeDiff:
+          type: number
+        relativeMeaningful:
+          type: boolean
+        varianceReduction:
+          type: number
+          description: 1 − Var(Δ_adj)/Var(Δ_raw)，实际灵敏度增益，钳制到 [0,1]。
+        varA:
+          type: number
+        varB:
+          type: number
+        na:
+          type: integer
+          format: int64
+        nb:
+          type: integer
+          format: int64
+        t:
+          type: number
+        df:
+          type: number
+        pValue:
+          type: number
+        ciDiffLow:
+          type: number
+        ciDiffHigh:
+          type: number
+        significant:
+          type: boolean
+    SequentialResult:
+      type: object
+      description: >-
+        always-valid 序贯推断（Gaussian mixture mSPRT；Robbins 1970 / Johari et
+        al. 2022）。p 值与置信序列在每一次查看都同时有效——多次查看不膨胀 I 型
+        错误（§10.3）。与固定样本 primary 分离，不驱动决策门。
+      properties:
+        na:
+          type: integer
+          format: int64
+        nb:
+          type: integer
+          format: int64
+        diff:
+          type: number
+          description: 当前均值差估计 x̄_B − x̄_A。
+        variance:
+          type: number
+          description: Diff 的方差 V = s²_A/n_A + s²_B/n_B。
+        tau:
+          type: number
+          description: 预注册的混合尺度（备择先验的效应尺度，默认取 MDE）。
+        logLambda:
+          type: number
+          description: 混合似然比 Λ 的自然对数（对 H0 的证据）。
+        pValue:
+          type: number
+          description: anytime-valid p 值 min(1, 1/Λ)。
+        csLow:
+          type: number
+          description: (1−alpha) 置信序列下界（时间一致有效）。
+        csHigh:
+          type: number
+        significant:
+          type: boolean
+          description: pValue < alpha；因 p 值 anytime-valid，可在每次查看时判定而无偷看惩罚。
+        alpha:
+          type: number
+    BayesianSection:
+      type: object
+      description: >-
+        贝叶斯视图，结构上与频率派 primary/decision 分离，二者绝不合并为同一
+        决策规则（§10.3）。按指标族填 mean 或 proportion 之一。
+      properties:
+        mean:
+          $ref: "#/components/schemas/BayesianMeanResult"
+        proportion:
+          $ref: "#/components/schemas/BayesianProportionResult"
+    BayesianMeanResult:
+      type: object
+      description: 均值差的 Normal-Normal 共轭后验摘要（胜出概率 + 期望损失 + 可信区间）。
+      properties:
+        postMeanDiff:
+          type: number
+        postSDDiff:
+          type: number
+        credibleLow:
+          type: number
+        credibleHigh:
+          type: number
+        probBSuperior:
+          type: number
+          description: P(μ_B > μ_A | data) 胜出概率。
+        expectedLossB:
+          type: number
+          description: 选择 B 的期望损失 E[max(0, μ_A − μ_B) | data]。
+        expectedLossA:
+          type: number
+        alpha:
+          type: number
+        na:
+          type: integer
+          format: int64
+        nb:
+          type: integer
+          format: int64
+        priorSDUsed:
+          type: number
+          description: 有效先验 SD（未显式给定时用弱信息默认 10×合并 SD）。
+    BayesianProportionResult:
+      type: object
+      description: 转化率差的 Beta-Binomial 共轭后验摘要（精确后验 + 胜出概率 + 期望损失）。
+      properties:
+        postAA:
+          type: number
+        postAB:
+          type: number
+        postBA:
+          type: number
+        postBB:
+          type: number
+        postMeanA:
+          type: number
+        postMeanB:
+          type: number
+        probBSuperior:
+          type: number
+        expectedLossB:
+          type: number
+        expectedLossA:
+          type: number
+        credibleLowDiff:
+          type: number
+          description: p_B − p_A 的可信区间（后验差的正态近似，等尾）。
+        credibleHighDiff:
+          type: number
+        alpha:
+          type: number
+        na:
+          type: integer
+          format: int64
+        nb:
+          type: integer
+          format: int64
+        xa:
+          type: integer
+          format: int64
+        xb:
+          type: integer
+          format: int64
     GuardrailCheck:
       type: object
       description: >-

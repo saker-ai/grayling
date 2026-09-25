@@ -15,6 +15,7 @@ package experiment
 import (
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	"github.com/godeps/golab/internal/platform"
@@ -49,6 +50,28 @@ type Report struct {
 	Guardrails          []stats.GuardrailCheck `json:"guardrails,omitempty"`
 	Decision            stats.Decision         `json:"decision"`
 	MinRuntimeSatisfied bool                   `json:"minRuntimeSatisfied"`
+
+	// ---- P5 views, presented SEPARATELY from the frequentist decision ----
+	// docs/技术方案.md §10.3: 不能将"默认 Bayesian"和"固定频率派 95% CI"混成同一
+	// 决策规则. Neither Sequential nor Bayesian ever drives the ship/rollback
+	// gate above; they are parallel decision-support views.
+	//
+	// Sequential is the always-valid (mSPRT) view for continuous monitoring: its
+	// p-value/confidence sequence stay valid under repeated looks (§10.3), so it
+	// is the correct lens for the rollout engine's per-tick peeking, while the
+	// fixed-sample Primary remains the pre-registered decision.
+	Sequential *stats.SequentialResult `json:"sequential,omitempty"`
+	// Bayesian is the posterior / expected-loss / probability-of-superiority
+	// view (mean or proportion family depending on the metric type).
+	Bayesian *BayesianSection `json:"bayesian,omitempty"`
+}
+
+// BayesianSection carries the Bayesian posterior summary, kept structurally
+// separate from the frequentist Primary/Decision so the two paradigms are never
+// conflated (docs/技术方案.md §10.3).
+type BayesianSection struct {
+	Mean       *stats.BayesianMeanResult       `json:"mean,omitempty"`
+	Proportion *stats.BayesianProportionResult `json:"proportion,omitempty"`
 }
 
 // VariantReport exposes per-arm volumes. RandomizedUnits is the SRM and
@@ -64,9 +87,10 @@ type VariantReport struct {
 }
 
 // PrimaryResult carries the pre-registered test outcome in a uniform shape
-// plus the native stats struct for detail.
+// plus the native stats struct for detail. Type is one of "welch",
+// "two-proportion-z", "ratio-delta", "quantile" or "cuped".
 type PrimaryResult struct {
-	Type               string                  `json:"type"` // "welch" | "two-proportion-z"
+	Type               string                  `json:"type"` // "welch" | "two-proportion-z" | "ratio-delta" | "quantile" | "cuped"
 	PValue             float64                 `json:"pValue"`
 	Diff               float64                 `json:"diff"`
 	RelativeDiff       float64                 `json:"relativeDiff"`
@@ -76,6 +100,11 @@ type PrimaryResult struct {
 	Significant        bool                    `json:"significant"`
 	Welch              *stats.WelchResult      `json:"welch,omitempty"`
 	Proportion         *stats.ProportionResult `json:"proportion,omitempty"`
+	Ratio              *stats.RatioResult      `json:"ratio,omitempty"`
+	Quantile           *stats.QuantileResult   `json:"quantile,omitempty"`
+	CUPED              *stats.CUPEDResult      `json:"cuped,omitempty"`
+	// VarianceReduction is the CUPED sensitivity gain when Type == "cuped".
+	VarianceReduction float64 `json:"varianceReduction,omitempty"`
 }
 
 // BuildReport assembles the analysis for one experiment. It fails when the
@@ -118,30 +147,75 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	}
 
 	// ---- primary metric on the randomized population ----
-	primaryAgg := store.MetricAggregate(exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch,
-		exp.PrimaryMetric.Key)
+	// Key is the primary metric: the numerator for ratio, the percentile'd
+	// metric for quantile, the outcome for a CUPED-adjusted mean. Ratio and
+	// CUPED fetch their second metric (denominator / covariate) as well.
+	wsID, envID := exp.WorkspaceID, exp.EnvironmentID
+	primaryAgg := store.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.Key)
 
-	ctrlStats, treatStats, convCtrl, convTreat := buildMetricStats(
-		exp.PrimaryMetric.Type, primaryAgg, splitSets, control, treatment)
+	var (
+		ctrlProp, treatProp   stats.ProportionStats
+		ctrlMean, treatMean   stats.MeanStats
+		ctrlRatio, treatRatio stats.RatioStats
+		ctrlVals, treatVals   []float64
+		convCtrl, convTreat   int64
+	)
+	switch exp.PrimaryMetric.Type {
+	case "proportion", "mean":
+		cs, ts, cc, ct := buildMetricStats(exp.PrimaryMetric.Type, primaryAgg, splitSets, control, treatment)
+		convCtrl, convTreat = cc, ct
+		if exp.PrimaryMetric.Type == "proportion" {
+			ctrlProp, _ = cs.(stats.ProportionStats)
+			treatProp, _ = ts.(stats.ProportionStats)
+		} else {
+			ctrlMean, _ = cs.(stats.MeanStats)
+			treatMean, _ = ts.(stats.MeanStats)
+		}
+	case "ratio":
+		numKey := exp.PrimaryMetric.NumeratorKey
+		if numKey == "" {
+			numKey = exp.PrimaryMetric.Key
+		}
+		numAgg := primaryAgg
+		if numKey != exp.PrimaryMetric.Key {
+			numAgg = store.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, numKey)
+		}
+		denAgg := store.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.DenominatorKey)
+		ctrlRatio, treatRatio = buildRatioStats(numAgg, denAgg, splitSets, control, treatment)
+		convCtrl, convTreat = ctrlRatio.N, treatRatio.N
+	case "quantile":
+		ctrlVals, treatVals = buildQuantileValues(primaryAgg, splitSets, control, treatment)
+		convCtrl, convTreat = int64(len(ctrlVals)), int64(len(treatVals))
+	}
 
-	for v, conv := range map[string]int64{control: convCtrl, treatment: convTreat} {
-		byVariant[v].ConvertedUnits = conv
+	byVariant[control].ConvertedUnits = convCtrl
+	byVariant[treatment].ConvertedUnits = convTreat
+	// PrimaryValue renders the per-arm point estimate for the console table.
+	setPrimaryValue := func(vr *VariantReport, prop stats.ProportionStats, mean stats.MeanStats,
+		ratio stats.RatioStats, vals []float64) {
+		switch exp.PrimaryMetric.Type {
+		case "proportion":
+			if n := vr.RandomizedUnits; n > 0 {
+				vr.PrimaryValue = float64(prop.Conversions) / float64(n)
+			}
+		case "mean":
+			if mean.N > 0 {
+				vr.PrimaryValue = mean.Sum / float64(mean.N)
+			}
+		case "ratio":
+			if ratio.SumX != 0 {
+				vr.PrimaryValue = ratio.SumY / ratio.SumX
+			}
+		case "quantile":
+			if len(vals) > 0 {
+				s := append([]float64(nil), vals...)
+				sort.Float64s(s)
+				vr.PrimaryValue = stats.SampleQuantile(s, exp.PrimaryMetric.QuantileLevel)
+			}
+		}
 	}
-	if exp.PrimaryMetric.Type == "proportion" {
-		if n := byVariant[control].RandomizedUnits; n > 0 {
-			byVariant[control].PrimaryValue = float64(convCtrl) / float64(n)
-		}
-		if n := byVariant[treatment].RandomizedUnits; n > 0 {
-			byVariant[treatment].PrimaryValue = float64(convTreat) / float64(n)
-		}
-	} else {
-		if ms, ok := ctrlStats.(stats.MeanStats); ok && ms.N > 0 {
-			byVariant[control].PrimaryValue = ms.Sum / float64(ms.N)
-		}
-		if ms, ok := treatStats.(stats.MeanStats); ok && ms.N > 0 {
-			byVariant[treatment].PrimaryValue = ms.Sum / float64(ms.N)
-		}
-	}
+	setPrimaryValue(byVariant[control], ctrlProp, ctrlMean, ctrlRatio, ctrlVals)
+	setPrimaryValue(byVariant[treatment], treatProp, treatMean, treatRatio, treatVals)
 	for _, v := range order {
 		rep.PerVariant = append(rep.PerVariant, *byVariant[v])
 	}
@@ -178,14 +252,15 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		}
 	}
 
-	// ---- primary test ----
-	var pValue, diff, relDiff, ciLow, ciHigh float64
-	var significant, relMeaningful bool
+	// ---- primary test (+ separate sequential/bayesian views) ----
+	// The frequentist fixed-sample Primary below is what drives Decide. The
+	// Sequential (always-valid) and Bayesian views are computed into their OWN
+	// report fields and never enter the gate (docs/技术方案.md §10.3).
+	var pValue, diff, ciLow, ciHigh float64
+	var significant bool
 	switch exp.PrimaryMetric.Type {
 	case "proportion":
-		a, _ := ctrlStats.(stats.ProportionStats)
-		b, _ := treatStats.(stats.ProportionStats)
-		res, terr := stats.TwoProportionZTest(a, b, exp.Alpha)
+		res, terr := stats.TwoProportionZTest(ctrlProp, treatProp, exp.Alpha)
 		if terr != nil {
 			rep.PrimaryError = terr.Error()
 		} else {
@@ -196,32 +271,112 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 				CILow: pr.CIDiffLow, CIHigh: pr.CIDiffHigh, Significant: pr.Significant,
 				Proportion: &pr,
 			}
-			pValue, diff, relDiff = pr.PValue, pr.Diff, pr.RelativeDiff
-			ciLow, ciHigh = pr.CIDiffLow, pr.CIDiffHigh
-			significant, relMeaningful = pr.Significant, pr.RelativeMeaningful
+			pValue, diff, ciLow, ciHigh = pr.PValue, pr.Diff, pr.CIDiffLow, pr.CIDiffHigh
+			significant = pr.Significant
 		}
+		if bres, berr := stats.BayesianProportionTest(ctrlProp, treatProp, exp.Alpha, stats.BetaPrior{}); berr == nil {
+			bp := bres
+			rep.Bayesian = &BayesianSection{Proportion: &bp}
+		}
+
 	case "mean":
-		a, _ := ctrlStats.(stats.MeanStats)
-		b, _ := treatStats.(stats.MeanStats)
-		res, terr := stats.WelchTTest(a, b, exp.Alpha)
+		// CUPED when a pre-experiment covariate is pre-registered and paired
+		// data exists; otherwise (or on insufficient pairs) fall back to Welch.
+		cupedDone := false
+		if exp.PrimaryMetric.CovariateKey != "" {
+			covAgg := store.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.CovariateKey)
+			cp, tp := buildPairedStats(covAgg, primaryAgg, splitSets, control, treatment)
+			if cp.N >= 2 && tp.N >= 2 {
+				if cres, cerr := stats.CUPEDTest(cp, tp, exp.Alpha); cerr == nil {
+					cr := cres
+					rep.Primary = &PrimaryResult{
+						Type: "cuped", PValue: cr.PValue, Diff: cr.Diff,
+						RelativeDiff: cr.RelativeDiff, RelativeMeaningful: cr.RelativeMeaningful,
+						CILow: cr.CIDiffLow, CIHigh: cr.CIDiffHigh, Significant: cr.Significant,
+						CUPED: &cr, VarianceReduction: cr.VarianceReduction,
+					}
+					pValue, diff, ciLow, ciHigh = cr.PValue, cr.Diff, cr.CIDiffLow, cr.CIDiffHigh
+					significant = cr.Significant
+					cupedDone = true
+				}
+			}
+		}
+		if !cupedDone {
+			res, terr := stats.WelchTTest(ctrlMean, treatMean, exp.Alpha)
+			if terr != nil {
+				rep.PrimaryError = terr.Error()
+			} else {
+				wr := res
+				rep.Primary = &PrimaryResult{
+					Type: "welch", PValue: wr.PValue, Diff: wr.Diff,
+					RelativeDiff: wr.RelativeDiff, RelativeMeaningful: wr.RelativeMeaningful,
+					CILow: wr.CIDiffLow, CIHigh: wr.CIDiffHigh, Significant: wr.Significant,
+					Welch: &wr,
+				}
+				pValue, diff, ciLow, ciHigh = wr.PValue, wr.Diff, wr.CIDiffLow, wr.CIDiffHigh
+				significant = wr.Significant
+			}
+		}
+		// Sequential (always-valid) view — the mixing scale tau is the
+		// pre-registered MDE (the effect scale worth detecting); fall back to a
+		// fraction of the pooled SD when MDE is unset.
+		tau := exp.MDE
+		if tau <= 0 {
+			if pooled := ctrlMean.Merge(treatMean); pooled.Variance() > 0 {
+				tau = 0.2 * math.Sqrt(pooled.Variance())
+			}
+		}
+		if tau > 0 {
+			if sres, serr := stats.SequentialMeanTest(ctrlMean, treatMean, exp.Alpha, tau); serr == nil {
+				sr := sres
+				rep.Sequential = &sr
+			}
+		}
+		// Bayesian view (mean family).
+		if bres, berr := stats.BayesianMeanTest(ctrlMean, treatMean, exp.Alpha, stats.NormalPrior{}); berr == nil {
+			bm := bres
+			rep.Bayesian = &BayesianSection{Mean: &bm}
+		}
+
+	case "ratio":
+		res, terr := stats.RatioDeltaTest(ctrlRatio, treatRatio, exp.Alpha)
 		if terr != nil {
 			rep.PrimaryError = terr.Error()
 		} else {
-			wr := res
+			rr := res
 			rep.Primary = &PrimaryResult{
-				Type: "welch", PValue: wr.PValue, Diff: wr.Diff,
-				RelativeDiff: wr.RelativeDiff, RelativeMeaningful: wr.RelativeMeaningful,
-				CILow: wr.CIDiffLow, CIHigh: wr.CIDiffHigh, Significant: wr.Significant,
-				Welch: &wr,
+				Type: "ratio-delta", PValue: rr.PValue, Diff: rr.Diff,
+				RelativeDiff: rr.RelativeDiff, RelativeMeaningful: rr.RelativeMeaningful,
+				CILow: rr.CIDiffLow, CIHigh: rr.CIDiffHigh, Significant: rr.Significant,
+				Ratio: &rr,
 			}
-			pValue, diff, relDiff = wr.PValue, wr.Diff, wr.RelativeDiff
-			ciLow, ciHigh = wr.CIDiffLow, wr.CIDiffHigh
-			significant, relMeaningful = wr.Significant, wr.RelativeMeaningful
+			pValue, diff, ciLow, ciHigh = rr.PValue, rr.Diff, rr.CIDiffLow, rr.CIDiffHigh
+			significant = rr.Significant
 		}
+
+	case "quantile":
+		res, terr := stats.QuantileTest(ctrlVals, treatVals, exp.PrimaryMetric.QuantileLevel, exp.Alpha)
+		if terr != nil {
+			rep.PrimaryError = terr.Error()
+		} else {
+			qr := res
+			rel, relMeaningful := 0.0, false
+			if math.Abs(qr.QuantileA) > 1e-12 {
+				rel, relMeaningful = qr.Diff/qr.QuantileA, true
+			}
+			rep.Primary = &PrimaryResult{
+				Type: "quantile", PValue: qr.PValue, Diff: qr.Diff,
+				RelativeDiff: rel, RelativeMeaningful: relMeaningful,
+				CILow: qr.CIDiffLow, CIHigh: qr.CIDiffHigh, Significant: qr.Significant,
+				Quantile: &qr,
+			}
+			pValue, diff, ciLow, ciHigh = qr.PValue, qr.Diff, qr.CIDiffLow, qr.CIDiffHigh
+			significant = qr.Significant
+		}
+
 	default:
 		return nil, fmt.Errorf("experiment %s: unsupported primary metric type %q", experimentID, exp.PrimaryMetric.Type)
 	}
-	_, _ = relDiff, relMeaningful // carried in rep.Primary for rendering
 
 	// ---- guardrails (operational rules, separate from significance) ----
 	for _, g := range exp.Guardrails {
@@ -303,6 +458,97 @@ func buildMetricStats(metricType string, agg map[string]*platform.MetricAgg,
 	ctrlStats, convCtrl := build(control)
 	treatStats, convTreat := build(treatment)
 	return ctrlStats, treatStats, convCtrl, convTreat
+}
+
+// buildRatioStats assembles per-arm RatioStats for a ratio metric from the
+// numerator and denominator per-unit aggregates, restricted to the randomized
+// population (docs/技术方案.md §10.1: ratio 需每单元分子/分母及交叉乘积). Each
+// split-exposed unit contributes its (denominator total, numerator total) pair;
+// a unit present in only one of the two metrics contributes 0 for the missing
+// side (totals over the randomized population).
+func buildRatioStats(numAgg, denAgg map[string]*platform.MetricAgg,
+	splitSets map[string]map[string]bool, control, treatment string) (stats.RatioStats, stats.RatioStats) {
+
+	build := func(variant string) stats.RatioStats {
+		set := splitSets[variant]
+		num, den := numAgg[variant], denAgg[variant]
+		var rs stats.RatioStats
+		for unit := range set {
+			var x, y float64
+			hasNum, hasDen := false, false
+			if num != nil {
+				if ua, ok := num.Units[unit]; ok && ua.Count > 0 {
+					y, hasNum = ua.Sum, true
+				}
+			}
+			if den != nil {
+				if ua, ok := den.Units[unit]; ok && ua.Count > 0 {
+					x, hasDen = ua.Sum, true
+				}
+			}
+			if !hasNum && !hasDen {
+				continue
+			}
+			rs.AddUnit(x, y)
+		}
+		return rs
+	}
+	return build(control), build(treatment)
+}
+
+// buildQuantileValues collects the per-unit values (each unit's mean of its
+// events) for a quantile metric, restricted to the randomized population
+// (docs/技术方案.md §10.1: 分位数推断需要保留单元明细). Returned slices are
+// sorted ascending.
+func buildQuantileValues(agg map[string]*platform.MetricAgg,
+	splitSets map[string]map[string]bool, control, treatment string) ([]float64, []float64) {
+
+	build := func(variant string) []float64 {
+		set := splitSets[variant]
+		ma := agg[variant]
+		var vals []float64
+		if ma != nil {
+			for unit, ua := range ma.Units {
+				if !set[unit] || ua.Count == 0 {
+					continue
+				}
+				vals = append(vals, ua.Sum/float64(ua.Count))
+			}
+		}
+		sort.Float64s(vals)
+		return vals
+	}
+	return build(control), build(treatment)
+}
+
+// buildPairedStats assembles per-arm PairedStats (pre-experiment covariate,
+// in-experiment outcome) for CUPED, restricted to units that have BOTH a
+// covariate and an outcome in the randomized population (docs/技术方案.md
+// §10.1: CUPED 需实验前协变量和实验后结果的同单元配对数据). Each pair uses the
+// unit means of the covariate and outcome metrics.
+func buildPairedStats(covAgg, outAgg map[string]*platform.MetricAgg,
+	splitSets map[string]map[string]bool, control, treatment string) (stats.PairedStats, stats.PairedStats) {
+
+	build := func(variant string) stats.PairedStats {
+		set := splitSets[variant]
+		cov, out := covAgg[variant], outAgg[variant]
+		var ps stats.PairedStats
+		if cov == nil || out == nil {
+			return ps
+		}
+		for unit, cua := range cov.Units {
+			if !set[unit] || cua.Count == 0 {
+				continue
+			}
+			oua, ok := out.Units[unit]
+			if !ok || oua.Count == 0 {
+				continue
+			}
+			ps.AddPair(cua.Sum/float64(cua.Count), oua.Sum/float64(oua.Count))
+		}
+		return ps
+	}
+	return build(control), build(treatment)
 }
 
 // evaluateGuardrail checks one guardrail metric. A breach requires the

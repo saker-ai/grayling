@@ -46,9 +46,17 @@ func (s *Service) CreateExperiment(actor Actor, workspaceID, environmentID strin
 	if exp.AnalysisMethod == "" {
 		switch exp.PrimaryMetric.Type {
 		case "mean":
-			exp.AnalysisMethod = "welch"
+			if exp.PrimaryMetric.CovariateKey != "" {
+				exp.AnalysisMethod = "cuped"
+			} else {
+				exp.AnalysisMethod = "welch"
+			}
 		case "proportion":
 			exp.AnalysisMethod = "two-proportion-z"
+		case "ratio":
+			exp.AnalysisMethod = "ratio-delta"
+		case "quantile":
+			exp.AnalysisMethod = "quantile"
 		}
 	}
 	if exp.AnalysisWindow <= 0 {

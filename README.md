@@ -2,7 +2,7 @@
 
 GoLab 是通用功能灰度与 A/B 实验平台，为传统后端、Web 应用与 AI Agent 提供变体决策、可信实验分析，以及 AI 资源（prompt/模型/skill/AgentSpec）的版本绑定、会话级配置冻结与紧急撤销。
 
-**状态：首版已实现并可运行。** 单节点闭环（管理 API → gonacos 配置分发 → Go SDK 本地求值 → 事件采集 → 统计报告 → AI 资源灰度）全部落地并有端到端测试；生产化扩展已落地：PostgreSQL 存储后端（真实 PG 测试）、独立 proxy 部署形态（`cmd/golab-proxy`）、OpenFeature Go Provider（`pkg/ofprovider`）、gonacos 依赖固定为确定 commit 伪版本；阶段二已落地：**Python / TypeScript SDK**（远程求值 + 缓存/轮询 + collect 契约上报，集成测试连真实 golab 二进制）、**自动推进发布**（预注册计划步骤/观察窗/决策门驱动的 eligibility 分步放量，幂等、可暂停、人工接管开关）、**P0 收尾**（`openapi.yaml` 与路由表机械化核对、`docs/threat-model.md`、`test/perf` 正式压测——P99/可见延迟/SSE 并发达成 §13 待测目标）。高级统计（P5）尚未实现。逐项完成范围见 [实施状态](docs/实施状态.md)，端点清单见 [API 参考](docs/api.md) 与 [openapi.yaml](openapi.yaml)，设计依据见 [技术方案](docs/技术方案.md)，安全分析见 [威胁模型](docs/threat-model.md)。
+**状态：首版已实现并可运行。** 单节点闭环（管理 API → gonacos 配置分发 → Go SDK 本地求值 → 事件采集 → 统计报告 → AI 资源灰度）全部落地并有端到端测试；生产化扩展已落地：PostgreSQL 存储后端（真实 PG 测试）、独立 proxy 部署形态（`cmd/golab-proxy`）、OpenFeature Go Provider（`pkg/ofprovider`）、gonacos 依赖固定为确定 commit 伪版本；阶段二已落地：**Python / TypeScript SDK**（远程求值 + 缓存/轮询 + collect 契约上报，集成测试连真实 golab 二进制）、**自动推进发布**（预注册计划步骤/观察窗/决策门驱动的 eligibility 分步放量，幂等、可暂停、人工接管开关）、**P0 收尾**（`openapi.yaml` 与路由表机械化核对、`docs/threat-model.md`、`test/perf` 正式压测——P99/可见延迟/SSE 并发达成 §13 待测目标）。阶段三（P5）高级统计已落地：**ratio（delta-method）/ quantile / CUPED / 序贯（always-valid mSPRT）/ 贝叶斯后验**（`internal/stats`）、**Bandit 流量自适应分配**（Thompson/ε-greedy + SRM/护栏触发冻结探索，`internal/bandit`）、**LLM-as-judge 在线评估管道**（可插拔 provider + 本地 mock + 真实 provider config-only 接入点 + 离线校准 + 作为护栏接入决策门，`internal/judge`）——每种方法含独立数值验证（对照解析解/权威实现/蒙特卡洛）与固定种子模拟验证（I 型错误/覆盖/功效/regret 落预注册区间），新指标类型（ratio/quantile/CUPED-mean）可预注册并接入既有决策门、SRM/护栏阻断对其同样生效，贝叶斯/序贯与频率派结论**分离呈现**（验证数值见 [实施状态](docs/实施状态.md) "P5 统计方法验证证据"节）。**仍未做**：Traefik 网关集成、gonacos 多节点集群验证、审批强化、统计的 Holm 多重比较与 funnel/retention。逐项完成范围见 [实施状态](docs/实施状态.md)，端点清单见 [API 参考](docs/api.md) 与 [openapi.yaml](openapi.yaml)，设计依据见 [技术方案](docs/技术方案.md)，安全分析见 [威胁模型](docs/threat-model.md)。
 
 ## 快速开始
 
@@ -163,8 +163,10 @@ AI 应用 ──会话冻结──> 授权资源解析(所有权索引+版本 pi
 | `internal/rollout` | 自动推进发布引擎（计划步骤/观察窗/决策门 → advance/pause/rollback/complete；人工接管开关） |
 | `internal/api` | HTTP 面：admin / sdk config+eval+revision+stream / collect / ai / release-plan |
 | `internal/proxy` | 独立 proxy 中继（eval/SSE/collect/config/revision + liveness/readiness + 超时/连接池） |
-| `internal/experiment` | 报告构建（单元聚合→统计→决策门） |
-| `internal/stats` | Welch/两比例 z/SRM χ²/固定样本决策（纯标准库，含模拟验证） |
+| `internal/experiment` | 报告构建（单元聚合→统计→决策门；主指标 welch/两比例 z/ratio-delta/quantile/cuped，另附分离的 sequential/bayesian 视图） |
+| `internal/stats` | Welch/两比例 z/SRM χ²/固定样本决策 + **P5**：ratio delta-method、quantile、CUPED、序贯 mSPRT（always-valid）、贝叶斯后验（纯标准库，每种含数值+固定种子模拟验证） |
+| `internal/bandit` | Bandit 流量分配（Thompson/ε-greedy，逐次记录分配概率；SRM/护栏触发冻结探索） |
+| `internal/judge` | LLM-as-judge 管道（可插拔 Provider + 本地 mock + HTTP config-only 接入点；位置随机化/入样概率加权/离线校准 κ/护栏接入决策门） |
 | `internal/ai` | AI 资源门禁（所有权索引/版本 pin/摘要复核/撤销） |
 | `internal/gffimport` | gff 严格导入 + legacy-gff-v1 对照求值 |
 | `cmd/golab`、`cmd/golab-proxy`、`web/` | 服务入口、独立 proxy 入口与内嵌控制台（无构建步骤） |
@@ -186,7 +188,7 @@ cd sdk/typescript && npm install && npm test && npm run typecheck
 
 PostgreSQL 后端测试连**真实数据库**：默认用 docker 自动起一次性 `postgres:16-alpine` 容器；也可 `GOLAB_TEST_PG_DSN=<admin dsn>` 指定现成服务器（每测试建独立库）；两者都没有时相关测试显式 skip 并说明原因。
 
-覆盖：黄金向量与独立实现交叉验证（Go/Python/TS 三实现同向量）、求值确定性/分布/互斥层/epoch 隔离、发布-回滚-删除-乐观锁-二人审批、离线/乱序/损坏快照、事件去重/迟到/epoch 混入拒绝、统计 I 型错误与 CI 覆盖率模拟、SRM 阻断错误结论、AI 跨租户 404/摘要漂移拒发/撤销阻断、受众凭证分离、PG roundtrip/分区删除/密钥轮换迁移/去重账本/并发（-race）、proxy 中继与健康检查（单元+e2e+双进程 boot）、OpenFeature 契约（值/变体/reason/错误码/状态/曝光归因）、本地/远程求值同值（`TestE2ELocalRemoteParity`）、自动推进（时钟推进/SRM 暂停/护栏回滚/接管/幂等，fake clock）、OpenAPI 与路由表双向核对、多语言 SDK 集成（pytest 21 例 / node:test 18 例）、正式压测（P99/发布可见延迟/1000 并发 SSE，`-short` 跳过）。
+覆盖：黄金向量与独立实现交叉验证（Go/Python/TS 三实现同向量）、求值确定性/分布/互斥层/epoch 隔离、发布-回滚-删除-乐观锁-二人审批、离线/乱序/损坏快照、事件去重/迟到/epoch 混入拒绝、统计 I 型错误与 CI 覆盖率模拟、SRM 阻断错误结论、AI 跨租户 404/摘要漂移拒发/撤销阻断、受众凭证分离、PG roundtrip/分区删除/密钥轮换迁移/去重账本/并发（-race）、proxy 中继与健康检查（单元+e2e+双进程 boot）、OpenFeature 契约（值/变体/reason/错误码/状态/曝光归因）、本地/远程求值同值（`TestE2ELocalRemoteParity`）、自动推进（时钟推进/SRM 暂停/护栏回滚/接管/幂等，fake clock）、OpenAPI 与路由表双向核对、多语言 SDK 集成（pytest 21 例 / node:test 18 例）、**P5 统计数值+模拟验证**（ratio delta 方差 vs 蒙特卡洛、quantile 二项 CI/渐近 SE vs 解析解、CUPED 无偏性/方差缩减≈ρ²、序贯 mSPRT 偷看 I 型不膨胀 vs 固定样本膨胀、贝叶斯后验 vs 蒙特卡洛、Bandit regret/收敛/安全冻结、judge Cohen's κ/位置随机化中和偏置，均固定种子）与决策门集成（ratio/quantile/CUPED 预注册、SRM/护栏对新方法阻断、控制台报告 DOM 契约）、正式压测（P99/发布可见延迟/1000 并发 SSE，`-short` 跳过）。
 
 ## 关键前置条件（生产多租户前）
 

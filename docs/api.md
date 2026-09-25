@@ -48,12 +48,31 @@
 
 | 端点 | 说明 |
 |---|---|
-| `POST {env前缀}/experiments` | 预注册（flagKey/unit/variants/proportions/primaryMetric/guardrails/alpha/power/mde/minSamplePerArm/minRuntime(ns)/analysisWindow(ns)/hypothesis/layer?/eligibility?）；epoch 自动分配、永不复用；layer 槽位注册即分配 |
+| `POST {env前缀}/experiments` | 预注册（flagKey/unit/variants/proportions/primaryMetric/guardrails/alpha/power/mde/minSamplePerArm/minRuntime(ns)/analysisWindow(ns)/hypothesis/layer?/eligibility?）；epoch 自动分配、永不复用；layer 槽位注册即分配。`primaryMetric.type ∈ proportion\|mean\|ratio\|quantile`；ratio 需 `denominatorKey`（`numeratorKey` 缺省用 `key`），quantile 需 `quantileLevel ∈(0,1)`，mean 可带 `covariateKey` 启用 CUPED（见下"高级统计"） |
 | `GET {env前缀}/experiments`、`GET /api/v1/admin/experiments/{id}` | 列表/详情 |
 | `POST /experiments/{id}/review` | Draft→Reviewed |
 | `POST /experiments/{id}/bind` | 校验 flag 结构与比例一致后注入绑定，生成高风险草稿并转 Scheduled（需二人审批后发布） |
 | `POST /experiments/{id}/transition` | `{to, reason}`；状态变更自动重发布绑定 flag（重试收敛） |
-| `GET /experiments/{id}/report` | 分析报告：健康位/SRM/per-variant/主指标（Welch 或两比例 z）/护栏/决策门（ship/rollback/continue/hold） |
+| `GET /experiments/{id}/report` | 分析报告：健康位/SRM/per-variant/主指标（welch\|two-proportion-z\|ratio-delta\|quantile\|cuped）/护栏/决策门（ship/rollback/continue/hold）；P5 另附**分离呈现**的序贯（`sequential`）与贝叶斯（`bayesian`）视图（见下） |
+
+### 高级统计与报告字段（P5，§10.3/§10.4）
+
+主指标类型扩展（均可预注册选用，SRM/护栏阻断对其同样生效——决策门顺序不变：数据健康/SRM/最短运行 → 护栏 → 最小样本 → 显著性）：
+
+| `primary.type` | 方法 | `primary` 附带明细字段 |
+|---|---|---|
+| `welch` | 均值 Welch t 检验 | `welch` |
+| `two-proportion-z` | 两比例 z 检验 | `proportion` |
+| `ratio-delta` | ratio 指标 delta-method 方差 + 正态检验（R=Σ分子/Σ分母，逐单元配对） | `ratio`（ratioA/B、varA/B、se、z、ci） |
+| `quantile` | 分位数：每臂分布式无关二项/阶次统计 CI + 两样本渐近检验（KDE 密度） | `quantile`（level、quantileA/B、每臂 ci、se、z、ci diff） |
+| `cuped` | mean + 实验前协变量的 CUPED 方差缩减（效应无偏，方差↓≈ρ²） | `cuped`（theta、correlation、rawDiff、`varianceReduction`） |
+
+报告另含两个**与频率派决策分离**的视图（绝不并入 ship/rollback 门，§10.3：不能将"默认 Bayesian"与"固定频率派 95% CI"混成同一决策规则）：
+
+- `sequential`（仅 mean 指标）：always-valid 序贯推断（Gaussian mixture mSPRT）。字段 `pValue`（anytime-valid，多次查看不膨胀 I 型错误）、`csLow/csHigh`（时间一致置信序列）、`logLambda`、`tau`（混合尺度，默认取 MDE）。这是持续监控/自动推进每 tick 查看的正确口径；固定样本 `primary` 仍是预注册决策。
+- `bayesian`：后验/期望损失/胜出概率。`bayesian.mean`（postMeanDiff/postSDDiff、credibleLow/High、`probBSuperior`、`expectedLossB/A`、priorSDUsed）或 `bayesian.proportion`（Beta 后验 postAA/AB/BA/BB、postMeanA/B、`probBSuperior`、`expectedLossB/A`、credibleLowDiff/High）。
+
+**LLM-as-judge（§10.4）**：judge 经可插拔 provider（本地确定性 mock 用于离线测试；真实 provider 为 config-only 接入点，无 endpoint/key 时拒绝构建，绝不伪称已接真实模型）按预注册采样概率抽样、成对比较**位置随机化**、记录每条**入样概率**（设计加权）。离线校准对人工标注集给出 accuracy/Cohen's κ/位置偏置/长度偏置与 `calibrated` 位；judge 质量指标经 `QualityGuardrail` 接入决策门——**校准不达标时只作诊断（`breached=false`），绝不驱动放量/回滚**。judge/bandit 为库能力，经报告护栏与（bandit）分配策略接入，bandit 按 §10.3 不与固定比例 A/B 共用传统 p 值结论。
 
 ### 自动推进发布（release plan，§5.3 P4）
 

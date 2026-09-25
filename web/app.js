@@ -596,8 +596,14 @@ function viewExpCreate(m) {
     '<h4>Primary metric</h4>' +
     '<div class="form-grid">' +
       '<label class="field">Metric key<input id="x-mkey" placeholder="checkout_success"></label>' +
-      '<label class="field">Type<select id="x-mtype"><option>proportion</option><option>mean</option></select></label>' +
+      '<label class="field">Type<select id="x-mtype"><option>proportion</option><option>mean</option><option>ratio</option><option>quantile</option></select></label>' +
       '<label class="field">Better direction<select id="x-mdir"><option>increase</option><option>decrease</option></select></label>' +
+    '</div>' +
+    '<div class="form-grid" id="x-metric-adv">' +
+      '<label class="field" id="x-numkey-wrap">Numerator key <span class="muted">(ratio; blank = metric key)</span><input id="x-numkey" placeholder="revenue"></label>' +
+      '<label class="field" id="x-denkey-wrap">Denominator key <span class="muted">(ratio)</span><input id="x-denkey" placeholder="sessions"></label>' +
+      '<label class="field" id="x-qlevel-wrap">Quantile level <span class="muted">(quantile, 0–1)</span><input id="x-qlevel" type="number" step="0.01" min="0.01" max="0.99" placeholder="0.95"></label>' +
+      '<label class="field" id="x-covkey-wrap">Covariate key <span class="muted">(CUPED, mean)</span><input id="x-covkey" placeholder="pre_period_value"></label>' +
     '</div>' +
     '<h4>Guardrails</h4>' +
     '<div id="x-guards"></div><button class="btn sm" id="x-add-guard">+ Add guardrail</button>' +
@@ -627,6 +633,18 @@ function viewExpCreate(m) {
   addVar('control', 50);
   addVar('treatment', 50);
   $('#x-add-var', m).onclick = () => addVar();
+  // Show only the advanced metric fields relevant to the selected type.
+  const mtype = $('#x-mtype', m);
+  const syncMetricAdv = () => {
+    const t = mtype.value;
+    const show = (id, on) => { const el = $('#' + id, m); if (el) el.style.display = on ? '' : 'none'; };
+    show('x-numkey-wrap', t === 'ratio');
+    show('x-denkey-wrap', t === 'ratio');
+    show('x-qlevel-wrap', t === 'quantile');
+    show('x-covkey-wrap', t === 'mean');
+  };
+  mtype.onchange = syncMetricAdv;
+  syncMetricAdv();
   $('#x-add-guard', m).onclick = () => {
     const row = document.createElement('div');
     row.className = 'vrow';
@@ -656,12 +674,23 @@ function viewExpCreate(m) {
       maxRelativeRegression: Number($('.g-reg', r).value || 0),
       minSample: Number($('.g-min', r).value || 0),
     })).filter(g => g.metricKey);
+    const pm = { key: $('#x-mkey', m).value.trim(), type: $('#x-mtype', m).value, direction: $('#x-mdir', m).value };
+    if (pm.type === 'ratio') {
+      const num = $('#x-numkey', m).value.trim();
+      if (num) pm.numeratorKey = num;
+      pm.denominatorKey = $('#x-denkey', m).value.trim();
+    } else if (pm.type === 'quantile') {
+      pm.quantileLevel = Number($('#x-qlevel', m).value);
+    } else if (pm.type === 'mean') {
+      const cov = $('#x-covkey', m).value.trim();
+      if (cov) pm.covariateKey = cov;
+    }
     const body = {
       flagKey: $('#x-flag', m).value.trim(),
       unit: $('#x-unit', m).value.trim(),
       variants: variants.map(v => v.name),
       proportions,
-      primaryMetric: { key: $('#x-mkey', m).value.trim(), type: $('#x-mtype', m).value, direction: $('#x-mdir', m).value },
+      primaryMetric: pm,
       guardrails,
       alpha: Number($('#x-alpha', m).value),
       power: Number($('#x-power', m).value),
@@ -672,6 +701,8 @@ function viewExpCreate(m) {
       hypothesis: $('#x-hyp', m).value.trim(),
     };
     if (!body.flagKey || !body.primaryMetric.key) { toast('flagKey and primary metric key are required', false); return; }
+    if (pm.type === 'ratio' && !pm.denominatorKey) { toast('ratio metric needs a denominator key', false); return; }
+    if (pm.type === 'quantile' && !(pm.quantileLevel > 0 && pm.quantileLevel < 1)) { toast('quantile metric needs a level in (0,1)', false); return; }
     const layer = $('#x-layer', m).value.trim();
     if (layer) body.layer = layer;
     const elig = $('#x-elig', m).value;
@@ -786,6 +817,38 @@ function renderReport(box, r) {
         ' · CI [' + esc(p.ciLow ?? '—') + ', ' + esc(p.ciHigh ?? '—') + '] ' +
         chip(p.significant ? 'significant' : 'not significant', p.significant ? 'green' : 'gray') + '</div>'
       : '<div class="muted">' + esc(r.primaryError || 'No primary-metric result yet.') + '</div>') +
+    (p && p.type === 'cuped' && p.cuped
+      ? '<div class="muted">CUPED: variance reduction ' + esc((100 * (p.varianceReduction || 0)).toFixed(1)) +
+        '% · θ=' + esc((p.cuped.theta ?? 0).toFixed(4)) + ' · ρ=' + esc((p.cuped.correlation ?? 0).toFixed(3)) +
+        ' · raw diff ' + esc((p.cuped.rawDiff ?? 0).toFixed(4)) + '</div>'
+      : '') +
+    (p && p.type === 'ratio-delta' && p.ratio
+      ? '<div class="muted">ratio: A=' + esc((p.ratio.ratioA ?? 0).toFixed(4)) +
+        ' · B=' + esc((p.ratio.ratioB ?? 0).toFixed(4)) + ' · SE=' + esc((p.ratio.se ?? 0).toFixed(4)) + '</div>'
+      : '') +
+    (p && p.type === 'quantile' && p.quantile
+      ? '<div class="muted">quantile p' + esc(p.quantile.level) + ': A=' + esc((p.quantile.quantileA ?? 0).toFixed(3)) +
+        ' · B=' + esc((p.quantile.quantileB ?? 0).toFixed(3)) + ' · A CI [' + esc((p.quantile.ciALow ?? 0).toFixed(3)) +
+        ', ' + esc((p.quantile.ciAHigh ?? 0).toFixed(3)) + '] (distribution-free)</div>'
+      : '') +
+    '<h4>Sequential <span class="muted">(always-valid · separate view, not the decision gate)</span></h4>' +
+    (r.sequential
+      ? '<div>anytime-valid p = ' + esc((r.sequential.pValue ?? 0).toExponential(3)) + ' ' +
+        chip(r.sequential.significant ? 'significant at any look' : 'not significant', r.sequential.significant ? 'green' : 'gray') +
+        ' · CS [' + esc((r.sequential.csLow ?? 0).toFixed(4)) + ', ' + esc((r.sequential.csHigh ?? 0).toFixed(4)) +
+        '] · τ=' + esc(r.sequential.tau) + ' · logΛ=' + esc((r.sequential.logLambda ?? 0).toFixed(3)) + '</div>'
+      : '<div class="muted">not computed (mean metrics only).</div>') +
+    '<h4>Bayesian <span class="muted">(posterior · separate from frequentist)</span></h4>' +
+    (r.bayesian && r.bayesian.mean
+      ? '<div>P(B&gt;A) = ' + esc((r.bayesian.mean.probBSuperior ?? 0).toFixed(4)) + ' ' +
+        chip('prob superior', 'teal') + ' · expected loss (choose B) = ' + esc((r.bayesian.mean.expectedLossB ?? 0).toExponential(3)) +
+        ' · 95% CrI [' + esc((r.bayesian.mean.credibleLow ?? 0).toFixed(4)) + ', ' + esc((r.bayesian.mean.credibleHigh ?? 0).toFixed(4)) + ']</div>'
+      : r.bayesian && r.bayesian.proportion
+      ? '<div>P(B&gt;A) = ' + esc((r.bayesian.proportion.probBSuperior ?? 0).toFixed(4)) + ' ' +
+        chip('prob superior', 'teal') + ' · expected loss (choose B) = ' + esc((r.bayesian.proportion.expectedLossB ?? 0).toExponential(3)) +
+        ' · posterior A=Beta(' + esc((r.bayesian.proportion.postAA ?? 0).toFixed(1)) + ',' + esc((r.bayesian.proportion.postAB ?? 0).toFixed(1)) +
+        ') B=Beta(' + esc((r.bayesian.proportion.postBA ?? 0).toFixed(1)) + ',' + esc((r.bayesian.proportion.postBB ?? 0).toFixed(1)) + ')</div>'
+      : '<div class="muted">not computed.</div>') +
     '<h4>Guardrails</h4>' +
     ((r.guardrails || []).length
       ? '<ul class="plain">' + r.guardrails.map(g =>

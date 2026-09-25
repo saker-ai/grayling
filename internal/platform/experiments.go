@@ -111,12 +111,30 @@ func validateExperimentInvariants(exp *Experiment) error {
 	}
 	switch exp.PrimaryMetric.Type {
 	case "proportion", "mean":
+	case "ratio":
+		// Ratio needs a numerator and a denominator metric key (§10.1). Key may
+		// serve as the numerator, but the denominator must be explicit.
+		if exp.PrimaryMetric.DenominatorKey == "" {
+			return fmt.Errorf("%w: ratio metric requires denominatorKey", ErrValidation)
+		}
+		if exp.PrimaryMetric.NumeratorKey == "" && exp.PrimaryMetric.Key == "" {
+			return fmt.Errorf("%w: ratio metric requires numeratorKey (or key as numerator)", ErrValidation)
+		}
+	case "quantile":
+		// Quantile needs a level in (0,1) taken over per-unit detail (§10.1).
+		lvl := exp.PrimaryMetric.QuantileLevel
+		if lvl <= 0 || lvl >= 1 {
+			return fmt.Errorf("%w: quantile metric requires quantileLevel in (0,1), got %v", ErrValidation, lvl)
+		}
 	default:
-		return fmt.Errorf("%w: v1 primary metric type must be proportion|mean, got %q",
+		return fmt.Errorf("%w: primary metric type must be proportion|mean|ratio|quantile, got %q",
 			ErrValidation, exp.PrimaryMetric.Type)
 	}
-	if exp.PrimaryMetric.Key == "" {
+	if exp.PrimaryMetric.Key == "" && exp.PrimaryMetric.NumeratorKey == "" {
 		return fmt.Errorf("%w: primary metric key required", ErrValidation)
+	}
+	if exp.PrimaryMetric.CovariateKey != "" && exp.PrimaryMetric.Type != "mean" {
+		return fmt.Errorf("%w: covariateKey (CUPED) applies only to mean metrics", ErrValidation)
 	}
 	switch exp.PrimaryMetric.Direction {
 	case "increase", "decrease":
@@ -124,7 +142,7 @@ func validateExperimentInvariants(exp *Experiment) error {
 		return fmt.Errorf("%w: metric direction must be increase|decrease", ErrValidation)
 	}
 	switch exp.AnalysisMethod {
-	case "", "welch", "two-proportion-z":
+	case "", "welch", "two-proportion-z", "ratio-delta", "quantile", "cuped":
 	default:
 		return fmt.Errorf("%w: unknown pre-registered analysis method %q", ErrValidation, exp.AnalysisMethod)
 	}
