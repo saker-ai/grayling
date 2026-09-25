@@ -2,6 +2,8 @@
 
 > 依据 Traefik 官方 multi-layer routing 文档与 PR #12130（milestone 3.6）设计。
 > 该方案替代早期"local plugin 内嵌 SDK 写 header"的不成立路线；ForwardAuth 为标准 middleware，无 Yaegi 兼容性问题。
+>
+> **状态：已端到端验证**——真实官方 Traefik **v3.7.13** 二进制（SHA-256 校验）跑通本图全链路，七项验收断言（稳定路由/分布/比例调整零网关配置变更/伪造剥离/fail-open 非 5xx/KV provider 实证/方法透传）全部通过：`test/gateway`，数值见 [实施状态](实施状态.md)"网关集成验证证据"节。落地组件：求值服务 fail-open 端点 = `cmd/golab-proxy` 的 `GET /api/v1/gateway/forwardauth`（`-gateway-token`）；router 配置生成器 + 层级校验 = `internal/gateway`（file/KV/IngressRoute 三目标）。与本图的唯一实现差异：KV 目标的 ① header 剥离改由 forwardAuth 的 `authResponseHeadersRegex: ^X-Golab-` 承担（实测 Traefik KV 解码器丢弃空值，headers middleware 置空语义在 KV 不可表达）；file/IngressRoute 仍生成图示的显式 headers middleware，两机制语义等价且都经真实链路验证。
 
 ## 请求链路总览
 
@@ -71,10 +73,10 @@ flowchart TB
 
 ## 约束与必须处理的风险
 
-1. **Provider 限制**：multi-layer routing 仅支持 file、KV（Consul/etcd/Redis/ZooKeeper）、Kubernetes CRD（IngressRoute）；Docker label、K8s Ingress、Gateway API 不支持。GoLab 管理面需将实验 router 配置生成到受支持的目标。
+1. **Provider 限制**：multi-layer routing 仅支持 file、KV（Consul/etcd/Redis/ZooKeeper）、Kubernetes CRD（IngressRoute）；Docker label、K8s Ingress、Gateway API 不支持。GoLab 管理面需将实验 router 配置生成到受支持的目标（已实现：`internal/gateway`，file 与 KV 经真实 Traefik 验证，IngressRoute 生成+校验完整、未在真实集群运行）。**KV 附加限制（实测）**：Traefik KV 解码器丢弃空值键，headers middleware 的置空剥离在 KV 不可表达——KV 目标必须用 forwardAuth `authResponseHeadersRegex` 完成剥离。
 2. **层级规则**：根 router 独占 `entryPoints`/`tls`/models；中间 router 不得定义 service；叶子 router 必须有 service。控制面生成配置时须按此校验。
 3. **求值服务可用性**：ForwardAuth 失败默认拒绝请求。求值服务须高可用部署，且内部错误 fail-open 返回默认变体，避免网关 5xx；对应 P5 验收的"紧急撤销安全降级"。
-4. **安全边界**：外部请求自带的 `X-Golab-Variant` 必须在父 router middleware 链最前剥离；变体 header 只接受求值服务经 `authResponseHeaders` 回写的值。
+4. **安全边界**：外部请求自带的 `X-Golab-Variant` 必须在父 router middleware 链最前剥离；变体 header 只接受求值服务经 `authResponseHeaders` 回写的值。求值端点自持 SDK 凭证，因此校验 forwardAuth address 内嵌的**共享路由 secret**（生成器 `RouteSpec.Secret` ↔ proxy `-gateway-secret`，常数时间比较）：无 secret 的直连探测不触发上游求值（`unauthorized` fail-open），端点不构成任意 flag 探测/曝光污染 oracle。
 
 ## 参考
 

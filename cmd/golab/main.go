@@ -40,18 +40,20 @@ import (
 
 func main() {
 	var (
-		listenAddr    = flag.String("addr", "127.0.0.1:8688", "GoLab HTTP listen address")
-		dataFile      = flag.String("data", filepath.Join("data", "golab-store.json"), "platform store file ('' = memory-only; ignored when -pg is set)")
-		pgDSN         = flag.String("pg", "", "PostgreSQL DSN for the production platform store (e.g. postgres://golab:secret@127.0.0.1:5432/golab); overrides -data")
-		gonacosRoot   = flag.String("gonacos-root", "", "gonacos contract root (repo with api/openapi/upstream); empty disables 501-stub registration")
-		gonacosData   = flag.String("gonacos-data", "", "gonacos embedded-redis dump dir (default <data dir>/gonacos)")
-		gonacosAddr   = flag.String("gonacos-addr", "127.0.0.1:18848", "gonacos HTTP bind — KEEP LOOPBACK/PRIVATE (§9)")
-		gonacosGRPC   = flag.String("gonacos-grpc-addr", "127.0.0.1:19848", "gonacos gRPC bind — KEEP LOOPBACK/PRIVATE (§9)")
-		redisAddr     = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
-		authSecret    = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
-		rolloutIv     = flag.Duration("rollout-interval", 30*time.Second, "auto-advance engine tick interval for staged release plans (0 disables automation; manual plan operations stay available)")
-		bootstrapName = flag.String("bootstrap-owner-name", "bootstrap-owner", "display name of the auto-created global owner token")
-		printVersion  = flag.Bool("version", false, "print version and exit")
+		listenAddr     = flag.String("addr", "127.0.0.1:8688", "GoLab HTTP listen address")
+		dataFile       = flag.String("data", filepath.Join("data", "golab-store.json"), "platform store file ('' = memory-only; ignored when -pg is set)")
+		pgDSN          = flag.String("pg", "", "PostgreSQL DSN for the production platform store (e.g. postgres://golab:secret@127.0.0.1:5432/golab); overrides -data")
+		gonacosRoot    = flag.String("gonacos-root", "", "gonacos contract root (repo with api/openapi/upstream); empty disables 501-stub registration")
+		gonacosData    = flag.String("gonacos-data", "", "gonacos embedded-redis dump dir (default <data dir>/gonacos)")
+		gonacosAddr    = flag.String("gonacos-addr", "127.0.0.1:18848", "gonacos HTTP bind — KEEP LOOPBACK/PRIVATE (§9)")
+		gonacosGRPC    = flag.String("gonacos-grpc-addr", "127.0.0.1:19848", "gonacos gRPC bind — KEEP LOOPBACK/PRIVATE (§9)")
+		redisAddr      = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
+		authSecret     = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
+		rolloutIv      = flag.Duration("rollout-interval", 30*time.Second, "auto-advance engine tick interval for staged release plans (0 disables automation; manual plan operations stay available)")
+		reconcileIv    = flag.Duration("reconcile-interval", 30*time.Second, "publish reconciliation tick interval: re-verifies the gonacos substrate against the platform store and idempotently republishes drift; also the multi-replica state-refresh cadence (0 disables)")
+		requestsPerSec = flag.Float64("requests-per-second", 0, "per-token request rate limit on sdk/collect endpoints (0 = default 200)")
+		bootstrapName  = flag.String("bootstrap-owner-name", "bootstrap-owner", "display name of the auto-created global owner token")
+		printVersion   = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
 
@@ -132,12 +134,15 @@ func main() {
 
 	// ---- API + AI gate ----
 	apiSrv := api.NewServer(store, configstore.NewGonacosStore(bundle.Config), api.Options{
-		Logger: log.New(os.Stderr, "golab-api ", log.LstdFlags),
+		Logger:            log.New(os.Stderr, "golab-api ", log.LstdFlags),
+		RequestsPerSecond: *requestsPerSec,
 	})
 	apiSrv.SetAI(aisvc.NewService(store, bundle.AI))
 
 	// ---- staged-release auto-advance engine (§5.3 P4) ----
 	go apiSrv.Rollout.Run(ctx, *rolloutIv)
+	// ---- publish reconciliation background task (§3/§11) ----
+	go apiSrv.Admin.RunReconciler(ctx, *reconcileIv)
 	// ---- bootstrap owner credential (printed once) ----
 	if token := bootstrapOwner(store, *bootstrapName, logger); token != "" {
 		logger.Printf("")

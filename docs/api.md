@@ -138,10 +138,11 @@
 | `POST /api/v1/collect` | 曝光/转化中继 |
 | `GET /api/v1/sdk/config` | 快照拉取中继（ETag/304 透传） |
 | `GET /api/v1/sdk/revision` | 受限新鲜度探测中继（仅 revision，供远程求值 SDK 轮询失效缓存） |
+| `GET /api/v1/gateway/forwardauth` | **Traefik ≥3.6 multi-layer routing 求值服务**（proxy 自有端点，非中继）：见下节 |
 | `GET /healthz` | **liveness**：proxy 自身存活，不探测上游（上游故障不应导致编排系统杀掉 proxy 机队） |
 | `GET /api/v1/health` | **readiness**：探测上游 `/api/v1/health`；不可达/不健康 → 503 |
 
-- 凭证原样透传：认证、受众分离、租户作用域与每 token 限流仍全部由上游执行；proxy 不持有任何凭证或状态，可水平扩展、随时重启。
+- 凭证原样透传：认证、受众分离、租户作用域与每 token 限流仍全部由上游执行；proxy 不持有中继凭证或状态，可水平扩展、随时重启。唯一例外是网关求值端点使用 `-gateway-token` 配置的自有 SDK 凭证（终端用户流量不可能携带 GoLab 凭证）。
 - 管理 API 与 AI 端点**不转发**（404）：proxy 的暴露面就是远程评估。
 - 错误映射：上游不可达 → 502 `upstream_unreachable`；超过 `-timeout`（一元请求，默认 10s）→ 504 `upstream_timeout`；其余状态码与响应体按上游原样透传。
 - 连接池：`-max-idle-conns-per-host`（默认 100）、`-max-conns-per-host`（0=不限）、`-dial-timeout`（默认 5s）；`-health-timeout` 约束 readiness 探测（默认 3s）。
@@ -150,6 +151,37 @@
 ```bash
 GOWORK=off go build ./cmd/golab-proxy
 ./bin/golab-proxy -addr 127.0.0.1:8689 -upstream http://127.0.0.1:8688
+```
+
+## Traefik 网关集成（§4，P5）
+
+Traefik ≥3.6 multi-layer routing 链路：父 router（无 service，独占 entryPoints）先剥离外部 `X-Golab-*` header，再经 forwardAuth 调用求值服务；子 router 按回写的 `X-Golab-Variant` 分流。完整链路与约束见 [traefik-golab-architecture](traefik-golab-architecture.md)；端到端验证证据见 [实施状态](实施状态.md)。
+
+**求值服务 = golab-proxy 的 forwardAuth 端点**（`-gateway-token` 启用）：
+
+```
+GET /api/v1/gateway/forwardauth?flagKey=<key>&defaultVariant=<v>&unitField=<f>&unitHeader=<h>&secret=<s>
+```
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `flagKey` | 必填 | 求值的 GoLab flag |
+| `defaultVariant` | 必填 | fail-open / 缺 bucketingKey 时回写的默认变体 |
+| `unitField` | `targetingKey` | bucketingKey 写入的求值上下文字段（应与 flag 的 `bucketing.unit` 一致；非 targetingKey 时同时写入 attributes 与 targetingKey） |
+| `unitHeader` | `X-Bucketing-Key` | 携带 bucketingKey 的请求 header |
+| `secret` | — | 路由共享密钥（proxy `-gateway-secret` 配置后强制校验，常数时间比较）；不匹配的请求**绝不上游求值**——fail-open 回默认变体（`X-Golab-Fail-Open: unauthorized`），防止任何能触达 proxy 的调用方把它当作任意 flag 探测/曝光污染 oracle |
+
+- Traefik forwardAuth 以 GET 探测该地址（address 的 query 原样保留），原始请求信息在 `X-Forwarded-*` header 中。
+- 响应恒为 200（**fail-open 契约**）：`X-Golab-Variant`（求值变体或默认变体）、`X-Golab-Flag-Key`、`X-Golab-Reason`；内部故障（上游不可达/超时/非 200/求值失败/缺 bucketingKey/未配置 token）附加 `X-Golab-Fail-Open: <reason>` 并回写默认变体——网关绝不因 GoLab 故障产生 5xx。求值服务进程整体不可用需 HA 部署兜底（Traefik forwardAuth 对不可达的 auth 服务默认拒绝请求）。
+- 曝光在决策点集中记录：求值走上游 `/api/v1/sdk/eval`，运行中实验的入组曝光由服务端落库（幂等 event ID）。
+- 每次求值超时 `-gateway-eval-timeout`（默认 2s，热路径宜短），超时即 fail-open。
+
+**router 配置生成器**：`internal/gateway` 由 `RouteSpec`（flag、变体→后端、entryPoint、求值服务地址、可选 `Secret`）生成三目标的动态配置——file（YAML/JSON）、KV（Consul/etcd/Redis/ZooKeeper 键值对）、Kubernetes IngressRoute CRD；所有输出先通过层级规则校验（根 router 独占 entryPoints、中间 router 无 service、叶子必须有 service、parentRefs 存在且无环——环检测覆盖多 parent 图）。比例调整只改 GoLab 分桶参数，**不触碰任何生成产物**；增删变体才需要重新生成。KV 目标的 header 剥离由 forwardAuth `authResponseHeadersRegex: ^X-Golab-` 承担（Traefik KV 解码器丢弃空值，headers middleware 置空语义在 KV 不可表达——file/IngressRoute 仍生成显式 headers middleware，两机制并存）。`RouteSpec.Secret` 会嵌入 forwardAuth address 的 `secret` 参数，与 proxy `-gateway-secret` 配对（强烈建议：proxy 网络可达即配置；仅回环/可信网格可省略，proxy 启动时对"有 token 无 secret"打 WARNING）。
+
+```bash
+# 网关求值服务（Traefik forwardAuth 目标）
+./bin/golab-proxy -addr 127.0.0.1:8689 -upstream http://127.0.0.1:8688 \
+  -gateway-token glab_sdk_... -gateway-secret <与 RouteSpec.Secret 相同> -gateway-eval-timeout 2s
 ```
 
 ## Flag DSL（schemaVersion 1）

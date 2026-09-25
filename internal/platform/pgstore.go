@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -1869,4 +1870,41 @@ func nullableTime(t time.Time) any {
 		return nil
 	}
 	return t
+}
+
+// ---------------------------------------------------------------------------
+// Multi-replica publish sequencing (docs/实施状态.md §11 发布对账; §3 集群:
+// "多节点需要数据库级序列化"). PostgreSQL session-level advisory locks are the
+// cross-process analogue of the admin service's in-process publishMu: the
+// first replica to acquire the scope lock publishes while the others wait, so
+// concurrent publishes on different replicas never interleave revision
+// allocation. The lock lives on ONE dedicated pooled connection (session
+// locks are per-connection) released exactly once.
+// ---------------------------------------------------------------------------
+
+// LockScope acquires the session-level advisory lock `key` on a dedicated
+// pooled connection. The ctx (from Store.PublishLock) bounds the wait; the
+// returned release function unlocks on the same connection exactly once and
+// returns it to the pool.
+func (p *pgPersistence) LockScope(ctx context.Context, key int64) (func(), error) {
+	conn, err := p.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("platform: acquire lock conn: %w", err)
+	}
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
+		conn.Release()
+		return nil, fmt.Errorf("platform: pg_advisory_lock(%d): %w", key, err)
+	}
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			// Unlock on the SAME connection that holds the lock; use a fresh
+			// context because the caller's may already be cancelled.
+			uctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, _ = conn.Exec(uctx, "SELECT pg_advisory_unlock($1)", key)
+			conn.Release()
+		})
+	}
+	return release, nil
 }

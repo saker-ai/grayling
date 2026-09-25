@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -26,14 +27,17 @@ type Service struct {
 	listener Listener
 	now      func() time.Time
 
+	// Logger receives reconciler diagnostics (nil = silent; repairs are
+	// audited regardless).
+	Logger *log.Logger
+
 	// publishMu serializes the whole publish pipeline (revision
 	// allocation → document write → revision record → manifest rebuild →
-	// manifest write). Two concurrent publishes would otherwise allocate
-	// the same manifest revision and the loser's flag revision could be
-	// missing from the surviving manifest — a silent snapshot/store
-	// divergence. Control-plane publishes are low-QPS; one global lock is
-	// the correct trade for a single-node deployment (multi-node needs
-	// database-level sequencing, see docs/实施状态.md).
+	// manifest write) INSIDE this process. Multi-replica deployments get
+	// the same guarantee across processes via Store.PublishLock (a
+	// PostgreSQL advisory lock) plus Store.ReloadFromBackend inside the
+	// lock, so revision allocation always sees every committed change of
+	// every replica — see acquirePublishLock and docs/实施状态.md §3/§11.
 	publishMu sync.Mutex
 
 	// FlagPublishHook runs immediately before a flag revision is written to
@@ -192,6 +196,37 @@ func (s *Service) MarkFlagDeleted(actor Actor, workspaceID, environmentID, key s
 	return nil
 }
 
+// acquirePublishLock serializes one (workspace, environment) publish scope
+// across THIS process (publishMu) AND, on a shared PostgreSQL backend, across
+// EVERY replica (advisory lock), then reloads the working set so revision
+// allocation sees every committed change (docs/实施状态.md §3/§11: 多节点需要
+// 数据库级序列化 + 发布对账). The returned release unwinds in reverse order and
+// is safe to call exactly once via defer.
+//
+// On single-process backends PublishLock is a no-op and ReloadFromBackend is
+// a no-op (memory) or a self-reread (file), so this preserves the historical
+// single-node behavior exactly.
+func (s *Service) acquirePublishLock(env *platform.Environment) (func(), error) {
+	s.publishMu.Lock()
+	releaseDB, err := s.Store.PublishLock(env.WorkspaceID, env.ID)
+	if err != nil {
+		s.publishMu.Unlock()
+		return nil, err
+	}
+	if err := s.Store.ReloadFromBackend(); err != nil {
+		releaseDB()
+		s.publishMu.Unlock()
+		return nil, err
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			releaseDB()
+			s.publishMu.Unlock()
+		})
+	}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Publish pipeline
 // ---------------------------------------------------------------------------
@@ -201,11 +236,22 @@ func (s *Service) MarkFlagDeleted(actor Actor, workspaceID, environmentID, key s
 // platform revision record → manifest write + read-back → notify. If the
 // manifest step fails, the flag document is already durable but unreferenced;
 // retrying the publish converges (idempotent revision records).
+//
+// The whole pipeline runs under the (possibly cross-replica) publish lock;
+// the draft is re-read AFTER the lock+reload so two replicas racing on the
+// same approved draft cannot both allocate a revision for it: the loser sees
+// the winner's publish (draft back to editing) and answers ErrInvalidState.
 func (s *Service) PublishFlag(actor Actor, workspaceID, environmentID, key, note string) (*PublishResult, error) {
 	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagPublish)
 	if err != nil {
 		return nil, err
 	}
+	release, err := s.acquirePublishLock(env)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	draft, err := s.Store.GetFlagDraft(env.WorkspaceID, env.ID, key)
 	if err != nil {
 		return nil, err
@@ -214,13 +260,13 @@ func (s *Service) PublishFlag(actor Actor, workspaceID, environmentID, key, note
 		return nil, fmt.Errorf("%w: draft %q is %s, want approved", platform.ErrInvalidState, key, draft.State)
 	}
 	if draft.Deleted {
-		return s.publishDeletion(actor, env, key)
+		return s.publishDeletionLocked(actor, env, key)
 	}
 
 	content := *draft.Content
 	rev := s.Store.NextFlagRevision(env.WorkspaceID, env.ID, key)
 	content.Version = model.FormatRevision(rev)
-	fr, m, err := s.publishRevision(actor, env, &content, note)
+	fr, m, err := s.publishRevisionLocked(actor, env, &content, note)
 	if err != nil {
 		s.audit(actor, "flag.publish.failed", env.WorkspaceID, env.ID, key, map[string]any{"error": err.Error()})
 		return nil, err
@@ -232,14 +278,24 @@ func (s *Service) PublishFlag(actor Actor, workspaceID, environmentID, key, note
 		Hash: fr.Hash, DataID: fr.DataID}, nil
 }
 
-// publishRevision writes one immutable flag revision + manifest. Shared by
-// draft publication and operational republishes (experiment transitions).
-// The entire pipeline is serialized (see publishMu).
+// publishRevision writes one immutable flag revision + manifest under a
+// freshly acquired publish lock. Callers that ALREADY hold the lock must use
+// publishRevisionLocked instead (the lock is not reentrant).
 func (s *Service) publishRevision(actor Actor, env *platform.Environment,
 	content *model.Flag, note string) (*platform.FlagRevision, *model.Manifest, error) {
 
-	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
+	release, err := s.acquirePublishLock(env)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer release()
+	return s.publishRevisionLocked(actor, env, content, note)
+}
+
+// publishRevisionLocked is the publish pipeline body; the caller holds the
+// publish lock and the working set is already reloaded.
+func (s *Service) publishRevisionLocked(actor Actor, env *platform.Environment,
+	content *model.Flag, note string) (*platform.FlagRevision, *model.Manifest, error) {
 
 	ws, err := s.Store.GetWorkspace(env.WorkspaceID)
 	if err != nil {
@@ -279,13 +335,11 @@ func (s *Service) publishRevision(actor Actor, env *platform.Environment,
 	return fr, m, nil
 }
 
-// publishDeletion tombstones a flag: remove from the current set and
-// republish the manifest (the immutable revisions stay for audit; the
-// tombstone tells delta-capable clients to evict, full-sync clients evict on
-// absence).
-func (s *Service) publishDeletion(actor Actor, env *platform.Environment, key string) (*PublishResult, error) {
-	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
+// publishDeletionLocked removes a flag from the current set and republishes
+// the manifest; the caller holds the publish lock. The immutable revisions
+// stay for audit; the tombstone tells delta-capable clients to evict,
+// full-sync clients evict on absence.
+func (s *Service) publishDeletionLocked(actor Actor, env *platform.Environment, key string) (*PublishResult, error) {
 	ws, err := s.Store.GetWorkspace(env.WorkspaceID)
 	if err != nil {
 		return nil, err
@@ -305,7 +359,14 @@ func (s *Service) publishDeletion(actor Actor, env *platform.Environment, key st
 // buildManifest assembles the next manifest revision from the in-force
 // content set. Entries are key-sorted for byte-level determinism.
 func (s *Service) buildManifest(ws *platform.Workspace, env *platform.Environment) (*model.Manifest, error) {
-	rev := s.Store.ManifestRevision(ws.ID, env.ID) + 1
+	return s.buildManifestAt(ws, env, s.Store.ManifestRevision(ws.ID, env.ID)+1)
+}
+
+// buildManifestAt assembles a manifest at an EXPLICIT revision from the
+// in-force content set. The reconciler uses it to republish the exact
+// revision recorded in the store (converging a lagging substrate without
+// inventing a newer revision).
+func (s *Service) buildManifestAt(ws *platform.Workspace, env *platform.Environment, rev int64) (*model.Manifest, error) {
 	m := &model.Manifest{
 		SchemaVersion: model.SchemaVersion,
 		Workspace:     ws.ID, Environment: env.ID,
@@ -365,8 +426,11 @@ func (s *Service) RepublishManifest(actor Actor, workspaceID, environmentID, rea
 	if err != nil {
 		return nil, err
 	}
-	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
+	release, err := s.acquirePublishLock(env)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	ws, err := s.Store.GetWorkspace(env.WorkspaceID)
 	if err != nil {
 		return nil, err
@@ -392,8 +456,11 @@ func (s *Service) RollbackFlag(actor Actor, workspaceID, environmentID, key stri
 	if err != nil {
 		return nil, err
 	}
-	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
+	release, err := s.acquirePublishLock(env)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if reason == "" {
 		return nil, fmt.Errorf("%w: rollback requires a reason", platform.ErrValidation)
 	}
@@ -479,6 +546,11 @@ func (s *Service) PublishSegment(actor Actor, workspaceID, environmentID, key, n
 	if err != nil {
 		return nil, err
 	}
+	release, err := s.acquirePublishLock(env)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	draft, err := s.Store.GetSegmentDraft(env.WorkspaceID, env.ID, key)
 	if err != nil {
 		return nil, err

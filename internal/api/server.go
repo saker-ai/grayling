@@ -90,6 +90,7 @@ func NewServer(store *platform.Store, cfg configstore.Store, opts Options) *Serv
 	s.Admin = admin.NewService(store, cfg, func(wsID, envID string, rev int64) {
 		s.Hub.Notify(wsID, envID, rev)
 	})
+	s.Admin.Logger = opts.Logger
 	s.Rollout = rollout.NewEngine(store, s.Admin, opts.Logger)
 	return s
 }

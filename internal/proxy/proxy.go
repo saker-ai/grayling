@@ -16,11 +16,18 @@
 //
 //	GET /healthz              liveness — process is up (no upstream call)
 //	GET /api/v1/health        readiness — probes the upstream health endpoint
+//	GET /api/v1/gateway/forwardauth
+//	                          Traefik ≥3.6 multi-layer routing forwardAuth
+//	                          evaluation (§4) — see gateway.go; holds the
+//	                          gateway SDK credential and fail-opens to the
+//	                          configured default variant on any internal
+//	                          error (never a gateway 5xx)
 //
-// The proxy keeps NO state and NO credentials of its own: timeouts, hop-by-hop
-// header hygiene and connection pooling are its only concerns. Per-token rate
-// limiting stays on the upstream, which is the only component that can
-// authenticate.
+// The proxy keeps NO state; the only credential it holds is the optional
+// gateway evaluation token (end-user traffic through Traefik cannot carry
+// GoLab credentials). Timeouts, hop-by-hop header hygiene and connection
+// pooling are its only other concerns. Per-token rate limiting stays on the
+// upstream, which is the only component that can authenticate.
 package proxy
 
 import (
@@ -28,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -52,6 +60,12 @@ type Config struct {
 	MaxConnsPerHost     int
 	// DialTimeout bounds TCP establishment (default 5s).
 	DialTimeout time.Duration
+	// Gateway configures the Traefik forwardAuth evaluation endpoint
+	// (docs/技术方案.md §4). With an empty Token the endpoint fail-opens
+	// every request to the configured default variant.
+	Gateway GatewayConfig
+	// Logger receives gateway fail-open diagnostics (nil = silent).
+	Logger *log.Logger
 }
 
 func (c *Config) withDefaults() Config {
@@ -76,6 +90,7 @@ func (c *Config) withDefaults() Config {
 type Proxy struct {
 	cfg      Config
 	upstream *url.URL
+	logger   *log.Logger
 	// unary serves eval/collect/config with a hard total timeout; stream
 	// serves the SSE relay with NO total timeout (only dial/response-header
 	// bounds) so long-lived event streams are not killed mid-flight.
@@ -114,6 +129,7 @@ func New(cfg Config) (*Proxy, error) {
 	return &Proxy{
 		cfg:      c,
 		upstream: u,
+		logger:   c.Logger,
 		unary:    &http.Client{Transport: transport, Timeout: c.RequestTimeout},
 		stream:   &http.Client{Transport: streamTransport},
 	}, nil
@@ -135,6 +151,10 @@ func (p *Proxy) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/sdk/revision", p.relayUnary)
 	mux.HandleFunc("POST /api/v1/collect", p.relayUnary)
 	mux.HandleFunc("GET /api/v1/sdk/stream", p.relayStream)
+	// Traefik ≥3.6 multi-layer routing forwardAuth evaluation (§4). Traefik
+	// probes the auth address with GET; per-route parameters arrive in the
+	// query string of the configured address.
+	mux.HandleFunc("GET "+gwForwardAuthPath, p.handleGatewayForwardAuth)
 	return mux
 }
 
