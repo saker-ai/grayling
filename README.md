@@ -129,6 +129,8 @@ GOWORK=off go build -o bin/golab-proxy ./cmd/golab-proxy
 
 凭证原样透传（鉴权/受众分离/限流仍由上游执行）；`GET /healthz` liveness 不依赖上游，`GET /api/v1/health` readiness 探测上游；一元请求超时（默认 10s，超时 504/不可达 502），SSE 逐块 flush、客户端断开即取消上游订阅；连接池（`-max-idle-conns-per-host` 等）可调；管理 API 不转发。详见 [API 参考](docs/api.md#独立-proxycmdgolab-proxy)。
 
+**按 client IP 灰度**：`-trusted-proxy-cidrs`（逗号分隔 CIDR/裸 IP，flag 为空时读环境变量 `GOLAB_TRUSTED_PROXY_CIDRS`）声明允许位于 proxy 之前的反向代理网段（Traefik/LB）。两条服务端求值路径（forwardAuth 端点与 `/sdk/eval` 中继）据此从连接对端出发、仅在可信网段内逐跳回退 `X-Forwarded-For`，把第一个不受信 IP 作为真实客户端，以保留属性名 `client_ip` 注入求值上下文——不受信的 XFF 段一律丢弃，客户端无法伪造 IP 自选灰度组；未配置时不信任任何 XFF（`client_ip` 即直连对端，现网行为不变）；中继路径上调用方显式传入的 `attributes.client_ip` 优先，不被覆盖。flag 在 `fields` 注册 `client_ip` 后即可用 `in_cidr` 定向（或作为分桶单元——实验慎用，见技术方案 §6）。安全语义、链路图与 e2e 证据见 [traefik-golab-architecture](docs/traefik-golab-architecture.md#按-client-ip-灰度)。
+
 ## Traefik 网关集成（≥3.6 multi-layer routing）
 
 父 router（无 service，独占 entryPoints）先剥离外部伪造的 `X-Golab-*` header，再经 forwardAuth 调用 golab-proxy 的求值端点（`-gateway-token` + `-gateway-secret`）按 bucketingKey 求值并回写 `X-Golab-Variant`；子 router 按该 header 把流量分到各版本后端。**fail-open 契约**：GoLab 故障时求值端点恒回默认变体，网关绝不因此产生 5xx；比例调整只改 GoLab 分桶参数，**Traefik 动态配置零变更**。`internal/gateway` 生成器由 RouteSpec 产出 file（YAML/JSON）/KV/IngressRoute 三目标配置，输出先经层级规则校验。全链路已在**真实官方 Traefik v3.7.13 二进制**（SHA-256 校验）上端到端验证（`test/gateway` 七项断言：稳定路由、50/50 分布、比例翻转零配置变更、伪造 header 剥离、fail-open、KV(Redis) provider 复证、方法透传；IngressRoute 生成+校验完整但本环境无 K8s 集群，未在真实集群运行）。配置与参数见 [API 参考](docs/api.md#traefik-网关集成4p5)，架构见 [traefik-golab-architecture](docs/traefik-golab-architecture.md)，证据见 [实施状态](docs/实施状态.md)"网关集成验证证据"节。

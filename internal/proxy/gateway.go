@@ -2,11 +2,14 @@
 // routing 求值服务 (docs/技术方案.md §4, docs/traefik-golab-architecture.md).
 //
 // Traefik's forwardAuth middleware sends the (already header-stripped)
-// request to this endpoint. It extracts the bucketing key, evaluates the
-// configured GoLab flag through the upstream /api/v1/sdk/eval (which records
-// exposures at this decision point — 曝光集中记录), and returns the variation
-// name in X-Golab-Variant. Traefik copies the response headers listed in
-// authResponseHeaders back onto the request; the child routers then match on
+// request to this endpoint. It extracts the bucketing key, derives the
+// client IP from the trusted proxy chain (clientip.go — injected into the
+// evaluation context as the reserved "client_ip" attribute for in_cidr
+// targeting / IP bucketing), evaluates the configured GoLab flag through
+// the upstream /api/v1/sdk/eval (which records exposures at this decision
+// point — 曝光集中记录), and returns the variation name in X-Golab-Variant.
+// Traefik copies the response headers listed in authResponseHeaders back
+// onto the request; the child routers then match on
 // Header(`X-Golab-Variant`, ...).
 //
 // Fail-open contract (P5 acceptance): internal errors — upstream
@@ -31,6 +34,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/godeps/golab/pkg/model"
 )
 
 // GatewayConfig configures the forwardAuth evaluation endpoint. The proxy
@@ -89,9 +94,18 @@ func (p *Proxy) logGateway(format string, args ...any) {
 //	flagKey        required — the GoLab flag to evaluate
 //	defaultVariant the fail-open / missing-key variant value
 //	unitField      evaluation-context field for the bucketing key
-//	               (default "targetingKey")
+//	               (default "targetingKey"); the reserved value
+//	               "client_ip" buckets on the trusted-chain client IP
+//	               derived by the proxy itself (clientip.go) — the unit
+//	               header is NOT read then, so clients cannot self-select
+//	               a gray group by sending a header
 //	unitHeader     request header carrying the bucketing key
 //	               (default "X-Bucketing-Key")
+//
+// The evaluation context always additionally carries the derived client IP
+// as the reserved "client_ip" attribute (when derivable), enabling in_cidr
+// targeting on the trusted source address regardless of unitField. Header
+// input never feeds that attribute on this path (anti-forgery).
 func (p *Proxy) handleGatewayForwardAuth(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	flagKey := q.Get("flagKey")
@@ -136,7 +150,21 @@ func (p *Proxy) handleGatewayForwardAuth(w http.ResponseWriter, r *http.Request)
 		failOpen("not_configured")
 		return
 	}
-	unit := r.Header.Get(unitHeader)
+
+	// Trusted-chain client IP (clientip.go): "" when not derivable (fail
+	// closed — no client_ip attribute is injected then).
+	clientIP := p.deriveClientIP(r)
+
+	var unit string
+	if unitField == model.ClientIPField {
+		// IP-bucketed route: the randomization unit IS the proxy-derived
+		// client IP. A client-provided unit header is deliberately ignored —
+		// otherwise a client could pick its own gray group by sending an
+		// arbitrary X-Bucketing-Key value.
+		unit = clientIP
+	} else {
+		unit = r.Header.Get(unitHeader)
+	}
 	if unit == "" {
 		// No bucketing key → deterministic default, never a random split (§6).
 		failOpen("missing_bucket_key")
@@ -151,7 +179,7 @@ func (p *Proxy) handleGatewayForwardAuth(w http.ResponseWriter, r *http.Request)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	variant, reason, err := p.gatewayEval(ctx, flagKey, unitField, unit)
+	variant, reason, err := p.gatewayEval(ctx, flagKey, unitField, unit, clientIP)
 	if err != nil {
 		failOpen(gatewayFailReason(err))
 		return
@@ -165,11 +193,19 @@ func (p *Proxy) handleGatewayForwardAuth(w http.ResponseWriter, r *http.Request)
 
 // gatewayEval calls the upstream remote-evaluation endpoint and extracts the
 // variation name. A failed evaluation result (FLAG_NOT_FOUND, type errors)
-// is returned as an error so the caller fail-opens.
-func (p *Proxy) gatewayEval(ctx context.Context, flagKey, unitField, unit string) (variant, reason string, err error) {
+// is returned as an error so the caller fail-opens. clientIP ("" when not
+// derivable) is injected as the reserved "client_ip" attribute.
+func (p *Proxy) gatewayEval(ctx context.Context, flagKey, unitField, unit, clientIP string) (variant, reason string, err error) {
 	evalCtx := map[string]any{"targetingKey": unit}
+	attrs := map[string]any{}
 	if unitField != gwDefaultUnitField {
-		evalCtx["attributes"] = map[string]any{unitField: unit}
+		attrs[unitField] = unit
+	}
+	if clientIP != "" {
+		attrs[model.ClientIPField] = clientIP
+	}
+	if len(attrs) > 0 {
+		evalCtx["attributes"] = attrs
 	}
 	body, err := json.Marshal(map[string]any{
 		"flagKey": flagKey,

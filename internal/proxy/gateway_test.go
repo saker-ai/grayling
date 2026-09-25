@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -134,8 +133,23 @@ func TestGatewayForwardAuthTargetingKeyOnly(t *testing.T) {
 	}
 	resp2.Body.Close()
 	body, _ := up.lastBody.Load().(string)
-	if strings.Contains(body, "attributes") {
+	var payload struct {
+		Context struct {
+			TargetingKey string         `json:"targetingKey"`
+			Attributes   map[string]any `json:"attributes"`
+		} `json:"context"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("upstream body: %v (%s)", err, body)
+	}
+	// The unit lives in targetingKey ONLY — it must not be duplicated into
+	// attributes under the unitField name. (attributes carries the reserved
+	// client_ip injection, which is unrelated to the bucketing key.)
+	if _, dup := payload.Context.Attributes["targetingKey"]; dup {
 		t.Fatalf("targetingKey unit field must not duplicate into attributes: %s", body)
+	}
+	if len(payload.Context.Attributes) != 1 || payload.Context.Attributes["client_ip"] == nil {
+		t.Fatalf("attributes must carry ONLY the derived client_ip: %s", body)
 	}
 }
 

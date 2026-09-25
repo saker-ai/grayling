@@ -146,6 +146,7 @@
 - 管理 API 与 AI 端点**不转发**（404）：proxy 的暴露面就是远程评估。
 - 错误映射：上游不可达 → 502 `upstream_unreachable`；超过 `-timeout`（一元请求，默认 10s）→ 504 `upstream_timeout`；其余状态码与响应体按上游原样透传。
 - 连接池：`-max-idle-conns-per-host`（默认 100）、`-max-conns-per-host`（0=不限）、`-dial-timeout`（默认 5s）；`-health-timeout` 约束 readiness 探测（默认 3s）。
+- client_ip 推导：`-trusted-proxy-cidrs`（逗号分隔 CIDR/裸 IP，如 `10.0.0.0/8,172.16.5.5,fd00::/8`；flag 为空时读环境变量 `GOLAB_TRUSTED_PROXY_CIDRS`，默认空）声明允许位于 proxy 之前的可信反向代理网段。两条**服务端求值路径**（forwardAuth 端点与 `POST /api/v1/sdk/eval` 中继）从连接对端（RemoteAddr）出发、仅在当前 IP 落于可信网段时逐跳向左回退 `X-Forwarded-For`，第一个不受信 IP 即 `client_ip`，其左侧条目一律丢弃（防伪造自选灰度组）；信任链中出现非法条目则 fail closed（不注入）。推导值以保留属性名 `client_ip` 注入求值上下文——中继路径上**调用方显式传入的 `attributes.client_ip` 优先，不被覆盖**；未配置时不信任任何 XFF，`client_ip` 即直连对端（现网行为不变）。安全语义与链路图见 [traefik-golab-architecture](traefik-golab-architecture.md)"按 client IP 灰度"节。
 - SIGTERM/SIGINT 优雅关停。
 
 ```bash
@@ -167,11 +168,12 @@ GET /api/v1/gateway/forwardauth?flagKey=<key>&defaultVariant=<v>&unitField=<f>&u
 |---|---|---|
 | `flagKey` | 必填 | 求值的 GoLab flag |
 | `defaultVariant` | 必填 | fail-open / 缺 bucketingKey 时回写的默认变体 |
-| `unitField` | `targetingKey` | bucketingKey 写入的求值上下文字段（应与 flag 的 `bucketing.unit` 一致；非 targetingKey 时同时写入 attributes 与 targetingKey） |
+| `unitField` | `targetingKey` | bucketingKey 写入的求值上下文字段（应与 flag 的 `bucketing.unit` 一致；非 targetingKey 时同时写入 attributes 与 targetingKey）。取保留值 `client_ip` 时为**按 IP 分桶**：分桶单元=proxy 从可信代理链派生的 client IP（`-trusted-proxy-cidrs`，见上节），`unitHeader` 不被读取——客户端无法用 header 自选灰度组；派生失败（如信任链断裂）按缺 bucketingKey fail-open |
 | `unitHeader` | `X-Bucketing-Key` | 携带 bucketingKey 的请求 header |
 | `secret` | — | 路由共享密钥（proxy `-gateway-secret` 配置后强制校验，常数时间比较）；不匹配的请求**绝不上游求值**——fail-open 回默认变体（`X-Golab-Fail-Open: unauthorized`），防止任何能触达 proxy 的调用方把它当作任意 flag 探测/曝光污染 oracle |
 
 - Traefik forwardAuth 以 GET 探测该地址（address 的 query 原样保留），原始请求信息在 `X-Forwarded-*` header 中。
+- 求值上下文恒携带（可推导时）保留属性 `client_ip` = 可信代理链派生的客户端 IP（`-trusted-proxy-cidrs`，见"独立 proxy"节；请求 header 输入永不喂给该值），flag 在 `fields` 注册 `client_ip` 即可用 `in_cidr` 按 IP 段定向；作为分桶单元允许但**实验慎用**（IP 漂移破坏粘性/归因，技术方案 §6）。端到端证据：`test/gateway/clientip_e2e_test.go`。
 - 响应恒为 200（**fail-open 契约**）：`X-Golab-Variant`（求值变体或默认变体）、`X-Golab-Flag-Key`、`X-Golab-Reason`；内部故障（上游不可达/超时/非 200/求值失败/缺 bucketingKey/未配置 token）附加 `X-Golab-Fail-Open: <reason>` 并回写默认变体——网关绝不因 GoLab 故障产生 5xx。求值服务进程整体不可用需 HA 部署兜底（Traefik forwardAuth 对不可达的 auth 服务默认拒绝请求）。
 - 曝光在决策点集中记录：求值走上游 `/api/v1/sdk/eval`，运行中实验的入组曝光由服务端落库（幂等 event ID）。
 - 每次求值超时 `-gateway-eval-timeout`（默认 2s，热路径宜短），超时即 fail-open。

@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -73,8 +74,29 @@ func TestRelayEvalPassthrough(t *testing.T) {
 	if gotAuth != "Bearer glab_sdk_x" {
 		t.Fatalf("authorization must pass through untouched: %q", gotAuth)
 	}
-	if gotBody != `{"flagKey":"f1"}` {
-		t.Fatalf("body relay: %q", gotBody)
+	// The eval body relays untouched EXCEPT for the reserved client_ip
+	// injection (clientip.go): /sdk/eval is server-side evaluation, so the
+	// derived client IP must travel inside the context. No trusted proxies
+	// are configured here, so the derived value is the direct connection
+	// peer — and any caller-sent X-Forwarded-For is ignored.
+	var relayed struct {
+		FlagKey string `json:"flagKey"`
+		Context struct {
+			TargetingKey string         `json:"targetingKey"`
+			Attributes   map[string]any `json:"attributes"`
+		} `json:"context"`
+	}
+	if err := json.Unmarshal([]byte(gotBody), &relayed); err != nil {
+		t.Fatalf("relayed body is not JSON: %v (%q)", err, gotBody)
+	}
+	if relayed.FlagKey != "f1" {
+		t.Fatalf("body relay must preserve caller fields: %q", gotBody)
+	}
+	if got := relayed.Context.Attributes["client_ip"]; got != "127.0.0.1" {
+		t.Fatalf("client_ip injection: got %v, want the connection peer 127.0.0.1 (%q)", got, gotBody)
+	}
+	if len(relayed.Context.Attributes) != 1 {
+		t.Fatalf("injection must add ONLY client_ip: %q", gotBody)
 	}
 	if gotQuery != "debug=1" {
 		t.Fatalf("query relay: %q", gotQuery)

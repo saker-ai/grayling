@@ -63,7 +63,10 @@ type Bucketing struct {
 	Algorithm string `yaml:"algorithm" json:"algorithm"`
 	// Unit names the context field providing the randomization unit
 	// ("targetingKey" or one of Flag.Fields). Changing it requires a new
-	// experiment epoch.
+	// experiment epoch. ClientIPField ("client_ip") is a legal unit for
+	// traffic-routing flags but is experiment-discouraged: IPs drift
+	// (NAT, DHCP, proxy chains), which breaks unit stability and thus
+	// stickiness/attribution (§6) — allowed, warned in docs, not blocked.
 	Unit string `yaml:"unit" json:"unit"`
 	// Salt domain-separates the hash. Changing it requires a new epoch.
 	Salt string `yaml:"salt,omitempty" json:"salt,omitempty"`
@@ -237,6 +240,23 @@ type EvaluationContext struct {
 // TargetingKeyField is the implicit context field name bound to
 // EvaluationContext.TargetingKey.
 const TargetingKeyField = "targetingKey"
+
+// ClientIPField is the RESERVED context-attribute name under which trusted
+// edge infrastructure (golab-proxy `-trusted-proxy-cidrs`,
+// docs/traefik-golab-architecture.md "按 client IP 灰度") injects the client
+// IP it derived from the trusted proxy chain. It is NOT implicitly
+// registered: a flag opts in by listing "client_ip" in Fields, after which
+// it can drive constraints (typically in_cidr) or — allowed but
+// EXPERIMENT-DISCOURAGED (§6: NAT/动态分配/代理链变化使 IP 单元不稳定，
+// 实验级分桶应使用认证稳定 ID) — act as the bucketing unit.
+//
+// Precedence: on the remote-evaluation relay the caller's explicit
+// attributes["client_ip"] wins and is never overwritten (an authenticated
+// SDK caller may itself sit behind a sanitized edge); the proxy-derived
+// value is injected only when the attribute is absent. On the gateway
+// forwardAuth path the value is ALWAYS the proxy-derived one — header
+// input never feeds it (anti-forgery).
+const ClientIPField = "client_ip"
 
 // Field looks up a registered field: "targetingKey" resolves to the context
 // key, everything else to Attributes.

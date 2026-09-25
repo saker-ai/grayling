@@ -26,8 +26,12 @@
 // The proxy keeps NO state; the only credential it holds is the optional
 // gateway evaluation token (end-user traffic through Traefik cannot carry
 // GoLab credentials). Timeouts, hop-by-hop header hygiene and connection
-// pooling are its only other concerns. Per-token rate limiting stays on the
-// upstream, which is the only component that can authenticate.
+// pooling are its only other concerns, plus — for the two server-side
+// evaluation paths — deriving the client IP from the trusted proxy chain
+// (Config.TrustedProxyCIDRs) and injecting it into the evaluation context
+// as the reserved "client_ip" attribute (clientip.go). Per-token rate
+// limiting stays on the upstream, which is the only component that can
+// authenticate.
 package proxy
 
 import (
@@ -38,6 +42,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -64,6 +69,18 @@ type Config struct {
 	// (docs/技术方案.md §4). With an empty Token the endpoint fail-opens
 	// every request to the configured default variant.
 	Gateway GatewayConfig
+	// TrustedProxyCIDRs is a comma-separated list of CIDRs (or bare IPs)
+	// identifying the reverse proxies that may sit in front of THIS proxy
+	// (e.g. the Traefik/LB subnets). It controls the derivation of the
+	// "client_ip" evaluation-context attribute from X-Forwarded-For — see
+	// clientip.go for the full trust model. EMPTY (default) trusts no XFF
+	// at all: client_ip is the direct connection peer (RemoteAddr) only,
+	// preserving the behavior of deployments without an edge topology.
+	// Security semantics: the XFF walk stops at the first IP outside these
+	// ranges and everything further left is discarded, so a client cannot
+	// forge its way into another IP's gray group; ranges clients can
+	// connect from must NEVER be listed here.
+	TrustedProxyCIDRs string
 	// Logger receives gateway fail-open diagnostics (nil = silent).
 	Logger *log.Logger
 }
@@ -91,6 +108,9 @@ type Proxy struct {
 	cfg      Config
 	upstream *url.URL
 	logger   *log.Logger
+	// trustedProxies is the parsed Config.TrustedProxyCIDRs set used by the
+	// client_ip derivation walk (clientip.go); nil = trust no XFF.
+	trustedProxies []netip.Prefix
 	// unary serves eval/collect/config with a hard total timeout; stream
 	// serves the SSE relay with NO total timeout (only dial/response-header
 	// bounds) so long-lived event streams are not killed mid-flight.
@@ -106,6 +126,10 @@ func New(cfg Config) (*Proxy, error) {
 	u, err := url.Parse(strings.TrimRight(cfg.Upstream, "/"))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("proxy: invalid upstream URL %q", cfg.Upstream)
+	}
+	trusted, err := parseTrustedProxyCIDRs(cfg.TrustedProxyCIDRs)
+	if err != nil {
+		return nil, err
 	}
 	c := cfg.withDefaults()
 	transport := &http.Transport{
@@ -127,11 +151,12 @@ func New(cfg Config) (*Proxy, error) {
 	// while a streaming one must stay open.
 	streamTransport.ResponseHeaderTimeout = c.RequestTimeout
 	return &Proxy{
-		cfg:      c,
-		upstream: u,
-		logger:   c.Logger,
-		unary:    &http.Client{Transport: transport, Timeout: c.RequestTimeout},
-		stream:   &http.Client{Transport: streamTransport},
+		cfg:            c,
+		upstream:       u,
+		logger:         c.Logger,
+		trustedProxies: trusted,
+		unary:          &http.Client{Transport: transport, Timeout: c.RequestTimeout},
+		stream:         &http.Client{Transport: streamTransport},
 	}, nil
 }
 
@@ -194,6 +219,14 @@ func (p *Proxy) handleReadyz(w http.ResponseWriter, _ *http.Request) {
 func (p *Proxy) relayUnary(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), p.cfg.RequestTimeout)
 	defer cancel()
+	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/sdk/eval" {
+		// Remote evaluation is server-side, so the trusted-chain client IP
+		// must travel inside the eval context (clientip.go): injected under
+		// the reserved "client_ip" attribute ONLY when the caller did not
+		// explicitly provide one (caller precedence); any unexpected body
+		// shape relays verbatim.
+		p.injectEvalClientIP(r)
+	}
 	upReq, err := p.newUpstreamRequest(ctx, r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, errBody("bad_request", err.Error()))

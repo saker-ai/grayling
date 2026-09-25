@@ -652,3 +652,79 @@ func TestTargetingMatchInsideExperimentMarksSource(t *testing.T) {
 		t.Fatalf("randomized arm must report source=split: %+v", res)
 	}
 }
+
+// TestClientIPTargetingAndBucketing proves the reserved client_ip attribute
+// (injected by golab-proxy from the trusted proxy chain — internal/proxy/
+// clientip.go) drives in_cidr targeting and, though experiment-discouraged
+// (docs 技术方案 §6), is a fully functional bucketing unit.
+func TestClientIPTargetingAndBucketing(t *testing.T) {
+	f := &model.Flag{
+		SchemaVersion: model.SchemaVersion,
+		Key:           "ip-gray", Type: model.FlagString,
+		Fields: []string{model.ClientIPField},
+		Variations: map[string]any{
+			"control": "control-value", "candidate": "candidate-value",
+		},
+		DefaultRule: &model.Rule{Variation: "control"},
+		Targeting: []model.Rule{{
+			Name: "internal-net",
+			Constraints: []model.Constraint{
+				{Field: model.ClientIPField, Op: model.OpInCIDR, Value: "10.0.0.0/8"},
+			},
+			Variation: "candidate",
+		}},
+	}
+	e := mustEvaluator(t, snap(map[string]*model.Flag{"ip-gray": f}, nil))
+
+	for _, c := range []struct {
+		name       string
+		attrs      map[string]any
+		want       string
+		wantReason model.Reason
+	}{
+		{"internal range hits candidate", map[string]any{"client_ip": "10.1.2.3"}, "candidate", model.ReasonTargetingMatch},
+		{"internal edge of range", map[string]any{"client_ip": "10.255.255.255"}, "candidate", model.ReasonTargetingMatch},
+		{"external range stays default", map[string]any{"client_ip": "203.0.113.9"}, "control", model.ReasonDefault},
+		{"missing attribute never matches", nil, "control", model.ReasonDefault},
+		{"malformed attribute never matches", map[string]any{"client_ip": "garbage"}, "control", model.ReasonDefault},
+		{"v4-mapped form matches via unmap", map[string]any{"client_ip": "::ffff:10.1.2.3"}, "candidate", model.ReasonTargetingMatch},
+	} {
+		v, res := e.StringVariation("ip-gray", ctx("u1", c.attrs), "?")
+		if res.VariationType != c.want || v != c.want+"-value" || res.Reason != c.wantReason {
+			t.Errorf("%s: got %q/%s/%s, want variation %q/%s",
+				c.name, v, res.VariationType, res.Reason, c.want, c.wantReason)
+		}
+	}
+
+	// Same IP ⇒ same arm (deterministic); the unit resolves from attributes.
+	split := &model.Flag{
+		SchemaVersion: model.SchemaVersion,
+		Key:           "ip-split", Type: model.FlagString,
+		Fields:    []string{model.ClientIPField},
+		Bucketing: &model.Bucketing{Algorithm: bucketing.AlgorithmID, Unit: model.ClientIPField, Salt: "s"},
+		Variations: map[string]any{
+			"control": "control-value", "candidate": "candidate-value",
+		},
+		DefaultRule: &model.Rule{Variation: "control"},
+		Targeting: []model.Rule{
+			{Percentage: map[string]float64{"control": 50, "candidate": 50}},
+		},
+	}
+	e2 := mustEvaluator(t, snap(map[string]*model.Flag{"ip-split": split}, nil))
+	first, res := e2.StringVariation("ip-split", ctx("", map[string]any{"client_ip": "203.0.113.7"}), "?")
+	if res.Reason != model.ReasonSplit || res.Bucket < 0 {
+		t.Fatalf("client_ip bucketing must produce a SPLIT: %q %+v", first, res)
+	}
+	for i := 0; i < 5; i++ {
+		again, _ := e2.StringVariation("ip-split", ctx("", map[string]any{"client_ip": "203.0.113.7"}), "?")
+		if again != first {
+			t.Fatalf("client_ip bucketing not deterministic: %q vs %q", again, first)
+		}
+	}
+	// Missing unit → caller default + MISSING_BUCKET_KEY, never a random
+	// split (§6).
+	v, res := e2.StringVariation("ip-split", ctx("", nil), "?")
+	if v != "?" || !res.Failed || res.ErrorCode != model.ErrMissingBucketKey {
+		t.Fatalf("missing client_ip unit must fail closed: %q %+v", v, res)
+	}
+}
