@@ -760,7 +760,9 @@ async function viewExpDetail(m) {
       '<div class="row"><button class="btn" id="exp-report">Load / refresh report</button>' +
       '<label class="inline"><input type="checkbox" id="exp-auto"> auto-refresh 10s</label></div>' +
       '<div id="report-box"><p class="muted">Not loaded.</p></div>' +
-    '</section></div>';
+    '</section></div>' +
+    '<section class="card"><h3>Staged rollout <span class="muted">(release plan · auto-advance)</span></h3>' +
+    '<div id="rollout-box">' + renderRollout(e) + '</div></section>';
   $('#exp-back', m).onclick = () => { S.expId = null; route(); };
   const act = (path, body, msg) => run(() => api(p + path, { method: 'POST', body }), msg);
   $('#exp-review', m).onclick = () => {
@@ -786,6 +788,7 @@ async function viewExpDetail(m) {
     if (S.timer) { clearInterval(S.timer); S.timer = null; }
     if (ev.target.checked) { loadReport(); S.timer = setInterval(loadReport, 10000); }
   };
+  bindRollout(m, id);
 }
 
 function renderReport(box, r) {
@@ -861,6 +864,241 @@ function renderReport(box, r) {
     ((d.guardrailBreaches || []).length
       ? '<div class="banner warn">Guardrail breaches:<ul>' + d.guardrailBreaches.map(gb =>
         '<li><span class="mono">' + esc(gb.metric) + '</span> — ' + esc(gb.detail || '') + '</li>').join('') + '</ul></div>' : '');
+}
+
+// ---------------------------------------------------------------------------
+// Staged rollout (release plan) — experiment-detail section (§5.3 P4 自动推进).
+// Pure renderers over the ReleasePlan JSON (steps/state/currentStep/history)
+// returned by GET /api/v1/admin/experiments/{id}; all mutations go through the
+// existing release-plan routes only. Danger actions (pause/takeover) require
+// confirm + reason, mirroring the rollback confirmation style.
+// ---------------------------------------------------------------------------
+const PLAN_CHIP = { armed: 'gray', running: 'green', paused: 'amber', completed: 'blue', rolled_back: 'red' };
+const PLAN_ACTION_CHIP = {
+  'plan.start': 'green', 'step.advance': 'green', 'manual.advance': 'green',
+  'plan.complete': 'blue', 'manual.complete': 'blue',
+  'plan.pause': 'amber', 'manual.pause': 'amber', 'manual.resume': 'teal',
+  'plan.rollback': 'red', 'repair_publish': 'teal',
+  'manual.takeover_on': 'red', 'manual.takeover_off': 'gray',
+};
+// Engine block reasons surface in pausedReason / plan.pause details — render
+// them with the same alert styling the report uses for SRM/guardrail breaches.
+const PLAN_BLOCK_RE = /srm|guardrail|unhealthy|health|rollback|breach/i;
+
+// planNextGate returns the earliest time the decision gate may fire for the
+// current step (stepStartedAt + minRuntime + observationWindow), or null when
+// it does not apply (not running / no step clock). Durations arrive as ns.
+function planNextGate(plan) {
+  if (!plan || plan.state !== 'running' || !plan.stepStartedAt) return null;
+  const step = (plan.steps || [])[plan.currentStep];
+  if (!step) return null;
+  const ms = Date.parse(plan.stepStartedAt) +
+    (Number(step.minRuntime || 0) + Number(step.observationWindow || 0)) / 1e6;
+  return isNaN(ms) ? null : new Date(ms);
+}
+
+function renderRolloutSteps(plan) {
+  const steps = plan.steps || [];
+  return '<table class="grid" id="ro-steps-tbl"><thead><tr><th>#</th><th>Step</th><th>Eligibility</th>' +
+    '<th>Min runtime</th><th>Observation window</th><th>Advance</th><th>Status</th></tr></thead><tbody>' +
+    (steps.map((s, i) => {
+      let st;
+      if (plan.state === 'completed' || i < plan.currentStep) st = chip('done', 'green');
+      else if (i === plan.currentStep) {
+        st = plan.state === 'rolled_back' ? chip('stopped here', 'red')
+          : chip(plan.state === 'paused' ? 'held here' : 'current', plan.state === 'paused' ? 'amber' : 'blue');
+      } else st = chip('pending', 'gray');
+      return '<tr' + (i === plan.currentStep ? ' class="ro-current"' : '') + '><td>' + i +
+        '</td><td class="mono">' + esc(s.name) + '</td><td>' + esc(s.ratio) +
+        '%</td><td>' + esc(fmtDurNs(s.minRuntime)) + '</td><td>' + esc(fmtDurNs(s.observationWindow)) +
+        '</td><td>' + chip(s.autoAdvance ? 'auto' : 'manual hold', s.autoAdvance ? 'green' : 'amber') +
+        '</td><td>' + st + '</td></tr>';
+    }).join('') || '<tr><td colspan="7" class="muted">no steps</td></tr>') +
+    '</tbody></table>' +
+    '<div class="muted">Gate = the pre-registered fixed-sample decision (data health → guardrails → min sample → significance). ' +
+    'Auto-advance fires only after min runtime + observation window on healthy data; SRM / guardrail breach pauses or rolls the plan back.</div>';
+}
+
+function renderRolloutHistory(plan) {
+  const hist = (plan.history || []).slice().reverse(); // newest first
+  return '<table class="grid" id="ro-history-tbl"><thead><tr><th>Time</th><th>Actor</th><th>Action</th>' +
+    '<th>Step</th><th>Detail (skip/block reason)</th></tr></thead><tbody>' +
+    (hist.map(ev =>
+      '<tr><td class="nowrap">' + esc(fmtTime(ev.at)) + '</td><td>' + esc(ev.actor || '—') + '</td><td>' +
+      chip(ev.action, PLAN_ACTION_CHIP[ev.action] || 'gray') + '</td><td>' + esc(ev.step ?? '—') +
+      '</td><td>' + esc(ev.detail || '—') + '</td></tr>').join('') ||
+      '<tr><td colspan="5" class="muted">no actions recorded yet</td></tr>') +
+    '</tbody></table>';
+}
+
+function renderRolloutCreate() {
+  return '<p class="muted" id="ro-none">No release plan registered. Pre-register a staged rollout: each step raises the experiment ' +
+    'eligibility (strictly increasing) and dwells for min runtime + observation window before the decision gate may advance it.</p>' +
+    '<div id="ro-steps-editor"></div>' +
+    '<div class="row"><button class="btn sm" id="ro-add-step">+ Add step</button></div>' +
+    '<div class="row"><button class="btn primary" id="ro-create">Register release plan</button></div>' +
+    '<div class="muted">Server validates: ratio ∈ (0,100] strictly increasing · minRuntime &gt; 0 · experiment reviewed/scheduled/running · one plan per experiment (409 on duplicate).</div>';
+}
+
+// renderRollout is the pure renderer of the rollout card content: state
+// banners (SRM/guardrail blocks in the report's alert style), progress,
+// next-gate time, plan-step table, action history and the operator actions.
+function renderRollout(exp) {
+  const plan = exp && exp.releasePlan;
+  if (!plan) return renderRolloutCreate();
+  const steps = plan.steps || [];
+  const cur = steps[plan.currentStep];
+  const active = plan.state === 'armed' || plan.state === 'running' || plan.state === 'paused';
+  const next = planNextGate(plan);
+
+  let banner = '';
+  if (plan.state === 'rolled_back') {
+    banner = '<div class="banner err" id="ro-banner"><b>ROLLED BACK — enrollment stopped</b><div>' +
+      esc(plan.pausedReason || 'decision gate fired rollback (guardrail breach or significantly worse primary)') + '</div></div>';
+  } else if (plan.state === 'paused') {
+    const reason = plan.pausedReason || '';
+    const blocked = PLAN_BLOCK_RE.test(reason);
+    banner = '<div class="banner ' + (blocked ? 'err' : 'warn') + '" id="ro-banner"><b>' +
+      (blocked ? 'BLOCKED — auto-paused by the engine' : 'PAUSED') + '</b><div>' + esc(reason || 'no reason recorded') + '</div>' +
+      (blocked
+        ? '<div class="muted">The engine auto-pauses on SRM / data-health problems and never auto-resumes. Inspect the report, then Resume — the step clock restarts.</div>'
+        : '') + '</div>';
+  } else if (plan.state === 'completed') {
+    banner = '<div class="banner ok" id="ro-banner">Plan completed — the flag stays at ' + esc(cur ? cur.ratio : '—') +
+      '%. Full rollout is a human publish decision (Flags view).</div>';
+  } else if (plan.state === 'armed') {
+    banner = '<div class="banner" id="ro-banner">Armed — waiting for the experiment to enter <b>running</b>; the engine then applies step 0.</div>';
+  }
+  if (plan.manualOverride) {
+    banner += '<div class="banner warn" id="ro-takeover-banner"><b>Manual takeover active</b> — the engine takes no automatic action ' +
+      'on this plan (no advance / pause / rollback). Operators drive it with the actions below.</div>';
+  }
+
+  const done = plan.state === 'completed' ? steps.length : Math.min(plan.currentStep, steps.length);
+  const pct = steps.length ? Math.round(100 * done / steps.length) : 0;
+  return banner +
+    '<div class="row" id="ro-head">' +
+      chip('plan ' + plan.state, PLAN_CHIP[plan.state] || 'gray') + ' ' +
+      (plan.manualOverride ? chip('manual override', 'red') : chip('engine auto', 'green')) +
+      ' <span id="ro-progress-txt">step ' + (steps.length ? plan.currentStep + 1 : 0) + '/' + steps.length +
+      (cur ? ' — <span class="mono">' + esc(cur.name) + '</span> @ ' + esc(cur.ratio) + '% eligibility' : '') + '</span>' +
+    '</div>' +
+    '<div class="bar" id="ro-bar"><i style="width:' + pct + '%"></i></div>' +
+    '<div class="row"><span class="muted">Next gate evaluation:</span> <b id="ro-next-eval">' + esc(next ? fmtTime(next) : '—') + '</b>' +
+    (next ? ' <span class="muted">(step started ' + esc(fmtTime(plan.stepStartedAt)) + ' — the gate fires only after min runtime + observation window on healthy data)</span>'
+      : plan.state === 'running' ? ' <span class="muted">(waiting for the step clock)</span>'
+      : plan.state === 'paused' ? ' <span class="muted">(held — nothing is evaluated while paused)</span>'
+      : plan.state === 'armed' ? ' <span class="muted">(starts when the experiment enters running)</span>' : '') +
+    '</div>' +
+    '<h4>Plan steps</h4>' + renderRolloutSteps(plan) +
+    '<h4>Action history <span class="muted">(newest first · capped at 64 · immutable trail in Audit)</span></h4>' +
+    renderRolloutHistory(plan) +
+    '<div class="row actions">' +
+      '<button class="btn sm" id="ro-refresh">Refresh</button>' +
+      (plan.state === 'armed' || plan.state === 'running' ? '<button class="btn" id="ro-pause">Pause…</button>' : '') +
+      (plan.state === 'paused' ? '<button class="btn primary" id="ro-resume">Resume…</button>' : '') +
+      (plan.state === 'running' ? '<button class="btn" id="ro-advance">Advance now…</button>' : '') +
+      (active
+        ? (plan.manualOverride
+          ? '<button class="btn" id="ro-takeover-off">Release takeover…</button>'
+          : '<button class="btn danger" id="ro-takeover-on">Manual takeover…</button>')
+        : '') +
+    '</div>' +
+    '<div class="muted">Plan registered by ' + esc(plan.createdBy || '—') + ' · updated ' + esc(fmtTime(plan.updatedAt)) + '</div>';
+}
+
+function rolloutStepRow() {
+  const row = document.createElement('div');
+  row.className = 'vrow';
+  row.innerHTML = '<input class="rs-name" placeholder="step name e.g. canary-5">' +
+    '<input class="rs-ratio" type="number" step="0.01" min="0" max="100" placeholder="eligibility % (increasing)">' +
+    '<input class="rs-min" type="number" step="0.5" min="0" placeholder="min runtime (h)">' +
+    '<input class="rs-obs" type="number" step="0.5" min="0" placeholder="observation window (h)">' +
+    '<label class="inline"><input type="checkbox" class="rs-auto"> auto-advance</label>' +
+    '<button class="btn sm" title="remove">✕</button>';
+  const x = $('button', row);
+  if (x) x.onclick = () => row.remove();
+  return row;
+}
+
+// bindRollout wires the rendered rollout card. State-conditional buttons are
+// guarded (they exist only in the states where the action is legal server-side).
+function bindRollout(m, expId) {
+  const base = '/api/v1/admin/experiments/' + encodeURIComponent(expId) + '/release-plan';
+
+  const refresh = $('#ro-refresh', m);
+  if (refresh) refresh.onclick = async () => {
+    const box = $('#rollout-box', m);
+    try {
+      const e2 = await api('/api/v1/admin/experiments/' + encodeURIComponent(expId));
+      if (!box) return;
+      box.innerHTML = renderRollout(e2);
+      bindRollout(m, expId);
+    } catch (err) { if (box) box.innerHTML = errBanner(err); }
+  };
+
+  const pause = $('#ro-pause', m);
+  if (pause) pause.onclick = () => {
+    if (!confirm('Pause the release plan? The engine takes no automatic action until resumed; on resume the step clock RESTARTS (the full observation window must elapse again).')) return;
+    const reason = prompt('Pause reason (required):', '');
+    if (!reason) { toast('Reason is required', false); return; }
+    run(() => api(base + '/pause', { method: 'POST', body: { reason } }), 'Release plan paused');
+  };
+
+  const resume = $('#ro-resume', m);
+  if (resume) resume.onclick = () => {
+    if (!confirm('Resume the release plan? The step clock restarts — the full pre-registered observation window must elapse again before the gate may fire.')) return;
+    run(() => api(base + '/resume', { method: 'POST' }), 'Release plan resumed');
+  };
+
+  const adv = $('#ro-advance', m);
+  if (adv) adv.onclick = () => {
+    if (!confirm('Advance the plan now? Manual advance is a human publish decision — it is NOT gated by the report verdict (the current verdict is recorded in history). On the final step this COMPLETES the plan.')) return;
+    const reason = prompt('Advance reason (optional):', '') || '';
+    run(() => api(base + '/advance', { method: 'POST', body: { reason } }), 'Release plan advanced');
+  };
+
+  const tkOn = $('#ro-takeover-on', m);
+  if (tkOn) tkOn.onclick = () => {
+    if (!confirm('Enable MANUAL TAKEOVER? The engine will take NO automatic action on this plan — no advancing, no pausing, no rollback — until takeover is released. Operators drive the rollout manually.')) return;
+    const reason = prompt('Takeover reason (required):', '');
+    if (!reason) { toast('Reason is required', false); return; }
+    run(() => api(base + '/takeover', { method: 'POST', body: { enabled: true, reason } }),
+      'Manual takeover enabled — the engine stands down');
+  };
+
+  const tkOff = $('#ro-takeover-off', m);
+  if (tkOff) tkOff.onclick = () => {
+    if (!confirm('Release manual takeover? The engine resumes automatic operation from the recorded plan state.')) return;
+    const reason = prompt('Reason (optional):', '') || '';
+    run(() => api(base + '/takeover', { method: 'POST', body: { enabled: false, reason } }),
+      'Manual takeover released — engine control restored');
+  };
+
+  const editor = $('#ro-steps-editor', m);
+  const addStep = $('#ro-add-step', m);
+  if (editor && addStep) {
+    const add = () => editor.appendChild(rolloutStepRow());
+    addStep.onclick = add;
+    if (!$$('.vrow', editor).length) add();
+  }
+  const create = $('#ro-create', m);
+  if (create) create.onclick = () => {
+    const steps = $$('.vrow', editor || m).map(r => ({
+      name: $('.rs-name', r).value.trim(),
+      ratio: Number($('.rs-ratio', r).value),
+      minRuntime: Math.round(Number($('.rs-min', r).value || 0) * NS_HOUR),
+      observationWindow: Math.round(Number($('.rs-obs', r).value || 0) * NS_HOUR),
+      autoAdvance: $('.rs-auto', r).checked,
+    })).filter(s => s.name || s.ratio);
+    if (!steps.length) { toast('Add at least one step', false); return; }
+    if (steps.some(s => !s.name || !(s.ratio > 0 && s.ratio <= 100))) { toast('Each step needs a name and eligibility % in (0,100]', false); return; }
+    for (let i = 1; i < steps.length; i++) {
+      if (steps[i].ratio <= steps[i - 1].ratio) { toast('Ratios must strictly increase (step ' + (i + 1) + ')', false); return; }
+    }
+    if (steps.some(s => !(s.minRuntime > 0))) { toast('Min runtime must be > 0 for every step', false); return; }
+    run(() => api(base, { method: 'POST', body: { steps } }), 'Release plan registered (armed)');
+  };
 }
 
 // ---------------------------------------------------------------------------

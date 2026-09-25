@@ -116,6 +116,14 @@ td.detail { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-s
 table.kv th { text-align: left; color: var(--muted); font-weight: 500; padding: 3px 12px 3px 0; white-space: nowrap; }
 table.kv td { padding: 3px 0; }
 
+/* ---------- staged rollout ---------- */
+.bar {
+  height: 6px; background: #22262f; border: 1px solid var(--border);
+  border-radius: 4px; overflow: hidden; margin: 6px 0;
+}
+.bar > i { display: block; height: 100%; background: var(--accent); }
+table.grid tr.ro-current td { background: #20283a; }
+
 pre.pre {
   background: #12141a; border: 1px solid var(--border); border-radius: 6px;
   padding: 10px; overflow: auto; font-size: 12px; max-height: 340px; margin: 8px 0;

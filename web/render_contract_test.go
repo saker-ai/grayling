@@ -36,6 +36,35 @@ func TestRenderReportDOMContract(t *testing.T) {
 	t.Logf("%s", out)
 }
 
+// TestRenderRolloutDOMContract runs the Node-based DOM/contract test for the
+// staged-rollout (release plan) UI of the experiment-detail view (§5.3 P4
+// 自动推进). It loads the same real web/app.js in a vm and drives
+// renderRollout()/bindRollout() with mock plans covering every plan state
+// (no plan / armed / running / manual takeover / paused — manual and
+// SRM-blocked / rolled_back / completed), asserting the key DOM nodes and
+// button IDs per state, that every bound ID exists in the rendered markup
+// (bindRollout runs against a root that answers only rendered IDs), and — via
+// click simulation with recording confirm/prompt/fetch stubs — the two-step
+// confirmation of danger actions plus the exact path/body of pause, resume,
+// advance and takeover requests. Same node gating as the report contract.
+func TestRenderRolloutDOMContract(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not available; console DOM/contract test requires node (same external-tool gating as the PG/docker tests)")
+	}
+	script := filepath.Join("rollout_contract.mjs")
+	if _, err := os.Stat(script); err != nil {
+		t.Fatalf("contract script missing: %v", err)
+	}
+	cmd := exec.Command(node, script)
+	cmd.Dir = wd(t)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("rollout UI DOM contract failed: %v\n%s", err, out)
+	}
+	t.Logf("%s", out)
+}
+
 // wd returns the directory of this test file (the web/ package dir), so the
 // contract runs regardless of the caller's working directory.
 func wd(t *testing.T) string {
