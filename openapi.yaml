@@ -2,6 +2,9 @@ openapi: 3.0.3
 info:
   title: GoLab API
   version: v1
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
   description: |-
     GoLab 功能灰度 / AB 实验平台的 HTTP API（权威路由清单：`internal/api/server.go` 的 `Handler()`）。
 

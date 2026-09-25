@@ -308,7 +308,7 @@ export class GolabClient {
     const wire: Record<string, unknown> = {};
     if (ctx.targetingKey) wire.targetingKey = ctx.targetingKey;
     if (ctx.attributes) wire.attributes = ctx.attributes;
-    const cacheKey = `${flagKey} ${canonicalContext(ctx)}`;
+    const cacheKey = `${flagKey}\0${canonicalContext(ctx)}`;
 
     this.#stats.evals++;
     const hit = this.#cache.get(cacheKey);
