@@ -702,3 +702,84 @@ func TestE2EDebugEvalNoExposure(t *testing.T) {
 		t.Fatal("debug eval recorded events")
 	}
 }
+
+// TestE2ELocalRemoteParity proves the cross-language contract on the server
+// side: the Go SDK's LOCAL evaluation and the remote /sdk/eval path (the one
+// the Python/TypeScript SDKs use) produce identical values, variants and
+// reasons for identical contexts — P4 退出验收「跨语言用例同值」. Combined
+// with the golden-vector tests in sdk/python and sdk/typescript, all three
+// languages agree on the same assignments.
+func TestE2ELocalRemoteParity(t *testing.T) {
+	h := newHarness(t)
+	h.setupWorkspace()
+	flag := testFlag("parity-flag")
+	h.publishFlag(t, flag, platform.RiskNormal, h.owner)
+
+	client := newSDK(t, h, nil)
+	// Wait for the first snapshot to sync.
+	probe := model.EvaluationContext{TargetingKey: "probe", Attributes: map[string]any{"user_id": "probe"}}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, r := client.StringVariation("parity-flag", probe, "?"); !r.Failed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("client never synced")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	var candidates, controls int
+	for i := 0; i < 60; i++ {
+		unit := fmt.Sprintf("parity-user-%d", i)
+		evalCtx := model.EvaluationContext{
+			TargetingKey: unit,
+			Attributes:   map[string]any{"user_id": unit},
+		}
+		localVal, localRes := client.StringVariation("parity-flag", evalCtx, "?")
+		if localRes.Failed {
+			t.Fatalf("local eval failed for %s: %+v", unit, localRes)
+		}
+
+		var remote struct {
+			Result model.Result `json:"result"`
+			Value  string       `json:"value"`
+		}
+		if code := h.do("POST", "/api/v1/sdk/eval", h.sdkTok, map[string]any{
+			"flagKey": "parity-flag", "context": evalCtx,
+		}, &remote); code != http.StatusOK {
+			t.Fatalf("remote eval %s: %d", unit, code)
+		}
+		if remote.Value != localVal {
+			t.Fatalf("unit %s: local=%q remote=%q", unit, localVal, remote.Value)
+		}
+		if remote.Result.Reason != localRes.Reason {
+			t.Fatalf("unit %s: local reason=%s remote reason=%s", unit, localRes.Reason, remote.Result.Reason)
+		}
+		if remote.Result.Bucket != localRes.Bucket {
+			t.Fatalf("unit %s: local bucket=%d remote bucket=%d", unit, localRes.Bucket, remote.Result.Bucket)
+		}
+		if (localRes.Experiment == nil) != (remote.Result.Experiment == nil) {
+			t.Fatalf("unit %s: experiment attribution mismatch", unit)
+		}
+		if localRes.Experiment != nil &&
+			*localRes.Experiment != *remote.Result.Experiment {
+			t.Fatalf("unit %s: local exp=%+v remote exp=%+v", unit,
+				*localRes.Experiment, *remote.Result.Experiment)
+		}
+		switch localVal {
+		case "candidate-value":
+			candidates++
+		case "control-value":
+			controls++
+		default:
+			t.Fatalf("unit %s: unexpected value %q", unit, localVal)
+		}
+	}
+	// The 90/10 ramp must produce BOTH arm values across 60 units —
+	// otherwise the parity assertions above would be vacuous.
+	if candidates == 0 || controls == 0 {
+		t.Fatalf("test coverage degenerate: candidates=%d controls=%d", candidates, controls)
+	}
+	t.Logf("parity over 60 units: control=%d candidate=%d", controls, candidates)
+}

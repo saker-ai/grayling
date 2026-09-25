@@ -294,3 +294,151 @@ func SortedVariants(exp *platform.Experiment) []string {
 	sort.Strings(out)
 	return out
 }
+
+// ---------------------------------------------------------------------------
+// Staged rollout (自动推进, §5.3 P4)
+// ---------------------------------------------------------------------------
+
+// MaxReleaseSteps bounds one pre-registered plan.
+const MaxReleaseSteps = 32
+
+// ValidateReleaseSteps checks a staged-rollout plan at registration time:
+// steps ramp eligibility monotonically upward (a decreasing ratio would
+// un-enroll live units — that is a rollback, not a step) and every step
+// pre-registers a positive minimum runtime so the decision gate can never
+// fire on a fresh, dataless step (§5.3: 自动推进只在观测窗口、数据完整性、
+// 最小样本及全部护栏均满足时执行).
+func ValidateReleaseSteps(steps []platform.ReleaseStep) error {
+	if len(steps) == 0 || len(steps) > MaxReleaseSteps {
+		return fmt.Errorf("%w: release plan needs 1..%d steps, got %d",
+			platform.ErrValidation, MaxReleaseSteps, len(steps))
+	}
+	seen := map[string]bool{}
+	var prev float64
+	for i, st := range steps {
+		if st.Name == "" {
+			return fmt.Errorf("%w: step %d needs a name", platform.ErrValidation, i)
+		}
+		if seen[st.Name] {
+			return fmt.Errorf("%w: duplicate step name %q", platform.ErrValidation, st.Name)
+		}
+		seen[st.Name] = true
+		if st.Ratio <= 0 || st.Ratio > 100 {
+			return fmt.Errorf("%w: step %q ratio %v out of (0,100]", platform.ErrValidation, st.Name, st.Ratio)
+		}
+		if i > 0 && st.Ratio <= prev {
+			return fmt.Errorf("%w: step %q ratio %v must strictly increase over previous %v (eligibility ramps never shrink — use rollback to reduce traffic)",
+				platform.ErrValidation, st.Name, st.Ratio, prev)
+		}
+		prev = st.Ratio
+		if st.MinRuntime <= 0 {
+			return fmt.Errorf("%w: step %q needs a pre-registered minRuntime > 0", platform.ErrValidation, st.Name)
+		}
+		if st.ObservationWindow < 0 {
+			return fmt.Errorf("%w: step %q observationWindow must be >= 0", platform.ErrValidation, st.Name)
+		}
+	}
+	return nil
+}
+
+// CreateReleasePlan pre-registers a staged-rollout plan on an experiment in
+// Reviewed/Scheduled/Running. The plan starts ARMED: the engine applies
+// step 0 (and its eligibility ratio) only once the experiment is Running, so
+// registration never changes live traffic by itself. Requires publish
+// permission because the plan will drive republishes.
+func (s *Service) CreateReleasePlan(actor Actor, experimentID string,
+	steps []platform.ReleaseStep) (*platform.Experiment, error) {
+
+	exp, err := s.Store.GetExperiment(experimentID)
+	if err != nil {
+		return nil, err
+	}
+	if err := Authorize(actor, exp.WorkspaceID, PermFlagPublish); err != nil {
+		return nil, err
+	}
+	switch exp.State {
+	case model.ExperimentReviewed, model.ExperimentScheduled, model.ExperimentRunning:
+	default:
+		return nil, fmt.Errorf("%w: experiment %s is %s, want reviewed/scheduled/running",
+			platform.ErrInvalidState, experimentID, exp.State)
+	}
+	if exp.ReleasePlan != nil {
+		return nil, fmt.Errorf("%w: experiment %s already has a release plan (pause/takeover to intervene; plans are pre-registered once)",
+			platform.ErrConflict, experimentID)
+	}
+	if err := ValidateReleaseSteps(steps); err != nil {
+		return nil, err
+	}
+	now := s.now()
+	plan := &platform.ReleasePlan{
+		Steps:     steps,
+		State:     platform.ReleasePlanArmed,
+		CreatedAt: now, UpdatedAt: now, CreatedBy: actor.Name,
+	}
+	plan.AppendHistory(platform.PlanEvent{
+		At: now, Actor: actor.Name, Action: "plan.create",
+		Detail: fmt.Sprintf("%d steps pre-registered (%v)", len(steps), stepRatios(steps)),
+	})
+	out, err := s.Store.SetReleasePlan(experimentID, plan)
+	if err != nil {
+		return nil, err
+	}
+	s.audit(actor, "release_plan.create", exp.WorkspaceID, exp.EnvironmentID, experimentID,
+		map[string]any{"steps": len(steps), "ratios": stepRatios(steps)})
+	return out, nil
+}
+
+func stepRatios(steps []platform.ReleaseStep) []float64 {
+	out := make([]float64, len(steps))
+	for i, st := range steps {
+		out[i] = st.Ratio
+	}
+	return out
+}
+
+// ApplyExperimentEligibility republishes the bound flag with an updated
+// experiment.eligibility — the ONLY mutation the staged-rollout engine makes
+// to live traffic (§6: eligibility 是独立 hash 坐标，提升比例不会移动已入组
+// 单元). Idempotent: when the published binding already carries the ratio,
+// nothing is written and changed=false, so a crashed/retried engine pass
+// converges without duplicate revisions.
+func (s *Service) ApplyExperimentEligibility(actor Actor, experimentID string,
+	ratio float64, reason string) (changed bool, err error) {
+
+	exp, err := s.Store.GetExperiment(experimentID)
+	if err != nil {
+		return false, err
+	}
+	if err := Authorize(actor, exp.WorkspaceID, PermFlagPublish); err != nil {
+		return false, err
+	}
+	current := s.Store.CurrentFlagContents(exp.WorkspaceID, exp.EnvironmentID)[exp.FlagKey]
+	if current == nil {
+		return false, fmt.Errorf("%w: flag %q not published", platform.ErrNotFound, exp.FlagKey)
+	}
+	if current.Content.Experiment == nil || current.Content.Experiment.ID != experimentID {
+		return false, fmt.Errorf("%w: flag %q is not bound to experiment %s",
+			platform.ErrInvalidState, exp.FlagKey, experimentID)
+	}
+	if math.Abs(current.Content.Experiment.Eligibility-ratio) < 1e-9 {
+		return false, nil // already applied — idempotent no-op
+	}
+	env, err := s.Store.GetEnvironment(exp.WorkspaceID, exp.EnvironmentID)
+	if err != nil {
+		return false, err
+	}
+	content := model.Flag{}
+	if err := copyFlagRules(&content, current.Content); err != nil {
+		return false, err
+	}
+	content.Experiment.Eligibility = ratio
+	content.Version = ""
+	fr, m, err := s.publishRevision(actor, env, &content, reason)
+	if err != nil {
+		return false, err
+	}
+	s.audit(actor, "release_plan.apply_ratio", exp.WorkspaceID, exp.EnvironmentID, experimentID,
+		map[string]any{"ratio": ratio, "flagRevision": fr.Revision,
+			"manifestRevision": m.Revision, "reason": reason})
+	return true, nil
+}

@@ -82,6 +82,41 @@ func snapshotETag(revision int64) string {
 	return fmt.Sprintf(`"golab-r%d"`, revision)
 }
 
+// ---------------------------------------------------------------------------
+// GET /api/v1/sdk/revision — minimal freshness probe (§8 受限投影)
+// ---------------------------------------------------------------------------
+//
+// Returns ONLY the current manifest revision of the token's scope — no
+// flags, rules or segments. Remote-evaluation SDKs (Python/TypeScript,
+// browser-adjacent runtimes) poll this endpoint to learn when their cached
+// evaluation results were computed against a superseded configuration, so
+// they can invalidate without ever downloading the full snapshot. An
+// environment without a published manifest reports revision 0.
+
+func (s *Server) handleSDKRevision(w http.ResponseWriter, r *http.Request) {
+	tok := tokenFrom(r)
+	env, err := s.Store.GetEnvironment(tok.WorkspaceID, tok.EnvironmentID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	var revision int64
+	manifest, err := s.Config.GetManifest(env.NamespaceID)
+	switch {
+	case err == nil:
+		revision = manifest.Revision
+	default:
+		// No manifest yet (or substrate read failure): report 0 so clients
+		// treat their cache as unverifiable and re-evaluate remotely.
+		revision = 0
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"revision": revision,
+		"etag":     snapshotETag(revision),
+	})
+}
+
 // evaluatorCacheEntry couples the serialized snapshot with its compiled
 // evaluator, keyed by manifest revision.
 type evaluatorCacheEntry struct {
@@ -149,6 +184,12 @@ type evalResponse struct {
 	Value      any          `json:"value"`
 	Revision   int64        `json:"manifestRevision"`
 	ExposureID string       `json:"exposureEventId,omitempty"`
+	// RandomizationUnit echoes the canonical unit string the server-side
+	// exposure was attributed to (present only when an exposure was
+	// recorded). Remote-evaluation SDKs need it to report CONVERSIONS that
+	// land on the same unit hash as the exposure (§10.1) — the value came
+	// from the caller's own context, so echoing it reveals nothing new.
+	RandomizationUnit string `json:"randomizationUnit,omitempty"`
 }
 
 func (s *Server) handleSDKEval(w http.ResponseWriter, r *http.Request) {
@@ -179,29 +220,30 @@ func (s *Server) handleSDKEval(w http.ResponseWriter, r *http.Request) {
 	// (experiment, epoch, unit, variant) which makes repeated remote evals
 	// idempotent — unique-unit analytics are unaffected (§10.1).
 	if res.TrackEvents && res.Experiment != nil {
-		if id := s.recordRemoteExposure(tok, env, snapshot, req, res); id != "" {
+		if id, unit := s.recordRemoteExposure(tok, env, snapshot, req, res); id != "" {
 			resp.ExposureID = id
+			resp.RandomizationUnit = unit
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) recordRemoteExposure(tok *platform.Token, env *platform.Environment,
-	snapshot *model.Snapshot, req evalRequest, res model.Result) string {
+	snapshot *model.Snapshot, req evalRequest, res model.Result) (string, string) {
 
 	flag := snapshot.Flags[res.FlagKey]
 	if flag == nil || flag.Bucketing == nil {
-		return ""
+		return "", ""
 	}
 	unitRaw, ok := req.Context.Field(flag.Bucketing.Unit)
 	if !ok {
-		return ""
+		return "", ""
 	}
 	// Same canonicalization the evaluator hashes with, so server-captured
 	// exposures and SDK-reported ones land on the identical unit hash.
 	unitStr, ok := evaluation.CanonicalUnitString(unitRaw)
 	if !ok {
-		return ""
+		return "", ""
 	}
 	unitHash := s.Store.HashUnit(env.WorkspaceID, unitStr)
 	eventID := fmt.Sprintf("srv-%s-%d-%s-%s", res.Experiment.ExperimentID, res.Experiment.Epoch,
@@ -217,9 +259,9 @@ func (s *Server) recordRemoteExposure(tok *platform.Token, env *platform.Environ
 	}})
 	if err != nil {
 		s.logger.Printf("api: remote exposure ingest failed: %v", err)
-		return ""
+		return "", ""
 	}
-	return eventID
+	return eventID, unitStr
 }
 
 func flagRevisionIn(snapshot *model.Snapshot, key string) int64 {

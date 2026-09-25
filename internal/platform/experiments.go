@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -299,4 +300,87 @@ func (s *Store) ExperimentStartedAt(id string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return *e.StartedAt, true
+}
+
+// SetReleasePlan attaches a pre-registered staged-rollout plan to an
+// experiment (single transactional write; both persistence backends carry
+// the plan inside the experiment document).
+func (s *Store) SetReleasePlan(experimentID string, plan *ReleasePlan) (*Experiment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.data.Experiments[experimentID]
+	if !ok {
+		return nil, fmt.Errorf("%w: experiment %q", ErrNotFound, experimentID)
+	}
+	e.ReleasePlan = plan
+	e.UpdatedAt = s.now()
+	s.changes.markDirty(collExperiments, experimentID)
+	return e, s.commitLocked()
+}
+
+// UpdateReleasePlan mutates the experiment's release plan inside one
+// transaction. Copy-on-write: the mutation is applied to a deep copy which
+// is then swapped in atomically, so a concurrent reader holding the
+// previous plan pointer (e.g. an API handler marshaling a GET response
+// while the rollout engine ticks) always observes a consistent snapshot —
+// plans are never mutated in place. A nil plan is ErrNotFound (plans are
+// pre-registered before the engine can act).
+func (s *Store) UpdateReleasePlan(experimentID string, mutate func(*ReleasePlan) error) (*Experiment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.data.Experiments[experimentID]
+	if !ok {
+		return nil, fmt.Errorf("%w: experiment %q", ErrNotFound, experimentID)
+	}
+	if e.ReleasePlan == nil {
+		return nil, fmt.Errorf("%w: experiment %q has no release plan", ErrNotFound, experimentID)
+	}
+	clone, err := cloneReleasePlan(e.ReleasePlan)
+	if err != nil {
+		return nil, err
+	}
+	if err := mutate(clone); err != nil {
+		return nil, err
+	}
+	clone.UpdatedAt = s.now()
+	e.ReleasePlan = clone
+	e.UpdatedAt = clone.UpdatedAt
+	s.changes.markDirty(collExperiments, experimentID)
+	return e, s.commitLocked()
+}
+
+// cloneReleasePlan deep-copies a plan via JSON round-trip (the plan is
+// JSON-serializable by construction — it is persisted as part of the
+// experiment document).
+func cloneReleasePlan(p *ReleasePlan) (*ReleasePlan, error) {
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	var out ReleasePlan
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ExperimentsWithActivePlans returns every experiment whose release plan can
+// still receive engine attention (armed/running/paused), oldest ID first for
+// deterministic engine passes. Terminal plans (completed/rolled_back) and
+// plan-less experiments are excluded.
+func (s *Store) ExperimentsWithActivePlans() []*Experiment {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []*Experiment{}
+	for _, e := range s.data.Experiments {
+		if e.ReleasePlan == nil {
+			continue
+		}
+		switch e.ReleasePlan.State {
+		case ReleasePlanArmed, ReleasePlanRunning, ReleasePlanPaused:
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }

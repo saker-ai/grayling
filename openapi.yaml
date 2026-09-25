@@ -1,0 +1,3796 @@
+openapi: 3.0.3
+info:
+  title: GoLab API
+  version: v1
+  description: |-
+    GoLab 功能灰度 / AB 实验平台的 HTTP API（权威路由清单：`internal/api/server.go` 的 `Handler()`）。
+
+    ## 认证与受众（三受众互斥）
+
+    所有端点（除 `GET /api/v1/health`）要求 `Authorization: Bearer <token>`。
+    凭证 secret 前缀标识受众，受众之间互斥——持错误受众的凭证访问端点返回
+    `403 wrong_audience`：
+
+    | 受众 | secret 前缀 | 可访问端点 |
+    |---|---|---|
+    | admin | `glab_admin_` | `/api/v1/admin/**` |
+    | sdk | `glab_sdk_` | `/api/v1/sdk/**` |
+    | collect | `glab_collect_` | `/api/v1/collect` |
+
+    租户作用域（workspace/environment）**完全由凭证决定**：任何端点都不接受
+    通过 query 参数或 body 字段选择租户。`{ws}`/`{env}` 路径参数接受 slug 或
+    服务端生成的内部 ID。管理角色（admin 凭证）：owner、publisher、analyst、
+    viewer；高风险草稿禁止提交人自批（403 `self_approval_denied`）。
+
+    ## 错误约定
+
+    错误响应统一为 `{"error":{"code":"...","message":"..."}}`（见
+    `ErrorResponse`）。存储层错误到 HTTP 状态的映射（`writeStoreError`）：
+    `not_found`→404，`exists`/`conflict`/`invalid_state`→409，
+    `access_denied`/`self_approval_denied`→403，`quota_exceeded`→429，
+    `validation_failed`→400，其余→500 `internal`。认证层：`unauthorized`→401，
+    `wrong_audience`→403，`rate_limited`→429。AI 端点：`ai_unavailable`→501；
+    跨租户 AI 读取一律 404（不泄露存在性）。采集：`batch_too_large`→400。
+    gff 导入：`import_failed`→400。SSE：连接数配额满 → 503 `sse_cap`。
+
+    ## 类型约定
+
+    - 请求体使用严格解码（`DisallowUnknownFields`）：未知字段 →
+      `400 validation_failed`，因此所有请求体 schema 标注
+      `additionalProperties: false`。
+    - Go `time.Duration` 字段序列化为**整数纳秒**（int64），如 `minRuntime`、
+      `analysisWindow`、`eventRetention`、`observationWindow`。
+    - Go `time.Time` 字段序列化为 RFC 3339 字符串（`date-time`）。
+    - `platform.CreatedToken` 无 json tag，故其响应字段是 Go 字段名
+      `Token` / `Secret`（大写开头，secret 仅在创建时返回一次）。
+    - `stats.GuardrailCheck` 的 `Metric`/`Detail` 无 json tag（大写开头），
+      `Breached` 为 `breached`。
+
+    ## 独立 proxy（cmd/golab-proxy）
+
+    proxy 以**相同路径**无状态中继数据面子集到上游 GoLab server：
+    `POST /api/v1/sdk/eval`、`GET /api/v1/sdk/stream`（逐块 flush 的 SSE
+    中继，客户端断开即取消上游订阅）、`GET /api/v1/sdk/config`（ETag/304
+    透传）、`GET /api/v1/sdk/revision`（受限新鲜度探针）、
+    `POST /api/v1/collect`。proxy 自有端点：`GET /healthz`
+    （liveness，不探测上游）与 `GET /api/v1/health`（readiness，探测上游，
+    不可达 → 503）。管理 API（`/api/v1/admin/**`，含 AI 端点）与
+    `POST /api/v1/sdk/ai/**` 一律不转发（404）。凭证原样透传：认证、
+    受众分离与限流仍由上游执行。
+    错误映射：上游不可达 → 502 `upstream_unreachable`；一元请求超时 →
+    504 `upstream_timeout`；其余状态与响应体按上游原样透传。
+servers:
+  - url: http://127.0.0.1:8688
+    description: GoLab server（默认本地部署，全部端点）
+  - url: http://127.0.0.1:8689
+    description: >-
+      cmd/golab-proxy 无状态中继——仅同路径转发 POST /api/v1/sdk/eval、
+      GET /api/v1/sdk/stream、GET /api/v1/sdk/config、
+      GET /api/v1/sdk/revision、POST /api/v1/collect，
+      另有自有 GET /healthz（liveness）与 GET /api/v1/health（readiness，
+      探测上游）。所有 /api/v1/admin/** 与 POST /api/v1/sdk/ai/**
+      不被转发（404）。
+security:
+  - bearerAuth: []
+tags:
+  - name: health
+    description: 存活/健康检查（无鉴权）
+  - name: workspaces
+    description: 工作空间、环境、凭证、审计与配额（admin 凭证）
+  - name: flags
+    description: Flag 生命周期（草稿/评审/发布/回滚/删除/gff 导入）
+  - name: segments
+    description: Segment 生命周期（草稿/评审/发布）
+  - name: experiments
+    description: 实验预注册、评审、绑定、状态迁移与分析报告
+  - name: release-plans
+    description: 分阶段放量计划（自动推进引擎的操作面）
+  - name: ai
+    description: AI 资源治理（注册/固定版本/紧急撤销/解析/模型白名单）
+  - name: sdk
+    description: SDK 数据面（sdk 凭证：快照、revision 探针、远程求值、SSE、AI）
+  - name: collect
+    description: 曝光/转化事件采集（collect 凭证）
+paths:
+  "/api/v1/health":
+    get:
+      tags: [health]
+      summary: 健康检查（无鉴权）
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: 服务存活。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  "/api/v1/admin/workspaces":
+    post:
+      tags: [workspaces]
+      summary: 创建工作空间（仅全局 owner）
+      operationId: createWorkspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceRequest"
+      responses:
+        "201":
+          description: 已创建。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+    get:
+      tags: [workspaces]
+      summary: 列出工作空间（作用域 admin 只见本工作空间）
+      operationId: listWorkspaces
+      responses:
+        "200":
+          description: 工作空间列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Workspace"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments":
+    post:
+      tags: [workspaces]
+      summary: 创建环境
+      operationId: createEnvironment
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEnvironmentRequest"
+      responses:
+        "201":
+          description: 已创建（含服务端生成的 gonacos namespaceId）。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Environment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+    get:
+      tags: [workspaces]
+      summary: 列出环境
+      operationId: listEnvironments
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+      responses:
+        "200":
+          description: 环境列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Environment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/tokens":
+    post:
+      tags: [workspaces]
+      summary: 铸造凭证（secret 仅此一次返回）
+      description: >-
+        凭证总是作用域绑定到路径中的工作空间；全局 owner 凭证只能由
+        cmd/golab 引导铸造，不能经此端点获得（工作空间 owner 无法提权为全局）。
+        kind=admin 时 role 必填（owner/publisher/analyst/viewer）；
+        kind=sdk/collect 时 environment 必填（slug 或 ID）。
+      operationId: createToken
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTokenRequest"
+      responses:
+        "201":
+          description: 已创建；明文 secret 仅此一次返回。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedToken"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+    get:
+      tags: [workspaces]
+      summary: 列出凭证（不含明文 secret）
+      operationId: listTokens
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+      responses:
+        "200":
+          description: 凭证列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Token"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/tokens/{id}":
+    delete:
+      tags: [workspaces]
+      summary: 吊销凭证（注意：路径不含 {ws}）
+      description: >-
+        对象级校验：作用域 owner 只能吊销本工作空间的凭证；全局凭证
+        （workspaceId 为空）只能由全局 owner 吊销（否则 403 access_denied）。
+      operationId: revokeToken
+      parameters:
+        - $ref: "#/components/parameters/TokenIdPath"
+      responses:
+        "200":
+          description: 已吊销。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenRevokeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/audit":
+    get:
+      tags: [workspaces]
+      summary: 审计日志（新→旧）
+      operationId: listAudit
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/AuditLimitQuery"
+      responses:
+        "200":
+          description: 审计条目列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/quotas":
+    put:
+      tags: [workspaces]
+      summary: 设置工作空间配额（owner）
+      operationId: setQuotas
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Quotas"
+      responses:
+        "200":
+          description: 已生效的配额。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quotas"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/flags":
+    get:
+      tags: [flags]
+      summary: 列出 flag（含草稿与当前 revision 的控制台读模型）
+      operationId: listFlags
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+      responses:
+        "200":
+          description: FlagView 列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FlagView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}":
+    get:
+      tags: [flags]
+      summary: Flag 详情（含草稿、当前 revision、全部历史）
+      operationId: getFlag
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/FlagKeyPath"
+      responses:
+        "200":
+          description: Flag 读模型。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlagView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      tags: [flags]
+      summary: 标记删除（仍需 submit→approve→publish 落 tombstone）
+      operationId: markFlagDeleted
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/FlagKeyPath"
+      responses:
+        "200":
+          description: 已标记；后续走正常评审发布流程落 tombstone。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlagDeleteResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/draft":
+    put:
+      tags: [flags]
+      summary: 保存 flag 草稿
+      description: >-
+        `content.key` 必须等于路径 `{key}`（改名在 v1 是删除+新建，不是草稿
+        操作）。`baseRevision > 0` 时启用乐观锁：目标 revision 已被别人推进 →
+        409 conflict。高风险（risk=high）草稿的提交人不能自批。
+      operationId: saveFlagDraft
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/FlagKeyPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveFlagDraftRequest"
+      responses:
+        "200":
+          description: 保存后的草稿。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlagDraft"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/submit":
+    post:
+      tags: [flags]
+      summary: 提交草稿进入评审（editing→submitted）
+      operationId: submitFlagDraft
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/FlagKeyPath"
+      responses:
+        "200":
+          description: 状态迁移成功。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StateResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/approve":
+    post:
+      tags: [flags]
+      summary: 批准草稿（submitted→approved；高风险禁止自批）
+      operationId: approveFlagDraft
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/FlagKeyPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NoteRequest"
+      responses:
+        "200":
+          description: 状态迁移成功。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StateResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/reject":
+    post:
+      tags: [flags]
+      summary: 驳回草稿（submitted→editing）
+      operationId: rejectFlagDraft
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/FlagKeyPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NoteRequest"
+      responses:
+        "200":
+          description: 已驳回，回到 editing。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StateResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/publish":
+    post:
+      tags: [flags]
+      summary: 发布已批准草稿（不可变 revision + manifest 推进 + SSE 通知）
+      operationId: publishFlag
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/FlagKeyPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NoteRequest"
+      responses:
+        "200":
+          description: 发布结果。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/rollback":
+    post:
+      tags: [flags]
+      summary: 回滚到历史 revision（新 manifest revision 指向已验证旧内容）
+      description: >-
+        目标 revision 必须存在于平台存储且从配置底座读回并哈希校验通过；
+        回滚不产生新的 flag 内容，只重指（rollbackOf 记录来源）。
+      operationId: rollbackFlag
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/FlagKeyPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RollbackRequest"
+      responses:
+        "200":
+          description: 发布结果（新的 manifest revision）。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/import-gff":
+    post:
+      tags: [flags]
+      summary: 严格导入 go-feature-flag 文档为 GoLab 草稿（HIGH 风险）
+      description: >-
+        白名单式转换：不支持的字段报错（400 import_failed），绝不静默丢弃；
+        warnings 随草稿返回（含"两种算法分配不一致"提示）。导入的草稿强制
+        risk=high——GoLab 固定桶算法不复现 gff 的分配，发布即重抽签。
+      operationId: importGffFlag
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/FlagKeyPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportGffRequest"
+      responses:
+        "201":
+          description: 导入成功；返回转换后的 flag、warnings 与已保存草稿。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportGffResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/segments":
+    get:
+      tags: [segments]
+      summary: 列出 segment 草稿
+      operationId: listSegments
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+      responses:
+        "200":
+          description: SegmentDraft 列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SegmentDraft"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/draft":
+    put:
+      tags: [segments]
+      summary: 保存 segment 草稿
+      operationId: saveSegmentDraft
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/SegmentKeyPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveSegmentDraftRequest"
+      responses:
+        "200":
+          description: 保存后的草稿。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentDraft"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/submit":
+    post:
+      tags: [segments]
+      summary: 提交 segment 草稿（editing→submitted）
+      operationId: submitSegment
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/SegmentKeyPath"
+      responses:
+        "200":
+          description: 状态迁移成功。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StateResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/approve":
+    post:
+      tags: [segments]
+      summary: 批准 segment 草稿（submitted→approved）
+      operationId: approveSegment
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/SegmentKeyPath"
+      responses:
+        "200":
+          description: 状态迁移成功。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StateResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/publish":
+    post:
+      tags: [segments]
+      summary: 发布已批准 segment（manifest 推进 + SSE 通知）
+      operationId: publishSegment
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/SegmentKeyPath"
+      responses:
+        "200":
+          description: 发布结果。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/experiments":
+    post:
+      tags: [experiments]
+      summary: 预注册实验（epoch 自动分配、永不复用）
+      description: >-
+        请求体是完整的 Experiment 预注册契约（flagKey、unit、variants、
+        proportions、primaryMetric、guardrails、alpha/power/mde、
+        minSamplePerArm、minRuntime(ns)、analysisWindow(ns)、hypothesis、
+        可选 layer/eligibility）。服务端赋值：id、workspaceId、environmentId、
+        flagRevision、epoch、state、时间戳、createdBy。layer 槽位在注册时分配。
+        实验没有更新路径——改 unit/比例/指标/绑定必须新建记录（新 epoch）。
+      operationId: createExperiment
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Experiment"
+      responses:
+        "201":
+          description: 已创建（state=draft）。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Experiment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+    get:
+      tags: [experiments]
+      summary: 列出实验
+      operationId: listExperiments
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+      responses:
+        "200":
+          description: 实验列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Experiment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/experiments/{id}":
+    get:
+      tags: [experiments]
+      summary: 实验详情
+      operationId: getExperiment
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+      responses:
+        "200":
+          description: 实验记录。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Experiment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/experiments/{id}/review":
+    post:
+      tags: [experiments]
+      summary: 评审通过（draft→reviewed）
+      operationId: reviewExperiment
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NoteRequest"
+      responses:
+        "200":
+          description: 评审后的实验。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Experiment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/experiments/{id}/bind":
+    post:
+      tags: [experiments]
+      summary: 绑定 flag（注入实验绑定，生成高风险草稿并转 scheduled）
+      description: >-
+        校验 flag 结构与预注册比例一致后向 flag 内容注入 experiment 绑定，
+        产生 HIGH 风险草稿（需二人评审后发布），实验状态转 scheduled。
+        无请求体。
+      operationId: bindExperiment
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+      responses:
+        "200":
+          description: 生成的绑定 flag 草稿。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlagDraft"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/experiments/{id}/transition":
+    post:
+      tags: [experiments]
+      summary: 状态迁移（running/paused/stopped/…；自动重发布绑定 flag）
+      operationId: transitionExperiment
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransitionRequest"
+      responses:
+        "200":
+          description: 迁移后的实验。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Experiment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/experiments/{id}/report":
+    get:
+      tags: [experiments]
+      summary: 分析报告（健康位/SRM/per-variant/主指标/护栏/决策门）
+      operationId: getExperimentReport
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+      responses:
+        "200":
+          description: 当前 epoch 的分析报告（纯读，不改实验状态）。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/experiments/{id}/release-plan":
+    post:
+      tags: [release-plans]
+      summary: 预注册分阶段放量计划
+      description: >-
+        步骤只调整实验 eligibility（比例/单元/salt/绑定由预注册 epoch 固定）；
+        ratio 必须跨步骤严格递增；eligibility 哈希是前缀区间，提升比例不会
+        取消已入组单元。计划由 internal/rollout 自动推进引擎驱动。
+      operationId: createReleasePlan
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReleasePlanCreateRequest"
+      responses:
+        "201":
+          description: 已注册的计划（state=armed）。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleasePlan"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+    get:
+      tags: [release-plans]
+      summary: 读取计划（含操作历史）
+      operationId: getReleasePlan
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+      responses:
+        "200":
+          description: 计划与 history（新→旧追加，容量 64 条）。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleasePlan"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/experiments/{id}/release-plan/pause":
+    post:
+      tags: [release-plans]
+      summary: 暂停计划（引擎不再自动推进）
+      operationId: pauseReleasePlan
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReasonRequest"
+      responses:
+        "200":
+          description: 暂停后的计划。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleasePlan"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/experiments/{id}/release-plan/resume":
+    post:
+      tags: [release-plans]
+      summary: 恢复计划（paused→running）。无请求体。
+      operationId: resumeReleasePlan
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+      responses:
+        "200":
+          description: 恢复后的计划。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleasePlan"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/experiments/{id}/release-plan/advance":
+    post:
+      tags: [release-plans]
+      summary: 人工推进到下一步骤（body 可选）
+      operationId: advanceReleasePlan
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReasonRequest"
+      responses:
+        "200":
+          description: 推进后的计划。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleasePlan"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/experiments/{id}/release-plan/takeover":
+    post:
+      tags: [release-plans]
+      summary: 人工接管开关（enabled=true 时引擎不做任何自动动作）
+      operationId: takeoverReleasePlan
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TakeoverRequest"
+      responses:
+        "200":
+          description: 更新后的计划。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleasePlan"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/debug/eval":
+    post:
+      tags: [flags]
+      summary: 调试求值（当前快照；永不记录曝光）
+      operationId: debugEval
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DebugEvalRequest"
+      responses:
+        "200":
+          description: 求值结果与快照 revision。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DebugEvalResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources":
+    post:
+      tags: [ai]
+      summary: 注册 AI 资源（physical ID 服务端生成）
+      description: >-
+        type 仅支持 prompt/skill/agentspec；mcp/pipeline 被明确拒绝
+        （gonacos 中无不可变版本语义，400 validation_failed）。
+      operationId: registerAIResource
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterAIResourceRequest"
+      responses:
+        "201":
+          description: 所有权索引条目。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIResourceRef"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "501":
+          $ref: "#/components/responses/AINotImplemented"
+        "500":
+          $ref: "#/components/responses/Internal"
+    get:
+      tags: [ai]
+      summary: 资源索引 + 当前撤销列表
+      description: >-
+        revocations 是一个 JSON 对象：键由资源 type 与 logicalId 用不可见
+        分隔符拼接而成，值为撤销原因（附操作者）。
+      operationId: listAIResources
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+      responses:
+        "200":
+          description: 索引与撤销表。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIResourcesResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}/pin":
+    post:
+      tags: [ai]
+      summary: 发布新内容并 pin 为不可变版本（version+MD5，发布后读回验证）
+      operationId: pinAIResourceVersion
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/AITypePath"
+        - $ref: "#/components/parameters/AILogicalPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PinAIVersionRequest"
+      responses:
+        "201":
+          description: 已 pin 的版本记录。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PinnedVersion"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "501":
+          $ref: "#/components/responses/AINotImplemented"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}/revoke":
+    post:
+      tags: [ai]
+      summary: 紧急撤销（实时生效于 resolve/执行前校验路径，不走快照同步）
+      operationId: revokeAIResource
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/AITypePath"
+        - $ref: "#/components/parameters/AILogicalPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeAIResourceRequest"
+      responses:
+        "200":
+          description: 已撤销。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIRevokeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "501":
+          $ref: "#/components/responses/AINotImplemented"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}/reinstate":
+    post:
+      tags: [ai]
+      summary: 解除撤销。无请求体。
+      operationId: reinstateAIResource
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/AITypePath"
+        - $ref: "#/components/parameters/AILogicalPath"
+      responses:
+        "200":
+          description: 已恢复。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIReinstateResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "501":
+          $ref: "#/components/responses/AINotImplemented"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resolve":
+    get:
+      tags: [ai]
+      summary: 原始内容读取（仅 owner——单独授权 ai.content.read）
+      description: >-
+        未 pin 版本、跨租户或已撤销的资源一律 404（不泄露存在性）；
+        内容摘要漂移 → 409 conflict。
+      operationId: resolveAIResourceAdmin
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/AIResolveTypeQuery"
+        - $ref: "#/components/parameters/AIResolveLogicalQuery"
+        - $ref: "#/components/parameters/AIResolveVersionQuery"
+      responses:
+        "200":
+          description: 摘要校验后的资源内容。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "501":
+          $ref: "#/components/responses/AINotImplemented"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/model-allowlist":
+    put:
+      tags: [ai]
+      summary: 设置 provider/model 白名单（未入白名单的 modelRef flag 无法发布）
+      operationId: setModelAllowlist
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetModelAllowlistRequest"
+      responses:
+        "200":
+          description: 已生效的白名单条目。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ModelAllowEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+    get:
+      tags: [ai]
+      summary: 读取白名单
+      operationId: getModelAllowlist
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+      responses:
+        "200":
+          description: 白名单条目。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ModelAllowEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/sdk/config":
+    get:
+      tags: [sdk]
+      summary: 作用域全量快照（ETag/If-None-Match → 304）
+      description: >-
+        workspace/environment 只来自 sdk 凭证，无任何租户选择参数。响应是该
+        环境的完整服务端快照（Snapshot）；浏览器侧应改用受限投影
+        （/sdk/revision）或远程求值（/sdk/eval）。ETag 即 manifest revision
+        （形如 "golab-r<revision>"），带匹配 If-None-Match 的请求得到 304。
+        响应头恒为 Cache-Control: no-store。快照损坏 → 500 snapshot_invalid
+        （客户端保留上一份好快照）。
+      operationId: getSDKConfig
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatchHeader"
+      responses:
+        "200":
+          description: 当前快照。
+          headers:
+            ETag:
+              description: 快照实体标签（"golab-r<manifestRevision>"）。
+              schema:
+                type: string
+            Cache-Control:
+              description: 恒为 no-store。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Snapshot"
+        "304":
+          description: If-None-Match 命中——客户端缓存仍是当前 revision；空 body。
+          headers:
+            ETag:
+              description: 当前实体标签。
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/sdk/revision":
+    get:
+      tags: [sdk]
+      summary: 最小新鲜度探针（受限投影：只有 revision 与 etag）
+      description: >-
+        只返回凭证作用域的当前 manifest revision——不含 flags/rules/segments。
+        远程求值 SDK（浏览器相邻运行时）轮询此端点判断缓存的求值结果是否基于
+        已被取代的配置，从而在不下载全量快照的情况下失效重估。尚未发布过
+        manifest 的环境返回 revision 0。响应头 Cache-Control: no-store。
+        cmd/golab-proxy 以相同路径中继此端点（一元转发）。
+      operationId: getSDKRevision
+      responses:
+        "200":
+          description: 当前 revision 与对应 etag。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/sdk/eval":
+    post:
+      tags: [sdk]
+      summary: 远程求值（进入实验时服务端自动落幂等曝光）
+      description: >-
+        服务端求值并在结果进入 running 实验 split 时自行记录曝光（远端客户端
+        不可信，不能自报曝光）。曝光 eventId 对
+        (experiment, epoch, unit, variant) 确定性生成，重复远程求值幂等。
+        响应中的 exposureEventId/randomizationUnit 仅在落了曝光时出现
+        （omitempty）；randomizationUnit 回显的是调用方自己上下文里的规范
+        单元字符串，供转化事件对齐同一 unit 哈希。
+      operationId: evaluateSDK
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvalRequest"
+      responses:
+        "200":
+          description: 求值结果。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/sdk/stream":
+    get:
+      tags: [sdk]
+      summary: SSE revision 失效通知流
+      description: >-
+        text/event-stream。事件格式：`id: <manifest revision>`、
+        `event: revision`、`data: {"revision":<int>,"scope":"<wsID>/<envID>"}`。
+        连接建立即重放当前 revision（全量重同步语义：客户端对比自身缓存
+        revision，更新则重拉快照），因此 Last-Event-ID 重连不需要服务端保留
+        事件日志——该头被接受并记录，但当前 revision 重放已覆盖其语义。
+        每 30s 发送注释心跳（": ping <unix>"）。通知是尽力而为的加速；
+        SDK 仍需轮询兜底，丢失事件不会导致永久过期。每
+        (workspace, environment) 连接数上限（默认 256）→ 503 sse_cap。
+        响应头：Cache-Control: no-cache、Connection: keep-alive、
+        X-Accel-Buffering: no。
+      operationId: streamSDKRevisions
+      parameters:
+        - $ref: "#/components/parameters/LastEventIdHeader"
+      responses:
+        "200":
+          description: SSE 流（长连接）。
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: >-
+                  SSE 帧序列：`id: <revision>\nevent: revision\ndata:
+                  {"revision":<int64>,"scope":"<workspaceId>/<environmentId>"}\n\n`，
+                  以及每 30s 的注释心跳 `: ping <unix秒>\n\n`。
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: 该作用域 SSE 连接数已达配额上限（code sse_cap）。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/sdk/ai/resolve":
+    post:
+      tags: [sdk, ai]
+      summary: SDK 侧资源解析（作用域=凭证环境；摘要校验后返回内容）
+      description: >-
+        SDK 凭证是服务端凭证——原始 AI 内容绝不发往浏览器。请求只能指名
+        凭证所属环境内注册的资源；跨租户/未 pin/已撤销一律 404。
+      operationId: resolveSDKAIResource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResourceRequest"
+      responses:
+        "200":
+          description: 摘要校验后的资源内容。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "501":
+          $ref: "#/components/responses/AINotImplemented"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/sdk/ai/session":
+    post:
+      tags: [sdk, ai]
+      summary: 会话冻结（一次求值 + 资源自动发现 + 摘要校验）
+      description: >-
+        为一次会话/任务冻结配置：对 flagKeys 逐个求值（进入实验时服务端落
+        曝光），从被服务的 variation 值中自动发现 promptRef/resourceRef 与
+        modelRef（modelRef 须过工作空间白名单），再解析并摘要校验全部资源。
+        任一资源失败则整体失败——任务绝不在部分解析的配置上启动。长任务把
+        返回的 SessionSnapshot 带在上下文里；新配置只影响后续会话。
+      operationId: freezeSDKAISession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionFreezeRequest"
+      responses:
+        "200":
+          description: 冻结的会话快照。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionSnapshot"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "501":
+          $ref: "#/components/responses/AINotImplemented"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/sdk/ai/check":
+    post:
+      tags: [sdk, ai]
+      summary: 执行前撤销门禁（即时阻断，不依赖快照同步）
+      description: >-
+        长任务在每个冻结资源执行前调用。任一资源被撤销 → HTTP 423，
+        body 中 anyBlocked=true 且对应 resources 项带 blocked/reason，
+        执行必须停止；全部通过 → 200。
+      operationId: checkSDKAIResources
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckRequest"
+      responses:
+        "200":
+          description: 无阻断。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckResponse"
+        "423":
+          description: 至少一个资源已被紧急撤销——停止执行。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "501":
+          $ref: "#/components/responses/AINotImplemented"
+        "500":
+          $ref: "#/components/responses/Internal"
+  "/api/v1/collect":
+    post:
+      tags: [collect]
+      summary: 批量上报曝光/转化事件（collect 凭证）
+      description: >-
+        events[].unit 必填明文：服务端做租户内 HMAC-SHA256 伪名化后存储，
+        原始 unit 不落盘；缺 unit 的事件跳过并计入 rejected（无随机化单元
+        即无归因）。eventId 幂等去重，重复计入 duplicates。epoch 与实验注册
+        不符、clientTime 迟到超 72h 或超前 5min → rejected（附原因）。
+        批量条数与字节上限来自工作空间配额；超限 → 400 batch_too_large。
+        空 events 数组返回全零结果。
+      operationId: collectEvents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CollectRequest"
+      responses:
+        "200":
+          description: 摄取统计。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: GoLab token (glab_admin_* / glab_sdk_* / glab_collect_*)
+      description: >-
+        Authorization: Bearer <token>。三受众互斥：admin（前缀 glab_admin_）
+        仅可用于 /api/v1/admin/**；sdk（glab_sdk_）仅可用于
+        /api/v1/sdk/**；collect（glab_collect_）仅可用于 /api/v1/collect。
+        持错误受众的凭证 → 403 wrong_audience；缺失/无效/已吊销 →
+        401 unauthorized。租户作用域（workspace/environment）由凭证本身
+        决定，任何端点不接受 query/body 参数选择租户。admin 凭证另带角色
+        （owner/publisher/analyst/viewer）做对象级 RBAC；每 token 固定窗口
+        限流，超限 → 429 rate_limited。GET /api/v1/health 无鉴权。
+  parameters:
+    WsPath:
+      name: ws
+      in: path
+      required: true
+      description: 工作空间 slug 或内部 ID（两者皆可，服务端解析）。
+      schema:
+        type: string
+    EnvPath:
+      name: env
+      in: path
+      required: true
+      description: 环境 slug 或内部 ID（两者皆可，服务端解析）。
+      schema:
+        type: string
+    FlagKeyPath:
+      name: key
+      in: path
+      required: true
+      description: Flag key（与草稿 content.key 必须一致）。
+      schema:
+        type: string
+    SegmentKeyPath:
+      name: key
+      in: path
+      required: true
+      description: Segment key（与草稿 content.key 必须一致）。
+      schema:
+        type: string
+    TokenIdPath:
+      name: id
+      in: path
+      required: true
+      description: 凭证内部 ID（非 secret）。
+      schema:
+        type: string
+    ExperimentIdPath:
+      name: id
+      in: path
+      required: true
+      description: 实验内部 ID。
+      schema:
+        type: string
+    AITypePath:
+      name: type
+      in: path
+      required: true
+      description: AI 资源类型（注册仅接受 prompt/skill/agentspec）。
+      schema:
+        type: string
+        enum: [prompt, skill, agentspec, mcp, pipeline]
+    AILogicalPath:
+      name: logical
+      in: path
+      required: true
+      description: 资源逻辑 ID（[a-z0-9-] slug）。
+      schema:
+        type: string
+    AuditLimitQuery:
+      name: limit
+      in: query
+      required: false
+      description: 返回条数上限；缺省 200，仅接受 1..1000（非法值忽略）。
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 200
+    AIResolveTypeQuery:
+      name: type
+      in: query
+      required: true
+      description: AI 资源类型。
+      schema:
+        type: string
+    AIResolveLogicalQuery:
+      name: logicalId
+      in: query
+      required: true
+      description: 资源逻辑 ID。
+      schema:
+        type: string
+    AIResolveVersionQuery:
+      name: version
+      in: query
+      required: false
+      description: 指定版本；缺省解析当前 pin 的版本。
+      schema:
+        type: string
+    IfNoneMatchHeader:
+      name: If-None-Match
+      in: header
+      required: false
+      description: 上次收到的 ETag；匹配当前 revision 时返回 304。
+      schema:
+        type: string
+    LastEventIdHeader:
+      name: Last-Event-ID
+      in: header
+      required: false
+      description: >-
+        SSE 重连时浏览器自动携带的最后事件 ID（= manifest revision）。
+        服务端接受该头用于观测，但连接即重放当前 revision（全量重同步
+        语义），不依赖事件日志回放。
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: >-
+        400：validation_failed（含严格 JSON 解码失败/未知字段）、
+        import_failed（gff 导入）、batch_too_large（采集批量超限）。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: 401 unauthorized：缺失、无效或已吊销的 bearer token。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: >-
+        403：wrong_audience（受众不符）、access_denied（RBAC/对象级拒绝）、
+        self_approval_denied（高风险草稿自批）。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: >-
+        404 not_found：对象不存在，或跨租户读取（AI 资源跨作用域一律 404，
+        不泄露存在性）。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: >-
+        409：exists（重复创建）、conflict（乐观锁/摘要漂移）、
+        invalid_state（非法状态迁移/资源已撤销）。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    RateLimited:
+      description: 429：rate_limited（每 token 限流）、quota_exceeded（工作空间配额）。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    AINotImplemented:
+      description: 501 ai_unavailable：AI 资源服务未接入本 server 实例。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Internal:
+      description: 500 internal：未分类服务端错误（另有 snapshot_invalid/encode/streaming_unsupported）。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: >-
+            机器可读错误码：unauthorized、wrong_audience、access_denied、
+            self_approval_denied、not_found、exists、conflict、invalid_state、
+            quota_exceeded、rate_limited、validation_failed、import_failed、
+            batch_too_large、ai_unavailable、snapshot_invalid、encode、
+            sse_cap、streaming_unsupported、internal。
+        message:
+          type: string
+          description: 人类可读详情。
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+    HealthResponse:
+      type: object
+      required: [status, service, schemaVersion]
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: golab
+        schemaVersion:
+          type: integer
+          description: 当前 DSL/快照 schema 代际（model.SchemaVersion = 1）。
+          example: 1
+    Workspace:
+      type: object
+      required: [id, slug, name, createdAt]
+      properties:
+        id:
+          type: string
+          description: 服务端生成的代理 ID（永不使用用户文本）。
+        slug:
+          type: string
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    Environment:
+      type: object
+      required: [id, workspaceId, slug, name, namespaceId, createdAt]
+      properties:
+        id:
+          type: string
+        workspaceId:
+          type: string
+        slug:
+          type: string
+        name:
+          type: string
+        namespaceId:
+          type: string
+          description: 该 (workspace, environment) 对应的 gonacos namespace（服务端生成）。
+        createdAt:
+          type: string
+          format: date-time
+    Token:
+      type: object
+      required: [id, name, kind, secretHash, prefix, createdAt, createdBy]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [admin, sdk, collect]
+        role:
+          type: string
+          enum: [owner, publisher, analyst, viewer]
+          description: 仅 admin 凭证（omitempty）。
+        workspaceId:
+          type: string
+          description: 作用域；全局 owner admin 凭证为空（omitempty）。
+        environmentId:
+          type: string
+          description: 仅 sdk/collect 凭证（omitempty）。
+        secretHash:
+          type: string
+          description: secret 的 SHA-256（明文永不存储）。
+        prefix:
+          type: string
+          description: 展示用明文前缀。
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        revoked:
+          type: boolean
+        createdBy:
+          type: string
+    CreatedToken:
+      type: object
+      description: >-
+        仅创建时返回一次。注意：platform.CreatedToken 没有 json tag，
+        因此 JSON 字段名是 Go 字段名 Token / Secret（大写开头）。
+      required: [Token, Secret]
+      properties:
+        Token:
+          $ref: "#/components/schemas/Token"
+        Secret:
+          type: string
+          description: 明文 secret（glab_<kind>_<43 个 url-safe 字符>），此后不可再取。
+    Quotas:
+      type: object
+      additionalProperties: false
+      required:
+        - maxFlags
+        - maxFlagBytes
+        - maxSegments
+        - maxExperiments
+        - maxEventBytes
+        - maxEventsPerBatch
+        - eventRetention
+      properties:
+        maxFlags:
+          type: integer
+        maxFlagBytes:
+          type: integer
+        maxSegments:
+          type: integer
+        maxExperiments:
+          type: integer
+        maxEventBytes:
+          type: integer
+        maxEventsPerBatch:
+          type: integer
+        eventRetention:
+          type: integer
+          format: int64
+          description: Go time.Duration，整数纳秒。
+    AuditEntry:
+      type: object
+      required: [id, time, actor, action]
+      properties:
+        id:
+          type: integer
+          format: int64
+        time:
+          type: string
+          format: date-time
+        actor:
+          type: string
+          description: 操作者（token 名称/ID）。
+        actorRole:
+          type: string
+          enum: [owner, publisher, analyst, viewer]
+        action:
+          type: string
+          description: 如 flag.publish、experiment.start、token.create、ai.revoke。
+        workspaceId:
+          type: string
+        environmentId:
+          type: string
+        object:
+          type: string
+        detail:
+          type: string
+          description: JSON 字符串，可能已脱敏。
+    CreateWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      required: [slug, name]
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+    CreateEnvironmentRequest:
+      type: object
+      additionalProperties: false
+      required: [slug, name]
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+    CreateTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [name, kind]
+      properties:
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [admin, sdk, collect]
+        role:
+          type: string
+          enum: [owner, publisher, analyst, viewer]
+          description: kind=admin 时必填；不能铸造全局 owner（workspaceId 恒为路径工作空间）。
+        environment:
+          type: string
+          description: kind=sdk/collect 时必填：环境 slug 或 ID。
+    TokenRevokeResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: revoked
+    Flag:
+      type: object
+      description: GoLab Flag DSL（schemaVersion 1）。
+      required: [schemaVersion, key, type, variations, defaultRule]
+      properties:
+        schemaVersion:
+          type: integer
+          enum: [1]
+        key:
+          type: string
+        type:
+          type: string
+          enum: [bool, string, number, json]
+        disable:
+          type: boolean
+          description: 急停开关；禁用时按 defaultRule 出值，reason=DISABLED。
+        version:
+          type: string
+          description: GoLab 发布 revision（信息性；权威值在 manifest）。
+        bucketing:
+          $ref: "#/components/schemas/Bucketing"
+        fields:
+          type: array
+          description: >-
+            注册的上下文字段白名单：所有约束字段（含引用 segment 的）与
+            bucketing unit 必须在此；targetingKey 隐式注册。
+          items:
+            type: string
+        variations:
+          type: object
+          description: 变体名 → 值；值必须匹配 type（json 接受任意值）。
+          additionalProperties: true
+        defaultRule:
+          $ref: "#/components/schemas/Rule"
+        targeting:
+          type: array
+          description: 按序匹配，首个命中生效。
+          items:
+            $ref: "#/components/schemas/Rule"
+        experiment:
+          $ref: "#/components/schemas/ExperimentBinding"
+    Bucketing:
+      type: object
+      required: [algorithm, unit]
+      properties:
+        algorithm:
+          type: string
+          enum: [golab-fnv1a-10000-v1]
+        unit:
+          type: string
+          description: 提供随机化单元的上下文字段；更改须开新实验 epoch。
+        salt:
+          type: string
+          description: 哈希域分隔；更改须开新 epoch。
+    Rule:
+      type: object
+      description: >-
+        targeting 规则或 defaultRule。variation 与 percentage 必须有且仅有
+        其一；约束 AND 组合，引用 segment 之间 OR、与约束 AND；disable 的
+        规则被跳过。
+      properties:
+        name:
+          type: string
+        disable:
+          type: boolean
+        constraints:
+          type: array
+          items:
+            $ref: "#/components/schemas/Constraint"
+        segments:
+          type: array
+          items:
+            type: string
+        percentage:
+          type: object
+          description: 变体名 → 百分比（和为 100）。
+          additionalProperties:
+            type: number
+        variation:
+          type: string
+    Constraint:
+      type: object
+      required: [field, op]
+      properties:
+        field:
+          type: string
+          description: 必须在 Flag.fields 注册（targetingKey 隐式注册）。
+        op:
+          type: string
+          description: 闭集操作符；未知操作符校验期拒绝。
+          enum:
+            - eq
+            - ne
+            - in
+            - not_in
+            - gt
+            - gte
+            - lt
+            - lte
+            - time_before
+            - time_after
+            - regex
+            - in_cidr
+            - semver_gt
+            - semver_gte
+            - semver_lt
+            - semver_lte
+            - semver_eq
+        value:
+          description: 标量操作符（eq/ne/gt/…/regex/in_cidr/semver_*/time_*）的操作数。
+        values:
+          type: array
+          description: 集合操作符（in/not_in）的操作数列表。
+          items: {}
+    ExperimentBinding:
+      type: object
+      required: [id, epoch, state]
+      properties:
+        id:
+          type: string
+        epoch:
+          type: integer
+          format: int64
+        layer:
+          type: string
+          description: 互斥层 ID（空 = 无层）。
+        layerSlot:
+          $ref: "#/components/schemas/BucketRange"
+        eligibility:
+          type: number
+          description: 入组百分比 [0,100]；0/未设 = 100。独立的 eligibility 哈希坐标。
+        state:
+          $ref: "#/components/schemas/ExperimentState"
+    BucketRange:
+      type: object
+      description: "[0,10000) 内的半开桶区间 [start, end)。"
+      required: [start, end]
+      properties:
+        start:
+          type: integer
+        end:
+          type: integer
+    ExperimentState:
+      type: string
+      enum: [draft, reviewed, scheduled, running, paused, stopped, analyzed, archived]
+    Segment:
+      type: object
+      description: 可复用、带版本的受众定义；约束 AND、嵌套 segment OR，环拒绝、深度有界。
+      required: [schemaVersion, key]
+      properties:
+        schemaVersion:
+          type: integer
+          enum: [1]
+        key:
+          type: string
+        version:
+          type: string
+        constraints:
+          type: array
+          items:
+            $ref: "#/components/schemas/Constraint"
+        segments:
+          type: array
+          items:
+            type: string
+    Manifest:
+      type: object
+      description: >-
+        每 (workspace, environment) 的索引：SDK 订阅/轮询 manifest，再拉取
+        其引用的不可变 per-revision 文档。所有被引用写入读回验证后才发布；
+        删除以 tombstone 呈现。
+      required: [schemaVersion, workspace, environment, revision, generatedAt, flags]
+      properties:
+        schemaVersion:
+          type: integer
+        workspace:
+          type: string
+          description: 代理 ID（喂给分桶哈希坐标，防改名）。
+        environment:
+          type: string
+        workspaceSlug:
+          type: string
+          description: 仅展示。
+        environmentSlug:
+          type: string
+        revision:
+          type: integer
+          format: int64
+        generatedAt:
+          type: string
+          format: date-time
+        flags:
+          type: array
+          items:
+            $ref: "#/components/schemas/ManifestEntry"
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/ManifestEntry"
+    ManifestEntry:
+      type: object
+      required: [key, revision, dataId, hash]
+      properties:
+        key:
+          type: string
+        revision:
+          type: integer
+          format: int64
+        dataId:
+          type: string
+          description: 承载文档的 gonacos dataId，如 golab.flag.<key>.r<revision>。
+        hash:
+          type: string
+          description: 文档规范 JSON 编码的 SHA-256 hex。
+        deleted:
+          type: boolean
+          description: tombstone：客户端必须从缓存逐出该 key。
+    Snapshot:
+      type: object
+      description: >-
+        求值器工作的原子单元：一个 manifest revision 及其全部被引用文档
+        （已下载、哈希验证、解析）。禁止部分混合多个 manifest revision。
+      required:
+        - schemaVersion
+        - workspace
+        - environment
+        - manifestRevision
+        - generatedAt
+        - flags
+      properties:
+        schemaVersion:
+          type: integer
+        workspace:
+          type: string
+          description: 代理 ID（哈希坐标）。
+        environment:
+          type: string
+        workspaceSlug:
+          type: string
+        environmentSlug:
+          type: string
+        manifestRevision:
+          type: integer
+          format: int64
+        generatedAt:
+          type: string
+          format: date-time
+        flags:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/Flag"
+        segments:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/Segment"
+    EvaluationContext:
+      type: object
+      description: >-
+        随机化单元与定向属性。targetingKey 必须是稳定的、已认证的或服务端
+        生成的身份——求值器绝不凭空发明。
+      properties:
+        targetingKey:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+    Exposure:
+      type: object
+      description: 应当上报的实验分配。
+      required: [experimentId, epoch, variant, source]
+      properties:
+        experimentId:
+          type: string
+        epoch:
+          type: integer
+          format: int64
+        variant:
+          type: string
+        source:
+          type: string
+          description: 到达该臂的方式；只有 split 臂是随机化的（SRM 只适用随机化人群）。
+          enum: [split, targeting, default]
+    Result:
+      type: object
+      description: >-
+        一次求值的结果。failed=true 的结果携带调用方默认值，绝不可解释为
+        一次分配。
+      required: [flagKey, value, variationType, reason, failed, trackEvents]
+      properties:
+        flagKey:
+          type: string
+        value:
+          description: 变体值（任意 JSON）。
+        variationType:
+          type: string
+        reason:
+          type: string
+          enum:
+            - DEFAULT
+            - TARGETING_MATCH
+            - SPLIT
+            - DISABLED
+            - ERROR
+            - NOT_ENROLLED
+            - EXPERIMENT_NOT_RUNNING
+            - STALE
+        errorCode:
+          type: string
+          enum: [FLAG_NOT_FOUND, MISSING_BUCKET_KEY, TYPE_MISMATCH, PARSE_ERROR, GENERAL]
+          description: 无错误时省略（omitempty）。
+        errorDetails:
+          type: string
+        failed:
+          type: boolean
+        flagVersion:
+          type: string
+        trackEvents:
+          type: boolean
+          description: true 且带 experiment 时应上报曝光。
+        experiment:
+          $ref: "#/components/schemas/Exposure"
+        bucket:
+          type: integer
+          description: 命中的桶（未使用时为 -1；omitempty 时 0 被省略）。
+    FlagDraft:
+      type: object
+      required:
+        - workspaceId
+        - environmentId
+        - key
+        - content
+        - state
+        - risk
+        - updatedBy
+        - updatedAt
+        - baseRevision
+      properties:
+        workspaceId:
+          type: string
+        environmentId:
+          type: string
+        key:
+          type: string
+        content:
+          $ref: "#/components/schemas/Flag"
+        state:
+          type: string
+          enum: [editing, submitted, approved]
+        risk:
+          type: string
+          enum: [normal, high]
+          description: high 草稿禁止提交人自批。
+        updatedBy:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        submittedBy:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        approvedBy:
+          type: string
+        approvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewNote:
+          type: string
+        deleted:
+          type: boolean
+          description: 待发布 tombstone。
+        baseRevision:
+          type: integer
+          format: int64
+          description: 乐观锁：本草稿编辑所基于的 revision。
+    FlagRevision:
+      type: object
+      description: 一个不可变的已发布 revision。
+      required:
+        - workspaceId
+        - environmentId
+        - key
+        - revision
+        - content
+        - hash
+        - dataId
+        - publishedAt
+        - publishedBy
+      properties:
+        workspaceId:
+          type: string
+        environmentId:
+          type: string
+        key:
+          type: string
+        revision:
+          type: integer
+          format: int64
+        content:
+          $ref: "#/components/schemas/Flag"
+        hash:
+          type: string
+          description: 规范 JSON 的 SHA-256。
+        dataId:
+          type: string
+          description: gonacos dataId（不可变）。
+        publishedAt:
+          type: string
+          format: date-time
+        publishedBy:
+          type: string
+        note:
+          type: string
+        rollbackOf:
+          type: integer
+          format: int64
+          description: 该 manifest 状态有意重指的旧 revision（回滚不产生新内容）。
+    SegmentDraft:
+      type: object
+      required:
+        - workspaceId
+        - environmentId
+        - key
+        - content
+        - state
+        - risk
+        - updatedBy
+        - updatedAt
+        - baseRevision
+      properties:
+        workspaceId:
+          type: string
+        environmentId:
+          type: string
+        key:
+          type: string
+        content:
+          $ref: "#/components/schemas/Segment"
+        state:
+          type: string
+          enum: [editing, submitted, approved]
+        risk:
+          type: string
+          enum: [normal, high]
+        updatedBy:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        submittedBy:
+          type: string
+        approvedBy:
+          type: string
+        baseRevision:
+          type: integer
+          format: int64
+    FlagView:
+      type: object
+      description: 控制台读模型：草稿 + 已发布状态。
+      required: [key, currentRevision]
+      properties:
+        key:
+          type: string
+        draft:
+          $ref: "#/components/schemas/FlagDraft"
+        currentRevision:
+          type: integer
+          format: int64
+          description: 0 = 尚无已发布 revision。
+        current:
+          $ref: "#/components/schemas/FlagRevision"
+        revisions:
+          type: array
+          description: 全部历史（详情端点返回；列表端点可省略）。
+          items:
+            $ref: "#/components/schemas/FlagRevision"
+    PublishResult:
+      type: object
+      required: [flagRevision, manifestRevision, hash, dataId]
+      properties:
+        flagRevision:
+          type: integer
+          format: int64
+        manifestRevision:
+          type: integer
+          format: int64
+        hash:
+          type: string
+        dataId:
+          type: string
+    SaveFlagDraftRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content:
+          allOf:
+            - $ref: "#/components/schemas/Flag"
+          description: content.key 必须等于路径 {key}（否则 400）。
+        risk:
+          type: string
+          enum: [normal, high]
+        baseRevision:
+          type: integer
+          format: int64
+          description: ">0 启用乐观锁；落后于当前 revision → 409 conflict。"
+    SaveSegmentDraftRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content:
+          allOf:
+            - $ref: "#/components/schemas/Segment"
+          description: content.key 必须等于路径 {key}（否则 400）。
+        risk:
+          type: string
+          enum: [normal, high]
+    NoteRequest:
+      type: object
+      additionalProperties: false
+      description: 可选评审备注（body 可整体省略）。
+      properties:
+        note:
+          type: string
+    ReasonRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+    RollbackRequest:
+      type: object
+      additionalProperties: false
+      required: [revision, reason]
+      properties:
+        revision:
+          type: integer
+          format: int64
+          description: 目标历史 revision（须存在且读回哈希验证通过）。
+        reason:
+          type: string
+    ImportGffRequest:
+      type: object
+      additionalProperties: false
+      required: [document, key, salt]
+      properties:
+        document:
+          type: string
+          description: gff flag 文档（YAML 或 JSON 原文）。
+        key:
+          type: string
+        salt:
+          type: string
+    ImportGffResponse:
+      type: object
+      required: [flag, warnings, draft, note]
+      properties:
+        flag:
+          $ref: "#/components/schemas/Flag"
+        warnings:
+          type: array
+          items:
+            type: string
+        draft:
+          $ref: "#/components/schemas/FlagDraft"
+        note:
+          type: string
+          description: HIGH 风险策略说明。
+    StateResponse:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [editing, submitted, approved]
+          description: 迁移后的草稿状态。
+    FlagDeleteResponse:
+      type: object
+      required: [status, next]
+      properties:
+        status:
+          type: string
+          example: marked-deleted
+        next:
+          type: string
+          description: 后续流程提示（submit → approve → publish 落 tombstone）。
+    DebugEvalRequest:
+      type: object
+      additionalProperties: false
+      required: [flagKey, context]
+      properties:
+        flagKey:
+          type: string
+        context:
+          $ref: "#/components/schemas/EvaluationContext"
+    DebugEvalResponse:
+      type: object
+      required: [result, manifestRevision, note]
+      properties:
+        result:
+          $ref: "#/components/schemas/Result"
+        manifestRevision:
+          type: integer
+          format: int64
+        note:
+          type: string
+          description: 调试求值永不记录曝光。
+    MetricSpec:
+      type: object
+      description: 实验主指标预注册（v1 仅 proportion 与 mean）。
+      required: [key, type, direction]
+      properties:
+        key:
+          type: string
+        type:
+          type: string
+          enum: [proportion, mean]
+        direction:
+          type: string
+          enum: [increase, decrease]
+          description: 什么方向算"更好"。
+        unit:
+          type: string
+        floor:
+          type: number
+          nullable: true
+          description: mean 指标的取值下限钳制（缺省不钳制）。
+        ceil:
+          type: number
+          nullable: true
+    GuardrailSpec:
+      type: object
+      description: 运营护栏规则，与主指标统计显著性分开评估。
+      required: [metricKey, type, maxRelativeRegression, minSample]
+      properties:
+        metricKey:
+          type: string
+        type:
+          type: string
+          enum: [proportion, mean]
+        direction:
+          type: string
+          enum: [increase, decrease]
+          description: 该指标什么方向算好；缺省 increase。逆向超出阈值即违约。
+        maxRelativeRegression:
+          type: number
+          description: 治疗臂相对控制臂的最大可接受回退比例（0.05 = 5%）。
+        minSample:
+          type: integer
+          format: int64
+          description: 样本低于此值不判违约（数据不足）。
+    Experiment:
+      type: object
+      additionalProperties: false
+      description: >-
+        预注册分析契约。创建请求必填：flagKey、unit、variants（≥2 且为 flag
+        的 variation）、proportions（每变体 (0,100]，和=100）、primaryMetric
+        （key/type/direction）、alpha ∈ (0,1)、analysisWindow > 0（纳秒）。
+        服务端赋值：id、workspaceId、environmentId、flagRevision、epoch、
+        layerSlot、state、时间戳、createdBy。更改随机化单元、指标定义、
+        比例或资源绑定 = 新 epoch，历史永不覆写。
+      required: [flagKey, unit, variants, proportions, primaryMetric, alpha, analysisWindow]
+      properties:
+        id:
+          type: string
+        workspaceId:
+          type: string
+        environmentId:
+          type: string
+        flagKey:
+          type: string
+        flagRevision:
+          type: integer
+          format: int64
+          description: 注册时所绑定的 flag revision。
+        epoch:
+          type: integer
+          format: int64
+          description: 自动分配、永不复用；0/缺省由服务端取下一个。
+        unit:
+          type: string
+          description: 随机化单元的上下文字段名。
+        layer:
+          type: string
+          description: 互斥层 ID（可选）。
+        layerSlot:
+          $ref: "#/components/schemas/BucketRange"
+        eligibility:
+          type: number
+          description: 入组百分比；0 = 100。
+        variants:
+          type: array
+          description: 显式稳定顺序（v1 分析要求恰好 2 个臂）。
+          items:
+            type: string
+        proportions:
+          type: object
+          description: 变体名 → 百分比；(0,100]，总和 100。
+          additionalProperties:
+            type: number
+        primaryMetric:
+          $ref: "#/components/schemas/MetricSpec"
+        guardrails:
+          type: array
+          items:
+            $ref: "#/components/schemas/GuardrailSpec"
+        alpha:
+          type: number
+          description: 显著性水平，(0,1)。
+        power:
+          type: number
+        mde:
+          type: number
+          description: 最小可检测效应。
+        minSamplePerArm:
+          type: integer
+          format: int64
+        minRuntime:
+          type: integer
+          format: int64
+          description: Go time.Duration，整数纳秒。
+        analysisWindow:
+          type: integer
+          format: int64
+          description: Go time.Duration，整数纳秒；必须 > 0。
+        hypothesis:
+          type: string
+        analysisMethod:
+          type: string
+          enum: [welch, two-proportion-z]
+          description: 预注册；缺省按 primaryMetric.type 推导（mean→welch，proportion→two-proportion-z）。
+        releasePlan:
+          $ref: "#/components/schemas/ReleasePlan"
+        state:
+          $ref: "#/components/schemas/ExperimentState"
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        stoppedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+    TransitionRequest:
+      type: object
+      additionalProperties: false
+      required: [to]
+      properties:
+        to:
+          $ref: "#/components/schemas/ExperimentState"
+        reason:
+          type: string
+    ReleaseStep:
+      type: object
+      description: >-
+        分阶段放量的一步。步骤只调整实验 eligibility；比例/单元/salt/绑定
+        由预注册 epoch 固定。eligibility 哈希是前缀区间——提高 ratio 不会
+        取消已入组单元。ratio 必须跨步骤严格递增。
+      additionalProperties: false
+      required: [name, ratio, minRuntime, autoAdvance]
+      properties:
+        name:
+          type: string
+        ratio:
+          type: number
+          description: 本步骤生效的实验 eligibility 百分比，(0,100]。
+        minRuntime:
+          type: integer
+          format: int64
+          description: 决策门可触发前的最小驻留时间（Go time.Duration，整数纳秒）。
+        observationWindow:
+          type: integer
+          format: int64
+          description: minRuntime 之后继续积累数据的观察窗（纳秒）。
+        autoAdvance:
+          type: boolean
+          description: false = 引擎在步骤边界等待人工推进。
+    ReleasePlanState:
+      type: string
+      enum: [armed, running, paused, completed, rolled_back]
+    PlanEvent:
+      type: object
+      description: 计划操作历史的一条（自动与手动动作都追加；有界，新者在后）。
+      required: [at, actor, action, step]
+      properties:
+        at:
+          type: string
+          format: date-time
+        actor:
+          type: string
+          description: rollout-engine 或 admin token 名称。
+        action:
+          type: string
+        step:
+          type: integer
+        detail:
+          type: string
+    ReleasePlan:
+      type: object
+      required: [steps, state, currentStep, createdAt, updatedAt, createdBy]
+      properties:
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReleaseStep"
+        state:
+          $ref: "#/components/schemas/ReleasePlanState"
+        currentStep:
+          type: integer
+        stepStartedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 当前步骤开始时刻（引擎时钟）。
+        manualOverride:
+          type: boolean
+          description: 人工接管开关；true 时引擎不做任何自动动作。
+        pausedReason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        history:
+          type: array
+          description: 最近操作窗口（上限 64 条；完整轨迹在不可变审计日志）。
+          items:
+            $ref: "#/components/schemas/PlanEvent"
+    ReleasePlanCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [steps]
+      properties:
+        steps:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ReleaseStep"
+    TakeoverRequest:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          description: true = 人工接管（引擎停止自动动作）；false = 交还引擎。
+        reason:
+          type: string
+    Report:
+      type: object
+      description: >-
+        一个实验 epoch 的完整分析输出（v1：固定样本、两臂、单一预注册主指标）。
+        分析人群是随机化子集；确定性 targeting/default 臂仅作展示，不进入
+        主统计与 SRM。报告是纯读——不改实验状态。
+      required:
+        - experimentId
+        - epoch
+        - flagKey
+        - state
+        - generatedAt
+        - analysisMethod
+        - alpha
+        - mde
+        - control
+        - treatment
+        - healthy
+        - perVariant
+        - decision
+        - minRuntimeSatisfied
+      properties:
+        experimentId:
+          type: string
+        epoch:
+          type: integer
+          format: int64
+        flagKey:
+          type: string
+        state:
+          $ref: "#/components/schemas/ExperimentState"
+        generatedAt:
+          type: string
+          format: date-time
+        analysisMethod:
+          type: string
+          enum: [welch, two-proportion-z]
+        alpha:
+          type: number
+        mde:
+          type: number
+        control:
+          type: string
+          description: 对照臂变体名。
+        treatment:
+          type: string
+          description: 治疗臂变体名。
+        healthy:
+          type: boolean
+          description: 任一数据质量门失败即 false；不健康的报告绝不驱动 ship/rollback 自动化。
+        healthIssues:
+          type: array
+          items:
+            type: string
+        srm:
+          $ref: "#/components/schemas/SRMResult"
+        perVariant:
+          type: array
+          items:
+            $ref: "#/components/schemas/VariantReport"
+        primary:
+          $ref: "#/components/schemas/PrimaryResult"
+        primaryError:
+          type: string
+        guardrails:
+          type: array
+          items:
+            $ref: "#/components/schemas/GuardrailCheck"
+        decision:
+          $ref: "#/components/schemas/Decision"
+        minRuntimeSatisfied:
+          type: boolean
+    VariantReport:
+      type: object
+      description: >-
+        每臂体量。randomizedUnits 是 SRM 与主分析的分母；exposedUnits 另计
+        经确定性规则到达该臂的单元（仅展示）。
+      required: [variant, exposedUnits, randomizedUnits, exposures, convertedUnits, primaryValue]
+      properties:
+        variant:
+          type: string
+        exposedUnits:
+          type: integer
+          format: int64
+        randomizedUnits:
+          type: integer
+          format: int64
+        exposures:
+          type: integer
+          format: int64
+        convertedUnits:
+          type: integer
+          format: int64
+          description: 随机化单元中发生转化者。
+        primaryValue:
+          type: number
+          description: 转化率或 per-unit 均值的均值。
+    PrimaryResult:
+      type: object
+      required: [type, pValue, diff, relativeDiff, relativeMeaningful, ciLow, ciHigh, significant]
+      properties:
+        type:
+          type: string
+          enum: [welch, two-proportion-z]
+        pValue:
+          type: number
+        diff:
+          type: number
+        relativeDiff:
+          type: number
+        relativeMeaningful:
+          type: boolean
+          description: 基线接近零时 false——只应解读绝对差。
+        ciLow:
+          type: number
+        ciHigh:
+          type: number
+        significant:
+          type: boolean
+        welch:
+          $ref: "#/components/schemas/WelchResult"
+        proportion:
+          $ref: "#/components/schemas/ProportionResult"
+    SRMResult:
+      type: object
+      description: 观测 per-variant 单元数对预注册分配的卡方拟合优度检验。
+      required: [chiSquare, pValue, healthy, observed, expected]
+      properties:
+        chiSquare:
+          type: number
+        pValue:
+          type: number
+        healthy:
+          type: boolean
+          description: pValue >= 阈值（0.001）；不健康即 SRM 告警，查明原因前不得宣称胜者。
+        observed:
+          type: array
+          items:
+            type: number
+        expected:
+          type: array
+          items:
+            type: number
+    WelchResult:
+      type: object
+      required:
+        - meanA
+        - meanB
+        - diff
+        - relativeDiff
+        - varA
+        - varB
+        - na
+        - nb
+        - t
+        - df
+        - pValue
+        - ciDiffLow
+        - ciDiffHigh
+        - significant
+        - relativeMeaningful
+      properties:
+        meanA:
+          type: number
+        meanB:
+          type: number
+        diff:
+          type: number
+          description: meanB − meanA。
+        relativeDiff:
+          type: number
+        varA:
+          type: number
+        varB:
+          type: number
+        na:
+          type: integer
+          format: int64
+        nb:
+          type: integer
+          format: int64
+        t:
+          type: number
+          description: 零方差退化情形可为 ±Inf。
+        df:
+          type: number
+          description: Welch–Satterthwaite 自由度；未定义时报 0。
+        pValue:
+          type: number
+        ciDiffLow:
+          type: number
+        ciDiffHigh:
+          type: number
+        significant:
+          type: boolean
+        relativeMeaningful:
+          type: boolean
+    ProportionResult:
+      type: object
+      required:
+        - pa
+        - pb
+        - diff
+        - relativeDiff
+        - na
+        - nb
+        - xa
+        - xb
+        - z
+        - pValue
+        - ciDiffLow
+        - ciDiffHigh
+        - significant
+        - relativeMeaningful
+      properties:
+        pa:
+          type: number
+        pb:
+          type: number
+        diff:
+          type: number
+          description: pb − pa。
+        relativeDiff:
+          type: number
+        na:
+          type: integer
+          format: int64
+        nb:
+          type: integer
+          format: int64
+        xa:
+          type: integer
+          format: int64
+        xb:
+          type: integer
+          format: int64
+        z:
+          type: number
+        pValue:
+          type: number
+        ciDiffLow:
+          type: number
+        ciDiffHigh:
+          type: number
+        significant:
+          type: boolean
+        relativeMeaningful:
+          type: boolean
+    GuardrailCheck:
+      type: object
+      description: >-
+        一条护栏的评估结果。注意：Go 结构体 stats.GuardrailCheck 的
+        Metric/Detail 字段没有 json tag——JSON 键是 Go 字段名（大写开头）；
+        Breached 的 tag 是 breached。
+      required: [Metric, breached, Detail]
+      properties:
+        Metric:
+          type: string
+          description: 护栏指标名（Go 字段名直出，无 json tag）。
+        breached:
+          type: boolean
+        Detail:
+          type: string
+          description: 违约说明（Go 字段名直出，无 json tag）。
+    Decision:
+      type: object
+      description: >-
+        固定样本决策门的输出。只在预注册分析点（窗口关闭、alpha/power/MDE/
+        最小运行时间事先固定）有效；对累积数据反复调用并据此提前宣称胜利
+        是 p 值偷看，被明确禁止。
+      required: [verdict, reasons]
+      properties:
+        verdict:
+          type: string
+          enum: [ship, rollback, continue, hold]
+        reasons:
+          type: array
+          description: 有序的人类可读解释。
+          items:
+            type: string
+        guardrailBreaches:
+          type: array
+          items:
+            $ref: "#/components/schemas/GuardrailBreach"
+    GuardrailBreach:
+      type: object
+      required: [metric, detail]
+      properties:
+        metric:
+          type: string
+        detail:
+          type: string
+    AIResourceRef:
+      type: object
+      description: 所有权索引：逻辑名（租户内）→ 服务端生成的全局唯一 physical ID。
+      required: [workspaceId, environmentId, type, logicalId, physicalId, owner, createdAt]
+      properties:
+        workspaceId:
+          type: string
+        environmentId:
+          type: string
+        type:
+          type: string
+          enum: [prompt, skill, agentspec]
+        logicalId:
+          type: string
+        physicalId:
+          type: string
+          description: 服务端生成、全局唯一（gonacos AI 资源无 namespace 字段）。
+        owner:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    PinnedVersion:
+      type: object
+      description: 发布时绑定的不可变资源版本。
+      required:
+        - workspaceId
+        - environmentId
+        - type
+        - logicalId
+        - physicalId
+        - version
+        - digest
+        - pinnedAt
+        - pinnedBy
+      properties:
+        workspaceId:
+          type: string
+        environmentId:
+          type: string
+        type:
+          type: string
+        logicalId:
+          type: string
+        physicalId:
+          type: string
+        version:
+          type: string
+        digest:
+          type: string
+          description: gonacos 版本元数据的 MD5 hex。
+        pinnedAt:
+          type: string
+          format: date-time
+        pinnedBy:
+          type: string
+    AIContent:
+      type: object
+      description: 一份已解析、摘要校验通过的资源版本内容。
+      required: [type, logicalId, physicalId, version, digest, content, resolvedAt]
+      properties:
+        type:
+          type: string
+        logicalId:
+          type: string
+        physicalId:
+          type: string
+        version:
+          type: string
+        digest:
+          type: string
+        content:
+          type: string
+        resolvedAt:
+          type: string
+          format: date-time
+    AIResourcesResponse:
+      type: object
+      required: [resources, revocations]
+      properties:
+        resources:
+          type: array
+          items:
+            $ref: "#/components/schemas/AIResourceRef"
+        revocations:
+          type: object
+          description: 活跃撤销表：键为 type 与 logicalId 的内部拼接，值为撤销原因（附操作者）。
+          additionalProperties:
+            type: string
+    RegisterAIResourceRequest:
+      type: object
+      additionalProperties: false
+      required: [type, logicalId, name]
+      properties:
+        type:
+          type: string
+          enum: [prompt, skill, agentspec]
+          description: mcp/pipeline 被拒绝（无不可变版本语义）。
+        logicalId:
+          type: string
+          description: "[a-z0-9-] slug。"
+        name:
+          type: string
+    PinAIVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content:
+          type: string
+          description: 新版本原始内容（发布后读回验证并计算 MD5）。
+    RevokeAIResourceRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          description: 撤销原因（必填，空 → 400）。
+    AIRevokeResponse:
+      type: object
+      required: [status, type, logicalId]
+      properties:
+        status:
+          type: string
+          example: revoked
+        type:
+          type: string
+        logicalId:
+          type: string
+    AIReinstateResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: reinstated
+    ModelAllowEntry:
+      type: object
+      description: provider/model 白名单的一行；未入白名单的 modelRef flag 无法发布。
+      required: [workspaceId, provider, model, enabled, createdAt, createdBy]
+      properties:
+        workspaceId:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+        params:
+          type: object
+          description: 受限默认参数。
+          additionalProperties:
+            type: string
+        enabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+    SetModelAllowlistRequest:
+      type: object
+      additionalProperties: false
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelAllowEntry"
+    ResourceRequest:
+      type: object
+      additionalProperties: false
+      required: [type, logicalId]
+      properties:
+        type:
+          type: string
+        logicalId:
+          type: string
+        version:
+          type: string
+          description: 缺省解析当前 pin 的版本。
+    SessionFreezeRequest:
+      type: object
+      additionalProperties: false
+      required: [sessionId, context, flagKeys]
+      properties:
+        sessionId:
+          type: string
+          description: 必填（空 → 400）。
+        taskId:
+          type: string
+        context:
+          $ref: "#/components/schemas/EvaluationContext"
+        flagKeys:
+          type: array
+          items:
+            type: string
+        resources:
+          type: array
+          description: 除自动发现（promptRef/resourceRef）外显式请求的资源。
+          items:
+            $ref: "#/components/schemas/ResourceRequest"
+    SessionSnapshot:
+      type: object
+      description: >-
+        冻结的每任务配置：一次求值 + 资源版本冻结。长任务把它带在上下文里；
+        新配置只影响后续会话。
+      required:
+        - sessionId
+        - workspaceId
+        - environmentId
+        - manifestRevision
+        - frozenAt
+        - evaluations
+        - resources
+        - modelRefs
+      properties:
+        sessionId:
+          type: string
+        taskId:
+          type: string
+        workspaceId:
+          type: string
+        environmentId:
+          type: string
+        manifestRevision:
+          type: integer
+          format: int64
+        frozenAt:
+          type: string
+          format: date-time
+        evaluations:
+          type: object
+          description: flagKey → 冻结时的求值结果。
+          additionalProperties:
+            $ref: "#/components/schemas/Result"
+        resources:
+          type: array
+          description: 全部解析并摘要校验通过的资源（任一失败则整体失败）。
+          items:
+            $ref: "#/components/schemas/AIContent"
+        modelRefs:
+          type: array
+          description: 已解析的白名单 modelRef 条目。
+          items:
+            $ref: "#/components/schemas/ModelAllowEntry"
+    CheckRequest:
+      type: object
+      additionalProperties: false
+      required: [resources]
+      properties:
+        resources:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResourceRequest"
+    CheckStatus:
+      type: object
+      required: [type, logicalId, blocked]
+      properties:
+        type:
+          type: string
+        logicalId:
+          type: string
+        blocked:
+          type: boolean
+        reason:
+          type: string
+          description: 撤销原因（仅 blocked=true 时出现，omitempty）。
+    CheckResponse:
+      type: object
+      required: [resources, anyBlocked]
+      properties:
+        resources:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckStatus"
+        anyBlocked:
+          type: boolean
+          description: true 时 HTTP 状态为 423——执行必须停止。
+    EvalRequest:
+      type: object
+      additionalProperties: false
+      required: [flagKey, context]
+      properties:
+        flagKey:
+          type: string
+        context:
+          $ref: "#/components/schemas/EvaluationContext"
+    EvalResponse:
+      type: object
+      required: [result, value, manifestRevision]
+      properties:
+        result:
+          $ref: "#/components/schemas/Result"
+        value:
+          description: result.value 的便捷副本（任意 JSON）。
+        manifestRevision:
+          type: integer
+          format: int64
+        exposureEventId:
+          type: string
+          description: >-
+            服务端落下曝光时返回（omitempty）：对
+            (experiment, epoch, unit, variant) 确定性生成，重复求值幂等。
+        randomizationUnit:
+          type: string
+          description: >-
+            曝光所归因的规范单元字符串（仅落了曝光时出现，omitempty）——
+            供转化事件对齐同一 unit 哈希；值来自调用方自身上下文。
+    RevisionResponse:
+      type: object
+      required: [revision, etag]
+      properties:
+        revision:
+          type: integer
+          format: int64
+          description: 当前 manifest revision；从未发布过 manifest 的环境为 0。
+        etag:
+          type: string
+          description: 对应实体标签（"golab-r<revision>"）。
+    CollectEvent:
+      type: object
+      additionalProperties: false
+      description: >-
+        一条曝光/转化事件。unit 必填明文（服务端 HMAC 伪名化，原值不落盘）；
+        缺 unit 的事件被跳过并计入 rejected。
+      required: [eventId, type, experimentId, epoch, variant, unit, clientTime]
+      properties:
+        eventId:
+          type: string
+          description: 幂等去重键；重复计入 duplicates。
+        type:
+          type: string
+          enum: [exposure, conversion]
+        experimentId:
+          type: string
+        epoch:
+          type: integer
+          format: int64
+          description: 与实验注册不符 → rejected。
+        flagKey:
+          type: string
+        flagRevision:
+          type: integer
+          format: int64
+        variant:
+          type: string
+        unit:
+          type: string
+          description: 随机化单元明文；服务端做租户内 HMAC-SHA256 后存储。
+        source:
+          type: string
+          description: 曝光来源 split|targeting|default。
+        metricKey:
+          type: string
+          description: 转化事件的指标键。
+        value:
+          type: number
+          description: 转化值（mean 指标用）。
+        sessionId:
+          type: string
+        taskId:
+          type: string
+        clientTime:
+          type: string
+          format: date-time
+          description: 迟到超 72h 或超前 5min → rejected。
+    CollectRequest:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          description: 空数组返回全零结果；条数超工作空间配额 → 400 batch_too_large。
+          items:
+            $ref: "#/components/schemas/CollectEvent"
+    CollectResponse:
+      type: object
+      required: [accepted, duplicates, rejected]
+      properties:
+        accepted:
+          type: integer
+        duplicates:
+          type: integer
+        rejected:
+          type: integer
+          description: 含缺 unit 被跳过的事件数。
+        rejectMessages:
+          type: array
+          nullable: true
+          description: 拒绝原因（无拒绝时可能缺省或为 null）。
+          items:
+            type: string

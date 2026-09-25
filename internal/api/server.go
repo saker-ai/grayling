@@ -30,6 +30,7 @@ import (
 	aisvc "github.com/godeps/golab/internal/ai"
 	"github.com/godeps/golab/internal/configstore"
 	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/golab/internal/rollout"
 	"github.com/godeps/golab/pkg/model"
 )
 
@@ -40,6 +41,11 @@ type Server struct {
 	Config  configstore.Store
 	Hub     *SSEHub
 	limiter *rateLimiter
+
+	// Rollout is the staged-release auto-advance engine (§5.3 P4). Created
+	// with the server; cmd/golab starts its ticker loop, tests may Tick it
+	// deterministically.
+	Rollout *rollout.Engine
 
 	// ai is optional; when nil, AI endpoints answer 501.
 	ai *aisvc.Service
@@ -84,6 +90,7 @@ func NewServer(store *platform.Store, cfg configstore.Store, opts Options) *Serv
 	s.Admin = admin.NewService(store, cfg, func(wsID, envID string, rev int64) {
 		s.Hub.Notify(wsID, envID, rev)
 	})
+	s.Rollout = rollout.NewEngine(store, s.Admin, opts.Logger)
 	return s
 }
 
@@ -129,6 +136,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/experiments/{id}/transition", s.adminOnly(s.handleTransitionExperiment))
 	mux.HandleFunc("GET /api/v1/admin/experiments/{id}/report", s.adminOnly(s.handleExperimentReport))
 
+	// Staged-rollout release plans (自动推进, §5.3 P4).
+	mux.HandleFunc("POST /api/v1/admin/experiments/{id}/release-plan", s.adminOnly(s.handleCreateReleasePlan))
+	mux.HandleFunc("GET /api/v1/admin/experiments/{id}/release-plan", s.adminOnly(s.handleGetReleasePlan))
+	mux.HandleFunc("POST /api/v1/admin/experiments/{id}/release-plan/pause", s.adminOnly(s.handlePauseReleasePlan))
+	mux.HandleFunc("POST /api/v1/admin/experiments/{id}/release-plan/resume", s.adminOnly(s.handleResumeReleasePlan))
+	mux.HandleFunc("POST /api/v1/admin/experiments/{id}/release-plan/advance", s.adminOnly(s.handleAdvanceReleasePlan))
+	mux.HandleFunc("POST /api/v1/admin/experiments/{id}/release-plan/takeover", s.adminOnly(s.handleTakeoverReleasePlan))
+
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/debug/eval", s.adminOnly(s.handleDebugEval))
 
 	// AI resource governance.
@@ -143,6 +158,7 @@ func (s *Server) Handler() http.Handler {
 
 	// SDK data plane (sdk tokens).
 	mux.HandleFunc("GET /api/v1/sdk/config", s.sdkOnly(s.handleSDKConfig))
+	mux.HandleFunc("GET /api/v1/sdk/revision", s.sdkOnly(s.handleSDKRevision))
 	mux.HandleFunc("POST /api/v1/sdk/eval", s.sdkOnly(s.handleSDKEval))
 	mux.HandleFunc("GET /api/v1/sdk/stream", s.sdkOnly(s.handleSDKStream))
 	mux.HandleFunc("POST /api/v1/sdk/ai/resolve", s.sdkOnly(s.handleSDKAIResolve))

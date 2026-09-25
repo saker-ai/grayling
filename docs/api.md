@@ -1,6 +1,6 @@
 # GoLab API 参考（v1）
 
-> 与实现同步的端点清单（来源：`internal/api/server.go` 路由表）。正式 OpenAPI 草案是 P0 待办（见[实施状态](实施状态.md)）；本文以实际行为为准。
+> 与实现同步的端点清单（来源：`internal/api/server.go` 路由表）。机器可读规范见仓库根 [`openapi.yaml`](../openapi.yaml)（由 `internal/api/openapi_test.go` 与路由表机械化双向核对）；本文以实际行为为准。
 
 ## 认证与受众
 
@@ -55,6 +55,25 @@
 | `POST /experiments/{id}/transition` | `{to, reason}`；状态变更自动重发布绑定 flag（重试收敛） |
 | `GET /experiments/{id}/report` | 分析报告：健康位/SRM/per-variant/主指标（Welch 或两比例 z）/护栏/决策门（ship/rollback/continue/hold） |
 
+### 自动推进发布（release plan，§5.3 P4）
+
+预注册的分步放量计划绑定在实验上，由服务端自动推进引擎（`internal/rollout`，`-rollout-interval`，默认 30s，0 关闭）按计划步骤/观察窗/决策门结果推进。步骤只 ramp **eligibility**（独立 hash 坐标的前缀区间，提升比例不会移动已入组单元）；比例/单元/盐属 epoch 预注册，引擎绝不触碰。
+
+| 端点 | 说明 |
+|---|---|
+| `POST /api/v1/admin/experiments/{id}/release-plan` | 预注册计划 `{steps:[{name, ratio, minRuntime(ns), observationWindow(ns), autoAdvance}]}`；ratio 必须严格递增 ∈(0,100]，minRuntime>0；实验须处于 reviewed/scheduled/running；计划唯一（重复创建 409） |
+| `GET /api/v1/admin/experiments/{id}/release-plan` | 计划详情 + 动作历史（每个自动/手动动作都记录 actor 与原因） |
+| `POST .../release-plan/pause` | `{reason}` 必填；armed/running → paused，引擎停手 |
+| `POST .../release-plan/resume` | paused → running（**步骤时钟重置**：干预后须重新服满观察窗）；从未起跑的计划回到 armed |
+| `POST .../release-plan/advance` | `{reason}` 人工推进下一步（最后一步则完成计划）；不被决策门拦截（人工发布决策），但当前 verdict 记入历史 |
+| `POST .../release-plan/takeover` | `{enabled, reason}` 人工接管开关：开启后引擎对该计划不做任何自动动作 |
+
+引擎语义（全部动作幂等，先记状态后发布、失败下一 tick 收敛修复）：
+
+- 实验 Running 后启动计划：应用 step 0 的 ratio（重发布绑定 flag）。
+- 每步服满 `minRuntime + observationWindow` 才查询决策门（绝不提前偷看 p 值）：报告不可得或数据不健康（SRM/无曝光等）→ **自动暂停**并记原因，人工恢复前不再动作；verdict=rollback（护栏破线或主指标显著变差）→ 实验转 Stopped（重发布停止入组）+ 计划 rolled_back（终态）；verdict=hold（样本/最短运行不足）→ 继续等待；verdict=continue/ship → `autoAdvance` 步骤进入下一步；最后一步 ship → 计划 completed（**flag 停留在最后一步 ratio，全量放开是人工发布决策，引擎不自动宣称成功**）。
+- 计划状态机：armed → running → paused/completed/rolled_back；所有自动动作以 `rollout-engine` 系统身份落审计（`release_plan.*`）。
+
 ### AI 资源
 
 | 端点 | 说明 |
@@ -71,7 +90,8 @@
 | 端点 | 说明 |
 |---|---|
 | `GET /api/v1/sdk/config` | 作用域全量快照；`ETag`/`If-None-Match`→304；manifest revision 即 ETag |
-| `POST /api/v1/sdk/eval` | `{flagKey, context}` → `{result, value, manifestRevision, exposureEventId?}`；进入实验时服务端自动落幂等曝光 |
+| `GET /api/v1/sdk/revision` | **受限投影**：仅返回 `{revision, etag}`（无 flag 内容）；远程求值 SDK（Python/TS）以此轮询失效本地求值缓存；未发布环境返回 `revision:0` |
+| `POST /api/v1/sdk/eval` | `{flagKey, context}` → `{result, value, manifestRevision, exposureEventId?, randomizationUnit?}`；进入实验时服务端自动落幂等曝光，并回显曝光归属的规范化随机化单元（供转化上报落在同一 unit hash） |
 | `GET /api/v1/sdk/stream` | SSE：`event: revision`，`id:`=manifest revision，data=`{revision,scope}`；连接即重放当前 revision；30s 心跳；断线用 `Last-Event-ID` 重连（全量重同步语义） |
 | `POST /api/v1/sdk/ai/resolve` | `{type, logicalId, version?}` → 摘要校验后的内容（跨租户 404，不泄露存在性） |
 | `POST /api/v1/sdk/ai/session` | `{sessionId, context, flagKeys, resources?}` → 会话冻结快照：一次求值+自动发现 promptRef/modelRef+摘要校验；任一资源失败则整体失败 |
@@ -98,6 +118,7 @@
 | `GET /api/v1/sdk/stream` | SSE 中继：逐块 flush，事件边界不缓冲；客户端断开即取消上游订阅 |
 | `POST /api/v1/collect` | 曝光/转化中继 |
 | `GET /api/v1/sdk/config` | 快照拉取中继（ETag/304 透传） |
+| `GET /api/v1/sdk/revision` | 受限新鲜度探测中继（仅 revision，供远程求值 SDK 轮询失效缓存） |
 | `GET /healthz` | **liveness**：proxy 自身存活，不探测上游（上游故障不应导致编排系统杀掉 proxy 机队） |
 | `GET /api/v1/health` | **readiness**：探测上游 `/api/v1/health`；不可达/不健康 → 503 |
 

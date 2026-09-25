@@ -49,6 +49,7 @@ func main() {
 		gonacosGRPC   = flag.String("gonacos-grpc-addr", "127.0.0.1:19848", "gonacos gRPC bind — KEEP LOOPBACK/PRIVATE (§9)")
 		redisAddr     = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
 		authSecret    = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
+		rolloutIv     = flag.Duration("rollout-interval", 30*time.Second, "auto-advance engine tick interval for staged release plans (0 disables automation; manual plan operations stay available)")
 		bootstrapName = flag.String("bootstrap-owner-name", "bootstrap-owner", "display name of the auto-created global owner token")
 		printVersion  = flag.Bool("version", false, "print version and exit")
 	)
@@ -135,6 +136,8 @@ func main() {
 	})
 	apiSrv.SetAI(aisvc.NewService(store, bundle.AI))
 
+	// ---- staged-release auto-advance engine (§5.3 P4) ----
+	go apiSrv.Rollout.Run(ctx, *rolloutIv)
 	// ---- bootstrap owner credential (printed once) ----
 	if token := bootstrapOwner(store, *bootstrapName, logger); token != "" {
 		logger.Printf("")

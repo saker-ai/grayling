@@ -288,3 +288,33 @@ func TestUnknownRouteNotRelayed(t *testing.T) {
 		}
 	}
 }
+
+func TestRevisionRelay(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/sdk/revision" {
+			t.Errorf("unexpected upstream path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer glab_sdk_test" {
+			t.Errorf("credential not passed through: %q", got)
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(`{"revision":7,"etag":"\"golab-r7\""}`))
+	}))
+	defer upstream.Close()
+	px := newTestProxy(t, upstream.URL, nil)
+
+	req, _ := http.NewRequest("GET", px.URL+"/api/v1/sdk/revision", nil)
+	req.Header.Set("Authorization", "Bearer glab_sdk_test")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("revision via proxy: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"revision":7`) {
+		t.Fatalf("revision relay: %d %s", resp.StatusCode, body)
+	}
+	if resp.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("cache-control not passed through: %q", resp.Header.Get("Cache-Control"))
+	}
+}

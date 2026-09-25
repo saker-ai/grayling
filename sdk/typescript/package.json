@@ -1,0 +1,24 @@
+{
+  "name": "@golab/sdk",
+  "version": "0.1.0",
+  "description": "GoLab feature-flag & experiment SDK for TypeScript/Node — remote evaluation with config cache/polling and collect-contract event reporting",
+  "type": "module",
+  "private": true,
+  "main": "./src/client.ts",
+  "exports": {
+    ".": "./src/client.ts",
+    "./bucketing": "./src/bucketing.ts"
+  },
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22.6"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2"
+  }
+}

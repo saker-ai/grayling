@@ -189,34 +189,124 @@ type GuardrailSpec struct {
 // randomization unit, metric definitions, proportions or resource bindings
 // creates a NEW epoch; history is never overwritten (§6).
 type Experiment struct {
-	ID              string                `json:"id"`
-	WorkspaceID     string                `json:"workspaceId"`
-	EnvironmentID   string                `json:"environmentId"`
-	FlagKey         string                `json:"flagKey"`
-	FlagRevision    int64                 `json:"flagRevision"` // revision the experiment was registered against
-	Epoch           int64                 `json:"epoch"`
-	Unit            string                `json:"unit"` // randomization-unit context field
-	Layer           string                `json:"layer,omitempty"`
-	LayerSlot       *model.BucketRange    `json:"layerSlot,omitempty"`
-	Eligibility     float64               `json:"eligibility"` // percent, 0 = 100
-	Variants        []string              `json:"variants"`    // explicit stable order
-	Proportions     map[string]float64    `json:"proportions"`
-	PrimaryMetric   MetricSpec            `json:"primaryMetric"`
-	Guardrails      []GuardrailSpec       `json:"guardrails,omitempty"`
-	Alpha           float64               `json:"alpha"`
-	Power           float64               `json:"power"`
-	MDE             float64               `json:"mde"`
-	MinSamplePerArm int64                 `json:"minSamplePerArm"`
-	MinRuntime      time.Duration         `json:"minRuntime"`
-	AnalysisWindow  time.Duration         `json:"analysisWindow"`
-	Hypothesis      string                `json:"hypothesis"`
-	AnalysisMethod  string                `json:"analysisMethod"` // pre-registered, v1: "welch" | "two-proportion-z"
-	State           model.ExperimentState `json:"state"`
-	StartedAt       *time.Time            `json:"startedAt,omitempty"`
-	StoppedAt       *time.Time            `json:"stoppedAt,omitempty"`
-	CreatedAt       time.Time             `json:"createdAt"`
-	UpdatedAt       time.Time             `json:"updatedAt"`
-	CreatedBy       string                `json:"createdBy"`
+	ID              string             `json:"id"`
+	WorkspaceID     string             `json:"workspaceId"`
+	EnvironmentID   string             `json:"environmentId"`
+	FlagKey         string             `json:"flagKey"`
+	FlagRevision    int64              `json:"flagRevision"` // revision the experiment was registered against
+	Epoch           int64              `json:"epoch"`
+	Unit            string             `json:"unit"` // randomization-unit context field
+	Layer           string             `json:"layer,omitempty"`
+	LayerSlot       *model.BucketRange `json:"layerSlot,omitempty"`
+	Eligibility     float64            `json:"eligibility"` // percent, 0 = 100
+	Variants        []string           `json:"variants"`    // explicit stable order
+	Proportions     map[string]float64 `json:"proportions"`
+	PrimaryMetric   MetricSpec         `json:"primaryMetric"`
+	Guardrails      []GuardrailSpec    `json:"guardrails,omitempty"`
+	Alpha           float64            `json:"alpha"`
+	Power           float64            `json:"power"`
+	MDE             float64            `json:"mde"`
+	MinSamplePerArm int64              `json:"minSamplePerArm"`
+	MinRuntime      time.Duration      `json:"minRuntime"`
+	AnalysisWindow  time.Duration      `json:"analysisWindow"`
+	Hypothesis      string             `json:"hypothesis"`
+	AnalysisMethod  string             `json:"analysisMethod"` // pre-registered, v1: "welch" | "two-proportion-z"
+	// ReleasePlan is the optional pre-registered staged-rollout plan driven
+	// by the auto-advance engine (§5.3 计划步骤/观察窗, P4).
+	ReleasePlan *ReleasePlan          `json:"releasePlan,omitempty"`
+	State       model.ExperimentState `json:"state"`
+	StartedAt   *time.Time            `json:"startedAt,omitempty"`
+	StoppedAt   *time.Time            `json:"stoppedAt,omitempty"`
+	CreatedAt   time.Time             `json:"createdAt"`
+	UpdatedAt   time.Time             `json:"updatedAt"`
+	CreatedBy   string                `json:"createdBy"`
+}
+
+// ReleaseStep is one planned step of a staged rollout (§5.3 发布记录: 计划
+// 步骤、观察窗). Steps ramp the experiment ELIGIBILITY only — proportions,
+// unit, salt and bindings are fixed by the pre-registered epoch (§6: 改比例
+// 须新 epoch). Eligibility hashing is a prefix interval, so raising the ratio
+// never un-enrolls an already-enrolled unit.
+type ReleaseStep struct {
+	Name string `json:"name"`
+	// Ratio is the experiment eligibility percentage in (0,100] applied
+	// while this step is current. Must strictly increase across steps.
+	Ratio float64 `json:"ratio"`
+	// MinRuntime is the minimum dwell time on this step before the decision
+	// gate may fire (§5.3: 自动推进只在观测窗口、数据完整性、最小样本及全部
+	// 护栏均满足时执行).
+	MinRuntime time.Duration `json:"minRuntime"`
+	// ObservationWindow is additional soak time after MinRuntime during
+	// which data keeps accumulating before the gate is consulted (观察窗).
+	ObservationWindow time.Duration `json:"observationWindow,omitempty"`
+	// AutoAdvance permits the engine to enter the next step without human
+	// confirmation when the gate passes. false = the engine holds at the
+	// step boundary until an operator advances manually.
+	AutoAdvance bool `json:"autoAdvance"`
+}
+
+// ReleasePlanState is the engine-visible lifecycle of a release plan.
+type ReleasePlanState string
+
+const (
+	// ReleasePlanArmed: registered, waiting for the experiment to run.
+	ReleasePlanArmed ReleasePlanState = "armed"
+	// ReleasePlanRunning: the engine is applying/observing steps.
+	ReleasePlanRunning ReleasePlanState = "running"
+	// ReleasePlanPaused: held — by the engine (unhealthy data, SRM) or by
+	// an operator. No automatic action until resumed.
+	ReleasePlanPaused ReleasePlanState = "paused"
+	// ReleasePlanCompleted: the final step passed its gate (ship verdict or
+	// manual completion). The flag stays at the final step's ratio; full
+	// rollout is a human publish decision (no automatic victory claim).
+	ReleasePlanCompleted ReleasePlanState = "completed"
+	// ReleasePlanRolledBack: the decision gate fired rollback (guardrail
+	// breach or significantly worse primary); enrollment was stopped.
+	ReleasePlanRolledBack ReleasePlanState = "rolled_back"
+)
+
+// PlanEvent is one entry of the plan's action history — the engine and
+// every manual operation append here (bounded, newest last) so operators can
+// reconstruct exactly what automation did and why (§9: 审计).
+type PlanEvent struct {
+	At     time.Time `json:"at"`
+	Actor  string    `json:"actor"` // "rollout-engine" or the admin token name
+	Action string    `json:"action"`
+	Step   int       `json:"step"`
+	Detail string    `json:"detail,omitempty"`
+}
+
+// ReleasePlan is the pre-registered staged-rollout contract of one
+// experiment (§5.3, P4 自动推进). It lives inside the Experiment record so
+// both persistence backends carry it transactionally; history is capped at
+// PlanHistoryCap entries.
+type ReleasePlan struct {
+	Steps       []ReleaseStep    `json:"steps"`
+	State       ReleasePlanState `json:"state"`
+	CurrentStep int              `json:"currentStep"`
+	// StepStartedAt stamps when the current step began (engine clock).
+	StepStartedAt *time.Time `json:"stepStartedAt,omitempty"`
+	// ManualOverride is the 人工接管开关 (§9: 人工可暂停开关): while true the
+	// engine takes NO automatic action on this plan; operators drive it via
+	// the manual endpoints.
+	ManualOverride bool        `json:"manualOverride,omitempty"`
+	PausedReason   string      `json:"pausedReason,omitempty"`
+	CreatedAt      time.Time   `json:"createdAt"`
+	UpdatedAt      time.Time   `json:"updatedAt"`
+	CreatedBy      string      `json:"createdBy"`
+	History        []PlanEvent `json:"history,omitempty"`
+}
+
+// PlanHistoryCap bounds the in-record action history (audit trail lives in
+// the immutable audit log; this is the operator-facing recent window).
+const PlanHistoryCap = 64
+
+// AppendHistory adds one event and trims to the cap.
+func (p *ReleasePlan) AppendHistory(ev PlanEvent) {
+	p.History = append(p.History, ev)
+	if len(p.History) > PlanHistoryCap {
+		p.History = p.History[len(p.History)-PlanHistoryCap:]
+	}
 }
 
 // EventType distinguishes exposures from conversions (§10.1).

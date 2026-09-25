@@ -10,6 +10,7 @@
 //	GET  /api/v1/sdk/stream   SSE revision invalidation (flushing relay)
 //	POST /api/v1/collect      exposure/conversion ingestion
 //	GET  /api/v1/sdk/config   scoped snapshot pull (ETag/304 passthrough)
+//	GET  /api/v1/sdk/revision restricted freshness probe (revision only)
 //
 // Proxy-owned endpoints:
 //
@@ -131,6 +132,7 @@ func (p *Proxy) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/health", p.handleReadyz)
 	mux.HandleFunc("POST /api/v1/sdk/eval", p.relayUnary)
 	mux.HandleFunc("GET /api/v1/sdk/config", p.relayUnary)
+	mux.HandleFunc("GET /api/v1/sdk/revision", p.relayUnary)
 	mux.HandleFunc("POST /api/v1/collect", p.relayUnary)
 	mux.HandleFunc("GET /api/v1/sdk/stream", p.relayStream)
 	return mux
