@@ -24,11 +24,37 @@
 //     flags all succeed with a gap-free monotonic manifest carrying every
 //     flag (PostgreSQL advisory lock + reload-under-lock serialization); a
 //     same-flag race yields exactly one winner.
+//
+// Convergence-wait contract (WHY the waits are shaped the way they are):
+//
+//   - The wait target is always the KNOWN TRUE FINAL revision from the
+//     store/admin plane — the manifestRevision of a publish response
+//     (allocated under the PG advisory lock), the gap-free-verified base+n
+//     of the concurrent burst, the winner revision of the same-flag race —
+//     never a sample of a possibly-lagging replica's served view (a replica
+//     only sees publishes completed THROUGH THE OTHER replica after a
+//     reload/pub-sub tick, so a sampled "final" revision can be lower than
+//     the true one and a ">=" wait against it passes instantly).
+//   - waitRevision means EVERY replica serves >= want; the final sweep uses
+//     waitSettledRevision (every replica serves the SAME revision >= want).
+//   - Revision parity does NOT imply document completeness: gonacos Redis
+//     pub/sub syncs per document, fire-and-forget, so a replica can briefly
+//     hold a manifest whose flag documents are still in flight; its read
+//     path then correctly refuses to serve torn state (HTTP 5xx,
+//     configstore.ErrIncompleteSnapshot) and the 1s reconciler backstop
+//     converges (docs/实施状态.md 已知限制 2 边界③). Snapshot/eval assertions
+//     therefore ride that window out with BOUNDED retries on transport/5xx
+//     only, then assert hard. Everything else fails immediately so product
+//     defects stay detectable: an HTTP 200 snapshot at revision >= the true
+//     final that is missing keys (manifest key loss), two successful evals
+//     that disagree (split brain), 4xx, decode failures. No wait is
+//     unbounded.
 package cluster
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -36,6 +62,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -331,8 +358,31 @@ func (c *client) sdkRevision() int64 {
 	return out.Revision
 }
 
-// sdkEval evaluates one flag for a bucketing key; returns the variation name.
-func (c *client) sdkEval(flagKey, unit string) string {
+// transientError marks a convergence-window failure that bounded waits may
+// retry: transport failures and HTTP 5xx — notably the documented
+// configstore.ErrIncompleteSnapshot 500 a replica answers while gonacos
+// per-document pub/sub propagation has delivered the manifest but not yet
+// every flag document it references (docs/实施状态.md 已知限制 2 边界③:
+// pub/sub fire-and-forget, 收敛上界=对账间隔+修复耗时).
+type transientError struct{ msg string }
+
+func (e *transientError) Error() string { return e.msg }
+
+func isTransient(err error) bool {
+	var tr *transientError
+	return errors.As(err, &tr)
+}
+
+// sdkEvalStrict evaluates one flag for a bucketing key. A nil-error result
+// is always a successful (HTTP 200) evaluation with a NON-EMPTY variation:
+// transport failures and 5xx return errors instead of silently degrading to
+// "" (which used to masquerade as a cross-replica eval disagreement). An
+// HTTP 200 carrying an empty variationType is a hard error: for the
+// default-rule string flags exercised here every legitimate outcome names a
+// variation, so an empty one means a failure result (flag not in the served
+// snapshot, missing bucket key, variation type mismatch) — a broken state
+// that must never pass as a value.
+func (c *client) sdkEvalStrict(flagKey, unit string) (string, error) {
 	body, _ := json.Marshal(map[string]any{
 		"flagKey": flagKey,
 		"context": map[string]any{
@@ -342,46 +392,281 @@ func (c *client) sdkEval(flagKey, unit string) string {
 	})
 	req, err := http.NewRequest("POST", c.base+"/api/v1/sdk/eval", bytes.NewReader(body))
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("eval(%s,%s) %s: build request: %w", flagKey, unit, c.base, err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return ""
+		return "", &transientError{fmt.Sprintf(
+			"eval(%s,%s) %s: transport: %v", flagKey, unit, c.base, err)}
 	}
 	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 500 {
+		return "", &transientError{fmt.Sprintf(
+			"eval(%s,%s) %s: HTTP %d: %s", flagKey, unit, c.base, resp.StatusCode, truncate(string(data), 300))}
+	}
 	if resp.StatusCode != 200 {
-		return ""
+		return "", fmt.Errorf("eval(%s,%s) %s: HTTP %d: %s",
+			flagKey, unit, c.base, resp.StatusCode, truncate(string(data), 300))
 	}
 	var out struct {
 		Result struct {
 			VariationType string `json:"variationType"`
 		} `json:"result"`
 	}
-	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &out); err != nil {
-		return ""
+		return "", fmt.Errorf("eval(%s,%s) %s: decode: %v (%s)",
+			flagKey, unit, c.base, err, truncate(string(data), 300))
 	}
-	return out.Result.VariationType
+	if out.Result.VariationType == "" {
+		return "", fmt.Errorf("eval(%s,%s) %s: HTTP 200 but the evaluation is missing "+
+			"(flag not in the served snapshot?): %s", flagKey, unit, c.base, truncate(string(data), 300))
+	}
+	return out.Result.VariationType, nil
 }
 
-// waitRevision polls a replica's served manifest revision until it reaches
-// want or the timeout elapses. Returns the observed latency.
-func waitRevision(t *testing.T, c *client, want int64, timeout time.Duration) time.Duration {
+// sdkSnapshotStrict fetches /api/v1/sdk/config with full error semantics:
+// transport failures and 5xx (the convergence window — a replica must never
+// serve a torn snapshot, so it answers ErrIncompleteSnapshot while manifest
+// and documents are mid-sync) return errors; a nil-error result is the
+// served manifest revision plus the flag map. An error body must never be
+// silently decoded into an "empty snapshot" (which used to masquerade as
+// missing flags).
+func (c *client) sdkSnapshotStrict() (int64, map[string]map[string]any, error) {
+	var out struct {
+		ManifestRevision int64                      `json:"manifestRevision"`
+		Flags            map[string]json.RawMessage `json:"flags"`
+	}
+	req, err := http.NewRequest("GET", c.base+"/api/v1/sdk/config", nil)
+	if err != nil {
+		return 0, nil, fmt.Errorf("sdk/config %s: build request: %w", c.base, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, nil, &transientError{fmt.Sprintf("sdk/config %s: transport: %v", c.base, err)}
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 500 {
+		return 0, nil, &transientError{fmt.Sprintf(
+			"sdk/config %s: HTTP %d: %s", c.base, resp.StatusCode, truncate(string(data), 300))}
+	}
+	if resp.StatusCode != 200 {
+		return 0, nil, fmt.Errorf("sdk/config %s: HTTP %d: %s",
+			c.base, resp.StatusCode, truncate(string(data), 300))
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return 0, nil, fmt.Errorf("sdk/config %s: decode: %v (%s)", c.base, err, truncate(string(data), 200))
+	}
+	flags := map[string]map[string]any{}
+	for k, raw := range out.Flags {
+		var f map[string]any
+		_ = json.Unmarshal(raw, &f)
+		flags[k] = f
+	}
+	return out.ManifestRevision, flags, nil
+}
+
+func bases(clients []*client) []string {
+	out := make([]string, len(clients))
+	for i, c := range clients {
+		out[i] = c.base
+	}
+	return out
+}
+
+// waitRevision polls EVERY given replica until all of them serve a manifest
+// revision >= want — the convergence contract is "all replicas >= want", not
+// "one sampled replica >= a possibly-lagging sample" — and returns the
+// observed latency. Transport errors while polling are retried through the
+// deadline; the failure message keeps the last observed revisions.
+func waitRevision(t *testing.T, want int64, timeout time.Duration, clients ...*client) time.Duration {
 	t.Helper()
 	start := time.Now()
 	deadline := start.Add(timeout)
-	var last int64 = -1
+	last := make([]int64, len(clients))
+	for i := range last {
+		last[i] = -1
+	}
 	for time.Now().Before(deadline) {
-		last = c.sdkRevision()
-		if last >= want {
+		all := true
+		for i, c := range clients {
+			last[i] = c.sdkRevision()
+			if last[i] < want {
+				all = false
+			}
+		}
+		if all {
 			return time.Since(start)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("replica revision never reached %d within %s (last=%d)", want, timeout, last)
+	t.Fatalf("replicas never all reached manifest r%d within %s (last=%v replicas=%v)",
+		want, timeout, last, bases(clients))
 	return 0
+}
+
+// waitSettledRevision waits until EVERY replica serves the SAME manifest
+// revision and it is >= want ("两副本 revision 相等且 >= 真终值"). Returns the
+// settled revision and the wait latency.
+func waitSettledRevision(t *testing.T, want int64, timeout time.Duration, clients ...*client) (int64, time.Duration) {
+	t.Helper()
+	start := time.Now()
+	deadline := start.Add(timeout)
+	last := make([]int64, len(clients))
+	for i := range last {
+		last[i] = -1
+	}
+	for time.Now().Before(deadline) {
+		settled := true
+		for i, c := range clients {
+			last[i] = c.sdkRevision()
+			if last[i] < want || last[i] != last[0] {
+				settled = false
+			}
+		}
+		if settled {
+			return last[0], time.Since(start)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("replicas never settled on a common revision >= %d within %s (last=%v replicas=%v)",
+		want, timeout, last, bases(clients))
+	return 0, 0
+}
+
+// waitFullSnapshot waits until c serves an HTTP 200 snapshot at
+// manifestRevision >= wantRev, riding out the per-document sync window
+// (transport/5xx are transient and retried; a 200 below wantRev is lag and
+// also retried), then returns the served revision and flags for HARD
+// assertions. Non-transient errors fail immediately; so does the timeout —
+// the wait is bounded, never unconditional.
+func waitFullSnapshot(t *testing.T, c *client, wantRev int64, timeout time.Duration) (int64, map[string]map[string]any) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		rev, flags, err := c.sdkSnapshotStrict()
+		switch {
+		case err == nil && rev >= wantRev:
+			return rev, flags
+		case err == nil:
+			lastErr = fmt.Errorf("served snapshot at r%d < r%d", rev, wantRev)
+		case isTransient(err):
+			lastErr = err
+		default:
+			t.Fatalf("snapshot from %s: %v", c.base, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("replica %s never served a complete snapshot at r>= %d within %s (last: %v; revision now %d)",
+		c.base, wantRev, timeout, lastErr, c.sdkRevision())
+	return 0, nil
+}
+
+// waitEvalAgreement waits until every replica returns a SUCCESSFUL eval for
+// every unit — transient convergence-window errors (transport/5xx) are
+// retried inside the bounded timeout — then hard-asserts cross-replica
+// agreement: two successful evals that differ after the revision wait are a
+// real inconsistency and fail immediately (never retried away).
+func waitEvalAgreement(t *testing.T, flagKey string, units []string, timeout time.Duration, clients ...*client) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	got := make([]string, len(clients))
+	for _, u := range units {
+		for {
+			var lastErr error
+			ok := true
+			for i, c := range clients {
+				v, err := c.sdkEvalStrict(flagKey, u)
+				if err != nil {
+					lastErr = err
+					if !isTransient(err) {
+						t.Fatalf("eval(%s) on %s: %v", u, c.base, err)
+					}
+					ok = false
+					break
+				}
+				got[i] = v
+			}
+			if ok {
+				for i := 1; i < len(got); i++ {
+					if got[i] != got[0] {
+						t.Fatalf("replicas disagree on eval(%s) after convergence: %s=%q %s=%q",
+							u, clients[0].base, got[0], clients[i].base, got[i])
+					}
+				}
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("eval(%s) never converged within %s (last: %v)", u, timeout, lastErr)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
+// captureFingerprint evaluates flagKey for every unit on c and returns the
+// unit→variation map once EVERY eval succeeded; transient convergence-window
+// errors are retried inside the bounded timeout so a fingerprint can never
+// record a "" born from a failed HTTP call.
+func captureFingerprint(t *testing.T, c *client, flagKey string, units []string, timeout time.Duration) map[string]string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	out := make(map[string]string, len(units))
+	for _, u := range units {
+		for {
+			v, err := c.sdkEvalStrict(flagKey, u)
+			if err == nil {
+				out[u] = v
+				break
+			}
+			if !isTransient(err) || time.Now().After(deadline) {
+				t.Fatalf("fingerprint eval(%s) on %s: %v", u, c.base, err)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	return out
+}
+
+// waitEvalMatch waits until c returns a SUCCESSFUL eval for every wanted
+// unit (transient errors retried inside the bounded timeout), hard-comparing
+// each against the expected value: two successful evals that differ are a
+// real divergence and are never retried away.
+func waitEvalMatch(t *testing.T, c *client, flagKey string, want map[string]string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	units := make([]string, 0, len(want))
+	for u := range want {
+		units = append(units, u)
+	}
+	sort.Strings(units)
+	mismatch := 0
+	for _, u := range units {
+		for {
+			got, err := c.sdkEvalStrict(flagKey, u)
+			if err == nil {
+				if got != want[u] {
+					mismatch++
+					if mismatch <= 5 {
+						t.Logf("eval(%s) on %s = %q, want %q", u, c.base, got, want[u])
+					}
+				}
+				break
+			}
+			if !isTransient(err) || time.Now().After(deadline) {
+				t.Fatalf("eval(%s) on %s never succeeded within %s (last: %v)", u, c.base, timeout, err)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	if mismatch != 0 {
+		t.Fatalf("%d/%d evaluations diverged on %s", mismatch, len(want), c.base)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -454,9 +739,16 @@ func TestClusterMultiReplica(t *testing.T) {
 	sdkB := &client{t: t, base: B.base, token: sdkToken}
 	sdkA := &client{t: t, base: A.base, token: sdkToken}
 
-	// B must already serve r1 (loaded/synced at boot); reconcile guarantees it.
-	waitRevision(t, sdkB, revA, 15*time.Second)
+	// B must already serve r1 (loaded/synced at boot); reconcile guarantees
+	// it. revA is the store truth from the publish response, and the wait
+	// covers BOTH replicas (see the convergence-wait contract in the header).
+	waitRevision(t, revA, 15*time.Second, sdkA, sdkB)
 	t.Logf("B serves manifest r%d at join", sdkB.sdkRevision())
+
+	// lastPublishRev carries the store-side truth (the manifestRevision of
+	// the most recent publish response) across subtests — the wait target
+	// is never sampled from a replica's possibly-lagging served view.
+	var lastPublishRev int64
 
 	// =====================================================================
 	// 1. 发布收敛 (Redis up): publish r2 on A → visible on B via gonacos
@@ -464,24 +756,24 @@ func TestClusterMultiReplica(t *testing.T) {
 	// =====================================================================
 	t.Run("ConvergenceRedisUp", func(t *testing.T) {
 		start := time.Now()
-		_, st := adminA.publishFlag(splitFlag("feature", 60)) // new revision of the flag
+		rev2, st := adminA.publishFlag(splitFlag("feature", 60)) // new revision of the flag
 		if st != 200 {
 			t.Fatalf("publish r2 on A: %d", st)
 		}
-		// A's publish bumps the manifest revision; read what A now serves.
-		wantA := sdkA.sdkRevision()
-		lat := waitRevision(t, sdkB, wantA, 5*time.Second)
+		// rev2 (publish response) is the store truth; wait for BOTH replicas.
+		// A serves its own publish synchronously, so the measured latency is
+		// B's convergence — what the 5s cluster goal is about.
+		lat := waitRevision(t, rev2, 5*time.Second, sdkA, sdkB)
 		t.Logf("1 PASS: publish on A → visible on B in %s (manifest r%d); gonacos Redis pub/sub fast path (< 5s goal, wall since publish-start %s)",
-			lat, wantA, time.Since(start))
+			lat, rev2, time.Since(start))
 		if lat >= 5*time.Second {
 			t.Fatalf("cluster convergence %s exceeded the 5s goal", lat)
 		}
 		// Same-key evaluations agree across replicas (one cluster, one truth).
-		for _, u := range []string{"u1", "u2", "u3", "u7", "u42"} {
-			if a, b := sdkA.sdkEval("feature", u), sdkB.sdkEval("feature", u); a != b {
-				t.Fatalf("replicas disagree on eval(%s): A=%q B=%q", u, a, b)
-			}
-		}
+		// Transient convergence-window 5xx (per-document sync still in
+		// flight) are retried inside the bounded wait; two SUCCESSFUL evals
+		// that disagree fail immediately.
+		waitEvalAgreement(t, "feature", []string{"u1", "u2", "u3", "u7", "u42"}, 15*time.Second, sdkA, sdkB)
 		t.Logf("1 PASS: per-key evaluation identical on A and B")
 	})
 
@@ -497,41 +789,38 @@ func TestClusterMultiReplica(t *testing.T) {
 
 		// Publish r3 on A while Redis is down. A commits to PG (up) and writes
 		// its own gonacos locally; the Redis sync publish fails and is ignored.
-		_, st := adminA.publishFlag(splitFlag("feature", 75))
+		rev3, st := adminA.publishFlag(splitFlag("feature", 75))
 		if st != 200 {
 			// Redis being down must not break the publish path (PG is the
 			// durable store; gonacos sync is best-effort).
 			rdb.StartAgain(t)
 			t.Fatalf("publish on A during Redis outage: %d", st)
 		}
-		wantA := sdkA.sdkRevision()
-		if wantA <= beforeA {
+		if rev3 <= beforeA {
 			rdb.StartAgain(t)
-			t.Fatalf("A did not advance during outage (still r%d)", wantA)
+			t.Fatalf("store truth r%d did not advance past the pre-outage served r%d", rev3, beforeA)
 		}
-		t.Logf("2: A advanced to manifest r%d during the outage", wantA)
+		t.Logf("2: A advanced to manifest r%d during the outage", rev3)
 
 		// B converges via its reconciler reloading the shared PG truth and
 		// republishing into B's gonacos — independent of Redis.
-		lat := waitRevision(t, sdkB, wantA, 30*time.Second)
-		t.Logf("2 PASS: B converged to manifest r%d via reconciler+PostgreSQL while Redis was DOWN (%s)", wantA, lat)
+		lat := waitRevision(t, rev3, 30*time.Second, sdkA, sdkB)
+		t.Logf("2 PASS: B converged to manifest r%d via reconciler+PostgreSQL while Redis was DOWN (%s)", rev3, lat)
 
 		// Restart Redis; the cluster must survive and stay consistent.
 		rdb.StartAgain(t)
 		t.Logf("2: Redis restarted; verifying continued consistency")
 		// A subsequent publish propagates through BOTH paths again.
-		_, st = adminA.publishFlag(splitFlag("feature", 25))
+		rev4, st := adminA.publishFlag(splitFlag("feature", 25))
 		if st != 200 {
 			t.Fatalf("publish after Redis restart: %d", st)
 		}
-		wantA2 := sdkA.sdkRevision()
-		waitRevision(t, sdkB, wantA2, 15*time.Second)
-		for _, u := range []string{"u1", "u5", "u9"} {
-			if a, b := sdkA.sdkEval("feature", u), sdkB.sdkEval("feature", u); a != b {
-				t.Fatalf("post-recovery replicas disagree on eval(%s): A=%q B=%q", u, a, b)
-			}
-		}
-		t.Logf("2 PASS: after Redis restart, publish r%d converged on B and evaluations agree", wantA2)
+		waitRevision(t, rev4, 15*time.Second, sdkA, sdkB)
+		// Anchor recorded as soon as the revision converged — later failures
+		// in this subtest must not degrade subtests 3/4 to a floor of 0.
+		lastPublishRev = rev4
+		waitEvalAgreement(t, "feature", []string{"u1", "u5", "u9"}, 15*time.Second, sdkA, sdkB)
+		t.Logf("2 PASS: after Redis restart, publish r%d converged on B and evaluations agree", rev4)
 	})
 
 	// =====================================================================
@@ -539,32 +828,27 @@ func TestClusterMultiReplica(t *testing.T) {
 	//    published state (manifest revision + per-key evaluation).
 	// =====================================================================
 	t.Run("RestartSnapshotConsistency", func(t *testing.T) {
-		wantA := sdkA.sdkRevision()
+		wantA := lastPublishRev // store truth: subtest 2's final publish response
 		// Capture A's evaluation fingerprint across many keys BEFORE restart.
-		fingerprint := map[string]string{}
-		for i := 0; i < 60; i++ {
-			u := fmt.Sprintf("restart-user-%d", i)
-			fingerprint[u] = sdkA.sdkEval("feature", u)
+		// captureFingerprint only records SUCCESSFUL evals (a transient 5xx
+		// during the sync window is retried, never frozen into the
+		// fingerprint as "").
+		units := make([]string, 60)
+		for i := range units {
+			units[i] = fmt.Sprintf("restart-user-%d", i)
 		}
-		t.Logf("3: restarting replica B (A at manifest r%d)", wantA)
+		fingerprint := captureFingerprint(t, sdkA, "feature", units, 15*time.Second)
+		t.Logf("3: restarting replica B (store truth r%d)", wantA)
 		B.restart(t)
 		sdkB2 := &client{t: t, base: B.base, token: sdkToken}
 
-		lat := waitRevision(t, sdkB2, wantA, 30*time.Second)
+		lat := waitRevision(t, wantA, 30*time.Second, sdkA, sdkB2)
 		t.Logf("3: B re-converged to manifest r%d %s after restart", wantA, lat)
 
-		mismatch := 0
-		for u, wantVariant := range fingerprint {
-			if got := sdkB2.sdkEval("feature", u); got != wantVariant {
-				mismatch++
-				if mismatch <= 5 {
-					t.Logf("3: eval(%s) after restart = %q, A had %q", u, got, wantVariant)
-				}
-			}
-		}
-		if mismatch != 0 {
-			t.Fatalf("3: %d/%d evaluations diverged after B restart", mismatch, len(fingerprint))
-		}
+		// Bounded retry covers the post-restart document-sync window (5xx);
+		// a SUCCESSFUL eval that differs from the fingerprint is a real
+		// divergence and fails immediately.
+		waitEvalMatch(t, sdkB2, "feature", fingerprint, 30*time.Second)
 		t.Logf("3 PASS: after restart B matches A on manifest r%d and all %d per-key evaluations (snapshot consistent)",
 			wantA, len(fingerprint))
 	})
@@ -590,8 +874,13 @@ func TestClusterMultiReplica(t *testing.T) {
 			}
 		}
 		adminB := &client{t: t, base: B.base, token: ownerToken}
+		sdkBcur := &client{t: t, base: B.base, token: sdkToken}
 
-		base := sdkA.sdkRevision()
+		// Anchor: settle BOTH replicas on a common served revision >= the
+		// last known store truth, so `base` below is deterministic (a
+		// single-replica sample could lag and silently shift the expected
+		// [base+1, base+n] window).
+		base, _ := waitSettledRevision(t, lastPublishRev, 15*time.Second, sdkA, sdkBcur)
 		var wg sync.WaitGroup
 		statuses := make([]int, n)
 		revs := make([]int64, n)
@@ -631,27 +920,48 @@ func TestClusterMultiReplica(t *testing.T) {
 		t.Logf("4 PASS: %d concurrent cross-replica publishes → gap-free monotonic manifest revisions %v", n, revs)
 
 		// The final manifest (read from BOTH replicas after convergence)
-		// carries every concurrently published flag exactly once.
-		finalRev := sdkA.sdkRevision()
-		waitRevision(t, &client{t: t, base: B.base, token: sdkToken}, finalRev, 15*time.Second)
-		for _, c := range []*client{sdkA, {t: t, base: B.base, token: sdkToken}} {
-			snap := c.fullSnapshot()
+		// carries every concurrently published flag exactly once. The wait
+		// target is the KNOWN true final revision base+n — the gap-free
+		// check above proved the burst allocated exactly [base+1, base+n] —
+		// never a sample of A's served view (publishes completed THROUGH B
+		// only reach A on a later reload/sync tick, so a sample can be low
+		// and a single-replica ">=" wait then passes instantly).
+		trueFinal := base + int64(n)
+		waitRevision(t, trueFinal, 30*time.Second, sdkA, sdkBcur)
+		// Revision parity does NOT imply document completeness: gonacos
+		// per-document pub/sub can land the manifest before every flag doc,
+		// and the read path then correctly 5xx's (ErrIncompleteSnapshot)
+		// until the docs arrive / the 1s reconciler repairs. Ride that
+		// bounded window out, then assert hard on the successful snapshot:
+		// a 200 at r >= trueFinal missing a key is manifest key loss (a
+		// product defect) and fails immediately — it is never retried away.
+		for _, c := range []*client{sdkA, sdkBcur} {
+			rev, snap := waitFullSnapshot(t, c, trueFinal, 30*time.Second)
 			for i := 0; i < n; i++ {
 				key := fmt.Sprintf("conc-%d", i)
 				if _, ok := snap[key]; !ok {
-					t.Fatalf("final snapshot missing concurrently published flag %s", key)
+					keys := make([]string, 0, len(snap))
+					for k := range snap {
+						keys = append(keys, k)
+					}
+					sort.Strings(keys)
+					t.Fatalf("snapshot on %s at r%d (true final r%d) is missing concurrently published flag %s; served keys=%v",
+						c.base, rev, trueFinal, key, keys)
 				}
 			}
 			if _, ok := snap["feature"]; !ok {
-				t.Fatal("final snapshot lost the pre-existing feature flag")
+				t.Fatalf("snapshot on %s at r%d lost the pre-existing feature flag", c.base, rev)
 			}
 		}
-		t.Logf("4 PASS: both replicas' final snapshots carry all %d concurrent flags + the pre-existing flag", n)
+		t.Logf("4 PASS: both replicas' final snapshots (r>= %d) carry all %d concurrent flags + the pre-existing flag", trueFinal, n)
 	})
 
 	// =====================================================================
 	// 4b. Same-flag race across replicas: exactly one winner.
 	// =====================================================================
+	// revA4b/revB4b capture the store-side truth of the race: exactly one
+	// call allocates a manifest revision (the winner); the loser gets 409/0.
+	var revA4b, revB4b int64
 	t.Run("SameFlagRaceOneWinner", func(t *testing.T) {
 		fl := splitFlag("race-flag", 50)
 		base := fmt.Sprintf("/api/v1/admin/workspaces/acme/environments/prod/flags/%s", fl.Key)
@@ -669,8 +979,8 @@ func TestClusterMultiReplica(t *testing.T) {
 		var wg sync.WaitGroup
 		stA, stB := 0, 0
 		wg.Add(2)
-		go func() { defer wg.Done(); _, stA = adminB.publishFlagApproved(fl) }()
-		go func() { defer wg.Done(); _, stB = adminA.publishFlagApproved(fl) }()
+		go func() { defer wg.Done(); revA4b, stA = adminB.publishFlagApproved(fl) }()
+		go func() { defer wg.Done(); revB4b, stB = adminA.publishFlagApproved(fl) }()
 		wg.Wait()
 
 		// A transport error (status 0) is NOT a serialization outcome — both
@@ -693,19 +1003,29 @@ func TestClusterMultiReplica(t *testing.T) {
 		if wins != 1 || losses != 1 {
 			t.Fatalf("same-flag race produced wins=%d losses=%d (statuses A=%d B=%d), want exactly one winner", wins, losses, stA, stB)
 		}
+		// The winner's revision is the final sweep's store-side truth floor —
+		// a 200 that carried no manifestRevision would silently degrade that
+		// floor to 0, so refuse it here.
+		if max(revA4b, revB4b) == 0 {
+			t.Fatalf("winner's publish response carried no manifestRevision (revB-call=%d revA-call=%d, statuses %d/%d)",
+				revA4b, revB4b, stA, stB)
+		}
 		t.Logf("4b PASS: concurrent same-flag publish on A and B → exactly one 200, the other 409 (draft already consumed; A=%d B=%d)",
 			stA, stB)
 	})
 
-	// Final consistency sweep: A and B serve the same revision and agree.
-	endRev := sdkA.sdkRevision()
-	waitRevision(t, &client{t: t, base: B.base, token: sdkToken}, endRev, 15*time.Second)
-	for _, u := range []string{"u1", "u2", "u3", "final-1", "final-2"} {
-		if a, b := sdkA.sdkEval("feature", u), (&client{t: t, base: B.base, token: sdkToken}).sdkEval("feature", u); a != b {
-			t.Fatalf("final replicas disagree on eval(%s): A=%q B=%q", u, a, b)
-		}
-	}
-	t.Logf("=== FINAL: A and B consistent at manifest r%d ===", endRev)
+	// Final consistency sweep: both replicas settle on the SAME revision —
+	// the store truth allocated by the 4b winner, never a sample of A's
+	// served view — and agree on per-key evaluation. Transient
+	// convergence-window 5xx (per-document sync still completing) are
+	// retried inside the bounded wait; two SUCCESSFUL evals that disagree
+	// fail immediately.
+	trueFinal4b := max(revA4b, revB4b)
+	sdkBfin := &client{t: t, base: B.base, token: sdkToken}
+	settledRev, lat := waitSettledRevision(t, trueFinal4b, 30*time.Second, sdkA, sdkBfin)
+	waitEvalAgreement(t, "feature", []string{"u1", "u2", "u3", "final-1", "final-2"}, 30*time.Second, sdkA, sdkBfin)
+	t.Logf("=== FINAL: A and B consistent at manifest r%d (settled in %s; 4b store truth r%d) ===",
+		settledRev, lat, trueFinal4b)
 }
 
 // publishFlagApproved publishes an ALREADY approved draft (draft/submit/
@@ -733,31 +1053,6 @@ func (c *client) publishFlagApproved(flag *model.Flag) (int64, int) {
 	}
 	_ = json.Unmarshal(data, &res)
 	return res.ManifestRevision, resp.StatusCode
-}
-
-// fullSnapshot returns the flagKey→flag map this replica currently serves.
-func (c *client) fullSnapshot() map[string]map[string]any {
-	var out struct {
-		Flags map[string]json.RawMessage `json:"flags"`
-	}
-	req, _ := http.NewRequest("GET", c.base+"/api/v1/sdk/config", nil)
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		c.t.Fatalf("sdk/config: %v", err)
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if err := json.Unmarshal(data, &out); err != nil {
-		c.t.Fatalf("decode snapshot: %v (%s)", err, truncate(string(data), 200))
-	}
-	res := map[string]map[string]any{}
-	for k, raw := range out.Flags {
-		var f map[string]any
-		_ = json.Unmarshal(raw, &f)
-		res[k] = f
-	}
-	return res
 }
 
 func truncate(s string, n int) string {
