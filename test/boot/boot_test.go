@@ -130,7 +130,7 @@ func TestBinaryBootsAndServes(t *testing.T) {
 		t.Fatalf("console: %d %s", resp.StatusCode, truncate(string(body), 120))
 	}
 	// Static assets referenced by the shell must be served.
-	for _, asset := range []string{"/app.js", "/style.css"} {
+	for _, asset := range []string{"/app.js", "/i18n.js", "/style.css"} {
 		ar, err := http.Get(base + asset)
 		if err != nil {
 			t.Fatalf("asset %s: %v", asset, err)

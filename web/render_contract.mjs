@@ -10,7 +10,11 @@ import assert from 'node:assert';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const code = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+// Load i18n.js + app.js in ONE vm context (same script-scope order as the
+// browser's <script> tags) so app.js resolves t()/I18N from the catalogs.
+// The sandbox has no golab_lang and no navigator.language → en (default).
+const code = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8') + '\n' +
+  fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 
 const el = () => ({
   style: {}, classList: { add() {}, remove() {} }, appendChild() {}, remove() {},

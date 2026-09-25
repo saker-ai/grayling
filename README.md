@@ -16,6 +16,8 @@ make build          # 或 GOWORK=off go build ./cmd/golab
 
 启动日志会打印一次性的 **global owner token**（`glab_admin_...`）。浏览器打开 `http://127.0.0.1:8688/` 进入控制台，填入该 token 即可创建工作空间/环境、编辑与发布 flag、注册实验、管理分阶段放量计划（实验详情 rollout 区块：计划预注册/步骤与进度/执行历史/暂停恢复/手动推进/人工接管）、查看报告与审计。
 
+控制台内置 **i18n（中文/英文双语，零构建步骤）**：词典为内嵌静态文件 `web/i18n.js`（en/zh 两套完整 catalog，`t(key, params)` 支持 `{name}` 参数插值，缺失键回退 en 并 `console.warn` 记录供测试收集）。**默认语言判定**顺序：`localStorage golab_lang` > `navigator.language`（`zh*` → 中文，其余 → 英文）> 英文；顶栏提供 **中/EN 切换**，切换后**不刷新页面**、就地重渲染导航与当前视图，选择**持久化**到 `localStorage`。日期/时长格式跟随语言（zh 用 `zh-CN` 本地化格式）。服务端返回的动态内容（flag key、备注、审计 actor、服务端错误消息本体、状态枚举值）原样展示不翻译，只翻译包裹它们的固定框架文案。双语 DOM 契约测试 `web/i18n_contract.mjs`（Node VM 加载真实 i18n.js+app.js）覆盖：语言判定顺序、全部关键视图 en/zh 双渲染（采样字符串命中对应语言且布局节点 ID 不变）、语言切换点击模拟（持久化+就地重渲染）、词典完整性（渲染全程 t() 缺失键为零、en/zh 键集对齐、静态提取的 t()/data-i18n 键全部在双 catalog 中）与静态扫描（app.js/index.html 中禁止 catalog 之外的 CJK 字面量，注释除外）；`GOWORK=off go test ./web/` 执行。
+
 生产存储使用 PostgreSQL（自动执行 schema 迁移；事件按月分区、保留期按分区删除、HMAC 密钥轮换有迁移路径）：
 
 ```bash

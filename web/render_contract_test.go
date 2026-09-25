@@ -65,6 +65,37 @@ func TestRenderRolloutDOMContract(t *testing.T) {
 	t.Logf("%s", out)
 }
 
+// TestI18NDOMContract runs the Node-based DOM/contract test for the console
+// i18n layer (web/i18n.js + web/app.js). It loads the REAL sources in a vm and
+// asserts: the language resolution order (localStorage golab_lang >
+// navigator.language zh*→zh > en), every key view (flags list/detail, segments
+// list/detail, experiments list/create/detail, report, rollout block, tokens,
+// audit, ai, debug) rendered in BOTH en and zh with sampled strings hitting
+// each language and identical layout node IDs, the top-bar language switch
+// under click simulation (persist + in-place re-render, no reload), dictionary
+// completeness (zero t() misses collected during all renders, en/zh catalog
+// key parity, every statically extracted t('key')/data-i18n key present) and a
+// static scan proving app.js/index.html carry no CJK literals outside the
+// catalogs (comments stripped as the whitelisted exception). Same node gating
+// as the other console contract tests.
+func TestI18NDOMContract(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not available; console DOM/contract test requires node (same external-tool gating as the PG/docker tests)")
+	}
+	script := filepath.Join("i18n_contract.mjs")
+	if _, err := os.Stat(script); err != nil {
+		t.Fatalf("contract script missing: %v", err)
+	}
+	cmd := exec.Command(node, script)
+	cmd.Dir = wd(t)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("i18n DOM contract failed: %v\n%s", err, out)
+	}
+	t.Logf("%s", out)
+}
+
 // wd returns the directory of this test file (the web/ package dir), so the
 // contract runs regardless of the caller's working directory.
 func wd(t *testing.T) string {
