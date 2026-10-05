@@ -92,6 +92,9 @@ const (
 type ExperimentBinding struct {
 	ID    string `yaml:"id" json:"id"`
 	Epoch int64  `yaml:"epoch" json:"epoch"`
+	// Bandit is an immutable published policy snapshot. Older SDKs ignore it
+	// and use the registered percentage rule as the safe fixed split.
+	Bandit *BanditBinding `yaml:"bandit,omitempty" json:"bandit,omitempty"`
 	// Layer is the mutual-exclusion layer ID (empty = no layer).
 	Layer string `yaml:"layer,omitempty" json:"layer,omitempty"`
 	// LayerSlot is the server-assigned disjoint bucket range inside the
@@ -103,6 +106,24 @@ type ExperimentBinding struct {
 	// State is the experiment state at publish time. Only "running"
 	// enrolls units and emits exposures.
 	State ExperimentState `yaml:"state" json:"state"`
+}
+
+// BanditBinding carries one versioned policy state in a published flag.
+// Counts are ordered exactly like Variants; they are recomputed from the
+// durable event ledger at the feedback watermark before publication.
+type BanditBinding struct {
+	PolicyVersion string    `yaml:"policyVersion" json:"policyVersion"`
+	Strategy      string    `yaml:"strategy" json:"strategy"`
+	Variants      []string  `yaml:"variants" json:"variants"`
+	PriorAlpha    float64   `yaml:"priorAlpha" json:"priorAlpha"`
+	PriorBeta     float64   `yaml:"priorBeta" json:"priorBeta"`
+	Epsilon       float64   `yaml:"epsilon,omitempty" json:"epsilon,omitempty"`
+	StateVersion  int64     `yaml:"stateVersion" json:"stateVersion"`
+	Watermark     time.Time `yaml:"watermark" json:"watermark"`
+	Trials        []int64   `yaml:"trials" json:"trials"`
+	Successes     []int64   `yaml:"successes" json:"successes"`
+	Frozen        bool      `yaml:"frozen,omitempty" json:"frozen,omitempty"`
+	FreezeReason  string    `yaml:"freezeReason,omitempty" json:"freezeReason,omitempty"`
 }
 
 // BucketRange is a half-open bucket interval [Start, End) within [0,10000).
@@ -306,7 +327,10 @@ type Exposure struct {
 	// Source is how the arm was reached: "split", "targeting" or "default".
 	// Analysis filters on this because only "split" arms are randomized
 	// (SRM applies to the randomized population).
-	Source string `json:"source"`
+	Source                string  `json:"source"`
+	PolicyVersion         string  `json:"policyVersion,omitempty"`
+	StateVersion          int64   `json:"stateVersion,omitempty"`
+	AllocationProbability float64 `json:"allocationProbability,omitempty"`
 }
 
 // Result is the outcome of one evaluation. Failed results carry the

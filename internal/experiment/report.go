@@ -65,6 +65,7 @@ type Report struct {
 	// Bayesian is the posterior / expected-loss / probability-of-superiority
 	// view (mean or proportion family depending on the metric type).
 	Bayesian *BayesianSection `json:"bayesian,omitempty"`
+	Bandit   *BanditSection   `json:"bandit,omitempty"`
 }
 
 // BayesianSection carries the Bayesian posterior summary, kept structurally
@@ -117,6 +118,27 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	exp, err := store.GetExperiment(experimentID)
 	if err != nil {
 		return nil, err
+	}
+	if exp.AllocationMode == "bandit" {
+		rep, err := BuildBanditReport(store, exp, now)
+		if err == nil {
+			return rep, nil
+		}
+		section := &BanditSection{PolicyVersion: exp.Bandit.PolicyVersion, Frozen: true,
+			FreezeReason:      "feedback ledger unhealthy: " + err.Error(),
+			FeedbackWatermark: now.UTC().Add(-exp.Bandit.FeedbackDelay),
+			Trials:            make([]int64, len(exp.Variants)), Successes: make([]int64, len(exp.Variants)),
+			PosteriorMean: make([]float64, len(exp.Variants))}
+		if current := store.CurrentFlagContents(exp.WorkspaceID, exp.EnvironmentID)[exp.FlagKey]; current != nil && current.Content.Experiment != nil && current.Content.Experiment.Bandit != nil {
+			state := current.Content.Experiment.Bandit
+			section.StateVersion = state.StateVersion
+			copy(section.Trials, state.Trials)
+			copy(section.Successes, state.Successes)
+		}
+		return &Report{ExperimentID: exp.ID, Epoch: exp.Epoch, FlagKey: exp.FlagKey, State: exp.State,
+			GeneratedAt: now.UTC(), AnalysisMethod: "bandit-beta-bernoulli", Healthy: false,
+			HealthIssues: []string{section.FreezeReason}, Bandit: section,
+			Decision: stats.Decision{Verdict: stats.VerdictHold}}, nil
 	}
 	if len(exp.Variants) != 2 {
 		return nil, fmt.Errorf("experiment %s has %d variants; v1 reports are fixed-sample two-arm (§10.3)",

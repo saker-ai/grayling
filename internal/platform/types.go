@@ -218,28 +218,31 @@ type GuardrailSpec struct {
 // randomization unit, metric definitions, proportions or resource bindings
 // creates a NEW epoch; history is never overwritten (§6).
 type Experiment struct {
-	ID              string             `json:"id"`
-	WorkspaceID     string             `json:"workspaceId"`
-	EnvironmentID   string             `json:"environmentId"`
-	FlagKey         string             `json:"flagKey"`
-	FlagRevision    int64              `json:"flagRevision"` // revision the experiment was registered against
-	Epoch           int64              `json:"epoch"`
-	Unit            string             `json:"unit"` // randomization-unit context field
-	Layer           string             `json:"layer,omitempty"`
-	LayerSlot       *model.BucketRange `json:"layerSlot,omitempty"`
-	Eligibility     float64            `json:"eligibility"` // percent, 0 = 100
-	Variants        []string           `json:"variants"`    // explicit stable order
-	Proportions     map[string]float64 `json:"proportions"`
-	PrimaryMetric   MetricSpec         `json:"primaryMetric"`
-	Guardrails      []GuardrailSpec    `json:"guardrails,omitempty"`
-	Alpha           float64            `json:"alpha"`
-	Power           float64            `json:"power"`
-	MDE             float64            `json:"mde"`
-	MinSamplePerArm int64              `json:"minSamplePerArm"`
-	MinRuntime      time.Duration      `json:"minRuntime"`
-	AnalysisWindow  time.Duration      `json:"analysisWindow"`
-	Hypothesis      string             `json:"hypothesis"`
-	AnalysisMethod  string             `json:"analysisMethod"` // pre-registered, v1: "welch" | "two-proportion-z"
+	ID            string             `json:"id"`
+	WorkspaceID   string             `json:"workspaceId"`
+	EnvironmentID string             `json:"environmentId"`
+	FlagKey       string             `json:"flagKey"`
+	FlagRevision  int64              `json:"flagRevision"` // revision the experiment was registered against
+	Epoch         int64              `json:"epoch"`
+	Unit          string             `json:"unit"` // randomization-unit context field
+	Layer         string             `json:"layer,omitempty"`
+	LayerSlot     *model.BucketRange `json:"layerSlot,omitempty"`
+	Eligibility   float64            `json:"eligibility"` // percent, 0 = 100
+	Variants      []string           `json:"variants"`    // explicit stable order
+	Proportions   map[string]float64 `json:"proportions"`
+	// AllocationMode is fixed-split (the legacy default) or bandit.
+	AllocationMode  string          `json:"allocationMode,omitempty"`
+	Bandit          *BanditSpec     `json:"bandit,omitempty"`
+	PrimaryMetric   MetricSpec      `json:"primaryMetric"`
+	Guardrails      []GuardrailSpec `json:"guardrails,omitempty"`
+	Alpha           float64         `json:"alpha"`
+	Power           float64         `json:"power"`
+	MDE             float64         `json:"mde"`
+	MinSamplePerArm int64           `json:"minSamplePerArm"`
+	MinRuntime      time.Duration   `json:"minRuntime"`
+	AnalysisWindow  time.Duration   `json:"analysisWindow"`
+	Hypothesis      string          `json:"hypothesis"`
+	AnalysisMethod  string          `json:"analysisMethod"` // pre-registered, v1: "welch" | "two-proportion-z"
 	// ReleasePlan is the optional pre-registered staged-rollout plan driven
 	// by the auto-advance engine (§5.3 计划步骤/观察窗, P4).
 	ReleasePlan *ReleasePlan          `json:"releasePlan,omitempty"`
@@ -249,6 +252,17 @@ type Experiment struct {
 	CreatedAt   time.Time             `json:"createdAt"`
 	UpdatedAt   time.Time             `json:"updatedAt"`
 	CreatedBy   string                `json:"createdBy"`
+}
+
+// BanditSpec is frozen at registration for one epoch. FeedbackDelay keeps
+// recent exposures out of the reward denominator while outcomes arrive.
+type BanditSpec struct {
+	PolicyVersion string        `json:"policyVersion"`
+	Strategy      string        `json:"strategy"`
+	PriorAlpha    float64       `json:"priorAlpha"`
+	PriorBeta     float64       `json:"priorBeta"`
+	Epsilon       float64       `json:"epsilon,omitempty"`
+	FeedbackDelay time.Duration `json:"feedbackDelay"`
 }
 
 // ReleaseStep is one planned step of a staged rollout (§5.3 发布记录: 计划
@@ -349,23 +363,26 @@ const (
 // Event is one deduplicated ingestion record. Unit is stored only as the
 // tenant-scoped HMAC pseudonym (§10.2), never in clear.
 type Event struct {
-	EventID       string    `json:"eventId"`
-	WorkspaceID   string    `json:"workspaceId"`
-	EnvironmentID string    `json:"environmentId"`
-	Type          EventType `json:"type"`
-	ExperimentID  string    `json:"experimentId"`
-	Epoch         int64     `json:"epoch"`
-	FlagKey       string    `json:"flagKey,omitempty"`
-	FlagRevision  int64     `json:"flagRevision,omitempty"`
-	Variant       string    `json:"variant"`
-	UnitHash      string    `json:"unitHash"`
-	SessionID     string    `json:"sessionId,omitempty"`
-	TaskID        string    `json:"taskId,omitempty"`
-	Source        string    `json:"source,omitempty"` // split|targeting|default (exposures)
-	MetricKey     string    `json:"metricKey,omitempty"`
-	Value         float64   `json:"value,omitempty"`
-	ClientTime    time.Time `json:"clientTime"`
-	ServerTime    time.Time `json:"serverTime"`
+	EventID               string    `json:"eventId"`
+	WorkspaceID           string    `json:"workspaceId"`
+	EnvironmentID         string    `json:"environmentId"`
+	Type                  EventType `json:"type"`
+	ExperimentID          string    `json:"experimentId"`
+	Epoch                 int64     `json:"epoch"`
+	FlagKey               string    `json:"flagKey,omitempty"`
+	FlagRevision          int64     `json:"flagRevision,omitempty"`
+	Variant               string    `json:"variant"`
+	UnitHash              string    `json:"unitHash"`
+	SessionID             string    `json:"sessionId,omitempty"`
+	TaskID                string    `json:"taskId,omitempty"`
+	Source                string    `json:"source,omitempty"` // split|targeting|default (exposures)
+	PolicyVersion         string    `json:"policyVersion,omitempty"`
+	StateVersion          int64     `json:"stateVersion,omitempty"`
+	AllocationProbability float64   `json:"allocationProbability,omitempty"`
+	MetricKey             string    `json:"metricKey,omitempty"`
+	Value                 float64   `json:"value,omitempty"`
+	ClientTime            time.Time `json:"clientTime"`
+	ServerTime            time.Time `json:"serverTime"`
 }
 
 // UnitAgg is the per-unit sufficient statistic for one

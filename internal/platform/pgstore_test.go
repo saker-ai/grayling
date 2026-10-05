@@ -1102,7 +1102,7 @@ func TestPGMigrationsIdempotent(t *testing.T) {
 			t.Fatalf("close %d: %v", i, err)
 		}
 	}
-	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM schema_migrations`); got[0][0] != "5" {
+	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM schema_migrations`); got[0][0] != "7" {
 		t.Fatalf("schema_migrations rows: %v", got)
 	}
 	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM workspaces`); got[0][0] != "3" {

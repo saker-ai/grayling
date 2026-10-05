@@ -129,6 +129,21 @@ var pgMigrations = []pgMigration{
         doc jsonb NOT NULL
     );
     CREATE INDEX approvals_workspace_id_idx ON approvals(workspace_id)`},
+	{6, `ALTER TABLE events
+        ADD COLUMN policy_version text NOT NULL DEFAULT '',
+        ADD COLUMN state_version bigint NOT NULL DEFAULT 0,
+        ADD COLUMN allocation_probability double precision NOT NULL DEFAULT 0`},
+	{7, `CREATE TABLE bandit_assignments (
+        experiment_id text NOT NULL,
+        epoch bigint NOT NULL,
+        unit_hash text NOT NULL,
+        variant text NOT NULL,
+        source text NOT NULL,
+        policy_version text NOT NULL,
+        state_version bigint NOT NULL,
+        allocation_probability double precision NOT NULL,
+        PRIMARY KEY (experiment_id, epoch, unit_hash)
+    )`},
 }
 
 const pgSchemaV1 = `
@@ -723,7 +738,9 @@ func (p *pgPersistence) rehashStored(ctx context.Context, tx pgx.Tx, keyHex stri
         SELECT DISTINCT workspace_id, unit_hash FROM events
         UNION SELECT workspace_id, unit_hash FROM exposed_units
         UNION SELECT workspace_id, unit_hash FROM split_exposed_units
-        UNION SELECT workspace_id, unit_hash FROM unit_aggs`)
+        UNION SELECT workspace_id, unit_hash FROM unit_aggs
+        UNION SELECT e.workspace_id, b.unit_hash FROM bandit_assignments b
+            JOIN experiments e ON e.id = b.experiment_id`)
 	if err != nil {
 		return fmt.Errorf("platform: rotation scan: %w", err)
 	}
@@ -763,6 +780,9 @@ func (p *pgPersistence) rehashStored(ctx context.Context, tx pgx.Tx, keyHex stri
 		   FROM _remap r WHERE u.workspace_id = r.workspace_id AND u.unit_hash = r.old_hash`,
 		`UPDATE unit_aggs a SET unit_hash = r.new_hash
 		   FROM _remap r WHERE a.workspace_id = r.workspace_id AND a.unit_hash = r.old_hash`,
+		`UPDATE bandit_assignments b SET unit_hash = r.new_hash
+		   FROM _remap r, experiments e
+		   WHERE b.experiment_id = e.id AND e.workspace_id = r.workspace_id AND b.unit_hash = r.old_hash`,
 	} {
 		if _, err := tx.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("platform: rotation rehash: %w", err)
@@ -1248,6 +1268,7 @@ var eventColumns = []string{
 	"event_id", "workspace_id", "environment_id", "type", "experiment_id", "epoch",
 	"flag_key", "flag_revision", "variant", "unit_hash", "session_id", "task_id",
 	"source", "metric_key", "value", "client_time", "server_time",
+	"policy_version", "state_version", "allocation_probability",
 }
 
 type copyEventSource struct {
@@ -1263,6 +1284,7 @@ func (c *copyEventSource) Values() ([]any, error) {
 		ev.EventID, ev.WorkspaceID, ev.EnvironmentID, string(ev.Type), ev.ExperimentID,
 		ev.Epoch, ev.FlagKey, ev.FlagRevision, ev.Variant, ev.UnitHash, ev.SessionID,
 		ev.TaskID, ev.Source, ev.MetricKey, ev.Value, ev.ClientTime.UTC(), ev.ServerTime.UTC(),
+		ev.PolicyVersion, ev.StateVersion, ev.AllocationProbability,
 	}, nil
 }
 
@@ -1293,6 +1315,34 @@ func ensureEventsPartition(ctx context.Context, tx pgx.Tx, t time.Time) error {
 	return nil
 }
 
+func (p *pgPersistence) pinBanditAssignment(exp *Experiment, candidate *Event) (*Event, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	pin := *candidate
+	err := p.pool.QueryRow(ctx, `INSERT INTO bandit_assignments
+        (experiment_id, epoch, unit_hash, variant, source, policy_version, state_version, allocation_probability)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        ON CONFLICT DO NOTHING
+        RETURNING variant, source, policy_version, state_version, allocation_probability`,
+		exp.ID, exp.Epoch, candidate.UnitHash, candidate.Variant, candidate.Source,
+		candidate.PolicyVersion, candidate.StateVersion, candidate.AllocationProbability).
+		Scan(&pin.Variant, &pin.Source, &pin.PolicyVersion, &pin.StateVersion, &pin.AllocationProbability)
+	if err == nil {
+		return &pin, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("platform: pin bandit assignment: %w", err)
+	}
+	err = p.pool.QueryRow(ctx, `SELECT variant, source, policy_version, state_version, allocation_probability
+        FROM bandit_assignments WHERE experiment_id=$1 AND epoch=$2 AND unit_hash=$3`,
+		exp.ID, exp.Epoch, candidate.UnitHash).
+		Scan(&pin.Variant, &pin.Source, &pin.PolicyVersion, &pin.StateVersion, &pin.AllocationProbability)
+	if err != nil {
+		return nil, fmt.Errorf("platform: read bandit assignment: %w", err)
+	}
+	return &pin, nil
+}
+
 func (p *pgPersistence) commitEvents(ctx context.Context, tx pgx.Tx, events []*Event) (map[string]bool, error) {
 	months := map[time.Time]bool{}
 	for _, ev := range events {
@@ -1309,7 +1359,8 @@ func (p *pgPersistence) commitEvents(ctx context.Context, tx pgx.Tx, events []*E
         experiment_id text, epoch bigint, flag_key text, flag_revision bigint,
         variant text, unit_hash text, session_id text, task_id text,
         source text, metric_key text, value double precision,
-        client_time timestamptz, server_time timestamptz) ON COMMIT DROP`); err != nil {
+        client_time timestamptz, server_time timestamptz,
+        policy_version text, state_version bigint, allocation_probability double precision) ON COMMIT DROP`); err != nil {
 		return nil, err
 	}
 	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"_ingest"}, eventColumns,
@@ -1351,14 +1402,29 @@ INSERT INTO _accepted_ingest SELECT i.* FROM _ingest i JOIN led USING (event_id)
 		return nil, fmt.Errorf("platform: read accepted event ids: %w", err)
 	}
 	rows.Close()
+	// Locally evaluated SDK exposures must also pin the randomization unit.
+	// This runs in the same transaction as event acceptance so a subsequent
+	// remote evaluation on another replica sees the first assignment.
+	if _, err := tx.Exec(ctx, `INSERT INTO bandit_assignments
+        (experiment_id, epoch, unit_hash, variant, source, policy_version, state_version, allocation_probability)
+        SELECT DISTINCT ON (experiment_id, epoch, unit_hash)
+            experiment_id, epoch, unit_hash, variant, source, policy_version, state_version, allocation_probability
+        FROM _accepted_ingest
+        WHERE type='exposure' AND policy_version<>'' AND source IN ('bandit','split','bandit-fallback')
+        ORDER BY experiment_id, epoch, unit_hash, client_time, event_id
+        ON CONFLICT DO NOTHING`); err != nil {
+		return nil, fmt.Errorf("platform: pin accepted bandit exposures: %w", err)
+	}
 	_, err = tx.Exec(ctx, `
 WITH payload AS (
     INSERT INTO events (event_id, workspace_id, environment_id, type, experiment_id,
         epoch, flag_key, flag_revision, variant, unit_hash, session_id, task_id,
-        source, metric_key, value, client_time, server_time)
+        source, metric_key, value, client_time, server_time,
+        policy_version, state_version, allocation_probability)
     SELECT i.event_id, i.workspace_id, i.environment_id, i.type, i.experiment_id,
         i.epoch, i.flag_key, i.flag_revision, i.variant, i.unit_hash, i.session_id,
-        i.task_id, i.source, i.metric_key, i.value, i.client_time, i.server_time
+        i.task_id, i.source, i.metric_key, i.value, i.client_time, i.server_time,
+        i.policy_version, i.state_version, i.allocation_probability
     FROM _accepted_ingest i
     ON CONFLICT (server_time, event_id) DO NOTHING
 ),
@@ -1576,7 +1642,8 @@ func (p *pgPersistence) analysisEvents(exp *Experiment, now time.Time) ([]*Event
 	defer func() { _ = tx.Rollback(ctx) }()
 	rows, err := tx.Query(ctx, `SELECT event_id, workspace_id, environment_id, type,
         experiment_id, epoch, flag_key, flag_revision, variant, unit_hash, session_id,
-        task_id, source, metric_key, value, client_time, server_time
+        task_id, source, metric_key, value, client_time, server_time,
+        policy_version, state_version, allocation_probability
         FROM events WHERE workspace_id=$1 AND environment_id=$2 AND experiment_id=$3
         AND epoch=$4 AND server_time <= $5 ORDER BY server_time, event_id`,
 		exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch, now)
@@ -1590,7 +1657,8 @@ func (p *pgPersistence) analysisEvents(exp *Experiment, now time.Time) ([]*Event
 		if err := rows.Scan(&ev.EventID, &ev.WorkspaceID, &ev.EnvironmentID, &typ,
 			&ev.ExperimentID, &ev.Epoch, &ev.FlagKey, &ev.FlagRevision, &ev.Variant,
 			&ev.UnitHash, &ev.SessionID, &ev.TaskID, &ev.Source, &ev.MetricKey,
-			&ev.Value, &ev.ClientTime, &ev.ServerTime); err != nil {
+			&ev.Value, &ev.ClientTime, &ev.ServerTime,
+			&ev.PolicyVersion, &ev.StateVersion, &ev.AllocationProbability); err != nil {
 			rows.Close()
 			return nil, 0, 0, false, fmt.Errorf("platform: scan analysis event: %w", err)
 		}
@@ -2130,7 +2198,8 @@ func (p *pgPersistence) loadEvents(ctx context.Context, d *Data) error {
 	// PostgreSQL for retention-window queries and the dedup ledger.
 	rows, err := p.pool.Query(ctx, `SELECT event_id, workspace_id, environment_id, type,
         experiment_id, epoch, flag_key, flag_revision, variant, unit_hash, session_id,
-        task_id, source, metric_key, value, client_time, server_time
+        task_id, source, metric_key, value, client_time, server_time,
+        policy_version, state_version, allocation_probability
         FROM events ORDER BY server_time DESC, event_id DESC LIMIT $1`, MaxRetainedEvents)
 	if err != nil {
 		return err
@@ -2142,7 +2211,8 @@ func (p *pgPersistence) loadEvents(ctx context.Context, d *Data) error {
 		if err := rows.Scan(&ev.EventID, &ev.WorkspaceID, &ev.EnvironmentID, &typ,
 			&ev.ExperimentID, &ev.Epoch, &ev.FlagKey, &ev.FlagRevision, &ev.Variant,
 			&ev.UnitHash, &ev.SessionID, &ev.TaskID, &ev.Source, &ev.MetricKey,
-			&ev.Value, &ev.ClientTime, &ev.ServerTime); err != nil {
+			&ev.Value, &ev.ClientTime, &ev.ServerTime,
+			&ev.PolicyVersion, &ev.StateVersion, &ev.AllocationProbability); err != nil {
 			rows.Close()
 			return err
 		}

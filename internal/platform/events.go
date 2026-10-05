@@ -2,6 +2,7 @@ package platform
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -319,6 +320,15 @@ func (s *Store) validateEventLocked(ev *Event, now time.Time) error {
 		return fmt.Errorf("epoch %d does not match experiment epoch %d (mixed epochs are rejected, §10.1)",
 			ev.Epoch, exp.Epoch)
 	}
+	if exp.AllocationMode == "bandit" && ev.Type == EventExposure {
+		if ev.PolicyVersion != "" && ev.PolicyVersion != exp.Bandit.PolicyVersion {
+			return fmt.Errorf("exposure policy version %q does not match registered %q", ev.PolicyVersion, exp.Bandit.PolicyVersion)
+		}
+		if ev.Source == "bandit" && (ev.PolicyVersion == "" || ev.StateVersion <= 0 ||
+			ev.AllocationProbability <= 0 || ev.AllocationProbability > 1 || math.IsNaN(ev.AllocationProbability)) {
+			return fmt.Errorf("bandit exposure requires versioned allocation probability")
+		}
+	}
 	if ev.Type == EventConversion && ev.MetricKey == "" {
 		return fmt.Errorf("conversion events require metricKey")
 	}
@@ -611,8 +621,18 @@ func (s *Store) ExposureLedgerForUnit(workspaceID, unitHash string, limit int) [
 // (convenience for the admin service when republishing flags on state
 // transitions).
 func (e *Experiment) ExperimentBinding() *model.ExperimentBinding {
-	return &model.ExperimentBinding{
+	b := &model.ExperimentBinding{
 		ID: e.ID, Epoch: e.Epoch, Layer: e.Layer, LayerSlot: e.LayerSlot,
 		Eligibility: e.Eligibility, State: e.State,
 	}
+	if e.AllocationMode == "bandit" && e.Bandit != nil {
+		b.Bandit = &model.BanditBinding{
+			PolicyVersion: e.Bandit.PolicyVersion, Strategy: e.Bandit.Strategy,
+			Variants: append([]string(nil), e.Variants...), PriorAlpha: e.Bandit.PriorAlpha,
+			PriorBeta: e.Bandit.PriorBeta, Epsilon: e.Bandit.Epsilon,
+			Trials: make([]int64, len(e.Variants)), Successes: make([]int64, len(e.Variants)),
+			Frozen: true, FreezeReason: "awaiting feedback health check",
+		}
+	}
+	return b
 }

@@ -687,21 +687,24 @@ func (c *Client) JSONVariation(flagKey string, evalCtx model.EvaluationContext, 
 // ---------------------------------------------------------------------------
 
 type collectEvent struct {
-	EventID      string    `json:"eventId"`
-	DecisionID   string    `json:"decisionId,omitempty"`
-	Type         string    `json:"type"`
-	ExperimentID string    `json:"experimentId"`
-	Epoch        int64     `json:"epoch"`
-	FlagKey      string    `json:"flagKey"`
-	FlagRevision int64     `json:"flagRevision"`
-	Variant      string    `json:"variant"`
-	Unit         string    `json:"unit"`
-	Source       string    `json:"source"`
-	MetricKey    string    `json:"metricKey,omitempty"`
-	Value        float64   `json:"value,omitempty"`
-	SessionID    string    `json:"sessionId,omitempty"`
-	TaskID       string    `json:"taskId,omitempty"`
-	ClientTime   time.Time `json:"clientTime"`
+	EventID               string    `json:"eventId"`
+	DecisionID            string    `json:"decisionId,omitempty"`
+	Type                  string    `json:"type"`
+	ExperimentID          string    `json:"experimentId"`
+	Epoch                 int64     `json:"epoch"`
+	FlagKey               string    `json:"flagKey"`
+	FlagRevision          int64     `json:"flagRevision"`
+	Variant               string    `json:"variant"`
+	Unit                  string    `json:"unit"`
+	Source                string    `json:"source"`
+	PolicyVersion         string    `json:"policyVersion,omitempty"`
+	StateVersion          int64     `json:"stateVersion,omitempty"`
+	AllocationProbability float64   `json:"allocationProbability,omitempty"`
+	MetricKey             string    `json:"metricKey,omitempty"`
+	Value                 float64   `json:"value,omitempty"`
+	SessionID             string    `json:"sessionId,omitempty"`
+	TaskID                string    `json:"taskId,omitempty"`
+	ClientTime            time.Time `json:"clientTime"`
 }
 
 func randomEventID(prefix string) string {
@@ -748,7 +751,9 @@ func (c *Client) queueExposure(snapshot *model.Snapshot, evalCtx model.Evaluatio
 		ExperimentID: res.Experiment.ExperimentID, Epoch: res.Experiment.Epoch,
 		FlagKey: res.FlagKey, FlagRevision: rev,
 		Variant: res.Experiment.Variant, Unit: unit, Source: res.Experiment.Source,
-		ClientTime: time.Now().UTC(),
+		PolicyVersion: res.Experiment.PolicyVersion, StateVersion: res.Experiment.StateVersion,
+		AllocationProbability: res.Experiment.AllocationProbability,
+		ClientTime:            time.Now().UTC(),
 	}
 	select {
 	case c.exposures <- ev:

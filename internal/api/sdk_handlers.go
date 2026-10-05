@@ -58,6 +58,7 @@ func (s *Server) handleSDKConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "snapshot_invalid", err.Error())
 			return
 		}
+		ev.EnableBandit()
 		body, err := json.Marshal(snapshot)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "encode", err.Error())
@@ -157,6 +158,7 @@ func (s *Server) evaluatorFor(env *platform.Environment) (*evaluation.Evaluator,
 	if err != nil {
 		return nil, nil, 0, err
 	}
+	ev.EnableBandit()
 	body, err := json.Marshal(snapshot)
 	if err != nil {
 		return nil, nil, 0, err
@@ -252,6 +254,10 @@ func (s *Server) handleSDKEval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := ev.Evaluate(req.FlagKey, req.Context)
+	if err := s.pinRemoteBanditAssignment(env, snapshot, req, &res); err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	res.DecisionID = "dec-" + rand.Text()
 	res.ManifestRevision = revision
 	generated := snapshot.GeneratedAt
@@ -275,6 +281,10 @@ func (s *Server) handleSDKEval(w http.ResponseWriter, r *http.Request) {
 			resp.RandomizationUnit = unit
 			res.ExposureEventID = id
 			diagnostic.ExposureStatus = "recorded"
+		} else if res.Experiment.Source == "bandit" {
+			writeError(w, http.StatusServiceUnavailable, "bandit_exposure_unavailable",
+				"bandit assignment could not be recorded")
+			return
 		}
 	}
 	resp.Result = res
@@ -292,6 +302,47 @@ func (s *Server) handleSDKEval(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) pinRemoteBanditAssignment(env *platform.Environment, snapshot *model.Snapshot,
+	req evalRequest, res *model.Result) error {
+	if res.Experiment == nil || (res.Experiment.Source != "bandit" && res.Experiment.Source != "split") {
+		return nil
+	}
+	flag := snapshot.Flags[res.FlagKey]
+	if flag == nil || flag.Experiment == nil || flag.Experiment.Bandit == nil || flag.Bucketing == nil {
+		return nil
+	}
+	raw, ok := req.Context.Field(flag.Bucketing.Unit)
+	if !ok {
+		return fmt.Errorf("bandit: missing randomization unit")
+	}
+	unit, ok := evaluation.CanonicalUnitString(raw)
+	if !ok {
+		return fmt.Errorf("bandit: invalid randomization unit")
+	}
+	exp, err := s.Store.GetExperiment(res.Experiment.ExperimentID)
+	if err != nil {
+		return err
+	}
+	pin, err := s.Store.PinBanditAssignment(exp, &platform.Event{ExperimentID: exp.ID, Epoch: exp.Epoch,
+		UnitHash: s.Store.HashUnit(env.WorkspaceID, unit), Variant: res.Experiment.Variant,
+		Source: res.Experiment.Source, PolicyVersion: res.Experiment.PolicyVersion,
+		StateVersion: res.Experiment.StateVersion, AllocationProbability: res.Experiment.AllocationProbability,
+		ClientTime: time.Now().UTC()})
+	if err != nil {
+		return err
+	}
+	value, ok := flag.Variations[pin.Variant]
+	if !ok {
+		return fmt.Errorf("bandit: pinned variant %q not in flag", pin.Variant)
+	}
+	res.VariationType, res.Value = pin.Variant, value
+	res.Experiment.Variant, res.Experiment.Source = pin.Variant, pin.Source
+	res.Experiment.PolicyVersion = pin.PolicyVersion
+	res.Experiment.StateVersion = pin.StateVersion
+	res.Experiment.AllocationProbability = pin.AllocationProbability
+	return nil
 }
 
 func (s *Server) recordRemoteExposure(tok *platform.Token, env *platform.Environment,
@@ -316,15 +367,17 @@ func (s *Server) recordRemoteExposure(tok *platform.Token, env *platform.Environ
 		unitHash[:16], res.Experiment.Variant)
 	flagRev := flagRevisionIn(snapshot, res.FlagKey)
 	now := time.Now().UTC()
-	_, err := s.Store.IngestEvents([]*platform.Event{{
+	ingested, err := s.Store.IngestEvents([]*platform.Event{{
 		EventID: eventID, WorkspaceID: env.WorkspaceID, EnvironmentID: env.ID,
 		Type: platform.EventExposure, ExperimentID: res.Experiment.ExperimentID,
 		Epoch: res.Experiment.Epoch, FlagKey: res.FlagKey, FlagRevision: flagRev,
 		Variant: res.Experiment.Variant, UnitHash: unitHash, Source: res.Experiment.Source,
-		ClientTime: now,
+		PolicyVersion: res.Experiment.PolicyVersion, StateVersion: res.Experiment.StateVersion,
+		AllocationProbability: res.Experiment.AllocationProbability,
+		ClientTime:            now,
 	}})
-	if err != nil {
-		s.logger.Printf("api: remote exposure ingest failed: %v", err)
+	if err != nil || ingested.Accepted+ingested.Duplicates != 1 {
+		s.logger.Printf("api: remote exposure ingest failed: result=%+v err=%v", ingested, err)
 		return "", ""
 	}
 	return eventID, unitStr
@@ -345,21 +398,24 @@ func flagRevisionIn(snapshot *model.Snapshot, key string) int64 {
 // ---------------------------------------------------------------------------
 
 type collectEventDTO struct {
-	EventID      string    `json:"eventId"`
-	DecisionID   string    `json:"decisionId,omitempty"`
-	Type         string    `json:"type"`
-	ExperimentID string    `json:"experimentId"`
-	Epoch        int64     `json:"epoch"`
-	FlagKey      string    `json:"flagKey"`
-	FlagRevision int64     `json:"flagRevision"`
-	Variant      string    `json:"variant"`
-	Unit         string    `json:"unit"` // plaintext; HMAC'd server-side, never stored
-	Source       string    `json:"source"`
-	MetricKey    string    `json:"metricKey"`
-	Value        float64   `json:"value"`
-	SessionID    string    `json:"sessionId"`
-	TaskID       string    `json:"taskId"`
-	ClientTime   time.Time `json:"clientTime"`
+	EventID               string    `json:"eventId"`
+	DecisionID            string    `json:"decisionId,omitempty"`
+	Type                  string    `json:"type"`
+	ExperimentID          string    `json:"experimentId"`
+	Epoch                 int64     `json:"epoch"`
+	FlagKey               string    `json:"flagKey"`
+	FlagRevision          int64     `json:"flagRevision"`
+	Variant               string    `json:"variant"`
+	Unit                  string    `json:"unit"` // plaintext; HMAC'd server-side, never stored
+	Source                string    `json:"source"`
+	PolicyVersion         string    `json:"policyVersion,omitempty"`
+	StateVersion          int64     `json:"stateVersion,omitempty"`
+	AllocationProbability float64   `json:"allocationProbability,omitempty"`
+	MetricKey             string    `json:"metricKey"`
+	Value                 float64   `json:"value"`
+	SessionID             string    `json:"sessionId"`
+	TaskID                string    `json:"taskId"`
+	ClientTime            time.Time `json:"clientTime"`
 }
 
 type collectRequest struct {
@@ -405,15 +461,28 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 			skippedNoUnit++
 			continue
 		}
-		events = append(events, &platform.Event{
+		ev := &platform.Event{
 			EventID: dto.EventID, WorkspaceID: env.WorkspaceID, EnvironmentID: env.ID,
 			Type: platform.EventType(dto.Type), ExperimentID: dto.ExperimentID,
 			Epoch: dto.Epoch, FlagKey: dto.FlagKey, FlagRevision: dto.FlagRevision,
 			Variant:  dto.Variant,
 			UnitHash: s.Store.HashUnit(env.WorkspaceID, dto.Unit),
 			Source:   dto.Source, MetricKey: dto.MetricKey, Value: dto.Value,
-			SessionID: dto.SessionID, TaskID: dto.TaskID, ClientTime: dto.ClientTime.UTC(),
-		})
+			PolicyVersion: dto.PolicyVersion, StateVersion: dto.StateVersion,
+			AllocationProbability: dto.AllocationProbability,
+			SessionID:             dto.SessionID, TaskID: dto.TaskID, ClientTime: dto.ClientTime.UTC(),
+		}
+		// Older SDKs know only the registered percentage rule. Record their
+		// assignment as an explicit fixed fallback with known propensity.
+		if ev.Type == platform.EventExposure && ev.Source == "split" && ev.PolicyVersion == "" {
+			if exp, err := s.Store.GetExperiment(ev.ExperimentID); err == nil &&
+				exp.AllocationMode == "bandit" && exp.Bandit != nil {
+				ev.PolicyVersion = exp.Bandit.PolicyVersion
+				ev.AllocationProbability = exp.Proportions[ev.Variant] / 100
+				ev.Source = "bandit-fallback"
+			}
+		}
+		events = append(events, ev)
 	}
 	res, err := s.Store.IngestEvents(events)
 	if err != nil {

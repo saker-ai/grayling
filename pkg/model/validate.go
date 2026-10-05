@@ -179,6 +179,19 @@ func ValidateFlag(f *Flag, segments map[string]*Segment) error {
 
 func validateExperimentBinding(f *Flag, verr *ValidationError) {
 	exp := f.Experiment
+	if b := exp.Bandit; b != nil {
+		if b.PolicyVersion == "" || (b.Strategy != "thompson" && b.Strategy != "epsilon-greedy") ||
+			len(b.Variants) < 2 || len(b.Variants) != len(b.Trials) || len(b.Variants) != len(b.Successes) ||
+			b.PriorAlpha <= 0 || b.PriorBeta <= 0 || b.Epsilon < 0 || b.Epsilon >= 1 || b.StateVersion < 0 {
+			verr.add("experiment.bandit invalid published policy state")
+		} else {
+			for i, v := range b.Variants {
+				if _, ok := f.Variations[v]; !ok || b.Trials[i] < 0 || b.Successes[i] < 0 || b.Successes[i] > b.Trials[i] {
+					verr.add("experiment.bandit invalid arm %d", i)
+				}
+			}
+		}
+	}
 	if !KeyPattern.MatchString(exp.ID) {
 		verr.add("experiment.id %q is not a valid identifier", exp.ID)
 	}

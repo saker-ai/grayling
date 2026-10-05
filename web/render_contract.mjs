@@ -111,4 +111,15 @@ assert(html.includes('posterior A=Beta('), 'bayesian proportion posterior line m
 html = render({ ...base, primary: { type: 'welch', pValue: 0.2, diff: 0.01, relativeDiff: 0.01, relativeMeaningful: true, ciLow: -0.01, ciHigh: 0.03, significant: false } });
 assert(html.includes('not computed (mean metrics only)'), 'sequential placeholder missing');
 
-console.log('renderReport DOM contract: all assertions passed (6 report shapes)');
+// 7. Adaptive allocation must never render the fixed-sample winner card.
+html = render({ ...base, analysisMethod: 'bandit-beta-bernoulli', decision: { verdict: 'ship' },
+  primary: { type: 'two-proportion-z', pValue: 0.001, significant: true },
+  perVariant: [{ variant: 'control' }, { variant: 'treatment' }],
+  bandit: { policyVersion: 'p1', stateVersion: 7, feedbackWatermark: '2026-10-01T00:00:00Z',
+    trials: [10, 10], successes: [2, 5], posteriorMean: [0.25, 0.5], pending: 4,
+    missingFeedback: 13, fallbackAssignments: 2, srmAlarm: false, frozen: false } });
+assert(html.includes('Adaptive Bandit report') && html.includes('p1'), 'bandit policy provenance missing');
+assert(!html.includes('two-proportion-z') && !html.includes('SHIP') && !html.includes('p = 0.001'),
+  'fixed-sample inference leaked into bandit report');
+
+console.log('renderReport DOM contract: all assertions passed (7 report shapes)');

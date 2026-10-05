@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
+	"time"
 
 	"github.com/godeps/golab/internal/platform"
 	"github.com/godeps/golab/pkg/bucketing"
@@ -43,7 +45,11 @@ func (s *Service) CreateExperiment(actor Actor, workspaceID, environmentID strin
 	if exp.Epoch == 0 {
 		exp.Epoch = s.Store.NextEpoch(env.WorkspaceID, env.ID, exp.FlagKey)
 	}
-	if exp.AnalysisMethod == "" {
+	if exp.AllocationMode == "bandit" {
+		if exp.AnalysisMethod == "" {
+			exp.AnalysisMethod = "bandit-beta-bernoulli"
+		}
+	} else if exp.AnalysisMethod == "" {
 		switch exp.PrimaryMetric.Type {
 		case "mean":
 			if exp.PrimaryMetric.CovariateKey != "" {
@@ -148,6 +154,21 @@ func (s *Service) BindExperimentFlag(actor Actor, experimentID string) (*platfor
 		return nil, fmt.Errorf("%w: flag has no percentage rule matching registered proportions %v",
 			platform.ErrValidation, exp.Proportions)
 	}
+	if exp.AllocationMode == "bandit" {
+		count := 0
+		for _, rule := range content.Targeting {
+			if len(rule.Percentage) == 0 {
+				continue
+			}
+			count++
+			if !matchingProportions(rule.Percentage, exp.Proportions) {
+				return nil, fmt.Errorf("%w: every bandit percentage rule must match the registered fallback", platform.ErrValidation)
+			}
+		}
+		if count != 1 {
+			return nil, fmt.Errorf("%w: bandit requires exactly one registered percentage rule", platform.ErrValidation)
+		}
+	}
 
 	binding := exp.ExperimentBinding()
 	if exp.Layer != "" && exp.LayerSlot != nil {
@@ -194,24 +215,25 @@ func copyFlagRules(dst *model.Flag, src *model.Flag) error {
 }
 
 func hasMatchingSplit(f *model.Flag, proportions map[string]float64) bool {
-	matches := func(pct map[string]float64) bool {
-		if len(pct) != len(proportions) {
-			return false
-		}
-		for k, v := range proportions {
-			got, ok := pct[k]
-			if !ok || math.Abs(got-v) > 1e-9 {
-				return false
-			}
-		}
-		return true
-	}
 	for i := range f.Targeting {
-		if matches(f.Targeting[i].Percentage) {
+		if matchingProportions(f.Targeting[i].Percentage, proportions) {
 			return true
 		}
 	}
-	return matches(f.DefaultRule.Percentage)
+	return matchingProportions(f.DefaultRule.Percentage, proportions)
+}
+
+func matchingProportions(pct, proportions map[string]float64) bool {
+	if len(pct) != len(proportions) {
+		return false
+	}
+	for k, v := range proportions {
+		got, ok := pct[k]
+		if !ok || math.Abs(got-v) > 1e-9 {
+			return false
+		}
+	}
+	return true
 }
 
 // TransitionExperiment moves the experiment state machine and republishes
@@ -361,6 +383,9 @@ func (s *Service) CreateReleasePlan(actor Actor, experimentID string,
 	if err != nil {
 		return nil, err
 	}
+	if exp.AllocationMode == "bandit" {
+		return nil, fmt.Errorf("%w: fixed-sample release plans are unavailable for bandit experiments", platform.ErrValidation)
+	}
 	if err := Authorize(actor, exp.WorkspaceID, PermFlagPublish); err != nil {
 		return nil, err
 	}
@@ -448,5 +473,57 @@ func (s *Service) ApplyExperimentEligibility(actor Actor, experimentID string,
 	s.audit(actor, "release_plan.apply_ratio", exp.WorkspaceID, exp.EnvironmentID, experimentID,
 		map[string]any{"ratio": ratio, "flagRevision": fr.Revision,
 			"manifestRevision": m.Revision, "reason": reason})
+	return true, nil
+}
+
+// ApplyBanditState publishes a replayed policy snapshot under the normal
+// cross-replica publish lock. The experiment contract stays immutable.
+func (s *Service) ApplyBanditState(actor Actor, experimentID string, state *model.BanditBinding) (bool, error) {
+	exp, err := s.Store.GetExperiment(experimentID)
+	if err != nil {
+		return false, err
+	}
+	if err := Authorize(actor, exp.WorkspaceID, PermFlagPublish); err != nil {
+		return false, err
+	}
+	if exp.AllocationMode != "bandit" || exp.State != model.ExperimentRunning || state == nil ||
+		state.PolicyVersion != exp.Bandit.PolicyVersion {
+		return false, fmt.Errorf("%w: invalid bandit state for experiment %s", platform.ErrInvalidState, experimentID)
+	}
+	env, err := s.Store.GetEnvironment(exp.WorkspaceID, exp.EnvironmentID)
+	if err != nil {
+		return false, err
+	}
+	release, err := s.acquirePublishLock(env)
+	if err != nil {
+		return false, err
+	}
+	defer release()
+	exp, err = s.Store.GetExperiment(experimentID)
+	if err != nil || exp.State != model.ExperimentRunning {
+		return false, fmt.Errorf("%w: experiment no longer running", platform.ErrInvalidState)
+	}
+	current := s.Store.CurrentFlagContents(exp.WorkspaceID, exp.EnvironmentID)[exp.FlagKey]
+	if current == nil || current.Content.Experiment == nil || current.Content.Experiment.ID != exp.ID {
+		return false, fmt.Errorf("%w: bandit flag is not published", platform.ErrInvalidState)
+	}
+	old := current.Content.Experiment.Bandit
+	if old != nil && old.StateVersion == state.StateVersion && old.Frozen == state.Frozen &&
+		old.FreezeReason == state.FreezeReason &&
+		reflect.DeepEqual(old.Trials, state.Trials) && reflect.DeepEqual(old.Successes, state.Successes) &&
+		s.now().Sub(current.PublishedAt) < 4*time.Minute {
+		return false, nil
+	}
+	content := model.Flag{}
+	if err := copyFlagRules(&content, current.Content); err != nil {
+		return false, err
+	}
+	content.Experiment.Bandit = state
+	content.Version = ""
+	if _, _, err := s.publishRevisionLocked(actor, env, &content, "bandit policy state replay"); err != nil {
+		return false, err
+	}
+	s.audit(actor, "bandit.state.publish", exp.WorkspaceID, exp.EnvironmentID, exp.ID,
+		map[string]any{"stateVersion": state.StateVersion, "watermark": state.Watermark, "frozen": state.Frozen})
 	return true, nil
 }

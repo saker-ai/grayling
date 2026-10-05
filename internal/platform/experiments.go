@@ -3,6 +3,7 @@ package platform
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
@@ -42,6 +43,9 @@ func (s *Store) CreateExperiment(exp *Experiment) (*Experiment, error) {
 	if exp == nil {
 		return nil, fmt.Errorf("%w: nil experiment", ErrValidation)
 	}
+	if exp.AllocationMode == "" {
+		exp.AllocationMode = "fixed-split"
+	}
 	if err := validateExperimentInvariants(exp); err != nil {
 		return nil, err
 	}
@@ -79,6 +83,27 @@ func (s *Store) CreateExperiment(exp *Experiment) (*Experiment, error) {
 }
 
 func validateExperimentInvariants(exp *Experiment) error {
+	if exp.AllocationMode != "" && exp.AllocationMode != "fixed-split" && exp.AllocationMode != "bandit" {
+		return fmt.Errorf("%w: unknown allocation mode %q", ErrValidation, exp.AllocationMode)
+	}
+	if exp.AllocationMode == "bandit" {
+		if exp.Bandit == nil || exp.Bandit.PolicyVersion == "" ||
+			(exp.Bandit.Strategy != "thompson" && exp.Bandit.Strategy != "epsilon-greedy") ||
+			exp.Bandit.PriorAlpha <= 0 || math.IsNaN(exp.Bandit.PriorAlpha) || math.IsInf(exp.Bandit.PriorAlpha, 0) ||
+			exp.Bandit.PriorBeta <= 0 || math.IsNaN(exp.Bandit.PriorBeta) || math.IsInf(exp.Bandit.PriorBeta, 0) ||
+			exp.Bandit.Epsilon < 0 || exp.Bandit.Epsilon >= 1 || math.IsNaN(exp.Bandit.Epsilon) ||
+			exp.Bandit.FeedbackDelay < exp.AnalysisWindow+72*time.Hour {
+			return fmt.Errorf("%w: bandit needs policy version, strategy, positive priors and feedback delay", ErrValidation)
+		}
+		if exp.PrimaryMetric.Type != "proportion" || exp.AnalysisMethod != "bandit-beta-bernoulli" {
+			return fmt.Errorf("%w: bandit requires proportion metric and bandit-beta-bernoulli analysis", ErrValidation)
+		}
+		if len(exp.Variants) != 2 {
+			return fmt.Errorf("%w: bandit v1 requires exactly two variants", ErrValidation)
+		}
+	} else if exp.Bandit != nil || exp.AnalysisMethod == "bandit-beta-bernoulli" {
+		return fmt.Errorf("%w: bandit spec requires bandit allocation mode", ErrValidation)
+	}
 	if exp.FlagKey == "" {
 		return fmt.Errorf("%w: experiment needs flagKey", ErrValidation)
 	}
@@ -142,7 +167,7 @@ func validateExperimentInvariants(exp *Experiment) error {
 		return fmt.Errorf("%w: metric direction must be increase|decrease", ErrValidation)
 	}
 	switch exp.AnalysisMethod {
-	case "", "welch", "two-proportion-z", "ratio-delta", "quantile", "cuped":
+	case "", "welch", "two-proportion-z", "ratio-delta", "quantile", "cuped", "bandit-beta-bernoulli":
 	default:
 		return fmt.Errorf("%w: unknown pre-registered analysis method %q", ErrValidation, exp.AnalysisMethod)
 	}

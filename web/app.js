@@ -643,6 +643,7 @@ function viewExpCreate(m) {
       '<label class="field">' + esc(t('exp.unit')) + '<input id="x-unit" value="user_id"></label>' +
       '<label class="field">' + esc(t('exp.layer')) + '<input id="x-layer"></label>' +
       '<label class="field">' + esc(t('exp.elig')) + '<input id="x-elig" type="number" step="1" min="0" max="100"></label>' +
+	  '<label class="field">' + esc(t('exp.allocationMode')) + '<select id="x-mode"><option value="fixed-split">fixed-split</option><option value="bandit">bandit</option></select></label>' +
     '</div>' +
     '<h4>' + t('exp.variantsHead') + '</h4>' +
     '<div id="x-vars"></div><button class="btn sm" id="x-add-var">' + esc(t('exp.addVariant')) + '</button>' +
@@ -658,6 +659,14 @@ function viewExpCreate(m) {
       '<label class="field" id="x-qlevel-wrap">' + esc(t('exp.quantileLevel')) + ' <span class="muted">' + esc(t('exp.quantileHint')) + '</span><input id="x-qlevel" type="number" step="0.01" min="0.01" max="0.99" placeholder="0.95"></label>' +
       '<label class="field" id="x-covkey-wrap">' + esc(t('exp.covariateKey')) + ' <span class="muted">' + esc(t('exp.covariateHint')) + '</span><input id="x-covkey" placeholder="pre_period_value"></label>' +
     '</div>' +
+	'<div class="form-grid" id="x-bandit" style="display:none">' +
+	  '<label class="field">' + esc(t('exp.policyVersion')) + '<input id="x-policy-version" value="bandit-v1"></label>' +
+	  '<label class="field">' + esc(t('exp.strategy')) + '<select id="x-strategy"><option value="thompson">Thompson</option><option value="epsilon-greedy">ε-greedy</option></select></label>' +
+	  '<label class="field">Prior α<input id="x-prior-a" type="number" step="0.1" value="1"></label>' +
+	  '<label class="field">Prior β<input id="x-prior-b" type="number" step="0.1" value="1"></label>' +
+	  '<label class="field">ε<input id="x-epsilon" type="number" step="0.01" value="0.1"></label>' +
+	  '<label class="field">' + esc(t('exp.feedbackDelayD')) + '<input id="x-feedback-delay" type="number" step="1" value="11"></label>' +
+	'</div>' +
     '<h4>' + esc(t('exp.guardrails')) + '</h4>' +
     '<div id="x-guards"></div><button class="btn sm" id="x-add-guard">' + esc(t('exp.addGuardrail')) + '</button>' +
     '<h4>' + t('exp.statsHead') + '</h4>' +
@@ -698,6 +707,7 @@ function viewExpCreate(m) {
   };
   mtype.onchange = syncMetricAdv;
   syncMetricAdv();
+	$('#x-mode', m).onchange = ev => { $('#x-bandit', m).style.display = ev.target.value === 'bandit' ? '' : 'none'; };
   $('#x-add-guard', m).onclick = () => {
     const row = document.createElement('div');
     row.className = 'vrow';
@@ -753,6 +763,13 @@ function viewExpCreate(m) {
       analysisWindow: Math.round(Number($('#x-window', m).value) * NS_DAY),
       hypothesis: $('#x-hyp', m).value.trim(),
     };
+	body.allocationMode = $('#x-mode', m).value;
+	if (body.allocationMode === 'bandit') {
+	  if (variants.length !== 2 || pm.type !== 'proportion') { toast(t('exp.banditRequiresProportion'), false); return; }
+	  body.bandit = { policyVersion: $('#x-policy-version', m).value.trim(), strategy: $('#x-strategy', m).value,
+	    priorAlpha: Number($('#x-prior-a', m).value), priorBeta: Number($('#x-prior-b', m).value),
+	    epsilon: Number($('#x-epsilon', m).value), feedbackDelay: Math.round(Number($('#x-feedback-delay', m).value) * NS_DAY) };
+	}
     if (!body.flagKey || !body.primaryMetric.key) { toast(t('toast.flagMetricRequired'), false); return; }
     if (pm.type === 'ratio' && !pm.denominatorKey) { toast(t('toast.ratioDenominator'), false); return; }
     if (pm.type === 'quantile' && !(pm.quantileLevel > 0 && pm.quantileLevel < 1)) { toast(t('toast.quantileLevel'), false); return; }
@@ -789,6 +806,8 @@ async function viewExpDetail(m) {
       '<tr><th>' + esc(t('exp.minRuntime')) + '</th><td>' + esc(fmtDurNs(e.minRuntime)) + '</td></tr>' +
       '<tr><th>' + esc(t('exp.window')) + '</th><td>' + esc(fmtDurNs(e.analysisWindow)) + '</td></tr>' +
       '<tr><th>' + esc(t('exp.method')) + '</th><td>' + esc(e.analysisMethod || '—') + '</td></tr>' +
+	  '<tr><th>' + esc(t('exp.allocationMode')) + '</th><td>' + esc(e.allocationMode || 'fixed-split') +
+	  (e.bandit ? ' · ' + esc(e.bandit.policyVersion) + ' · ' + esc(e.bandit.strategy) : '') + '</td></tr>' +
     '</table><div class="muted">' + esc(t('exp.hypothesisLine', { h: e.hypothesis || '—' })) + '</div>' +
     ((e.guardrails || []).length
       ? '<h4>' + esc(t('exp.guardrails')) + '</h4><table class="grid"><thead><tr><th>' + esc(t('th.metric')) + '</th><th>' + esc(t('th.type')) + '</th><th>' + esc(t('th.goodDir')) + '</th><th>' + esc(t('th.maxReg')) + '</th><th>' + esc(t('th.minSample')) + '</th></tr></thead><tbody>' +
@@ -844,6 +863,7 @@ async function viewExpDetail(m) {
 }
 
 function renderReport(box, r) {
+  if (r.bandit) { renderBanditReport(box, r); return; }
   const p = r.primary, d = r.decision || {}, srm = r.srm;
   const window = r.window;
   box.innerHTML =
@@ -930,6 +950,29 @@ function renderReport(box, r) {
     ((d.guardrailBreaches || []).length
       ? '<div class="banner warn">' + esc(t('report.breaches')) + '<ul>' + d.guardrailBreaches.map(gb =>
         '<li><span class="mono">' + esc(gb.metric) + '</span> — ' + esc(gb.detail || '') + '</li>').join('') + '</ul></div>' : '');
+}
+
+function renderBanditReport(box, r) {
+  const b = r.bandit;
+  box.innerHTML =
+    '<div class="banner ' + (r.healthy ? 'ok' : 'err') + '"><b>' + esc(t('report.banditTitle')) + '</b> · ' +
+    esc(b.frozen ? t('report.banditFrozen') : t('report.banditActive')) + '</div>' +
+    '<p class="muted">' + esc(t('report.banditNoFixed')) + '</p>' +
+    '<div>' + esc(t('exp.policyVersion')) + ': <span class="mono">' + esc(b.policyVersion) +
+    '</span> · state: <span class="mono">' + esc(b.stateVersion) + '</span> · ' +
+    esc(t('report.watermark')) + ': <span class="mono">' + esc(b.feedbackWatermark) + '</span></div>' +
+    '<div>' + esc(t('report.banditPending')) + ': ' + esc(b.pending) + ' · ' +
+    esc(t('report.banditMissing')) + ': ' + esc(b.missingFeedback) + ' · ' +
+    esc(t('report.banditFallback')) + ': ' + esc(b.fallbackAssignments) + '</div>' +
+    (b.srmAlarm ? '<div class="banner err">' + esc(t('report.banditSrm')) + '</div>' : '') +
+    (b.freezeReason ? '<div class="muted">' + esc(b.freezeReason) + '</div>' : '') +
+    '<table class="grid"><thead><tr><th>' + esc(t('th.variant')) + '</th><th>' + esc(t('report.banditTrials')) +
+    '</th><th>' + esc(t('report.banditSuccesses')) + '</th><th>' + esc(t('report.banditPosterior')) + '</th></tr></thead><tbody>' +
+    (r.perVariant || []).map((v, i) => '<tr><td>' + esc(v.variant) + '</td><td>' + esc(b.trials[i]) +
+      '</td><td>' + esc(b.successes[i]) + '</td><td>' + esc((b.posteriorMean[i] ?? 0).toFixed(4)) + '</td></tr>').join('') +
+    '</tbody></table>' +
+    (r.healthIssues || []).map(x => '<div class="banner err">' + esc(x) + '</div>').join('') +
+    (r.guardrails || []).map(g => '<div>' + esc(g.Metric ?? g.metric) + ': ' + esc(g.Detail ?? g.detail) + '</div>').join('');
 }
 
 // ---------------------------------------------------------------------------

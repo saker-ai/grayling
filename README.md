@@ -184,7 +184,7 @@ AI 应用 ──会话冻结──> 授权资源解析(所有权索引+版本 pi
 | `internal/gateway` | Traefik router 配置生成器（RouteSpec → file/KV/IngressRoute 三目标 + 层级规则校验） |
 | `internal/experiment` | 报告构建（单元聚合→统计→决策门；主指标 welch/两比例 z/ratio-delta/quantile/cuped，另附分离的 sequential/bayesian 视图） |
 | `internal/stats` | Welch/两比例 z/SRM χ²/固定样本决策 + **P5**：ratio delta-method、quantile、CUPED、序贯 mSPRT（always-valid）、贝叶斯后验（纯标准库，每种含数值+固定种子模拟验证） |
-| `internal/bandit` | Bandit 流量分配（Thompson/ε-greedy，逐次记录分配概率；SRM/护栏触发冻结探索） |
+| `internal/bandit` | Bandit 实时远程分流（Thompson/ε-greedy，版本化概率记录、重放、冻结与独立报告；见 [Bandit 实时分流](docs/Bandit实时分流.md)） |
 | `internal/judge` | LLM-as-judge 管道（可插拔 Provider + 本地 mock + HTTP config-only 接入点；位置随机化/入样概率加权/离线校准 κ/护栏接入决策门） |
 | `internal/ai` | AI 资源门禁（所有权索引/版本 pin/摘要复核/撤销） |
 | `internal/gffimport` | gff 严格导入 + legacy-gff-v1 对照求值 |

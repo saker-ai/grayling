@@ -94,12 +94,13 @@ type Data struct {
 // Persistence backend as one transactional unit (file JSON for dev, or
 // PostgreSQL for production — docs/技术方案.md §3, §10.2).
 type Store struct {
-	mu        sync.RWMutex
-	persist   Persistence
-	dedup     eventDedup // optional backend dedup ledger (PostgreSQL)
-	changes   *ChangeSet
-	data      *Data
-	syncStats syncMetrics
+	banditPins map[string]*Event
+	mu         sync.RWMutex
+	persist    Persistence
+	dedup      eventDedup // optional backend dedup ledger (PostgreSQL)
+	changes    *ChangeSet
+	data       *Data
+	syncStats  syncMetrics
 }
 
 const dataSchemaVersion = 1
@@ -663,6 +664,9 @@ func (s *Store) RotateHMACKey(newKeyHex string) error {
 	s.data.UnitAggs = rehashAggKeys(s.data.UnitAggs, newKeyHex)
 	s.data.ExposedUnits = rehashUnitSets(s.data.ExposedUnits, newKeyHex)
 	s.data.SplitExposedUnits = rehashUnitSets(s.data.SplitExposedUnits, newKeyHex)
+	// The local pin cache is derived from the raw exposure ledger and must be
+	// rebuilt with the newly pseudonymized unit hashes on its next use.
+	s.banditPins = nil
 	// Pending (not yet committed) aggregate upserts carry unit hashes as
 	// plain copies — rotate them too so a commit-failure window can never
 	// persist pre-rotation hashes after the migration ran.

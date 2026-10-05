@@ -2619,6 +2619,25 @@ components:
           description: 入组百分比 [0,100]；0/未设 = 100。独立的 eligibility 哈希坐标。
         state:
           $ref: "#/components/schemas/ExperimentState"
+        bandit:
+          $ref: "#/components/schemas/BanditBinding"
+    BanditBinding:
+      type: object
+      description: 已发布、不可变的策略状态；旧 SDK 忽略它并使用注册固定比例。
+      required: [policyVersion, strategy, variants, priorAlpha, priorBeta, stateVersion, watermark, trials, successes]
+      properties:
+        policyVersion: { type: string }
+        strategy: { type: string, enum: [thompson, epsilon-greedy] }
+        variants: { type: array, items: { type: string } }
+        priorAlpha: { type: number }
+        priorBeta: { type: number }
+        epsilon: { type: number }
+        stateVersion: { type: integer, format: int64 }
+        watermark: { type: string, format: date-time }
+        trials: { type: array, items: { type: integer, format: int64 } }
+        successes: { type: array, items: { type: integer, format: int64 } }
+        frozen: { type: boolean }
+        freezeReason: { type: string }
     BucketRange:
       type: object
       description: "[0,10000) 内的半开桶区间 [start, end)。"
@@ -2766,8 +2785,11 @@ components:
           type: string
         source:
           type: string
-          description: 到达该臂的方式；只有 split 臂是随机化的（SRM 只适用随机化人群）。
-          enum: [split, targeting, default]
+          description: 到达该臂的方式；bandit 为自适应概率分流，split 为注册固定比例。
+          enum: [split, bandit, bandit-fallback, targeting, default]
+        policyVersion: { type: string }
+        stateVersion: { type: integer, format: int64 }
+        allocationProbability: { type: number, minimum: 0, maximum: 1 }
     Result:
       type: object
       description: >-
@@ -3195,6 +3217,19 @@ components:
           type: integer
           format: int64
           description: 样本低于此值不判违约（数据不足）。
+    BanditSpec:
+      type: object
+      required: [policyVersion, strategy, priorAlpha, priorBeta, feedbackDelay]
+      properties:
+        policyVersion: { type: string }
+        strategy: { type: string, enum: [thompson, epsilon-greedy] }
+        priorAlpha: { type: number, exclusiveMinimum: 0 }
+        priorBeta: { type: number, exclusiveMinimum: 0 }
+        epsilon: { type: number, minimum: 0, exclusiveMaximum: 1 }
+        feedbackDelay:
+          type: integer
+          format: int64
+          description: 纳秒；至少 analysisWindow + 72h。
     Experiment:
       type: object
       additionalProperties: false
@@ -3244,6 +3279,12 @@ components:
           description: 变体名 → 百分比；(0,100]，总和 100。
           additionalProperties:
             type: number
+        allocationMode:
+          type: string
+          enum: [fixed-split, bandit]
+          description: 缺省 fixed-split；bandit 必须注册 bandit 策略。
+        bandit:
+          $ref: "#/components/schemas/BanditSpec"
         primaryMetric:
           $ref: "#/components/schemas/MetricSpec"
         guardrails:
@@ -3273,7 +3314,7 @@ components:
           type: string
         analysisMethod:
           type: string
-          enum: [welch, two-proportion-z, ratio-delta, quantile, cuped]
+          enum: [welch, two-proportion-z, ratio-delta, quantile, cuped, bandit-beta-bernoulli]
           description: 预注册；缺省按 primaryMetric.type 推导（mean→welch，proportion→two-proportion-z）。
         releasePlan:
           $ref: "#/components/schemas/ReleasePlan"
@@ -3410,7 +3451,8 @@ components:
     Report:
       type: object
       description: >-
-        一个实验 epoch 的完整分析输出（v1：固定样本、两臂、单一预注册主指标）。
+        一个实验 epoch 的分析输出。bandit-beta-bernoulli 只返回专用 bandit 后验段，
+        不给出固定样本 p 值、CI 或胜出结论。
         分析人群是随机化子集；确定性 targeting/default 臂仅作展示，不进入
         主统计与 SRM。报告是纯读——不改实验状态。
       required:
@@ -3443,7 +3485,7 @@ components:
           format: date-time
         analysisMethod:
           type: string
-          enum: [welch, two-proportion-z, ratio-delta, quantile, cuped]
+          enum: [welch, two-proportion-z, ratio-delta, quantile, cuped, bandit-beta-bernoulli]
         alpha:
           type: number
         mde:
@@ -3491,6 +3533,24 @@ components:
           description: >-
             贝叶斯后验/期望损失/胜出概率视图，与频率派结论分离呈现，绝不与
             固定样本 95% CI 混成同一决策规则（§10.3）。
+        bandit:
+          $ref: "#/components/schemas/BanditSection"
+    BanditSection:
+      type: object
+      required: [policyVersion, stateVersion, feedbackWatermark, trials, successes, posteriorMean, pending, missingFeedback, fallbackAssignments, srmAlarm, frozen]
+      properties:
+        policyVersion: { type: string }
+        stateVersion: { type: integer, format: int64 }
+        feedbackWatermark: { type: string, format: date-time }
+        trials: { type: array, items: { type: integer, format: int64 } }
+        successes: { type: array, items: { type: integer, format: int64 } }
+        posteriorMean: { type: array, items: { type: number } }
+        pending: { type: integer, format: int64 }
+        missingFeedback: { type: integer, format: int64 }
+        fallbackAssignments: { type: integer, format: int64 }
+        srmAlarm: { type: boolean }
+        frozen: { type: boolean }
+        freezeReason: { type: string }
     VariantReport:
       type: object
       description: >-
@@ -4337,7 +4397,10 @@ components:
           description: 随机化单元明文；服务端做租户内 HMAC-SHA256 后存储。
         source:
           type: string
-          description: 曝光来源 split|targeting|default。
+          description: 曝光来源 split|bandit|bandit-fallback|targeting|default。
+        policyVersion: { type: string }
+        stateVersion: { type: integer, format: int64 }
+        allocationProbability: { type: number, minimum: 0, maximum: 1 }
         metricKey:
           type: string
           description: 转化事件的指标键。

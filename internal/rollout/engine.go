@@ -89,14 +89,16 @@ func (e *Engine) now() time.Time {
 
 // TickSummary counts what one engine pass did (observability + tests).
 type TickSummary struct {
-	Inspected  int      `json:"inspected"`
-	Started    []string `json:"started,omitempty"`
-	Advanced   []string `json:"advanced,omitempty"`
-	Repaired   []string `json:"repaired,omitempty"`
-	Paused     []string `json:"paused,omitempty"`
-	RolledBack []string `json:"rolledBack,omitempty"`
-	Completed  []string `json:"completed,omitempty"`
-	Errors     []string `json:"errors,omitempty"`
+	Inspected     int      `json:"inspected"`
+	Started       []string `json:"started,omitempty"`
+	Advanced      []string `json:"advanced,omitempty"`
+	Repaired      []string `json:"repaired,omitempty"`
+	Paused        []string `json:"paused,omitempty"`
+	RolledBack    []string `json:"rolledBack,omitempty"`
+	Completed     []string `json:"completed,omitempty"`
+	Errors        []string `json:"errors,omitempty"`
+	BanditUpdated []string `json:"banditUpdated,omitempty"`
+	BanditFrozen  []string `json:"banditFrozen,omitempty"`
 }
 
 // Tick runs one pass over every experiment with an engine-attention plan.
@@ -119,6 +121,44 @@ func (e *Engine) Tick() TickSummary {
 				return
 			}
 			e.tickPlan(now, exp, &sum)
+		}()
+	}
+	for _, candidate := range e.Store.ExperimentsWithBandit() {
+		sum.Inspected++
+		release, err := e.lockPlan(candidate.ID)
+		if err != nil {
+			sum.Errors = append(sum.Errors, candidate.ID+": "+err.Error())
+			continue
+		}
+		func() {
+			defer release()
+			exp, err := e.Store.GetExperiment(candidate.ID)
+			if err != nil || exp.State != model.ExperimentRunning {
+				return
+			}
+			rep, err := experiment.BuildBanditReport(e.Store, exp, now)
+			var state *model.BanditBinding
+			if err != nil {
+				state = exp.ExperimentBinding().Bandit
+				if current := e.Store.CurrentFlagContents(exp.WorkspaceID, exp.EnvironmentID)[exp.FlagKey]; current != nil && current.Content.Experiment != nil && current.Content.Experiment.Bandit != nil {
+					cp := *current.Content.Experiment.Bandit
+					state = &cp
+				}
+				state.Frozen, state.FreezeReason = true, "feedback ledger unhealthy: "+err.Error()
+			} else {
+				state = experiment.PublishedBanditState(exp, rep.Bandit)
+			}
+			changed, publishErr := e.Admin.ApplyBanditState(EngineActor, exp.ID, state)
+			if publishErr != nil {
+				sum.Errors = append(sum.Errors, exp.ID+": "+publishErr.Error())
+				return
+			}
+			if changed {
+				sum.BanditUpdated = append(sum.BanditUpdated, exp.ID)
+			}
+			if state.Frozen {
+				sum.BanditFrozen = append(sum.BanditFrozen, exp.ID)
+			}
 		}()
 	}
 	return sum
@@ -160,10 +200,10 @@ func (e *Engine) Run(ctx context.Context, interval time.Duration) {
 			return
 		case <-t.C:
 			sum := e.Tick()
-			if len(sum.Started)+len(sum.Advanced)+len(sum.Paused)+
+			if len(sum.Started)+len(sum.Advanced)+len(sum.Paused)+len(sum.BanditUpdated)+len(sum.BanditFrozen)+
 				len(sum.RolledBack)+len(sum.Completed)+len(sum.Errors) > 0 {
-				e.Logger.Printf("rollout: tick started=%v advanced=%v repaired=%v paused=%v rolledBack=%v completed=%v errors=%v",
-					sum.Started, sum.Advanced, sum.Repaired, sum.Paused, sum.RolledBack, sum.Completed, sum.Errors)
+				e.Logger.Printf("rollout: tick started=%v advanced=%v repaired=%v paused=%v rolledBack=%v completed=%v banditUpdated=%v banditFrozen=%v errors=%v",
+					sum.Started, sum.Advanced, sum.Repaired, sum.Paused, sum.RolledBack, sum.Completed, sum.BanditUpdated, sum.BanditFrozen, sum.Errors)
 			}
 		}
 	}

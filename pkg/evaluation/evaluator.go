@@ -39,7 +39,9 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"time"
 
+	"github.com/godeps/golab/internal/bandit"
 	"github.com/godeps/golab/pkg/bucketing"
 	"github.com/godeps/golab/pkg/model"
 )
@@ -47,10 +49,15 @@ import (
 // Evaluator evaluates flags from one immutable, pre-validated snapshot.
 // It is safe for concurrent use.
 type Evaluator struct {
-	snap  *model.Snapshot
-	flags map[string]*compiledFlag
-	segs  map[string]*compiledSegment
+	snap          *model.Snapshot
+	flags         map[string]*compiledFlag
+	segs          map[string]*compiledSegment
+	banditEnabled bool
 }
+
+// EnableBandit is used by the remote server, which owns the exposure ledger
+// and can pin repeat evaluations. Local SDKs retain the fixed split fallback.
+func (e *Evaluator) EnableBandit() { e.banditEnabled = true }
 
 type compiledFlag struct {
 	flag        *model.Flag
@@ -66,6 +73,8 @@ type compiledExperiment struct {
 	layerSlot   *model.BucketRange
 	eligBuckets int // 0..10000; 10000 = everyone enrolled
 	running     bool
+	bandit      *model.BanditBinding
+	banditProb  []float64
 }
 
 // needsGatingBucket reports whether layer or eligibility checks will hash.
@@ -165,6 +174,16 @@ func (e *Evaluator) compileFlag(f *model.Flag) (*compiledFlag, error) {
 			layerSlot:   f.Experiment.LayerSlot,
 			eligBuckets: eligBuckets,
 			running:     f.Experiment.State == model.ExperimentRunning,
+		}
+		if b := f.Experiment.Bandit; b != nil {
+			cf.exp.bandit = b
+			if !b.Frozen && b.StateVersion > 0 {
+				probs, err := bandit.Distribution(b)
+				if err != nil {
+					return nil, err
+				}
+				cf.exp.banditProb = probs
+			}
 		}
 	}
 	return cf, nil
@@ -358,6 +377,9 @@ func (e *Evaluator) finish(cf *compiledFlag, rule *compiledRule, ctx model.Evalu
 	if rule.split != nil {
 		reason = model.ReasonSplit
 		source = "split"
+		if cf.exp != nil && e.banditEnabled && cf.exp.banditActive(e.snap.GeneratedAt) {
+			source = "bandit"
+		}
 	}
 	base.VariationType, base.Value, base.Reason = name, value, reason
 	base.Bucket = bucket
@@ -369,6 +391,22 @@ func (e *Evaluator) finish(cf *compiledFlag, rule *compiledRule, ctx model.Evalu
 		base.Experiment = &model.Exposure{
 			ExperimentID: cf.exp.id, Epoch: cf.exp.epoch,
 			Variant: name, Source: source,
+		}
+		if cf.exp.bandit != nil {
+			base.Experiment.PolicyVersion = cf.exp.bandit.PolicyVersion
+			base.Experiment.StateVersion = cf.exp.bandit.StateVersion
+			base.Experiment.AllocationProbability = 1
+			if rule.split != nil {
+				base.Experiment.AllocationProbability = rule.rule.Percentage[name] / 100
+			}
+		}
+		if source == "bandit" {
+			for i, v := range cf.exp.bandit.Variants {
+				if v == name {
+					base.Experiment.AllocationProbability = cf.exp.banditProb[i]
+					break
+				}
+			}
 		}
 	}
 	return base
@@ -392,11 +430,22 @@ func (e *Evaluator) resolveVariation(cf *compiledFlag, rule *compiledRule,
 	if err != nil {
 		return "", nil, -1, err
 	}
+	if cf.exp != nil && e.banditEnabled && cf.exp.banditActive(e.snap.GeneratedAt) {
+		arm, _ := bandit.Assign(cf.exp.bandit, unit, cf.exp.banditProb)
+		name := cf.exp.bandit.Variants[arm]
+		return name, cf.flag.Variations[name], bucket, nil
+	}
 	name, err := rule.split.Assign(bucket)
 	if err != nil {
 		return "", nil, -1, err
 	}
 	return name, cf.flag.Variations[name], bucket, nil
+}
+
+// A stale or offline snapshot serves the pre-registered percentage split.
+func (exp *compiledExperiment) banditActive(generated time.Time) bool {
+	return exp.bandit != nil && len(exp.banditProb) != 0 && !generated.IsZero() &&
+		time.Since(generated) <= 5*time.Minute
 }
 
 // hashCoordinate returns the (key, epoch) pair for variant hashing: the
