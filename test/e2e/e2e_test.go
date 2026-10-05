@@ -29,6 +29,7 @@ type harness struct {
 	t      *testing.T
 	store  *platform.Store
 	api    *api.Server
+	rawCfg *gconfig.Service
 	srv    *httptest.Server
 	ws     platform.Workspace
 	env    platform.Environment
@@ -43,12 +44,13 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	cfg := configstore.NewGonacosStore(gconfig.NewService())
+	rawCfg := gconfig.NewService()
+	cfg := configstore.NewGonacosStore(rawCfg)
 	apiSrv := api.NewServer(store, cfg, api.Options{})
 	srv := httptest.NewServer(apiSrv.Handler())
 	t.Cleanup(srv.Close)
 
-	h := &harness{t: t, store: store, api: apiSrv, srv: srv}
+	h := &harness{t: t, store: store, api: apiSrv, rawCfg: rawCfg, srv: srv}
 
 	// Bootstrap global owner credential (cmd/golab does this at startup).
 	ct, err := store.CreateToken(platform.TokenAdmin, "bootstrap-owner", platform.RoleOwner, "", "", "bootstrap")

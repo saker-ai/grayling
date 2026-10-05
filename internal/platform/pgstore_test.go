@@ -32,6 +32,23 @@ func openPGStore(t *testing.T, dsn string) *Store {
 	return s
 }
 
+func TestPGReopenDoesNotAdvanceRecoveryPoint(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	a := openPGStore(t, dsn)
+	if _, err := a.CreateWorkspace("recovery", "Recovery"); err != nil {
+		t.Fatal(err)
+	}
+	before := pgtest.Query(t, dsn, `SELECT control_version FROM meta WHERE id=1`)[0][0]
+	b := openPGStore(t, dsn)
+	if _, err := b.GetWorkspace("recovery"); err != nil {
+		t.Fatal(err)
+	}
+	after := pgtest.Query(t, dsn, `SELECT control_version FROM meta WHERE id=1`)[0][0]
+	if after != before {
+		t.Fatalf("read-only reopen changed control version: %s to %s", before, after)
+	}
+}
+
 // Two independent working sets converge through object reads, while token
 // authorization remains a direct primary-DB check even before invalidation.
 func TestPGIncrementalControlSync(t *testing.T) {

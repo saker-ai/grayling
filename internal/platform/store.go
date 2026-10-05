@@ -146,9 +146,16 @@ func newStore(p Persistence) (*Store, error) {
 	if d == nil {
 		d = newData()
 	}
+	needsBootstrap := len(d.HMACKeyRing) == 0
 	s.data = d
 	if err := s.normalizeKeyRing(); err != nil {
 		return nil, err
+	}
+	// Reopening an initialized PostgreSQL store is read-only. Bumping its
+	// control version here would make a verified recovery point drift merely
+	// because an operator ran the offline verifier.
+	if _, pg := p.(*pgPersistence); pg && !needsBootstrap {
+		return s, nil
 	}
 	// Persist bootstrap state (counters + key ring) — matches the historical
 	// behavior of NewStore writing the store file on open.

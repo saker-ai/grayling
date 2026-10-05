@@ -12,6 +12,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -21,6 +24,7 @@ import (
 	"github.com/godeps/golab/internal/configstore"
 	"github.com/godeps/golab/internal/experiment"
 	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/golab/internal/recovery"
 	"github.com/godeps/golab/pkg/model"
 	"github.com/godeps/golab/pkg/sdk"
 	"github.com/godeps/golab/test/pgtest"
@@ -112,12 +116,13 @@ func newPGHarness(t *testing.T) (string, *harness) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	cfg := configstore.NewGonacosStore(gconfig.NewService())
+	rawCfg := gconfig.NewService()
+	cfg := configstore.NewGonacosStore(rawCfg)
 	apiSrv := api.NewServer(store, cfg, api.Options{})
 	srv := httptest.NewServer(apiSrv.Handler())
 	t.Cleanup(srv.Close)
 
-	h := &harness{t: t, store: store, api: apiSrv, srv: srv}
+	h := &harness{t: t, store: store, api: apiSrv, rawCfg: rawCfg, srv: srv}
 	ct, err := store.CreateToken(platform.TokenAdmin, "bootstrap-owner", platform.RoleOwner, "", "", "bootstrap")
 	if err != nil {
 		t.Fatalf("owner token: %v", err)
@@ -213,7 +218,20 @@ func TestE2EPostgresExperimentLoop(t *testing.T) {
 	if nPerArm["control"]+nPerArm["treatment"] < 300 {
 		t.Fatalf("too few enrollments: %v", nPerArm)
 	}
+	wantValue, wantEval := client.StringVariation("pg-checkout",
+		model.EvaluationContext{Attributes: map[string]any{"user_id": "recovery-probe"}}, "?")
+	if wantEval.Failed || wantEval.Experiment == nil {
+		t.Fatalf("pre-recovery SDK evaluation: %+v", wantEval)
+	}
 	client.Close()
+	duplicate := map[string]any{"events": []any{map[string]any{
+		"eventId": "recovery-dedup-probe", "type": "exposure", "experimentId": exp.ID,
+		"epoch": 1, "variant": "control", "unit": "recovery-unit", "source": "split", "clientTime": time.Now().UTC(),
+	}}}
+	var firstIngest map[string]any
+	if code := h.do("POST", "/api/v1/collect", h.colTok, duplicate, &firstIngest); code != 200 || firstIngest["accepted"] != float64(1) {
+		t.Fatalf("pre-recovery dedup fixture: %d %+v", code, firstIngest)
+	}
 
 	var rep map[string]any
 	if code := h.do("GET", "/api/v1/admin/experiments/"+exp.ID+"/report", h.owner, nil, &rep); code != 200 {
@@ -255,25 +273,90 @@ func TestE2EPostgresExperimentLoop(t *testing.T) {
 		t.Fatalf("30%% vs 10%% lift on ~400 units must be significant: %v", primary)
 	}
 
-	// The durable side must hold the analysis state: reopen the store on the
-	// SAME database, rebuild the API on it, and produce an identical report
-	// from PostgreSQL alone.
+	// Back up the quiesced PostgreSQL database and gonacos Config snapshot,
+	// then restore into an isolated fresh database and service instance.
+	point, err := recovery.Capture(t.Context(), dsn, "recovery-test-auth", h.store, h.api.Config)
+	if err != nil {
+		t.Fatalf("capture recovery point: %v", err)
+	}
+	configSnapshot, err := h.rawCfg.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	point.GonacosSHA256, err = recovery.DigestSnapshot(map[string]any{"config": configSnapshot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pointPath := filepath.Join(t.TempDir(), "point.json")
+	if err := recovery.Write(pointPath, point); err != nil {
+		t.Fatal(err)
+	}
+	configJSON, err := json.Marshal(configSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := h.store.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
+	targetDSN := pgtest.DSN(t)
+	dumpRestorePostgres(t, dsn, targetDSN)
+	var decoded map[string]any
+	if err := json.Unmarshal(configJSON, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	restoredConfig := gconfig.NewService()
+	if err := restoredConfig.Restore(decoded); err != nil {
+		t.Fatal(err)
+	}
+	restoredCfg := configstore.NewGonacosStore(restoredConfig)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	reloaded, err := platform.NewPGStore(ctx, dsn)
+	reloaded, err := platform.NewPGStore(ctx, targetDSN)
 	if err != nil {
 		t.Fatalf("reopen on same database: %v", err)
 	}
 	defer reloaded.Close()
-	apiSrv2 := api.NewServer(reloaded, h.api.Config, api.Options{})
+	actual, err := recovery.Capture(t.Context(), targetDSN, "recovery-test-auth", reloaded, restoredCfg)
+	if err != nil {
+		t.Fatalf("capture restored state: %v", err)
+	}
+	restoredSnapshot, err := restoredConfig.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual.GonacosSHA256, err = recovery.DigestSnapshot(map[string]any{"config": restoredSnapshot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recovery.Verify(pointPath, actual); err != nil {
+		t.Fatalf("restored recovery point: %v\nbefore=%+v\nafter=%+v", err, point, actual)
+	}
+	if _, err := recovery.Capture(t.Context(), targetDSN, "recovery-test-auth", reloaded,
+		configstore.NewGonacosStore(gconfig.NewService())); err == nil {
+		t.Fatal("single-component gonacos rollback passed recovery capture")
+	}
+	wrongKey := *actual
+	wrongKey.AuthSHA256 = "wrong"
+	if err := recovery.Verify(pointPath, &wrongKey); err == nil {
+		t.Fatal("wrong auth secret passed recovery gate")
+	}
+	apiSrv2 := api.NewServer(reloaded, restoredCfg, api.Options{})
 	h.srv.Close()
 	h.srv = httptest.NewServer(apiSrv2.Handler())
 	t.Cleanup(h.srv.Close)
 	h.api = apiSrv2
 	h.store = reloaded
+	h.rawCfg = restoredConfig
+	restoredClient := newSDK(t, h, nil)
+	gotValue, gotEval := restoredClient.StringVariation("pg-checkout",
+		model.EvaluationContext{Attributes: map[string]any{"user_id": "recovery-probe"}}, "?")
+	if gotEval.Failed || gotEval.Experiment == nil || gotValue != wantValue || gotEval.Experiment.Variant != wantEval.Experiment.Variant {
+		t.Fatalf("SDK evaluation drift: before=%s %+v after=%s %+v", wantValue, wantEval, gotValue, gotEval)
+	}
+	var secondIngest map[string]any
+	if code := h.do("POST", "/api/v1/collect", h.colTok, duplicate, &secondIngest); code != 200 || secondIngest["duplicates"] != float64(1) {
+		t.Fatalf("restored event dedup: %d %+v", code, secondIngest)
+	}
 
 	var rep2 map[string]any
 	if code := h.do("GET", "/api/v1/admin/experiments/"+exp.ID+"/report", h.owner, nil, &rep2); code != 200 {
@@ -293,5 +376,36 @@ func TestE2EPostgresExperimentLoop(t *testing.T) {
 	primary2, _ := rep2["primary"].(map[string]any)
 	if primary2 == nil || primary2["significant"] != true {
 		t.Fatalf("significance must survive reload: %v", primary2)
+	}
+}
+
+func dumpRestorePostgres(t *testing.T, source, target string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "postgres.dump")
+	var dump, restore *exec.Cmd
+	if _, err := exec.LookPath("pg_dump"); err == nil {
+		if _, err := exec.LookPath("pg_restore"); err == nil {
+			dump = exec.Command("pg_dump", "-Fc", "-f", path, source)
+			restore = exec.Command("pg_restore", "--exit-on-error", "--no-owner", "--no-acl", "-d", target, path)
+		}
+	}
+	if dump == nil {
+		if _, err := exec.LookPath("docker"); err != nil {
+			t.Skip("recovery drill needs pg_dump/pg_restore or Docker")
+		}
+		mount := filepath.Dir(path) + ":/backup"
+		dump = exec.Command("docker", "run", "--rm", "--network", "host", "-v", mount,
+			"postgres:16-alpine", "pg_dump", "-Fc", "-f", "/backup/postgres.dump", source)
+		restore = exec.Command("docker", "run", "--rm", "--network", "host", "-v", mount,
+			"postgres:16-alpine", "pg_restore", "--exit-on-error", "--no-owner", "--no-acl",
+			"-d", target, "/backup/postgres.dump")
+	}
+	for _, cmd := range []*exec.Cmd{dump, restore} {
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s: %v\n%s", cmd.Path, err, out)
+		}
+	}
+	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
+		t.Fatalf("empty postgres dump: %v", err)
 	}
 }

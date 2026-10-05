@@ -34,6 +34,7 @@ import (
 	"github.com/godeps/golab/internal/api"
 	"github.com/godeps/golab/internal/configstore"
 	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/golab/internal/recovery"
 	"github.com/godeps/golab/web"
 	"github.com/godeps/gonacos/pkg/server"
 )
@@ -49,11 +50,15 @@ func main() {
 		gonacosGRPC    = flag.String("gonacos-grpc-addr", "127.0.0.1:19848", "gonacos gRPC bind — KEEP LOOPBACK/PRIVATE (§9)")
 		redisAddr      = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
 		authSecret     = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
+		authSecretFile = flag.String("auth-secret-file", "", "owner-only file containing the gonacos HMAC/auth secret")
 		rolloutIv      = flag.Duration("rollout-interval", 30*time.Second, "auto-advance engine tick interval for staged release plans (0 disables automation; manual plan operations stay available)")
 		reconcileIv    = flag.Duration("reconcile-interval", 30*time.Second, "publish reconciliation tick interval: re-verifies the gonacos substrate against the platform store and idempotently republishes drift (0 disables); PostgreSQL control changes sync separately every 500ms")
 		requestsPerSec = flag.Float64("requests-per-second", 0, "per-token request rate limit on sdk/collect endpoints (0 = default 200)")
 		bootstrapName  = flag.String("bootstrap-owner-name", "bootstrap-owner", "display name of the auto-created global owner token")
 		printVersion   = flag.Bool("version", false, "print version and exit")
+		recoveryPoint  = flag.String("recovery-point", "", "checkpoint to verify before opening the API after a restore")
+		writePoint     = flag.String("write-recovery-point", "", "write a checkpoint from quiesced PostgreSQL and gonacos state, then exit")
+		verifyPoint    = flag.String("verify-recovery-point", "", "verify restored components against a checkpoint, then exit without opening listeners")
 	)
 	flag.Parse()
 
@@ -61,6 +66,23 @@ func main() {
 	if *printVersion {
 		fmt.Println("golab dev (schema v1)")
 		return
+	}
+	if *authSecretFile != "" {
+		if *authSecret != "" {
+			logger.Fatal("-auth-secret and -auth-secret-file are mutually exclusive")
+		}
+		info, err := os.Stat(*authSecretFile)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+			logger.Fatal("auth secret file must be a regular owner-only file (mode 0600)")
+		}
+		b, err := os.ReadFile(*authSecretFile)
+		if err != nil {
+			logger.Fatalf("read auth secret file: %v", err)
+		}
+		*authSecret = strings.TrimSuffix(strings.TrimSuffix(string(b), "\n"), "\r")
+		if *authSecret == "" {
+			logger.Fatal("auth secret file is empty")
+		}
 	}
 	adminPassword := os.Getenv("GOLAB_ADMIN_PASSWORD")
 	if passwordFile := os.Getenv("GOLAB_ADMIN_PASSWORD_FILE"); passwordFile != "" && adminPassword == "" {
@@ -96,6 +118,28 @@ func main() {
 	if *dataFile != "" && *gonacosData == "" {
 		*gonacosData = filepath.Join(filepath.Dir(*dataFile), "gonacos")
 	}
+	var diskSnapshotHash string
+	if (*recoveryPoint != "" || *verifyPoint != "") && *redisAddr == "" {
+		if *gonacosData == "" {
+			logger.Fatal("recovery verification requires -gonacos-data in embedded mode")
+		}
+		for _, name := range []string{"snapshot.json", "snapshot.json.hmac"} {
+			if _, err := os.Stat(filepath.Join(*gonacosData, name)); err != nil {
+				logger.Fatalf("recovery verification: missing gonacos %s: %v", name, err)
+			}
+		}
+		var err error
+		diskSnapshotHash, err = recovery.DigestFile(filepath.Join(*gonacosData, "snapshot.json"))
+		if err != nil {
+			logger.Fatalf("recovery verification: %v", err)
+		}
+	} else if (*recoveryPoint != "" || *verifyPoint != "") && *redisAddr != "" {
+		var err error
+		diskSnapshotHash, err = recovery.DigestRedisSnapshot(context.Background(), *redisAddr)
+		if err != nil {
+			logger.Fatalf("recovery verification: %v", err)
+		}
+	}
 
 	// ---- gonacos substrate ----
 	gopts := []server.Option{
@@ -114,6 +158,9 @@ func main() {
 	if *authSecret != "" {
 		gopts = append(gopts, server.WithAuthSecret(*authSecret))
 	}
+	if *recoveryPoint != "" || *verifyPoint != "" {
+		gopts = append(gopts, server.WithStrictSnapshot(true))
+	}
 	gsrv, err := server.New(gopts...)
 	if err != nil {
 		logger.Fatalf("gonacos server: %v", err)
@@ -125,12 +172,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go func() {
-		if err := gsrv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			logger.Printf("gonacos serve: %v", err)
-		}
-	}()
-	logger.Printf("gonacos substrate: http=%s grpc=%s (loopback-only by design)", gsrv.HTTPAddr(), gsrv.GRPCAddr())
+	// Substrate handlers start serving only after the recovery gate passes.
 
 	// ---- platform store ----
 	var store *platform.Store
@@ -152,6 +194,71 @@ func main() {
 		}
 	}
 	defer func() { _ = store.Close() }()
+	if *recoveryPoint != "" || *writePoint != "" || *verifyPoint != "" {
+		if *pgDSN == "" {
+			logger.Fatal("recovery checkpoint requires -pg")
+		}
+		if (*writePoint != "" && (*recoveryPoint != "" || *verifyPoint != "")) || (*recoveryPoint != "" && *verifyPoint != "") {
+			logger.Fatal("recovery point modes are mutually exclusive")
+		}
+		point, err := recovery.Capture(ctx, *pgDSN, *authSecret, store, configstore.NewGonacosStore(bundle.Config))
+		if err != nil {
+			logger.Fatalf("recovery gate: %v", err)
+		}
+		if *writePoint != "" {
+			previousRedisSnapshot := ""
+			if *redisAddr != "" {
+				previousRedisSnapshot, _ = recovery.DigestRedisSnapshot(ctx, *redisAddr)
+			}
+			saveStarted := time.Now()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := gsrv.Shutdown(shutdownCtx); err != nil {
+				logger.Fatalf("save gonacos snapshot: %v", err)
+			}
+			if *redisAddr == "" {
+				snapshotPath := filepath.Join(*gonacosData, "snapshot.json")
+				for _, path := range []string{snapshotPath, snapshotPath + ".hmac"} {
+					info, statErr := os.Stat(path)
+					if statErr != nil || info.ModTime().Before(saveStarted) {
+						logger.Fatalf("recovery gate: gonacos snapshot was not saved during shutdown: %s: %v", path, statErr)
+					}
+				}
+				point.GonacosSHA256, err = recovery.DigestFile(snapshotPath)
+			} else {
+				point.GonacosSHA256, err = recovery.DigestRedisSnapshot(ctx, *redisAddr)
+				if err == nil && point.GonacosSHA256 == previousRedisSnapshot {
+					logger.Fatal("recovery gate: gonacos Redis snapshot was not refreshed during shutdown")
+				}
+			}
+			if err != nil {
+				logger.Fatalf("recovery gate: gonacos digest: %v", err)
+			}
+			if err := recovery.Write(*writePoint, point); err != nil {
+				logger.Fatalf("write recovery checkpoint: %v", err)
+			}
+			logger.Printf("recovery checkpoint written: %s", *writePoint)
+			return
+		}
+		point.GonacosSHA256 = diskSnapshotHash
+		path := *recoveryPoint
+		if *verifyPoint != "" {
+			path = *verifyPoint
+		}
+		if err := recovery.Verify(path, point); err != nil {
+			logger.Fatalf("recovery gate: %v", err)
+		}
+		logger.Printf("recovery gate: checkpoint verified")
+		if *verifyPoint != "" {
+			return
+		}
+	}
+	go func() {
+		if err := gsrv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Printf("gonacos serve: %v", err)
+		}
+	}()
+	logger.Printf("gonacos substrate: http=%s grpc=%s (loopback-only by design)", gsrv.HTTPAddr(), gsrv.GRPCAddr())
 
 	// ---- API + AI gate ----
 	apiSrv := api.NewServer(store, configstore.NewGonacosStore(bundle.Config), api.Options{
