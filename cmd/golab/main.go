@@ -50,7 +50,7 @@ func main() {
 		redisAddr      = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
 		authSecret     = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
 		rolloutIv      = flag.Duration("rollout-interval", 30*time.Second, "auto-advance engine tick interval for staged release plans (0 disables automation; manual plan operations stay available)")
-		reconcileIv    = flag.Duration("reconcile-interval", 30*time.Second, "publish reconciliation tick interval: re-verifies the gonacos substrate against the platform store and idempotently republishes drift; also the multi-replica state-refresh cadence (0 disables)")
+		reconcileIv    = flag.Duration("reconcile-interval", 30*time.Second, "publish reconciliation tick interval: re-verifies the gonacos substrate against the platform store and idempotently republishes drift (0 disables); PostgreSQL control changes sync separately every 500ms")
 		requestsPerSec = flag.Float64("requests-per-second", 0, "per-token request rate limit on sdk/collect endpoints (0 = default 200)")
 		bootstrapName  = flag.String("bootstrap-owner-name", "bootstrap-owner", "display name of the auto-created global owner token")
 		printVersion   = flag.Bool("version", false, "print version and exit")
@@ -168,6 +168,7 @@ func main() {
 	go apiSrv.Rollout.Run(ctx, *rolloutIv)
 	// ---- publish reconciliation background task (§3/§11) ----
 	go apiSrv.Admin.RunReconciler(ctx, *reconcileIv)
+	go store.RunChangeSync(ctx, 500*time.Millisecond, logger.Printf)
 	// ---- bootstrap owner credential (printed once) ----
 	if token := bootstrapOwner(store, *bootstrapName, logger); token != "" {
 		logger.Printf("")

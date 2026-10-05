@@ -93,11 +93,12 @@ type Data struct {
 // Persistence backend as one transactional unit (file JSON for dev, or
 // PostgreSQL for production — docs/技术方案.md §3, §10.2).
 type Store struct {
-	mu      sync.RWMutex
-	persist Persistence
-	dedup   eventDedup // optional backend dedup ledger (PostgreSQL)
-	changes *ChangeSet
-	data    *Data
+	mu        sync.RWMutex
+	persist   Persistence
+	dedup     eventDedup // optional backend dedup ledger (PostgreSQL)
+	changes   *ChangeSet
+	data      *Data
+	syncStats syncMetrics
 }
 
 const dataSchemaVersion = 1

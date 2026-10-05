@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -29,6 +30,264 @@ func openPGStore(t *testing.T, dsn string) *Store {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
+}
+
+// Two independent working sets converge through object reads, while token
+// authorization remains a direct primary-DB check even before invalidation.
+func TestPGIncrementalControlSync(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	a, b := openPGStore(t, dsn), openPGStore(t, dsn)
+	if err := a.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := a.CreateWorkspace("incremental", "old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.GetWorkspace(ws.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unexpected pre-sync workspace: %v", err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := b.GetWorkspace(ws.ID); err != nil || got.Name != "old" {
+		t.Fatalf("workspace: %+v %v", got, err)
+	}
+	env, err := a.CreateEnvironment(ws.ID, "prod", "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.GetEnvironment(ws.ID, env.ID); err != nil {
+		t.Fatal(err)
+	}
+	tok, err := a.CreateToken(TokenAdmin, "owner", RoleOwner, "", "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.ListTokens("")) != 1 {
+		t.Fatalf("token list did not converge")
+	}
+	revokedAt := time.Now()
+	if err := a.RevokeToken(tok.Token.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ResolveToken(tok.Secret); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("revoked token authenticated: %v", err)
+	}
+	if delay := time.Since(revokedAt); delay > 2*time.Second {
+		t.Fatalf("revocation authorization delay %s exceeded healthy-PG test bound", delay)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if !b.ListTokens("")[0].Revoked {
+		t.Fatal("cached token still active")
+	}
+	exp, err := a.CreateExperiment(&Experiment{WorkspaceID: ws.ID, EnvironmentID: env.ID,
+		FlagKey: "flag", Epoch: 1, Unit: "user_id", Variants: []string{"a", "b"},
+		Proportions:   map[string]float64{"a": 50, "b": 50},
+		PrimaryMetric: MetricSpec{Key: "m", Type: "proportion", Direction: "increase"},
+		Alpha:         0.05, AnalysisWindow: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.TransitionExperiment(exp.ID, model.ExperimentReviewed, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := b.GetExperiment(exp.ID); err != nil || got.State != model.ExperimentReviewed {
+		t.Fatalf("experiment: %+v %v", got, err)
+	}
+	q := DefaultQuotas()
+	q.MaxFlags = 2
+	if err := a.SetQuotas(ws.ID, q); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if b.GetQuotas(ws.ID).MaxFlags != 2 {
+		t.Fatal("quota tightening did not converge")
+	}
+	if err := a.RevokeAIResource(ws.ID, env.ID, AITypePrompt, "prompt", "stop", "owner"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if _, revoked := b.IsAIRevoked(ws.ID, env.ID, AITypePrompt, "prompt"); !revoked {
+		t.Fatal("AI revocation did not converge")
+	}
+	// The repository has no workspace rename API; inject a valid committed
+	// protocol write to verify a changed row is re-read from workspaces.
+	p := a.persist.(*pgPersistence)
+	ctx := t.Context()
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `UPDATE meta SET control_version=control_version+1 WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE workspaces SET name='new' WHERE id=$1`, ws.ID); err != nil {
+		t.Fatal(err)
+	}
+	var version int64
+	if err := tx.QueryRow(ctx, `SELECT control_version FROM meta WHERE id=1`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO control_changes(version,collection,object_id) VALUES ($1,'workspaces',$2)`, version, changeKey(ws.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := b.GetWorkspace(ws.ID); err != nil || got.Name != "new" {
+		t.Fatalf("workspace update: %+v %v", got, err)
+	}
+	// An old hint carries no state and cannot roll the working set back.
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := b.GetWorkspace(ws.ID); got.Name != "new" {
+		t.Fatal("old hint rolled back workspace")
+	}
+	m := b.ChangeSyncMetrics()
+	if m.FullReloads != 0 || m.VersionLag != 0 || m.Applied < 6 {
+		t.Fatalf("incremental metrics: %+v", m)
+	}
+}
+
+func TestPGChangeSyncMissedNoticeAndIdleCost(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	a, b := openPGStore(t, dsn), openPGStore(t, dsn)
+	if err := a.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	// No listener runs while A writes; the durable sequence repairs the gap.
+	ws, err := a.CreateWorkspace("missed", "missed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.GetWorkspace(ws.ID); err != nil {
+		t.Fatal(err)
+	}
+	before := b.ChangeSyncMetrics()
+	var memBefore, memAfter runtime.MemStats
+	runtime.ReadMemStats(&memBefore)
+	start := time.Now()
+	for range 100 {
+		if err := b.SyncChanges(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	elapsed := time.Since(start)
+	runtime.ReadMemStats(&memAfter)
+	after := b.ChangeSyncMetrics()
+	if after.Queries-before.Queries != 100 || after.FullReloads != 0 {
+		t.Fatalf("idle sync cost: before=%+v after=%+v", before, after)
+	}
+	t.Logf("idle sync: 100 version queries, %s total, %d allocated bytes, heap before=%d after=%d, 0 full reloads",
+		elapsed, memAfter.TotalAlloc-memBefore.TotalAlloc, memBefore.HeapAlloc, memAfter.HeapAlloc)
+}
+
+func TestPGChangeSyncListenerReconnect(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	a, b := openPGStore(t, dsn), openPGStore(t, dsn)
+	if err := a.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); b.RunChangeSync(ctx, 100*time.Millisecond, nil) }()
+	defer func() { cancel(); <-done }()
+	waitFor := func(check func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(4 * time.Second)
+		for time.Now().Before(deadline) {
+			if check() {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatal("change sync did not converge within 4s")
+	}
+	waitFor(func() bool {
+		var n int
+		err := a.persist.(*pgPersistence).pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN golab_control'`).Scan(&n)
+		return err == nil && n > 0
+	})
+	ws, err := a.CreateWorkspace("listener", "listener")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(func() bool { _, err := b.GetWorkspace(ws.ID); return err == nil })
+	// Kill the dedicated LISTEN session. The loop reconnects, and the version
+	// poll closes the gap even if the NOTIFY was lost during that interval.
+	var killed bool
+	err = a.persist.(*pgPersistence).pool.QueryRow(t.Context(), `SELECT pg_terminate_backend(pid)
+		FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN golab_control' LIMIT 1`).Scan(&killed)
+	if err != nil || !killed {
+		t.Fatalf("terminate listener: %v %t", err, killed)
+	}
+	env, err := a.CreateEnvironment(ws.ID, "prod", "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(func() bool { _, err := b.GetEnvironment(ws.ID, env.ID); return err == nil })
+	p := a.persist.(*pgPersistence)
+	tx, err := p.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err := tx.Exec(t.Context(), `UPDATE meta SET control_version=control_version+1 WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `UPDATE workspaces SET name='newer' WHERE id=$1`, ws.ID); err != nil {
+		t.Fatal(err)
+	}
+	var version int64
+	if err := tx.QueryRow(t.Context(), `SELECT control_version FROM meta WHERE id=1`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `INSERT INTO control_changes(version,collection,object_id) VALUES ($1,'workspaces',$2)`, version, changeKey(ws.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(func() bool { got, err := b.GetWorkspace(ws.ID); return err == nil && got.Name == "newer" })
+	// A late duplicate with an older version carries no state and is ignored.
+	oldHint := fmt.Sprintf(`{"type":"workspaces","id":"%s","version":1}`, changeKey(ws.ID))
+	if _, err := p.pool.Exec(t.Context(), `SELECT pg_notify('golab_control', $1)`, oldHint); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if got, _ := b.GetWorkspace(ws.ID); got.Name != "newer" {
+		t.Fatal("old notification rolled back workspace")
+	}
+	if m := b.ChangeSyncMetrics(); m.VersionLag != 0 || m.FullReloads != 0 {
+		t.Fatalf("reconnect metrics: %+v", m)
+	}
 }
 
 func TestPGConcurrentDuplicateCountMatchesLedger(t *testing.T) {
@@ -826,7 +1085,7 @@ func TestPGMigrationsIdempotent(t *testing.T) {
 			t.Fatalf("close %d: %v", i, err)
 		}
 	}
-	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM schema_migrations`); got[0][0] != "2" {
+	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM schema_migrations`); got[0][0] != "3" {
 		t.Fatalf("schema_migrations rows: %v", got)
 	}
 	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM workspaces`); got[0][0] != "3" {

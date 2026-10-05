@@ -24,9 +24,8 @@ import (
 //
 // PublishLock is a no-op on single-process backends (file/memory), where the
 // admin service's in-process publishMu already serializes everything.
-// ReloadFromBackend is what lets the reconciler converge replicas: each pass
-// re-reads the shared backend, so a commit on replica A becomes visible on
-// replica B within one tick.
+// The normal PostgreSQL read path converges through SyncChanges; this full
+// reload remains required inside publish locks and as an exceptional fallback.
 
 // scopeLocker is implemented by backends that can serialize publishes across
 // processes (PostgreSQL advisory locks).
@@ -108,6 +107,7 @@ func (s *Store) PublishLock(workspaceID, environmentID string) (func(), error) {
 func (s *Store) ReloadFromBackend() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	start := time.Now()
 	if s.persist == nil {
 		return nil
 	}
@@ -124,5 +124,11 @@ func (s *Store) ReloadFromBackend() error {
 		return nil // empty backend — keep the current working set
 	}
 	s.data = d
-	return s.normalizeKeyRing()
+	if err := s.normalizeKeyRing(); err != nil {
+		return err
+	}
+	s.syncStats.fullReloads.Add(1)
+	s.syncStats.lastReloadNS.Store(time.Since(start).Nanoseconds())
+	s.syncStats.versionLag.Store(0)
+	return nil
 }

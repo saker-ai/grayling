@@ -58,14 +58,13 @@ func (st ReconcileStats) Repaired() bool {
 	return st.DocsRepaired+st.ManifestsRepaired > 0
 }
 
-// ReconcileOnce runs one pass over every environment. It reloads the working
-// set first so a replica sees changes committed by other replicas since the
-// last pass, then reconciles each environment under the publish lock (the
+// ReconcileOnce runs one pass over every environment. It first catches up the
+// PostgreSQL control journal, then reconciles each environment under the publish lock (the
 // same lock publishes take — a repair can never interleave with a publish).
 func (s *Service) ReconcileOnce() ReconcileStats {
 	stats := ReconcileStats{}
-	if err := s.Store.ReloadFromBackend(); err != nil {
-		stats.Errors = append(stats.Errors, "reload: "+err.Error())
+	if err := s.Store.SyncChanges(); err != nil {
+		stats.Errors = append(stats.Errors, "sync: "+err.Error())
 		return stats
 	}
 	for _, ws := range s.Store.ListWorkspaces() {
@@ -94,11 +93,11 @@ func (s *Service) RunReconciler(ctx context.Context, interval time.Duration) {
 			return
 		case <-t.C:
 			stats := s.ReconcileOnce()
-			if stats.Repaired() || len(stats.Errors) > 0 {
-				s.logf("reconcile: envs=%d healthy=%d docsRepaired=%d manifestsRepaired=%d errors=%v",
-					stats.Environments, stats.Healthy, stats.DocsRepaired,
-					stats.ManifestsRepaired, stats.Errors)
-			}
+			m := s.Store.ChangeSyncMetrics()
+			s.logf("reconcile: envs=%d healthy=%d docsRepaired=%d manifestsRepaired=%d errors=%v control_applied=%d control_queries=%d control_failures=%d control_version_lag=%d control_max_notification_delay=%s full_reloads=%d last_full_reload=%s",
+				stats.Environments, stats.Healthy, stats.DocsRepaired,
+				stats.ManifestsRepaired, stats.Errors, m.Applied, m.Queries, m.Failures, m.VersionLag,
+				m.MaxNotificationDelay, m.FullReloads, m.LastFullReload)
 		}
 	}
 }

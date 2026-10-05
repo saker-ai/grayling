@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -101,6 +102,13 @@ type pgMigration struct {
 var pgMigrations = []pgMigration{
 	{1, pgSchemaV1},
 	{2, `ALTER TABLE meta ADD COLUMN control_version bigint NOT NULL DEFAULT 0`},
+	{3, `CREATE TABLE control_changes (
+        version bigint NOT NULL,
+        collection text NOT NULL,
+        object_id text NOT NULL,
+        committed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+        PRIMARY KEY (version, collection, object_id)
+    )`},
 }
 
 const pgSchemaV1 = `
@@ -509,6 +517,11 @@ func (p *pgPersistence) Commit(data *Data, ch *ChangeSet) error {
 			return pgConflict(err)
 		}
 	}
+	if control {
+		if err := p.commitChanges(ctx, tx, data.ControlVersion+1, ch); err != nil {
+			return err
+		}
+	}
 	if !ch.PruneEventsBefore.IsZero() {
 		if err := p.pruneEvents(ctx, tx, ch.PruneEventsBefore); err != nil {
 			return err
@@ -523,6 +536,84 @@ func (p *pgPersistence) Commit(data *Data, ch *ChangeSet) error {
 	p.lastAcceptedIDs = accepted
 	return nil
 }
+
+// commitChanges records the exact objects modified by this transaction. The
+// notification is only a hint; consumers query control_changes and then the
+// canonical entity tables. A meta-only operation still advances the cursor.
+func (p *pgPersistence) commitChanges(ctx context.Context, tx pgx.Tx, version int64, ch *ChangeSet) error {
+	batch := &pgx.Batch{}
+	count := 0
+	for coll, keys := range ch.Dirty {
+		for key := range keys {
+			batch.Queue(`INSERT INTO control_changes (version, collection, object_id) VALUES ($1,$2,$3)`, version, string(coll), changeKey(key))
+			count++
+		}
+	}
+	for coll, keys := range ch.Deleted {
+		for key := range keys {
+			batch.Queue(`INSERT INTO control_changes (version, collection, object_id) VALUES ($1,$2,$3)`, version, string(coll), changeKey(key))
+			count++
+		}
+	}
+	for _, entry := range ch.Audit {
+		batch.Queue(`INSERT INTO control_changes (version, collection, object_id) VALUES ($1,'audit',$2)`, version, changeKey(strconv.FormatInt(entry.ID, 10)))
+		count++
+	}
+	if count == 0 {
+		batch.Queue(`INSERT INTO control_changes (version, collection, object_id) VALUES ($1,'meta','')`, version)
+	}
+	if err := tx.SendBatch(ctx, batch).Close(); err != nil {
+		return fmt.Errorf("platform: persist control changes: %w", err)
+	}
+	// Hints contain only type, ID and version; state always comes from tables.
+	for coll, keys := range ch.Dirty {
+		for key := range keys {
+			if err := p.notifyChange(ctx, tx, version, string(coll), key); err != nil {
+				return err
+			}
+		}
+	}
+	for coll, keys := range ch.Deleted {
+		for key := range keys {
+			if err := p.notifyChange(ctx, tx, version, string(coll), key); err != nil {
+				return err
+			}
+		}
+	}
+	for _, entry := range ch.Audit {
+		if err := p.notifyChange(ctx, tx, version, "audit", strconv.FormatInt(entry.ID, 10)); err != nil {
+			return err
+		}
+	}
+	if count == 0 {
+		return p.notifyChange(ctx, tx, version, "meta", "")
+	}
+	return nil
+}
+
+func (p *pgPersistence) notifyChange(ctx context.Context, tx pgx.Tx, version int64, coll, key string) error {
+	payload, err := json.Marshal(struct {
+		Type    string `json:"type"`
+		ID      string `json:"id"`
+		Version int64  `json:"version"`
+	}{coll, changeKey(key), version})
+	if err != nil {
+		return err
+	}
+	// A hint must never make an otherwise valid management transaction fail.
+	// The durable journal and periodic version check cover oversized keys.
+	if len(payload) > 7900 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_notify('golab_control', $1)`, string(payload)); err != nil {
+		return fmt.Errorf("platform: notify control change: %w", err)
+	}
+	return nil
+}
+
+// PostgreSQL text and NOTIFY payloads cannot contain NUL, while scoped
+// collection keys deliberately use NUL separators.
+func changeKey(key string) string { return base64.RawURLEncoding.EncodeToString([]byte(key)) }
 
 func pgConflict(err error) error {
 	var pgErr *pgconn.PgError
