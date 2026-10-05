@@ -274,9 +274,10 @@ func (r *replica) restart(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type client struct {
-	t     *testing.T
-	base  string
-	token string
+	t        *testing.T
+	base     string
+	token    string
+	reviewer string
 }
 
 func (c *client) do(method, path string, body any, out any) int {
@@ -331,10 +332,11 @@ func (c *client) publishFlag(flag *model.Flag) (manifestRev int64, status int) {
 	if status = c.do("PUT", base+"/draft", map[string]any{"content": flag, "risk": "normal"}, nil); status != 200 {
 		return 0, status
 	}
-	if status = c.do("POST", base+"/submit", nil, nil); status != 200 {
+	if status = c.do("POST", base+"/submit", map[string]any{"reason": "cluster publish"}, nil); status != 200 {
 		return 0, status
 	}
-	if status = c.do("POST", base+"/approve", map[string]any{"note": "ok"}, nil); status != 200 {
+	approver := &client{t: c.t, base: c.base, token: c.reviewer}
+	if status = approver.do("POST", base+"/approve", map[string]any{"note": "ok"}, nil); status != 200 {
 		return 0, status
 	}
 	var res struct {
@@ -734,6 +736,13 @@ func TestClusterMultiReplica(t *testing.T) {
 		map[string]any{"slug": "prod", "name": "Production"}, nil); code != http.StatusCreated {
 		t.Fatalf("create env: %d", code)
 	}
+	var reviewerCT struct{ Secret string }
+	if code := adminA.do("POST", "/api/v1/admin/workspaces/acme/tokens",
+		map[string]any{"name": "reviewer", "kind": "admin", "role": "publisher"}, &reviewerCT); code != http.StatusCreated {
+		t.Fatalf("create reviewer token: %d", code)
+	}
+	adminA.reviewer = reviewerCT.Secret
+	reviewerA := &client{t: t, base: A.base, token: reviewerCT.Secret}
 	var sdkCT struct{ Secret string }
 	if code := adminA.do("POST", "/api/v1/admin/workspaces/acme/tokens",
 		map[string]any{"name": "sdk", "kind": "sdk", "environment": "prod"}, &sdkCT); code != http.StatusCreated {
@@ -880,10 +889,10 @@ func TestClusterMultiReplica(t *testing.T) {
 			if code := adminA.do("PUT", base+"/draft", map[string]any{"content": fl, "risk": "normal"}, nil); code != 200 {
 				t.Fatalf("draft %d: %d", i, code)
 			}
-			if code := adminA.do("POST", base+"/submit", nil, nil); code != 200 {
+			if code := adminA.do("POST", base+"/submit", map[string]any{"reason": "cluster publish"}, nil); code != 200 {
 				t.Fatalf("submit %d: %d", i, code)
 			}
-			if code := adminA.do("POST", base+"/approve", map[string]any{"note": "ok"}, nil); code != 200 {
+			if code := reviewerA.do("POST", base+"/approve", map[string]any{"note": "ok"}, nil); code != 200 {
 				t.Fatalf("approve %d: %d", i, code)
 			}
 		}
@@ -982,10 +991,10 @@ func TestClusterMultiReplica(t *testing.T) {
 		if code := adminA.do("PUT", base+"/draft", map[string]any{"content": fl, "risk": "normal"}, nil); code != 200 {
 			t.Fatalf("draft: %d", code)
 		}
-		if code := adminA.do("POST", base+"/submit", nil, nil); code != 200 {
+		if code := adminA.do("POST", base+"/submit", map[string]any{"reason": "cluster publish"}, nil); code != 200 {
 			t.Fatalf("submit: %d", code)
 		}
-		if code := adminA.do("POST", base+"/approve", map[string]any{"note": "ok"}, nil); code != 200 {
+		if code := reviewerA.do("POST", base+"/approve", map[string]any{"note": "ok"}, nil); code != 200 {
 			t.Fatalf("approve: %d", code)
 		}
 		adminB := &client{t: t, base: B.base, token: ownerToken}

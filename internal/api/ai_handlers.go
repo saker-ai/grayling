@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -67,6 +68,10 @@ func (s *Server) handleRevokeAIResource(w http.ResponseWriter, r *http.Request) 
 		writeStoreError(w, err)
 		return
 	}
+	if actor.Role != platform.RoleOwner {
+		writeStoreError(w, platform.ErrAccessDenied)
+		return
+	}
 	var req struct {
 		Reason string `json:"reason"`
 	}
@@ -83,8 +88,29 @@ func (s *Server) handleRevokeAIResource(w http.ResponseWriter, r *http.Request) 
 		writeStoreError(w, err)
 		return
 	}
-	_ = s.Store.Audit(actor.Name, actor.Role, "ai.revoke", ws.ID, env.ID, typ+"/"+logical, req.Reason)
-	writeJSON(w, http.StatusOK, map[string]any{"status": "revoked", "type": typ, "logicalId": logical})
+	hash, err := approvalHash(struct {
+		Reason string `json:"reason"`
+	}{req.Reason})
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	review, err := s.Store.RequestApproval(platform.Approval{
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, Action: "breakglass.review",
+		Object: typ + "/" + logical, PayloadHash: hash,
+		BaseRevision: int64(len(s.Store.ListPinnedVersions(ws.ID, env.ID, typ, logical))),
+		Reason:       req.Reason, Impact: "immediate denial of AI resource resolution and execution",
+		RollbackTarget: "resource reinstatement after incident review",
+		Guardrails:     "runtime revocation check; independent post-action review",
+		SubmittedBy:    actor.Name, SubmittedTokenID: actor.TokenID,
+	})
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	_ = s.Store.Audit(actor.Name+" ("+actor.TokenID+")", actor.Role, "breakglass.open", ws.ID, env.ID,
+		review.ID, fmt.Sprintf(`{"action":"ai.revoke","object":%q,"reason":%q}`, typ+"/"+logical, req.Reason))
+	writeJSON(w, http.StatusOK, map[string]any{"status": "revoked", "type": typ, "logicalId": logical, "reviewId": review.ID})
 }
 
 // handleReinstateAIResource lifts a revocation.
@@ -98,12 +124,35 @@ func (s *Server) handleReinstateAIResource(w http.ResponseWriter, r *http.Reques
 		writeStoreError(w, err)
 		return
 	}
+	if actor.Role != platform.RoleOwner {
+		writeStoreError(w, platform.ErrAccessDenied)
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if req.Reason == "" {
+		writeStoreError(w, fmt.Errorf("%w: reinstatement requires a reason", platform.ErrValidation))
+		return
+	}
 	typ, logical := r.PathValue("type"), r.PathValue("logical")
+	for _, review := range s.Store.ListApprovals(ws.ID) {
+		if review.EnvironmentID == env.ID && review.Action == "breakglass.review" &&
+			review.Object == typ+"/"+logical && review.State == platform.DraftSubmitted {
+			writeStoreError(w, fmt.Errorf("%w: emergency revocation requires independent review", platform.ErrInvalidState))
+			return
+		}
+	}
 	if err := s.ai.Reinstate(ws.ID, env.ID, typ, logical); err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	_ = s.Store.Audit(actor.Name, actor.Role, "ai.reinstate", ws.ID, env.ID, typ+"/"+logical, "")
+	_ = s.Store.Audit(actor.Name+" ("+actor.TokenID+")", actor.Role, "ai.reinstate", ws.ID, env.ID,
+		typ+"/"+logical, fmt.Sprintf(`{"reason":%q}`, req.Reason))
 	writeJSON(w, http.StatusOK, map[string]any{"status": "reinstated"})
 }
 
@@ -164,14 +213,31 @@ func (s *Server) handlePinAIVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Content string `json:"content"`
+		Content    string `json:"content"`
+		ApprovalID string `json:"approvalId"`
 	}
 	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
 		writeStoreError(w, err)
 		return
 	}
 	typ, logical := r.PathValue("type"), r.PathValue("logical")
-	pin, err := s.ai.PublishVersion(ws.ID, env.ID, typ, logical, req.Content, actor.Name)
+	if err := admin.Authorize(actor, ws.ID, admin.PermFlagPublish); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	var pin *platform.PinnedVersion
+	err = s.Admin.WithScopeLock(ws.ID, env.ID, func() error {
+		base := int64(len(s.Store.ListPinnedVersions(ws.ID, env.ID, typ, logical)))
+		if err := s.useApproval(actor, req.ApprovalID, ws.ID, env.ID, "ai.pin", typ+"/"+logical,
+			struct {
+				Content string `json:"content"`
+			}{req.Content}, base); err != nil {
+			return err
+		}
+		var err error
+		pin, err = s.ai.PublishVersion(ws.ID, env.ID, typ, logical, req.Content, actor.Name)
+		return err
+	})
 	if err != nil {
 		writeStoreError(w, mapAIError(err))
 		return

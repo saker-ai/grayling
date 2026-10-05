@@ -206,9 +206,10 @@ func waitHealth(t *testing.T, base, path string, timeout time.Duration) {
 // ---------------------------------------------------------------------------
 
 type adminClient struct {
-	t     *testing.T
-	base  string
-	token string
+	t        *testing.T
+	base     string
+	token    string
+	reviewer string
 }
 
 func (a *adminClient) do(method, path string, body any, out any) int {
@@ -255,10 +256,11 @@ func (a *adminClient) publishFlag(flag *model.Flag) (manifestRev int64) {
 	if code := a.do("PUT", base+"/draft", map[string]any{"content": flag, "risk": "normal"}, nil); code != 200 {
 		a.t.Fatalf("save draft: %d", code)
 	}
-	if code := a.do("POST", base+"/submit", nil, nil); code != 200 {
+	if code := a.do("POST", base+"/submit", map[string]any{"reason": "gateway verification"}, nil); code != 200 {
 		a.t.Fatalf("submit: %d", code)
 	}
-	if code := a.do("POST", base+"/approve", map[string]any{"note": "ok"}, nil); code != 200 {
+	approver := &adminClient{t: a.t, base: a.base, token: a.reviewer}
+	if code := approver.do("POST", base+"/approve", map[string]any{"note": "ok"}, nil); code != 200 {
 		a.t.Fatalf("approve: %d", code)
 	}
 	var res struct {
@@ -486,6 +488,12 @@ func setupFixture(t *testing.T) *fixture {
 		map[string]any{"slug": "prod", "name": "Production"}, nil); code != http.StatusCreated {
 		t.Fatalf("create env: %d", code)
 	}
+	var reviewerCT struct{ Secret string }
+	if code := fx.admin.do("POST", "/api/v1/admin/workspaces/acme/tokens",
+		map[string]any{"name": "reviewer", "kind": "admin", "role": "publisher"}, &reviewerCT); code != http.StatusCreated {
+		t.Fatalf("create reviewer token: %d", code)
+	}
+	fx.admin.reviewer = reviewerCT.Secret
 	var sdkCT struct {
 		Secret string
 	}

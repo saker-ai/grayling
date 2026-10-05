@@ -99,6 +99,12 @@ func TestGatewayClientIPE2E(t *testing.T) {
 		map[string]any{"slug": "prod", "name": "Production"}, nil); code != http.StatusCreated {
 		t.Fatalf("create env: %d", code)
 	}
+	var reviewerCT struct{ Secret string }
+	if code := admin.do("POST", "/api/v1/admin/workspaces/acme/tokens",
+		map[string]any{"name": "reviewer", "kind": "admin", "role": "publisher"}, &reviewerCT); code != http.StatusCreated {
+		t.Fatalf("create reviewer token: %d", code)
+	}
+	admin.reviewer = reviewerCT.Secret
 	var sdkCT struct {
 		Secret string
 	}

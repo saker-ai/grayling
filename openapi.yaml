@@ -495,6 +495,12 @@ paths:
         - $ref: "#/components/parameters/WsPath"
         - $ref: "#/components/parameters/EnvPath"
         - $ref: "#/components/parameters/FlagKeyPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitRequest"
       responses:
         "200":
           description: 状态迁移成功。
@@ -517,7 +523,7 @@ paths:
   "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/approve":
     post:
       tags: [flags]
-      summary: 批准草稿（submitted→approved；高风险禁止自批）
+      summary: 批准草稿（submitted→approved；所有风险等级禁止自批）
       operationId: approveFlagDraft
       parameters:
         - $ref: "#/components/parameters/WsPath"
@@ -767,6 +773,12 @@ paths:
         - $ref: "#/components/parameters/WsPath"
         - $ref: "#/components/parameters/EnvPath"
         - $ref: "#/components/parameters/SegmentKeyPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitRequest"
       responses:
         "200":
           description: 状态迁移成功。
@@ -1420,13 +1432,19 @@ paths:
   "/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}/reinstate":
     post:
       tags: [ai]
-      summary: 解除撤销。无请求体。
+      summary: 独立事后复核完成后由 owner 解除撤销
       operationId: reinstateAIResource
       parameters:
         - $ref: "#/components/parameters/WsPath"
         - $ref: "#/components/parameters/EnvPath"
         - $ref: "#/components/parameters/AITypePath"
         - $ref: "#/components/parameters/AILogicalPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeAIResourceRequest"
       responses:
         "200":
           description: 已恢复。
@@ -1853,6 +1871,114 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/approvals":
+    get:
+      tags: [workspaces]
+      summary: 列出工作空间的审批和紧急复核待办
+      operationId: listApprovals
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+      responses:
+        "200":
+          description: 审批记录列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Approval"
+  "/api/v1/admin/workspaces/{ws}/approvals/{id}/approve":
+    post:
+      tags: [workspaces]
+      summary: 异人审批或事后复核，授权限于当前工作空间
+      operationId: approveChange
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                note: { type: string }
+      responses:
+        "200":
+          description: 24 小时有效的内容摘要审批，或紧急路径事后复核。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Approval"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/approvals":
+    post:
+      tags: [workspaces]
+      summary: 申请 release plan、AI pin 或计划回滚审批
+      operationId: requestApproval
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalProposal"
+      responses:
+        "201":
+          description: 已提交，含受影响范围、回滚目标、护栏和不可变摘要。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Approval"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/preview":
+    get:
+      tags: [segments]
+      summary: 发布前查看 segment 的变更摘要、目标环境、影响与回滚目标
+      operationId: previewSegment
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/SegmentKeyPath"
+      responses:
+        "200":
+          description: Segment 发布预览。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewPreview"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/emergency-disable":
+    post:
+      tags: [flags]
+      summary: owner 紧急关闭，发布 disable=true 新 revision 并生成异人事后复核
+      operationId: emergencyDisableFlag
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/FlagKeyPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitRequest"
+      responses:
+        "200":
+          description: 含新 revision、manifest revision 和待复核 reviewId。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishResult"
+        "403": { $ref: "#/components/responses/Forbidden" }
 components:
   securitySchemes:
     bearerAuth:
@@ -2032,6 +2158,71 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    SubmitRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+    ApprovalProposal:
+      type: object
+      additionalProperties: false
+      required: [action, object, payload, reason]
+      properties:
+        action:
+          type: string
+          enum: [release_plan.create, ai.pin, flag.rollback]
+        object:
+          type: string
+          description: release plan 为 experiment ID，AI pin 为 type/logical，回滚为 flag key。
+        payload:
+          type: object
+          description: 具体操作请求体；服务端解析并绑定规范化摘要。
+        reason:
+          type: string
+    Approval:
+      type: object
+      required: [id, workspaceId, environmentId, action, object, payloadHash, baseRevision, risk, reason, state, submittedBy, submittedTokenId, submittedAt]
+      properties:
+        id: { type: string }
+        workspaceId: { type: string }
+        environmentId: { type: string }
+        action: { type: string }
+        object: { type: string }
+        payloadHash: { type: string }
+        baseRevision: { type: integer, format: int64 }
+        risk: { type: string, enum: [high] }
+        reason: { type: string }
+        impact: { type: string }
+        rollbackTarget: { type: string }
+        guardrails: { type: string }
+        payload: { type: string, description: 非敏感操作参数；AI 原始内容不保存。 }
+        state: { type: string, enum: [submitted, approved, used] }
+        submittedBy: { type: string }
+        submittedTokenId: { type: string }
+        submittedAt: { type: string, format: date-time }
+        approvedBy: { type: string }
+        approvedTokenId: { type: string }
+        approvedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        reviewNote: { type: string }
+        usedAt: { type: string, format: date-time }
+    ReviewPreview:
+      type: object
+      required: [targetEnvironment, risk, baseRevision, proposedHash, changedFields, estimatedAffected, rollbackTarget, guardrails]
+      properties:
+        targetEnvironment: { type: string }
+        risk: { type: string, enum: [normal, high] }
+        baseRevision: { type: integer, format: int64 }
+        currentHash: { type: string }
+        proposedHash: { type: string }
+        changedFields: { type: array, items: { type: string } }
+        estimatedAffected: { type: string }
+        rollbackTarget: { type: string }
+        guardrails: { type: string }
+        approvalExpiresAt: { type: string, format: date-time }
     ErrorBody:
       type: object
       required: [code, message]
@@ -2715,6 +2906,8 @@ components:
           type: string
         draft:
           $ref: "#/components/schemas/FlagDraft"
+        preview:
+          $ref: "#/components/schemas/ReviewPreview"
         currentRevision:
           type: integer
           format: int64
@@ -2792,6 +2985,12 @@ components:
           description: 目标历史 revision（须存在且读回哈希验证通过）。
         reason:
           type: string
+        approvalId:
+          type: string
+          description: 计划回滚的审批记录；与 emergency 二选一。
+        emergency:
+          type: boolean
+          description: owner 紧急回滚，强制原因与事后复核。
     ImportGffRequest:
       type: object
       additionalProperties: false
@@ -3116,6 +3315,9 @@ components:
           minItems: 1
           items:
             $ref: "#/components/schemas/ReleaseStep"
+        approvalId:
+          type: string
+          description: 与本次 steps 完全相同的有效审批记录 ID。
     TakeoverRequest:
       type: object
       additionalProperties: false
@@ -3807,6 +4009,9 @@ components:
         content:
           type: string
           description: 新版本原始内容（发布后读回验证并计算 MD5）。
+        approvalId:
+          type: string
+          description: 与 content 摘要一致的有效审批记录 ID。
     RevokeAIResourceRequest:
       type: object
       additionalProperties: false
@@ -3817,7 +4022,7 @@ components:
           description: 撤销原因（必填，空 → 400）。
     AIRevokeResponse:
       type: object
-      required: [status, type, logicalId]
+      required: [status, type, logicalId, reviewId]
       properties:
         status:
           type: string
@@ -3825,6 +4030,8 @@ components:
         type:
           type: string
         logicalId:
+          type: string
+        reviewId:
           type: string
     AIReinstateResponse:
       type: object

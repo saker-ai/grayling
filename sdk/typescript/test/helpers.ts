@@ -44,6 +44,7 @@ export interface AdminResponse {
 export class GolabServer {
   readonly baseUrl: string;
   readonly ownerToken: string;
+  reviewerToken = "";
   readonly proc: GolabProc;
   readonly tmp: string;
 
@@ -81,8 +82,8 @@ export class GolabServer {
     const base = `/api/v1/admin/workspaces/${ws}/environments/${env}/flags/${content.key}`;
     await this.expect("PUT", `${base}/draft`, 200, this.ownerToken,
       { content, risk: opts.risk ?? "normal" });
-    await this.expect("POST", `${base}/submit`, 200, this.ownerToken);
-    await this.expect("POST", `${base}/approve`, 200, opts.approver ?? this.ownerToken, { note: "ok" });
+    await this.expect("POST", `${base}/submit`, 200, this.ownerToken, { reason: "TypeScript SDK integration" });
+    await this.expect("POST", `${base}/approve`, 200, opts.approver ?? this.reviewerToken, { note: "ok" });
     return await this.expect("POST", `${base}/publish`, 200, this.ownerToken, { note: "ship" });
   }
 
@@ -173,6 +174,7 @@ export class TestEnv {
       201, server.ownerToken, { name: "ts-collect", kind: "collect", environment: t.env })).Secret;
     t.publisherToken = (await server.expect("POST", `/api/v1/admin/workspaces/${t.ws}/tokens`,
       201, server.ownerToken, { name: "ts-publisher", kind: "admin", role: "publisher" })).Secret;
+    server.reviewerToken = t.publisherToken;
 
     // Bool flag: tenant=acme → on; default off.
     await server.publishFlag(t.ws, t.env, {

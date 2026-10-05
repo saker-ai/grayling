@@ -8,6 +8,59 @@ import (
 	"github.com/godeps/golab/pkg/model"
 )
 
+// ApprovalTTL bounds the time between review and execution. A changed draft
+// must be submitted and approved again, even while the old grant is live.
+const ApprovalTTL = 24 * time.Hour
+
+func draftHash(content any, risk Risk, deleted bool, baseRevision int64) (string, error) {
+	raw, err := model.CanonicalJSON(struct {
+		Content      any   `json:"content"`
+		Risk         Risk  `json:"risk"`
+		Deleted      bool  `json:"deleted"`
+		BaseRevision int64 `json:"baseRevision"`
+	}{content, risk, deleted, baseRevision})
+	if err != nil {
+		return "", err
+	}
+	return model.HashBytes(raw), nil
+}
+
+// VerifyFlagApproval checks the exact reviewed bytes and current base revision.
+func (s *Store) VerifyFlagApproval(d *FlagDraft) error {
+	if d.State != DraftApproved || d.ApprovalExpiresAt == nil || !s.now().Before(*d.ApprovalExpiresAt) {
+		return fmt.Errorf("%w: flag approval is missing or expired", ErrInvalidState)
+	}
+	hash, err := draftHash(d.Content, d.Risk, d.Deleted, d.BaseRevision)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	if hash != d.ApprovedHash || hash != d.SubmittedHash {
+		return fmt.Errorf("%w: flag changed after approval", ErrConflict)
+	}
+	if s.CurrentFlagRevision(d.WorkspaceID, d.EnvironmentID, d.Key) != d.BaseRevision {
+		return fmt.Errorf("%w: published flag changed after approval", ErrConflict)
+	}
+	return nil
+}
+
+// VerifySegmentApproval applies the same grant to a segment draft.
+func (s *Store) VerifySegmentApproval(d *SegmentDraft) error {
+	if d.State != DraftApproved || d.ApprovalExpiresAt == nil || !s.now().Before(*d.ApprovalExpiresAt) {
+		return fmt.Errorf("%w: segment approval is missing or expired", ErrInvalidState)
+	}
+	hash, err := draftHash(d.Content, d.Risk, false, d.BaseRevision)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	if hash != d.ApprovedHash || hash != d.SubmittedHash {
+		return fmt.Errorf("%w: segment changed after approval", ErrConflict)
+	}
+	if s.CurrentSegmentRevision(d.WorkspaceID, d.EnvironmentID, d.Key) != d.BaseRevision {
+		return fmt.Errorf("%w: published segment changed after approval", ErrConflict)
+	}
+	return nil
+}
+
 func flagScopeKey(workspaceID, environmentID, key string) string {
 	return workspaceID + "\x00" + environmentID + "\x00" + key
 }
@@ -34,6 +87,9 @@ func (s *Store) SaveFlagDraft(workspaceID, environmentID string, content *model.
 	}
 	if risk == "" {
 		risk = RiskNormal
+	}
+	if risk != RiskNormal && risk != RiskHigh {
+		return nil, fmt.Errorf("%w: invalid risk %q", ErrValidation, risk)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -82,6 +138,7 @@ func (s *Store) MarkFlagDraftDeleted(workspaceID, environmentID, key, actor stri
 		return fmt.Errorf("%w: draft %q", ErrNotFound, key)
 	}
 	d.Deleted = true
+	d.Risk = RiskHigh
 	d.UpdatedBy = actor
 	d.UpdatedAt = s.now()
 	s.changes.markDirty(collFlagDrafts, flagScopeKey(workspaceID, environmentID, key))
@@ -89,7 +146,7 @@ func (s *Store) MarkFlagDraftDeleted(workspaceID, environmentID, key, actor stri
 }
 
 // SubmitFlagDraft moves editing → submitted.
-func (s *Store) SubmitFlagDraft(workspaceID, environmentID, key, actor string) error {
+func (s *Store) SubmitFlagDraft(workspaceID, environmentID, key, actor string, tokenID ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	d, ok := s.data.FlagDrafts[flagScopeKey(workspaceID, environmentID, key)]
@@ -101,15 +158,22 @@ func (s *Store) SubmitFlagDraft(workspaceID, environmentID, key, actor string) e
 	}
 	d.State = DraftSubmitted
 	d.SubmittedBy = actor
+	if len(tokenID) > 0 {
+		d.SubmittedTokenID = tokenID[0]
+	}
+	hash, err := draftHash(d.Content, d.Risk, d.Deleted, d.BaseRevision)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	d.SubmittedHash = hash
 	now := s.now()
 	d.SubmittedAt = &now
 	s.changes.markDirty(collFlagDrafts, flagScopeKey(workspaceID, environmentID, key))
 	return s.commitLocked()
 }
 
-// ApproveFlagDraft moves submitted → approved, enforcing the two-person rule
-// for high-risk changes (§9).
-func (s *Store) ApproveFlagDraft(workspaceID, environmentID, key, actor string, note string) error {
+// ApproveFlagDraft moves submitted → approved, enforcing the two-person rule.
+func (s *Store) ApproveFlagDraft(workspaceID, environmentID, key, actor string, note string, tokenID ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	d, ok := s.data.FlagDrafts[flagScopeKey(workspaceID, environmentID, key)]
@@ -119,14 +183,27 @@ func (s *Store) ApproveFlagDraft(workspaceID, environmentID, key, actor string, 
 	if d.State != DraftSubmitted {
 		return fmt.Errorf("%w: draft %q is %s, want submitted", ErrInvalidState, key, d.State)
 	}
-	if d.Risk == RiskHigh && d.SubmittedBy == actor {
+	if d.SubmittedBy == actor || len(tokenID) > 0 && tokenID[0] != "" && tokenID[0] == d.SubmittedTokenID {
 		return ErrSelfApproval
+	}
+	hash, err := draftHash(d.Content, d.Risk, d.Deleted, d.BaseRevision)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	if hash != d.SubmittedHash {
+		return fmt.Errorf("%w: draft changed after submission", ErrConflict)
 	}
 	d.State = DraftApproved
 	d.ApprovedBy = actor
+	if len(tokenID) > 0 {
+		d.ApprovedTokenID = tokenID[0]
+	}
+	d.ApprovedHash = hash
 	d.ReviewNote = note
 	now := s.now()
 	d.ApprovedAt = &now
+	expires := now.Add(ApprovalTTL)
+	d.ApprovalExpiresAt = &expires
 	s.changes.markDirty(collFlagDrafts, flagScopeKey(workspaceID, environmentID, key))
 	return s.commitLocked()
 }
@@ -147,7 +224,14 @@ func (s *Store) RejectFlagDraft(workspaceID, environmentID, key, actor, note str
 	d.UpdatedBy = actor
 	d.UpdatedAt = s.now()
 	d.SubmittedBy = ""
+	d.SubmittedTokenID = ""
 	d.SubmittedAt = nil
+	d.SubmittedHash = ""
+	d.ApprovedBy = ""
+	d.ApprovedTokenID = ""
+	d.ApprovedAt = nil
+	d.ApprovedHash = ""
+	d.ApprovalExpiresAt = nil
 	s.changes.markDirty(collFlagDrafts, flagScopeKey(workspaceID, environmentID, key))
 	return s.commitLocked()
 }
@@ -221,8 +305,13 @@ func (s *Store) AppendFlagRevision(rev *FlagRevision) error {
 		d.BaseRevision = rev.Revision
 		d.SubmittedBy = ""
 		d.SubmittedAt = nil
+		d.SubmittedTokenID = ""
+		d.SubmittedHash = ""
 		d.ApprovedBy = ""
 		d.ApprovedAt = nil
+		d.ApprovedTokenID = ""
+		d.ApprovedHash = ""
+		d.ApprovalExpiresAt = nil
 		s.changes.markDirty(collFlagDrafts, scope)
 	}
 	if d, ok := s.data.FlagDrafts[scope]; ok && d.Deleted {
@@ -412,6 +501,9 @@ func (s *Store) SaveSegmentDraft(workspaceID, environmentID string, content *mod
 	if risk == "" {
 		risk = RiskNormal
 	}
+	if risk != RiskNormal && risk != RiskHigh {
+		return nil, fmt.Errorf("%w: invalid risk %q", ErrValidation, risk)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.checkEnvLocked(workspaceID, environmentID); err != nil {
@@ -428,6 +520,7 @@ func (s *Store) SaveSegmentDraft(workspaceID, environmentID string, content *mod
 		WorkspaceID: workspaceID, EnvironmentID: environmentID, Key: content.Key,
 		Content: content, State: DraftEditing, Risk: risk,
 		UpdatedBy: actor, UpdatedAt: s.now(),
+		BaseRevision: s.data.CurrentSegmentRev[scope],
 	}
 	s.data.SegmentDrafts[scope] = d
 	s.changes.markDirty(collSegmentDrafts, scope)
@@ -435,7 +528,7 @@ func (s *Store) SaveSegmentDraft(workspaceID, environmentID string, content *mod
 }
 
 // SubmitSegmentDraft / ApproveSegmentDraft mirror the flag workflow.
-func (s *Store) SubmitSegmentDraft(workspaceID, environmentID, key, actor string) error {
+func (s *Store) SubmitSegmentDraft(workspaceID, environmentID, key, actor string, tokenID ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	d, ok := s.data.SegmentDrafts[flagScopeKey(workspaceID, environmentID, key)]
@@ -447,11 +540,21 @@ func (s *Store) SubmitSegmentDraft(workspaceID, environmentID, key, actor string
 	}
 	d.State = DraftSubmitted
 	d.SubmittedBy = actor
+	if len(tokenID) > 0 {
+		d.SubmittedTokenID = tokenID[0]
+	}
+	now := s.now()
+	d.SubmittedAt = &now
+	hash, err := draftHash(d.Content, d.Risk, false, d.BaseRevision)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	d.SubmittedHash = hash
 	s.changes.markDirty(collSegmentDrafts, flagScopeKey(workspaceID, environmentID, key))
 	return s.commitLocked()
 }
 
-func (s *Store) ApproveSegmentDraft(workspaceID, environmentID, key, actor string) error {
+func (s *Store) ApproveSegmentDraft(workspaceID, environmentID, key, actor string, tokenID ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	d, ok := s.data.SegmentDrafts[flagScopeKey(workspaceID, environmentID, key)]
@@ -461,11 +564,26 @@ func (s *Store) ApproveSegmentDraft(workspaceID, environmentID, key, actor strin
 	if d.State != DraftSubmitted {
 		return fmt.Errorf("%w: segment %q is %s", ErrInvalidState, key, d.State)
 	}
-	if d.Risk == RiskHigh && d.SubmittedBy == actor {
+	if d.SubmittedBy == actor || len(tokenID) > 0 && tokenID[0] != "" && tokenID[0] == d.SubmittedTokenID {
 		return ErrSelfApproval
+	}
+	hash, err := draftHash(d.Content, d.Risk, false, d.BaseRevision)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	if hash != d.SubmittedHash {
+		return fmt.Errorf("%w: segment changed after submission", ErrConflict)
 	}
 	d.State = DraftApproved
 	d.ApprovedBy = actor
+	if len(tokenID) > 0 {
+		d.ApprovedTokenID = tokenID[0]
+	}
+	d.ApprovedHash = hash
+	now := s.now()
+	d.ApprovedAt = &now
+	expires := now.Add(ApprovalTTL)
+	d.ApprovalExpiresAt = &expires
 	s.changes.markDirty(collSegmentDrafts, flagScopeKey(workspaceID, environmentID, key))
 	return s.commitLocked()
 }
@@ -524,6 +642,15 @@ func (s *Store) AppendSegmentRevision(rev *SegmentRevision) error {
 	s.changes.markDirty(collSegmentState, scope)
 	if d, ok := s.data.SegmentDrafts[scope]; ok && d.State == DraftApproved {
 		d.State = DraftEditing
+		d.SubmittedBy = ""
+		d.SubmittedTokenID = ""
+		d.SubmittedAt = nil
+		d.SubmittedHash = ""
+		d.ApprovedBy = ""
+		d.ApprovedTokenID = ""
+		d.ApprovedAt = nil
+		d.ApprovedHash = ""
+		d.ApprovalExpiresAt = nil
 		s.changes.markDirty(collSegmentDrafts, scope)
 	}
 	return s.commitLocked()
@@ -538,6 +665,13 @@ func (s *Store) NextSegmentRevision(workspaceID, environmentID, key string) int6
 		return 1
 	}
 	return next
+}
+
+// CurrentSegmentRevision returns the in-force revision, or zero if absent.
+func (s *Store) CurrentSegmentRevision(workspaceID, environmentID, key string) int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.data.CurrentSegmentRev[flagScopeKey(workspaceID, environmentID, key)]
 }
 
 // CurrentSegmentContents returns key → current revision for the manifest.

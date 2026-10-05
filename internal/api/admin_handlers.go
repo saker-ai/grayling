@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -297,8 +298,19 @@ func (s *Server) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSubmitDraft(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if req.Reason == "" {
+		writeStoreError(w, fmt.Errorf("%w: submission requires a reason", platform.ErrValidation))
+		return
+	}
 	if err := s.Admin.SubmitFlagDraft(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
-		r.PathValue("key")); err != nil {
+		r.PathValue("key"), req.Reason); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -335,7 +347,14 @@ func (s *Server) handlePublishFlag(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Note string `json:"note"`
 	}
-	_ = decodeJSON(r, &req, maxAdminBodyBytes)
+	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if req.Note == "" {
+		writeStoreError(w, fmt.Errorf("%w: publish requires a note", platform.ErrValidation))
+		return
+	}
 	res, err := s.Admin.PublishFlag(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
 		r.PathValue("key"), req.Note)
 	if err != nil {
@@ -347,20 +366,35 @@ func (s *Server) handlePublishFlag(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Revision int64  `json:"revision"`
-		Reason   string `json:"reason"`
+		Revision   int64  `json:"revision"`
+		Reason     string `json:"reason"`
+		ApprovalID string `json:"approvalId"`
+		Emergency  bool   `json:"emergency"`
 	}
 	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
 		writeStoreError(w, err)
 		return
 	}
+	if req.ApprovalID == "" && !req.Emergency {
+		writeError(w, http.StatusBadRequest, "validation_failed", "approvalId or emergency=true required")
+		return
+	}
 	res, err := s.Admin.RollbackFlag(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
-		r.PathValue("key"), req.Revision, req.Reason)
+		r.PathValue("key"), req.Revision, req.Reason, req.ApprovalID)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) handleEmergencyDisable(w http.ResponseWriter, r *http.Request) {
+	var req struct { Reason string `json:"reason"` }
+	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil { writeStoreError(w, err); return }
+	result, err := s.Admin.EmergencyDisableFlag(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
+		r.PathValue("key"), req.Reason)
+	if err != nil { writeStoreError(w, err); return }
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleMarkDeleted(w http.ResponseWriter, r *http.Request) {
@@ -458,12 +492,32 @@ func (s *Server) handleSaveSegmentDraft(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleSubmitSegment(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if req.Reason == "" {
+		writeStoreError(w, fmt.Errorf("%w: submission requires a reason", platform.ErrValidation))
+		return
+	}
 	if err := s.Admin.SubmitSegmentDraft(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
-		r.PathValue("key")); err != nil {
+		r.PathValue("key"), req.Reason); err != nil {
 		writeStoreError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"state": string(platform.DraftSubmitted)})
+}
+
+func (s *Server) handleSegmentPreview(w http.ResponseWriter, r *http.Request) {
+	p, err := s.Admin.GetSegmentPreview(actorFrom(r), r.PathValue("ws"), r.PathValue("env"), r.PathValue("key"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
 }
 
 func (s *Server) handleApproveSegment(w http.ResponseWriter, r *http.Request) {
@@ -476,8 +530,19 @@ func (s *Server) handleApproveSegment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePublishSegment(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Note string `json:"note"`
+	}
+	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if req.Note == "" {
+		writeStoreError(w, fmt.Errorf("%w: publish requires a note", platform.ErrValidation))
+		return
+	}
 	res, err := s.Admin.PublishSegment(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
-		r.PathValue("key"), "")
+		r.PathValue("key"), req.Note)
 	if err != nil {
 		writeStoreError(w, err)
 		return

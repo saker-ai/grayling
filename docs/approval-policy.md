@@ -1,0 +1,17 @@
+# 审批与紧急操作
+
+GoLab 的 flag、segment、实验绑定、release plan、AI 资源 pin 和计划回滚共用“提交 → 独立审核 → 执行”规则。`normal` 与 `high` 风险均需不同凭证的 owner 或 publisher 审核；生产环境、已有 flag 修改、实验绑定及删除自动提升为高风险。服务端决定最低风险，客户端不能降低。提交须说明原因，审核可写结论，发布须写备注。
+
+## 审核依据
+
+flag 和 segment 的预览展示当前与拟发布配置的变化字段、目标环境、风险、不可变内容 hash、基线 revision、预计影响范围上限、回滚目标和护栏。GoLab 无法统计所有 SDK 用户，因此只给受影响用户的上限，不给虚假的精确人数。release plan、AI pin 和计划回滚申请记录相同的影响、回滚、护栏信息；AI 原文不保存在审批记录中，仅记录 hash。
+
+审核结论绑定提交时的内容 hash 和基线 revision，有效期为批准后 24 小时。编辑草稿、并发发布使基线变化、审批过期、审核人凭证被吊销或降权、跨工作空间或环境使用、重复使用均拒绝执行。申请人不能审核自己的申请。审核人和申请人的凭证 ID、名称、时间、对象、hash、原因与结论进入追加式审计记录。审批记录在文件及 PostgreSQL 后端持久化。
+
+flag/segment 使用原有 draft、submit、approve、publish 路由；实验绑定产生高风险 flag 草稿，需走同一流程。release plan 创建、AI pin、计划回滚先在环境的 `/approvals` 申请，再由其他人批准，最后在执行请求中带 `approvalId`。自动推进遵循已批准计划的预注册步骤与既有决策门；人工修改计划须另行申请。
+
+## 紧急路径
+
+只有 owner 可以带非空原因执行 `emergency-disable`、`rollback` 的 `emergency:true` 或 AI `revoke`。紧急关闭生成新的 disabled flag revision；回滚只指向已留存且经 hash 读回验证的目标 revision；AI 撤销即时阻断资源解析。每次紧急操作在审计中记录原 revision、目标 revision 或资源、actor、时间和原因，并创建 `breakglass.review` 待办。另一位具备审核权限的人使用审批列表中的 ID 及 `/approvals/{id}/approve` 写入事后复核结论；紧急操作者不能自复核。AI 资源复原由 owner 执行，须先完成独立事后复核并填写原因。控制台审计页显示待复核项。紧急路径的后续通知以审计与审批列表供值班人员读取；系统不向外部消息服务自动发送通知。
+
+审核失败、审批过期或审批人失权时，重新提交当前内容并请另一名有效审核人批准。常规操作不可借用紧急路径；API 校验 owner 身份与原因，审计保留例外路径标记。

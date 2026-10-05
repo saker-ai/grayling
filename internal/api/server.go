@@ -123,6 +123,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/tokens", s.adminOnly(s.handleListTokens))
 	mux.HandleFunc("DELETE /api/v1/admin/tokens/{id}", s.adminOnly(s.handleRevokeToken))
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/audit", s.adminOnly(s.handleAudit))
+	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/approvals", s.adminOnly(s.handleListApprovals))
+	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/approvals/{id}/approve", s.adminOnly(s.handleApproveChange))
+	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/approvals", s.adminOnly(s.handleRequestApproval))
 	mux.HandleFunc("PUT /api/v1/admin/workspaces/{ws}/quotas", s.adminOnly(s.handleSetQuotas))
 
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/flags", s.adminOnly(s.handleListFlags))
@@ -133,6 +136,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/reject", s.adminOnly(s.handleRejectDraft))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/publish", s.adminOnly(s.handlePublishFlag))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/rollback", s.adminOnly(s.handleRollback))
+	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/emergency-disable", s.adminOnly(s.handleEmergencyDisable))
 	mux.HandleFunc("DELETE /api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}", s.adminOnly(s.handleMarkDeleted))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/import-gff", s.adminOnly(s.handleImportGff))
 
@@ -140,6 +144,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/draft", s.adminOnly(s.handleSaveSegmentDraft))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/submit", s.adminOnly(s.handleSubmitSegment))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/approve", s.adminOnly(s.handleApproveSegment))
+	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/preview", s.adminOnly(s.handleSegmentPreview))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/publish", s.adminOnly(s.handlePublishSegment))
 
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/experiments", s.adminOnly(s.handleCreateExperiment))

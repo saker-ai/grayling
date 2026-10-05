@@ -25,6 +25,28 @@ function fmtDurNs(ns) {
 function shortHash(h) { return h ? String(h).slice(0, 12) : '—'; }
 function chip(label, cls) { return '<span class="chip ' + (cls || 'gray') + '">' + esc(label) + '</span>'; }
 
+function reviewPreview(p) {
+  if (!p) return '';
+  return '<section class="card" id="review-preview"><h3>' + esc(t('approval.preview')) + '</h3>' +
+    '<p>' + esc(t('approval.environment')) + ': ' + esc(p.targetEnvironment) + ' · ' +
+      esc(t('approval.risk')) + ': ' + esc(p.risk) + ' · ' + esc(t('approval.base')) + ': r' + esc(p.baseRevision) + '</p>' +
+    '<p>' + esc(t('approval.changed')) + ': ' + esc((p.changedFields || []).join(', ') || '—') + '</p>' +
+    '<p>' + esc(t('approval.impact')) + ': ' + esc(p.estimatedAffected) + '</p>' +
+    '<p>' + esc(t('approval.rollback')) + ': ' + esc(p.rollbackTarget) + '</p>' +
+    '<p>' + esc(t('approval.guardrails')) + ': ' + esc(p.guardrails) + '</p>' +
+    '<p class="mono">' + esc(t('approval.hash')) + ': ' + esc(p.proposedHash) + '</p>' +
+    (p.approvalExpiresAt ? '<p>' + esc(t('approval.expires')) + ': ' + esc(fmtTime(p.approvalExpiresAt)) + '</p>' : '') +
+    '</section>';
+}
+
+async function requestChange(action, object, payload) {
+  const reason = prompt(t('approval.reason'), '');
+  if (!reason) { toast(t('toast.reasonRequired'), false); return null; }
+  const a = await api(scopePath() + '/approvals', { method: 'POST', body: { action, object, payload, reason } });
+  toast(t('approval.requested', { id: a.id }));
+  return a;
+}
+
 const DRAFT_CHIP = { editing: 'blue', submitted: 'amber', approved: 'green' };
 const EXP_CHIP = { draft: 'gray', reviewed: 'blue', bound: 'teal', running: 'green', paused: 'amber', stopped: 'red', analyzed: 'blue', archived: 'gray' };
 const VERDICT_CHIP = { ship: 'green', rollback: 'red', continue: 'blue', hold: 'amber' };
@@ -344,7 +366,8 @@ function revisionsTable(f) {
     revs.map(r => '<tr><td>r' + esc(r.revision) + (r.rollbackOf ? ' <span class="muted">' + esc(t('flags.rollbackOf', { n: r.rollbackOf })) + '</span>' : '') +
       '</td><td class="mono">' + esc(shortHash(r.hash)) + '</td><td class="nowrap">' + esc(fmtTime(r.publishedAt)) +
       '</td><td>' + esc(r.publishedBy || '—') + '</td><td>' + esc(r.note || '') +
-      '</td><td><button class="btn sm" data-rb="' + esc(r.revision) + '">' + esc(t('flags.rollbackTo', { n: r.revision })) + '</button></td></tr>').join('') +
+      '</td><td><button class="btn sm" data-rb="' + esc(r.revision) + '">' + esc(t('flags.rollbackTo', { n: r.revision })) + '</button> ' +
+      '<button class="btn sm danger" data-er="' + esc(r.revision) + '">' + esc(t('approval.emergency')) + '</button></td></tr>').join('') +
     '</tbody></table>';
 }
 
@@ -379,13 +402,15 @@ async function viewFlagDetail(m) {
         '<button class="btn" id="flag-approve">' + esc(t('btn.approve')) + '</button>' +
         '<button class="btn" id="flag-reject">' + esc(t('btn.reject')) + '</button>' +
         '<button class="btn" id="flag-publish">' + esc(t('btn.publish')) + '</button>' +
-        '<button class="btn danger" id="flag-delete">' + esc(t('btn.markDeleted')) + '</button></div></section>' +
+        '<button class="btn danger" id="flag-delete">' + esc(t('btn.markDeleted')) + '</button>' +
+        '<button class="btn danger" id="flag-emergency-disable">' + esc(t('approval.emergencyDisable')) + '</button></div></section>' +
       '<section class="card"><h3>' + esc(t('flags.currentPublished', { n: (f && f.currentRevision) || 0 })) + '</h3>' +
         (f && f.current
           ? '<div class="muted">' + esc(t('flags.currentMeta', { hash: shortHash(f.current.hash), time: fmtTime(f.current.publishedAt), by: f.current.publishedBy || '—' })) + '</div>'
           : '<div class="muted">' + esc(t('flags.nothingPublished')) + '</div>') +
         '<pre id="flag-current" class="pre"></pre></section>' +
     '</div>' +
+    reviewPreview(f && f.preview) +
     '<section class="card"><h3>' + t('flags.history') + '</h3><div id="flag-revs">' + revisionsTable(f) + '</div></section>' +
     '<section class="card"><h3>' + esc(t('flags.importTitle')) + '</h3>' +
       '<textarea id="gff-doc" class="json" rows="8" spellcheck="false" placeholder="' + esc(t('flags.importPh')) + '"></textarea>' +
@@ -427,7 +452,11 @@ function bindFlagDetail(m, key, kp) {
       body: { content, risk: $('#flag-risk', m).value, baseRevision: Number($('#flag-base', m).value || 0) },
     }), t('toast.draftSaved'));
   };
-  $('#flag-submit', m).onclick = () => run(() => api(kp + '/submit', { method: 'POST', body: {} }), t('toast.draftSubmitted'));
+  $('#flag-submit', m).onclick = () => {
+    const reason = prompt(t('approval.reason'), '');
+    if (!reason) { toast(t('toast.reasonRequired'), false); return; }
+    run(() => api(kp + '/submit', { method: 'POST', body: { reason } }), t('toast.draftSubmitted'));
+  };
   $('#flag-approve', m).onclick = () => {
     const note = prompt(t('prompt.approveNote'), '') || '';
     run(() => api(kp + '/approve', { method: 'POST', body: { note } }), t('toast.draftApproved'));
@@ -438,6 +467,7 @@ function bindFlagDetail(m, key, kp) {
   };
   $('#flag-publish', m).onclick = () => {
     const note = prompt(t('prompt.publishNote'), '') || '';
+    if (!note) { toast(t('toast.reasonRequired'), false); return; }
     run(() => api(kp + '/publish', { method: 'POST', body: { note } }),
       r => t('toast.published', { flag: r && r.flagRevision, manifest: r && r.manifestRevision }));
   };
@@ -445,14 +475,27 @@ function bindFlagDetail(m, key, kp) {
     if (!confirm(t('confirm.markDeleted', { key }))) return;
     run(() => api(kp, { method: 'DELETE' }), t('toast.deletionMarked'));
   };
-  $('#flag-revs', m).addEventListener('click', ev => {
-    const b = ev.target.closest('[data-rb]');
-    if (!b) return;
-    const rev = Number(b.dataset.rb);
-    if (!confirm(t('confirm.rollback', { rev }))) return;
+  $('#flag-emergency-disable', m).onclick = () => {
+    if (!confirm(t('approval.confirmDisable', { key }))) return;
     const reason = prompt(t('prompt.rollbackReason'), '');
     if (!reason) { toast(t('toast.reasonRequired'), false); return; }
-    run(() => api(kp + '/rollback', { method: 'POST', body: { revision: rev, reason } }), t('toast.rolledBack', { rev }));
+    run(() => api(kp + '/emergency-disable', { method: 'POST', body: { reason } }),
+      r => t('approval.emergencyDone', { id: r.reviewId }));
+  };
+  $('#flag-revs', m).addEventListener('click', ev => {
+    const b = ev.target.closest('[data-rb], [data-er]');
+    if (!b) return;
+    const emergency = b.hasAttribute('data-er');
+    const rev = Number(emergency ? b.dataset.er : b.dataset.rb);
+    if (!confirm(t('confirm.rollback', { rev }))) return;
+    if (!emergency) {
+      requestChange('flag.rollback', key, { revision: rev }).catch(e => toast(errMsg(e), false));
+      return;
+    }
+    const reason = prompt(t('prompt.rollbackReason'), '');
+    if (!reason) { toast(t('toast.reasonRequired'), false); return; }
+    run(() => api(kp + '/rollback', { method: 'POST', body: { revision: rev, reason, emergency: true } }),
+      r => t('approval.emergencyDone', { id: r.reviewId }));
   });
   $('#gff-run', m).onclick = async () => {
     const doc = $('#gff-doc', m).value;
@@ -504,11 +547,13 @@ async function viewSegments(m) {
   });
 }
 
-function viewSegmentDetail(m) {
+async function viewSegmentDetail(m) {
   const key = S.segKey;
   const kp = scopePath() + '/segments/' + encodeURIComponent(key);
   const d = S.segDrafts.find(x => x.key === key);
   const content = (d && d.content) || segmentTemplate(key);
+  let preview = null;
+  if (d) preview = await api(kp + '/preview');
   m.innerHTML =
     '<div class="view-head"><button class="btn sm" id="seg-back">' + esc(t('seg.back')) + '</button>' +
     '<h2 class="mono">' + esc(key) + '</h2>' +
@@ -523,7 +568,7 @@ function viewSegmentDetail(m) {
     '<button class="btn primary" id="seg-save">' + esc(t('btn.saveDraft')) + '</button>' +
     '<button class="btn" id="seg-submit">' + esc(t('btn.submit')) + '</button>' +
     '<button class="btn" id="seg-approve">' + esc(t('btn.approve')) + '</button>' +
-    '<button class="btn" id="seg-publish">' + esc(t('btn.publish')) + '</button></div></section>';
+    '<button class="btn" id="seg-publish">' + esc(t('btn.publish')) + '</button></div></section>' + reviewPreview(preview);
   $('#seg-json', m).value = JSON.stringify(content, null, 2);
   if (d && d.risk) $('#seg-risk', m).value = d.risk;
   $('#seg-back', m).onclick = () => { S.segKey = null; route(); };
@@ -547,9 +592,17 @@ function viewSegmentDetail(m) {
     if (!content2) return;
     run(() => api(kp + '/draft', { method: 'PUT', body: { content: content2, risk: $('#seg-risk', m).value } }), t('toast.segSaved'));
   };
-  $('#seg-submit', m).onclick = () => run(() => api(kp + '/submit', { method: 'POST', body: {} }), t('toast.segSubmitted'));
+  $('#seg-submit', m).onclick = () => {
+    const reason = prompt(t('approval.reason'), '');
+    if (!reason) { toast(t('toast.reasonRequired'), false); return; }
+    run(() => api(kp + '/submit', { method: 'POST', body: { reason } }), t('toast.segSubmitted'));
+  };
   $('#seg-approve', m).onclick = () => run(() => api(kp + '/approve', { method: 'POST', body: {} }), t('toast.segApproved'));
-  $('#seg-publish', m).onclick = () => run(() => api(kp + '/publish', { method: 'POST', body: {} }), t('toast.segPublished'));
+  $('#seg-publish', m).onclick = () => {
+    const note = prompt(t('prompt.publishNote'), '') || '';
+    if (!note) { toast(t('toast.reasonRequired'), false); return; }
+    run(() => api(kp + '/publish', { method: 'POST', body: { note } }), t('toast.segPublished'));
+  };
   return Promise.resolve();
 }
 
@@ -1107,7 +1160,7 @@ function bindRollout(m, expId) {
       if (steps[i].ratio <= steps[i - 1].ratio) { toast(t('toast.ratioIncrease', { i: i + 1 }), false); return; }
     }
     if (steps.some(s => !(s.minRuntime > 0))) { toast(t('toast.minRuntimePositive'), false); return; }
-    run(() => api(base, { method: 'POST', body: { steps } }), t('toast.planRegistered'));
+    requestChange('release_plan.create', expId, { steps }).catch(e => toast(errMsg(e), false));
   };
 }
 
@@ -1227,8 +1280,35 @@ async function viewAudit(m) {
     '<div class="view-head"><h2>' + esc(t('audit.title')) + '</h2>' +
     '<label class="inline">' + esc(t('audit.limit')) + ' <select id="a-limit">' +
     [50, 200, 500, 1000].map(n => '<option' + (n === S.auditLimit ? ' selected' : '') + '>' + n + '</option>').join('') +
-    '</select></label></div><div id="a-box"><p class="muted">' + esc(t('misc.loading')) + '</p></div>';
+    '</select></label></div><section class="card"><h3>' + esc(t('approval.inbox')) + '</h3><div id="approval-box"></div></section>' +
+    '<div id="a-box"><p class="muted">' + esc(t('misc.loading')) + '</p></div>';
   const load = async () => {
+    const approvalData = await api(wsPath() + '/approvals');
+    const approvals = Array.isArray(approvalData) ? approvalData : [];
+    $('#approval-box', m).innerHTML = '<table class="grid"><thead><tr><th>' + esc(t('th.time')) + '</th><th>' + esc(t('th.action')) + '</th>' +
+      '<th>' + esc(t('th.object')) + '</th><th>' + esc(t('th.state')) + '</th><th>' + esc(t('approval.impact')) +
+      '</th><th>' + esc(t('approval.rollback')) + '</th><th>' + esc(t('approval.guardrails')) + '</th><th>' + esc(t('th.actions')) + '</th></tr></thead><tbody>' +
+      (approvals.map(a => '<tr><td>' + esc(fmtTime(a.submittedAt)) + '</td><td>' + esc(a.action) + '<div class="mono">' + esc(shortHash(a.payloadHash)) + '</div></td>' +
+        '<td>' + esc(a.object) + '<div class="muted">' + esc(a.environmentId) + ' · r' + esc(a.baseRevision) + '</div></td>' +
+        '<td>' + chip(a.state, DRAFT_CHIP[a.state] || 'gray') + '<div>' + esc(a.submittedBy) + ' → ' + esc(a.approvedBy || '—') + '</div>' +
+        '<div class="muted">' + esc(fmtTime(a.expiresAt)) + '</div></td><td>' + esc(a.impact) + '</td><td>' + esc(a.rollbackTarget) +
+        '</td><td>' + esc(a.guardrails) + '</td><td>' +
+        (a.state === 'submitted' ? '<button class="btn sm" data-appr="' + esc(a.id) + '">' + esc(t('btn.approve')) + '</button>' : '') +
+        (a.state === 'approved' && a.action !== 'breakglass.review' ? '<button class="btn sm primary" data-exec="' + esc(a.id) + '">' + esc(t('approval.execute')) + '</button>' : '') +
+        '</td></tr>').join('') || '<tr><td colspan="8" class="muted">' + esc(t('approval.none')) + '</td></tr>') + '</tbody></table>';
+    $('#approval-box', m).onclick = ev => {
+      const btn = ev.target.closest('[data-appr], [data-exec]');
+      if (!btn) return;
+      const a = approvals.find(x => x.id === (btn.dataset.appr || btn.dataset.exec));
+      if (!a) return;
+      if (btn.dataset.appr) {
+        const note = prompt(t('prompt.approveNote'), '') || '';
+        run(() => api(wsPath() + '/approvals/' + encodeURIComponent(a.id) + '/approve',
+          { method: 'POST', body: { note } }), t('approval.reviewed'));
+      } else {
+        run(() => executeApproval(a), t('approval.executed'));
+      }
+    };
     const rows = (await api(wsPath() + '/audit?limit=' + S.auditLimit)) || [];
     $('#a-box', m).innerHTML =
       '<table class="grid"><thead><tr><th>' + esc(t('th.time')) + '</th><th>' + esc(t('th.actor')) + '</th><th>' + esc(t('th.action')) + '</th><th>' + esc(t('th.object')) + '</th><th>' + esc(t('th.env')) + '</th><th>' + esc(t('th.detail')) + '</th></tr></thead><tbody>' +
@@ -1246,6 +1326,29 @@ async function viewAudit(m) {
     load().catch(e => { $('#a-box', m).innerHTML = errBanner(e); });
   };
   await load();
+}
+
+async function executeApproval(a) {
+  const scope = wsPath() + '/environments/' + encodeURIComponent(a.environmentId);
+  if (a.action === 'release_plan.create') {
+    const payload = JSON.parse(a.payload);
+    return api('/api/v1/admin/experiments/' + encodeURIComponent(a.object) + '/release-plan',
+      { method: 'POST', body: { steps: payload.steps, approvalId: a.id } });
+  }
+  if (a.action === 'flag.rollback') {
+    const payload = JSON.parse(a.payload);
+    return api(scope + '/flags/' + encodeURIComponent(a.object) + '/rollback',
+      { method: 'POST', body: { revision: payload.revision, reason: a.reason, approvalId: a.id } });
+  }
+  if (a.action === 'ai.pin') {
+    const content = prompt(t('approval.pinContent'), '');
+    if (!content) throw new ApiError(0, 'validation_failed', t('err.contentRequired'));
+    const i = a.object.indexOf('/');
+    return api(scope + '/ai/resources/' + encodeURIComponent(a.object.slice(0, i)) + '/' +
+      encodeURIComponent(a.object.slice(i + 1)) + '/pin',
+      { method: 'POST', body: { content, approvalId: a.id } });
+  }
+  throw new ApiError(0, 'validation_failed', t('approval.unsupported'));
 }
 
 // ---------------------------------------------------------------------------
@@ -1327,8 +1430,7 @@ async function viewAI(m) {
         [{ name: 'content', label: t('ai.content'), type: 'textarea', rows: 10, placeholder: t('ai.contentPh') }],
         t('btn.pin'), async v => {
           if (!v.content) throw new ApiError(0, 'validation_failed', t('err.contentRequired'));
-          await run(() => api(aiPath + '/' + encodeURIComponent(ty) + '/' + encodeURIComponent(lid) + '/pin',
-            { method: 'POST', body: { content: v.content } }), t('toast.versionPinned'));
+          await requestChange('ai.pin', ty + '/' + lid, { content: v.content });
         });
     } else if (rev) {
       const [ty, lid] = split(rev.dataset.revoke);

@@ -395,7 +395,7 @@ func TestPGPersistenceRoundtrip(t *testing.T) {
 	if err := s1.SubmitFlagDraft(ws.ID, env.ID, "f1", "root"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if err := s1.ApproveFlagDraft(ws.ID, env.ID, "f1", "root", "ok"); err != nil {
+	if err := s1.ApproveFlagDraft(ws.ID, env.ID, "f1", "reviewer", "ok"); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	rev := &FlagRevision{
@@ -962,7 +962,7 @@ func TestPGFlagLifecycleAndAIPins(t *testing.T) {
 	if err := s.SubmitSegmentDraft(ws.ID, env.ID, "beta-users", "root"); err != nil {
 		t.Fatalf("segment submit: %v", err)
 	}
-	if err := s.ApproveSegmentDraft(ws.ID, env.ID, "beta-users", "root"); err != nil {
+	if err := s.ApproveSegmentDraft(ws.ID, env.ID, "beta-users", "reviewer"); err != nil {
 		t.Fatalf("segment approve: %v", err)
 	}
 	if err := s.AppendSegmentRevision(&SegmentRevision{
@@ -1102,7 +1102,7 @@ func TestPGMigrationsIdempotent(t *testing.T) {
 			t.Fatalf("close %d: %v", i, err)
 		}
 	}
-	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM schema_migrations`); got[0][0] != "3" {
+	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM schema_migrations`); got[0][0] != "5" {
 		t.Fatalf("schema_migrations rows: %v", got)
 	}
 	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM workspaces`); got[0][0] != "3" {

@@ -298,8 +298,11 @@ func (h *harness) publishFlag(flag *model.Flag, risk platform.Risk, approver str
 		map[string]any{"content": flag, "risk": risk}, nil); code != http.StatusOK {
 		h.t.Fatalf("save draft: %d", code)
 	}
-	if code := h.do("POST", base+"/submit", h.owner, nil, nil); code != http.StatusOK {
+	if code := h.do("POST", base+"/submit", h.owner, map[string]any{"reason": "rollout test"}, nil); code != http.StatusOK {
 		h.t.Fatalf("submit: %d", code)
+	}
+	if approver == h.owner {
+		approver = h.publisher
 	}
 	if code := h.do("POST", base+"/approve", approver, map[string]any{"note": "ok"}, nil); code != http.StatusOK {
 		h.t.Fatalf("approve: %d", code)
@@ -319,8 +322,18 @@ type step struct {
 
 func (h *harness) createPlan(t *testing.T, expID string, steps ...step) {
 	t.Helper()
+	var approval platform.Approval
+	if code := h.do("POST", "/api/v1/admin/workspaces/acme/environments/prod/approvals", h.owner,
+		map[string]any{"action": "release_plan.create", "object": expID,
+			"payload": map[string]any{"steps": steps}, "reason": "pre-registered rollout"}, &approval); code != http.StatusCreated {
+		t.Fatalf("request release plan: %d", code)
+	}
+	if code := h.do("POST", "/api/v1/admin/workspaces/acme/approvals/"+approval.ID+"/approve", h.publisher,
+		map[string]any{"note": "plan checked"}, nil); code != http.StatusOK {
+		t.Fatalf("approve release plan: %d", code)
+	}
 	if code := h.do("POST", "/api/v1/admin/experiments/"+expID+"/release-plan",
-		h.owner, map[string]any{"steps": steps}, nil); code != http.StatusCreated {
+		h.owner, map[string]any{"steps": steps, "approvalId": approval.ID}, nil); code != http.StatusCreated {
 		t.Fatalf("create release plan: %d", code)
 	}
 }

@@ -66,6 +66,13 @@ func newFixture(t *testing.T) *fixture {
 		Role: platform.RoleViewer, WorkspaceID: ws.ID}
 	f.otherWS = Actor{TokenID: "tok-o2", Name: "eve", Kind: platform.TokenAdmin,
 		Role: platform.RoleOwner, WorkspaceID: other.ID}
+	for _, a := range []*Actor{&f.owner, &f.publisher, &f.publisher2, &f.analyst, &f.viewer, &f.otherWS} {
+		ct, err := store.CreateToken(platform.TokenAdmin, a.Name, a.Role, a.WorkspaceID, "", "fixture")
+		if err != nil {
+			t.Fatalf("CreateToken %s: %v", a.Name, err)
+		}
+		a.TokenID = ct.Token.ID
+	}
 	return f
 }
 

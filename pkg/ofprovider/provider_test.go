@@ -23,9 +23,9 @@ import (
 	"github.com/godeps/golab/pkg/bucketing"
 	"github.com/godeps/golab/pkg/model"
 	"github.com/godeps/golab/pkg/sdk"
+	gconfig "github.com/godeps/gonacos/pkg/config"
 	of "github.com/open-feature/go-sdk/openfeature"
 	"github.com/open-feature/go-sdk/openfeature/isolated"
-	gconfig "github.com/godeps/gonacos/pkg/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -33,15 +33,16 @@ import (
 // ---------------------------------------------------------------------------
 
 type harness struct {
-	t       *testing.T
-	store   *platform.Store
-	srv     *httptest.Server
-	owner   string
-	sdkTok  string
-	colTok  string
-	ws      *platform.Workspace
-	env     *platform.Environment
-	baseURL string
+	t        *testing.T
+	store    *platform.Store
+	srv      *httptest.Server
+	owner    string
+	reviewer string
+	sdkTok   string
+	colTok   string
+	ws       *platform.Workspace
+	env      *platform.Environment
+	baseURL  string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -69,6 +70,11 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("env: %v", err)
 	}
+	reviewer, err := store.CreateToken(platform.TokenAdmin, "reviewer", platform.RolePublisher, h.ws.ID, "", "bootstrap")
+	if err != nil {
+		t.Fatalf("reviewer token: %v", err)
+	}
+	h.reviewer = reviewer.Secret
 	sdkCT, err := store.CreateToken(platform.TokenSDK, "sdk", "", h.ws.ID, h.env.ID, "root")
 	if err != nil {
 		t.Fatalf("sdk token: %v", err)
@@ -111,18 +117,17 @@ func (h *harness) do(method, path, token string, body any) int {
 	return resp.StatusCode
 }
 
-// publishFlag runs the draft→submit→approve→publish pipeline (normal risk,
-// so the owner may approve their own submission).
+// publishFlag runs the draft→submit→approve→publish pipeline.
 func (h *harness) publishFlag(flag *model.Flag) {
 	h.t.Helper()
 	base := fmt.Sprintf("/api/v1/admin/workspaces/acme/environments/prod/flags/%s", flag.Key)
 	if code := h.do("PUT", base+"/draft", h.owner, map[string]any{"content": flag}); code != http.StatusOK {
 		h.t.Fatalf("draft %s: %d", flag.Key, code)
 	}
-	if code := h.do("POST", base+"/submit", h.owner, nil); code != http.StatusOK {
+	if code := h.do("POST", base+"/submit", h.owner, map[string]any{"reason": "provider verification"}); code != http.StatusOK {
 		h.t.Fatalf("submit %s: %d", flag.Key, code)
 	}
-	if code := h.do("POST", base+"/approve", h.owner, map[string]any{"note": "ok"}); code != http.StatusOK {
+	if code := h.do("POST", base+"/approve", h.reviewer, map[string]any{"note": "ok"}); code != http.StatusOK {
 		h.t.Fatalf("approve %s: %d", flag.Key, code)
 	}
 	if code := h.do("POST", base+"/publish", h.owner, map[string]any{"note": "ship"}); code != http.StatusOK {
@@ -174,7 +179,7 @@ func TestOFReasonAndVariantMapping(t *testing.T) {
 
 	h.publishFlag(&model.Flag{
 		SchemaVersion: model.SchemaVersion, Key: "of-string", Type: model.FlagString,
-		Fields:    []string{"tenant"},
+		Fields:     []string{"tenant"},
 		Variations: map[string]any{"base": "base-v", "targeted": "targeted-v"},
 		Targeting: []model.Rule{{
 			Name:        "acme-only",
@@ -186,8 +191,8 @@ func TestOFReasonAndVariantMapping(t *testing.T) {
 
 	h.publishFlag(&model.Flag{
 		SchemaVersion: model.SchemaVersion, Key: "of-split", Type: model.FlagString,
-		Fields:    []string{"user_id"},
-		Bucketing: &model.Bucketing{Algorithm: bucketing.AlgorithmID, Unit: "user_id", Salt: "of"},
+		Fields:     []string{"user_id"},
+		Bucketing:  &model.Bucketing{Algorithm: bucketing.AlgorithmID, Unit: "user_id", Salt: "of"},
 		Variations: map[string]any{"a": "A", "b": "B"},
 		Targeting: []model.Rule{{
 			Name:       "fifty",
@@ -198,7 +203,7 @@ func TestOFReasonAndVariantMapping(t *testing.T) {
 
 	h.publishFlag(&model.Flag{
 		SchemaVersion: model.SchemaVersion, Key: "of-json", Type: model.FlagJSON,
-		Variations: map[string]any{"cfg": map[string]any{"mode": "fast", "retries": float64(3)}},
+		Variations:  map[string]any{"cfg": map[string]any{"mode": "fast", "retries": float64(3)}},
 		DefaultRule: &model.Rule{Variation: "cfg"},
 	})
 
@@ -275,8 +280,8 @@ func TestOFErrorCodes(t *testing.T) {
 	h := newHarness(t)
 	h.publishFlag(&model.Flag{
 		SchemaVersion: model.SchemaVersion, Key: "need-unit", Type: model.FlagString,
-		Fields:    []string{"user_id"},
-		Bucketing: &model.Bucketing{Algorithm: bucketing.AlgorithmID, Unit: "user_id", Salt: "s"},
+		Fields:     []string{"user_id"},
+		Bucketing:  &model.Bucketing{Algorithm: bucketing.AlgorithmID, Unit: "user_id", Salt: "s"},
 		Variations: map[string]any{"a": "A", "b": "B"},
 		Targeting: []model.Rule{{
 			Name:       "fifty",
@@ -354,8 +359,8 @@ func TestOFExperimentExposureAttribution(t *testing.T) {
 	h := newHarness(t)
 	flag := &model.Flag{
 		SchemaVersion: model.SchemaVersion, Key: "of-exp", Type: model.FlagString,
-		Fields:    []string{"user_id"},
-		Bucketing: &model.Bucketing{Algorithm: bucketing.AlgorithmID, Unit: "user_id", Salt: "of-exp"},
+		Fields:     []string{"user_id"},
+		Bucketing:  &model.Bucketing{Algorithm: bucketing.AlgorithmID, Unit: "user_id", Salt: "of-exp"},
 		Variations: map[string]any{"control": "c", "treatment": "t"},
 		Targeting: []model.Rule{{
 			Name:       "fifty",

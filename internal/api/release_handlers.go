@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/godeps/golab/internal/admin"
 	"github.com/godeps/golab/internal/platform"
 )
 
@@ -20,13 +21,46 @@ import (
 // Body: {"steps":[{"name","ratio","minRuntime"(ns),"observationWindow"(ns),"autoAdvance"}]}
 func (s *Server) handleCreateReleasePlan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Steps []platform.ReleaseStep `json:"steps"`
+		Steps      []platform.ReleaseStep `json:"steps"`
+		ApprovalID string                 `json:"approvalId"`
 	}
 	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	exp, err := s.Admin.CreateReleasePlan(actorFrom(r), r.PathValue("id"), req.Steps)
+	if err := admin.ValidateReleaseSteps(req.Steps); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	actor := actorFrom(r)
+	exp, err := s.Store.GetExperiment(r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := admin.Authorize(actor, exp.WorkspaceID, admin.PermFlagPublish); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if exp.ReleasePlan != nil {
+		writeStoreError(w, platform.ErrConflict)
+		return
+	}
+	err = s.Admin.WithScopeLock(exp.WorkspaceID, exp.EnvironmentID, func() error {
+		current, err := s.Store.GetExperiment(exp.ID)
+		if err != nil {
+			return err
+		}
+		base := s.Store.CurrentFlagRevision(current.WorkspaceID, current.EnvironmentID, current.FlagKey)
+		if err := s.useApproval(actor, req.ApprovalID, current.WorkspaceID, current.EnvironmentID,
+			"release_plan.create", current.ID, struct {
+				Steps []platform.ReleaseStep `json:"steps"`
+			}{req.Steps}, base); err != nil {
+			return err
+		}
+		exp, err = s.Admin.CreateReleasePlan(actor, current.ID, req.Steps)
+		return err
+	})
 	if err != nil {
 		writeStoreError(w, err)
 		return

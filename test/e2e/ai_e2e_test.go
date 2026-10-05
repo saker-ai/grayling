@@ -84,13 +84,15 @@ func TestAIPublishRequiresAllowlist(t *testing.T) {
 		t.Fatal("physical id must be server-generated")
 	}
 	var pin1 platform.PinnedVersion
+	a1 := h.approveOperation("ai.pin", "prompt/support-tone", map[string]any{"content": "Calm tone v1"})
 	if code := h.do("POST", "/api/v1/admin/workspaces/acme/environments/prod/ai/resources/prompt/support-tone/pin",
-		h.owner, map[string]any{"content": "Calm tone v1"}, &pin1); code != http.StatusCreated {
+		h.owner, map[string]any{"content": "Calm tone v1", "approvalId": a1}, &pin1); code != http.StatusCreated {
 		t.Fatalf("pin v1: %d", code)
 	}
 	var pin2 platform.PinnedVersion
+	a2 := h.approveOperation("ai.pin", "prompt/support-tone", map[string]any{"content": "Concise tone v2"})
 	if code := h.do("POST", "/api/v1/admin/workspaces/acme/environments/prod/ai/resources/prompt/support-tone/pin",
-		h.owner, map[string]any{"content": "Concise tone v2"}, &pin2); code != http.StatusCreated {
+		h.owner, map[string]any{"content": "Concise tone v2", "approvalId": a2}, &pin2); code != http.StatusCreated {
 		t.Fatalf("pin v2: %d", code)
 	}
 	if pin1.Version == pin2.Version {
@@ -103,10 +105,10 @@ func TestAIPublishRequiresAllowlist(t *testing.T) {
 	if code := h.do("PUT", base+"/draft", h.owner, map[string]any{"content": flag}, nil); code != http.StatusOK {
 		t.Fatalf("draft: %d", code)
 	}
-	if code := h.do("POST", base+"/submit", h.owner, nil, nil); code != http.StatusOK {
+	if code := h.do("POST", base+"/submit", h.owner, map[string]any{"reason": "AI route release"}, nil); code != http.StatusOK {
 		t.Fatalf("submit: %d", code)
 	}
-	if code := h.do("POST", base+"/approve", h.owner, map[string]any{}, nil); code != http.StatusOK {
+	if code := h.do("POST", base+"/approve", h.reviewer, map[string]any{}, nil); code != http.StatusOK {
 		t.Fatalf("approve: %d", code)
 	}
 	if code := h.do("POST", base+"/publish", h.owner, map[string]any{}, nil); code == http.StatusOK {
@@ -124,7 +126,7 @@ func TestAIPublishRequiresAllowlist(t *testing.T) {
 		t.Fatalf("allowlist: %d", code)
 	}
 	var pub adminPublishResult
-	if code := h.do("POST", base+"/publish", h.owner, map[string]any{}, &pub); code != http.StatusOK {
+	if code := h.do("POST", base+"/publish", h.owner, map[string]any{"note": "AI release"}, &pub); code != http.StatusOK {
 		t.Fatalf("publish with allowlist: %d", code)
 	}
 	if pub.FlagRevision != 1 {
@@ -215,9 +217,15 @@ func TestAISessionFreezeAndRevocation(t *testing.T) {
 	// Emergency revocation: the pre-execution gate blocks immediately, and
 	// new freezes fail (long tasks already holding content must consult the
 	// gate before each use — §7).
+	var revoked struct {
+		ReviewID string `json:"reviewId"`
+	}
 	if code := h.do("POST", "/api/v1/admin/workspaces/acme/environments/prod/ai/resources/prompt/support-tone/revoke",
-		h.owner, map[string]any{"reason": "prompt injection found"}, nil); code != http.StatusOK {
+		h.owner, map[string]any{"reason": "prompt injection found"}, &revoked); code != http.StatusOK {
 		t.Fatalf("revoke: %d", code)
+	}
+	if revoked.ReviewID == "" {
+		t.Fatal("revocation must create post-action review")
 	}
 	var check struct {
 		Resources []struct {
@@ -244,9 +252,21 @@ func TestAISessionFreezeAndRevocation(t *testing.T) {
 		t.Fatal("freeze must fail while a referenced resource is revoked")
 	}
 
+	// An independent review is required before restoring a revoked resource.
+	reinstate := "/api/v1/admin/workspaces/acme/environments/prod/ai/resources/prompt/support-tone/reinstate"
+	if code := h.do("POST", reinstate, h.owner, map[string]any{"reason": "fixed"}, nil); code != http.StatusConflict {
+		t.Fatalf("reinstatement before review: %d", code)
+	}
+	if code := h.do("POST", "/api/v1/admin/workspaces/acme/approvals/"+revoked.ReviewID+"/approve",
+		h.reviewer, map[string]any{"note": "remediation verified"}, nil); code != http.StatusOK {
+		t.Fatalf("post-review: %d", code)
+	}
+	if code := h.do("POST", reinstate, h.reviewer, map[string]any{"reason": "fixed"}, nil); code != http.StatusForbidden {
+		t.Fatalf("publisher reinstatement: %d", code)
+	}
 	// Reinstate → freeze works again.
 	if code := h.do("POST", "/api/v1/admin/workspaces/acme/environments/prod/ai/resources/prompt/support-tone/reinstate",
-		h.owner, nil, nil); code != http.StatusOK {
+		h.owner, map[string]any{"reason": "remediation reviewed"}, nil); code != http.StatusOK {
 		t.Fatalf("reinstate: %d", code)
 	}
 	if code := h.do("POST", "/api/v1/sdk/ai/check", h.sdkTok, map[string]any{

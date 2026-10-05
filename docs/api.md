@@ -14,7 +14,7 @@
 
 错误响应统一为 `{"error":{"code":"...","message":"..."}}`。常见 code：`unauthorized`(401)、`wrong_audience`/`access_denied`/`self_approval_denied`(403)、`not_found`(404)、`validation_failed`/`import_failed`/`batch_too_large`(400)、`conflict`/`invalid_state`(409)、`rate_limited`/`quota_exceeded`(429)、revoked 资源(423)、`ai_unavailable`(501)。
 
-管理角色：`owner`（全部+token/配额/AI 原始内容）、`publisher`（flag 全流程+发布+实验操作）、`analyst`（读+实验定义/评审）、`viewer`（只读）。高风险草稿禁止提交人自批（403 `self_approval_denied`）。
+管理角色：`owner`（全部+token/配额/AI 原始内容）、`publisher`（flag 全流程+发布+实验操作）、`analyst`（读+实验定义/评审）、`viewer`（只读）。所有草稿与高影响操作均禁止提交人自批（403 `self_approval_denied`）；审批有效期 24 小时，凭证被吊销或降权、内容或基线 revision 改变后须重新申请。详见 [审批与紧急操作](approval-policy.md)。
 
 ## Admin
 
@@ -36,13 +36,25 @@
 |---|---|
 | `GET /flags` / `GET /flags/{key}` | 列表 / 详情（含草稿、当前 revision、历史） |
 | `PUT /flags/{key}/draft` | 保存草稿 `{content:<Flag DSL>, risk:"normal"\|"high", baseRevision}`；`content.key` 必须等于 `{key}`；`baseRevision>0` 时启用乐观锁（409 冲突） |
-| `POST /flags/{key}/submit` / `approve` / `reject` | 评审流（approve 可带 `{note}`） |
-| `POST /flags/{key}/publish` | 发布已批准草稿 → `{flagRevision, manifestRevision, hash, dataId}` |
-| `POST /flags/{key}/rollback` | `{revision, reason}` → 新 manifest revision 指向已验证旧 revision |
+| `POST /flags/{key}/submit` / `approve` / `reject` | 评审流（submit 必填 `{reason}`；approve 可带 `{note}`） |
+| `POST /flags/{key}/publish` | `{note}` 必填；发布已批准草稿 → `{flagRevision, manifestRevision, hash, dataId}` |
+| `POST /flags/{key}/rollback` | `{revision, reason, approvalId}` 计划回滚；owner 可用 `{revision, reason, emergency:true}` 紧急回滚，生成事后复核记录 |
+| `POST /flags/{key}/emergency-disable` | owner `{reason}` 立即发布 disable=true 新 revision，生成独立事后复核记录 |
 | `DELETE /flags/{key}` | 标记删除（仍需 submit→approve→publish 落 tombstone） |
 | `POST /flags/{key}/import-gff` | `{document:"<gff YAML/JSON>", key, salt}` → 严格白名单导入；不支持字段报错、绝不静默丢弃；返回 warnings（含"两种算法分配不一致"） |
-| `GET /segments`、`PUT /segments/{key}/draft`、`POST submit/approve/publish` | segment 同流程 |
+| `GET /segments`、`PUT /segments/{key}/draft`、`GET /segments/{key}/preview`、`POST submit/approve/publish` | segment 同流程，submit 必填 `{reason}`，publish 必填 `{note}` |
+| `GET /flags/{key}/preview` | 发布前差异、环境、上限受影响用户、回滚目标、护栏及提交 hash |
 | `POST /debug/eval` | `{flagKey, context:{targetingKey, attributes}}` → 当前快照求值；**永不记录曝光** |
+
+### 高影响操作审批
+
+| 端点 | 说明 |
+|---|---|
+| `POST {env前缀}/approvals` | `{action, object, payload, reason}` 申请；支持 `flag.rollback`、`release_plan.create`、`ai.pin`，返回不可变 payload hash、基线 revision、影响与回滚信息 |
+| `GET /api/v1/admin/workspaces/{ws}/approvals` | 本工作空间申请与事后复核列表 |
+| `POST /api/v1/admin/workspaces/{ws}/approvals/{id}/approve` | 不同的 owner/publisher `{note}` 批准；`breakglass.review` 用同一端点事后复核 |
+
+申请 `release_plan.create` 的 `object` 为实验 ID、`payload` 为 `{steps:[...]}`；申请 `ai.pin` 的 `object` 为 `{type}/{logical}`、`payload` 为 `{content}`；申请 `flag.rollback` 的 `object` 为 flag key、`payload` 为 `{revision}`。批准后在原执行端点传 `approvalId` 和同一 payload。AI 原始内容只用来计算 hash，不存入审批记录。
 
 ### 实验
 
@@ -80,7 +92,7 @@
 
 | 端点 | 说明 |
 |---|---|
-| `POST /api/v1/admin/experiments/{id}/release-plan` | 预注册计划 `{steps:[{name, ratio, minRuntime(ns), observationWindow(ns), autoAdvance}]}`；ratio 必须严格递增 ∈(0,100]，minRuntime>0；实验须处于 reviewed/scheduled/running；计划唯一（重复创建 409） |
+| `POST /api/v1/admin/experiments/{id}/release-plan` | 预注册计划 `{steps:[{name, ratio, minRuntime(ns), observationWindow(ns), autoAdvance}], approvalId}`；ratio 必须严格递增 ∈(0,100]，minRuntime>0；实验须处于 reviewed/scheduled/running；计划唯一（重复创建 409） |
 | `GET /api/v1/admin/experiments/{id}/release-plan` | 计划详情 + 动作历史（每个自动/手动动作都记录 actor 与原因） |
 | `POST .../release-plan/pause` | `{reason}` 必填；armed/running → paused，引擎停手 |
 | `POST .../release-plan/resume` | paused → running（**步骤时钟重置**：干预后须重新服满观察窗）；从未起跑的计划回到 armed |
@@ -99,8 +111,8 @@
 |---|---|
 | `POST {env前缀}/ai/resources` | 注册 `{type:"prompt"\|"skill"\|"agentspec", logicalId, name}`；physical ID 服务端生成；mcp/pipeline 明确拒绝（无不可变版本语义） |
 | `GET {env前缀}/ai/resources` | 索引+当前撤销列表 |
-| `POST .../ai/resources/{type}/{logical}/pin` | `{content}` → 发布新版本并 pin（version+MD5，发布后读回验证） |
-| `POST .../ai/resources/{type}/{logical}/revoke` / `reinstate` | 紧急撤销（实时生效，不走快照）/恢复 |
+| `POST .../ai/resources/{type}/{logical}/pin` | `{content, approvalId}` → 发布新版本并 pin（version+MD5，发布后读回验证） |
+| `POST .../ai/resources/{type}/{logical}/revoke` / `reinstate` | owner 带 `{reason}` 紧急撤销（实时生效，生成事后复核）；恢复须事后复核已完成并由 owner 带 `{reason}` 操作 |
 | `GET {env前缀}/ai/resolve?type=&logicalId=&version=` | 原始内容读取——**仅 owner**（单独授权） |
 | `PUT/GET /api/v1/admin/workspaces/{ws}/model-allowlist` | `{entries:[{provider,model,enabled}]}`；未入白名单的 modelRef flag 无法发布 |
 

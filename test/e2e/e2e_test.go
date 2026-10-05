@@ -26,16 +26,17 @@ import (
 )
 
 type harness struct {
-	t      *testing.T
-	store  *platform.Store
-	api    *api.Server
-	rawCfg *gconfig.Service
-	srv    *httptest.Server
-	ws     platform.Workspace
-	env    platform.Environment
-	owner  string // admin secret (global owner)
-	sdkTok string
-	colTok string
+	t        *testing.T
+	store    *platform.Store
+	api      *api.Server
+	rawCfg   *gconfig.Service
+	srv      *httptest.Server
+	ws       platform.Workspace
+	env      platform.Environment
+	owner    string // admin secret (global owner)
+	reviewer string // independent publisher for every approval
+	sdkTok   string
+	colTok   string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -126,6 +127,12 @@ func (h *harness) setupWorkspace() {
 		h.t.Fatalf("create collect token: %d", code)
 	}
 	h.colTok = colCT.Secret
+	var reviewer platform.CreatedToken
+	if code := h.do("POST", "/api/v1/admin/workspaces/acme/tokens", h.owner,
+		map[string]any{"name": "reviewer", "kind": "admin", "role": "publisher"}, &reviewer); code != http.StatusCreated {
+		h.t.Fatalf("create reviewer token: %d", code)
+	}
+	h.reviewer = reviewer.Secret
 }
 
 func testFlag(key string) *model.Flag {
@@ -154,8 +161,11 @@ func (h *harness) publishFlag(t *testing.T, flag *model.Flag, risk platform.Risk
 	}, nil); code != http.StatusOK {
 		t.Fatalf("save draft: %d", code)
 	}
-	if code := h.do("POST", base+"/submit", h.owner, nil, nil); code != http.StatusOK {
+	if code := h.do("POST", base+"/submit", h.owner, map[string]any{"reason": "e2e publish"}, nil); code != http.StatusOK {
 		t.Fatalf("submit: %d", code)
+	}
+	if approver == h.owner {
+		approver = h.reviewer
 	}
 	if code := h.do("POST", base+"/approve", approver, map[string]any{"note": "ok"}, nil); code != http.StatusOK {
 		t.Fatalf("approve: %d", code)
@@ -165,6 +175,21 @@ func (h *harness) publishFlag(t *testing.T, flag *model.Flag, risk platform.Risk
 		t.Fatalf("publish: %d", code)
 	}
 	return res
+}
+
+func (h *harness) approveOperation(action, object string, payload any) string {
+	h.t.Helper()
+	base := "/api/v1/admin/workspaces/acme/environments/prod/approvals"
+	var a platform.Approval
+	if code := h.do("POST", base, h.owner,
+		map[string]any{"action": action, "object": object, "payload": payload, "reason": "e2e verification"}, &a); code != http.StatusCreated {
+		h.t.Fatalf("request approval: %d", code)
+	}
+	if code := h.do("POST", "/api/v1/admin/workspaces/acme/approvals/"+a.ID+"/approve",
+		h.reviewer, map[string]any{"note": "verified"}, &a); code != http.StatusOK {
+		h.t.Fatalf("approve operation: %d", code)
+	}
+	return a.ID
 }
 
 type adminPublishResult struct {
@@ -292,7 +317,7 @@ func TestE2EKillSwitchAndRollback(t *testing.T) {
 	// Rollback to revision 1 (the split version serving control-value).
 	var rb adminPublishResult
 	if code := h.do("POST", "/api/v1/admin/workspaces/acme/environments/prod/flags/ks/rollback",
-		h.owner, map[string]any{"revision": 1, "reason": "kill switch drill"}, &rb); code != http.StatusOK {
+		h.owner, map[string]any{"revision": 1, "reason": "kill switch drill", "emergency": true}, &rb); code != http.StatusOK {
 		t.Fatalf("rollback: %d", code)
 	}
 	if rb.FlagRevision != 1 || rb.ManifestRevision != 3 {

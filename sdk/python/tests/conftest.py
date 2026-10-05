@@ -48,6 +48,7 @@ class GolabServer:
     def __init__(self, base_url: str, owner_token: str, proc: subprocess.Popen):
         self.base_url = base_url
         self.owner_token = owner_token
+        self.reviewer_token = ""
         self.proc = proc
 
     def request(self, method: str, path: str, token: str | None = None,
@@ -104,8 +105,9 @@ class GolabServer:
         base = f"/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{content['key']}"
         self.request("PUT", base + "/draft", self.owner_token,
                      {"content": content, "risk": risk}, expect=200)
-        self.request("POST", base + "/submit", self.owner_token, None, expect=200)
-        self.request("POST", base + "/approve", approver or self.owner_token,
+        self.request("POST", base + "/submit", self.owner_token,
+                     {"reason": "Python SDK integration"}, expect=200)
+        self.request("POST", base + "/approve", approver or self.reviewer_token,
                      {"note": "ok"}, expect=200)
         _, res = self.request("POST", base + "/publish", self.owner_token,
                               {"note": "ship"}, expect=200)
@@ -186,6 +188,7 @@ class Env:
                                                  "collect", environment=self.env)
         self.publisher_token = server.create_token(self.ws, "py-publisher",
                                                    "admin", role="publisher")
+        server.reviewer_token = self.publisher_token
 
         # Bool flag: tenant=acme → on; default off.
         server.publish_flag(self.ws, self.env, {

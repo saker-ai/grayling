@@ -109,6 +109,26 @@ var pgMigrations = []pgMigration{
         committed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
         PRIMARY KEY (version, collection, object_id)
     )`},
+	{4, `ALTER TABLE flag_drafts
+        ADD COLUMN submitted_token_id text NOT NULL DEFAULT '',
+        ADD COLUMN submitted_hash text NOT NULL DEFAULT '',
+        ADD COLUMN approved_token_id text NOT NULL DEFAULT '',
+        ADD COLUMN approved_hash text NOT NULL DEFAULT '',
+        ADD COLUMN approval_expires_at timestamptz;
+        ALTER TABLE segment_drafts
+        ADD COLUMN submitted_token_id text NOT NULL DEFAULT '',
+        ADD COLUMN submitted_at timestamptz,
+        ADD COLUMN submitted_hash text NOT NULL DEFAULT '',
+        ADD COLUMN approved_token_id text NOT NULL DEFAULT '',
+        ADD COLUMN approved_at timestamptz,
+        ADD COLUMN approved_hash text NOT NULL DEFAULT '',
+        ADD COLUMN approval_expires_at timestamptz`},
+	{5, `CREATE TABLE approvals (
+        id text PRIMARY KEY,
+        workspace_id text NOT NULL,
+        doc jsonb NOT NULL
+    );
+    CREATE INDEX approvals_workspace_id_idx ON approvals(workspace_id)`},
 }
 
 const pgSchemaV1 = `
@@ -820,6 +840,17 @@ func (p *pgPersistence) commitDirty(ctx context.Context, tx pgx.Tx, data *Data, 
                      last_used_at = EXCLUDED.last_used_at, revoked = EXCLUDED.revoked`,
 					t.ID, t.Name, string(t.Kind), string(t.Role), t.WorkspaceID, t.EnvironmentID,
 					t.SecretHash, t.Prefix, t.CreatedAt, nullableTime(t.LastUsedAt), t.Revoked, t.CreatedBy)
+			case collApprovals:
+				a := data.Approvals[key]
+				if a == nil {
+					continue
+				}
+				doc, err := json.Marshal(a)
+				if err != nil {
+					return err
+				}
+				batch.Queue(`INSERT INTO approvals(id, workspace_id, doc) VALUES ($1,$2,$3)
+                    ON CONFLICT (id) DO UPDATE SET doc=EXCLUDED.doc`, key, a.WorkspaceID, doc)
 			case collFlagDrafts:
 				ws, env, k, err := splitScope3(key)
 				if err != nil {
@@ -836,18 +867,25 @@ func (p *pgPersistence) commitDirty(ctx context.Context, tx pgx.Tx, data *Data, 
 				batch.Queue(`INSERT INTO flag_drafts
                     (workspace_id, environment_id, key, content, state, risk, updated_by,
                      updated_at, submitted_by, submitted_at, approved_by, approved_at,
-                     review_note, deleted, base_revision)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                     review_note, deleted, base_revision, submitted_token_id, submitted_hash,
+                     approved_token_id, approved_hash, approval_expires_at)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
                     ON CONFLICT (workspace_id, environment_id, key) DO UPDATE SET
                      content = EXCLUDED.content, state = EXCLUDED.state, risk = EXCLUDED.risk,
                      updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at,
                      submitted_by = EXCLUDED.submitted_by, submitted_at = EXCLUDED.submitted_at,
                      approved_by = EXCLUDED.approved_by, approved_at = EXCLUDED.approved_at,
                      review_note = EXCLUDED.review_note, deleted = EXCLUDED.deleted,
-                     base_revision = EXCLUDED.base_revision`,
+                     base_revision = EXCLUDED.base_revision,
+                     submitted_token_id = EXCLUDED.submitted_token_id,
+                     submitted_hash = EXCLUDED.submitted_hash,
+                     approved_token_id = EXCLUDED.approved_token_id,
+                     approved_hash = EXCLUDED.approved_hash,
+                     approval_expires_at = EXCLUDED.approval_expires_at`,
 					ws, env, k, content, string(d.State), string(d.Risk), d.UpdatedBy,
 					d.UpdatedAt, d.SubmittedBy, d.SubmittedAt, d.ApprovedBy, d.ApprovedAt,
-					d.ReviewNote, d.Deleted, d.BaseRevision)
+					d.ReviewNote, d.Deleted, d.BaseRevision, d.SubmittedTokenID, d.SubmittedHash,
+					d.ApprovedTokenID, d.ApprovedHash, d.ApprovalExpiresAt)
 			case collFlagRevisions:
 				flagRevScopes = append(flagRevScopes, key)
 			case collFlagState:
@@ -882,15 +920,26 @@ func (p *pgPersistence) commitDirty(ctx context.Context, tx pgx.Tx, data *Data, 
 				}
 				batch.Queue(`INSERT INTO segment_drafts
                     (workspace_id, environment_id, key, content, state, risk, updated_by,
-                     updated_at, submitted_by, approved_by, base_revision)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                     updated_at, submitted_by, approved_by, base_revision,
+                     submitted_token_id, submitted_at, submitted_hash, approved_token_id,
+                     approved_at, approved_hash, approval_expires_at)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
                     ON CONFLICT (workspace_id, environment_id, key) DO UPDATE SET
                      content = EXCLUDED.content, state = EXCLUDED.state, risk = EXCLUDED.risk,
                      updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at,
                      submitted_by = EXCLUDED.submitted_by, approved_by = EXCLUDED.approved_by,
-                     base_revision = EXCLUDED.base_revision`,
+                     base_revision = EXCLUDED.base_revision,
+                     submitted_token_id = EXCLUDED.submitted_token_id,
+                     submitted_at = EXCLUDED.submitted_at,
+                     submitted_hash = EXCLUDED.submitted_hash,
+                     approved_token_id = EXCLUDED.approved_token_id,
+                     approved_at = EXCLUDED.approved_at,
+                     approved_hash = EXCLUDED.approved_hash,
+                     approval_expires_at = EXCLUDED.approval_expires_at`,
 					ws, env, k, content, string(d.State), string(d.Risk), d.UpdatedBy,
-					d.UpdatedAt, d.SubmittedBy, d.ApprovedBy, d.BaseRevision)
+					d.UpdatedAt, d.SubmittedBy, d.ApprovedBy, d.BaseRevision,
+					d.SubmittedTokenID, d.SubmittedAt, d.SubmittedHash, d.ApprovedTokenID,
+					d.ApprovedAt, d.ApprovedHash, d.ApprovalExpiresAt)
 			case collSegmentRevisions:
 				segRevScopes = append(segRevScopes, key)
 			case collSegmentState:
@@ -1725,6 +1774,9 @@ func (p *pgPersistence) loadOnce() (*Data, error) {
 	if err := p.loadFlags(ctx, d); err != nil {
 		return nil, err
 	}
+	if err := p.loadApprovals(ctx, d); err != nil {
+		return nil, err
+	}
 	if err := p.loadExperiments(ctx, d); err != nil {
 		return nil, err
 	}
@@ -1851,10 +1903,31 @@ func (p *pgPersistence) loadTenants(ctx context.Context, d *Data) error {
 	return qRows.Err()
 }
 
+func (p *pgPersistence) loadApprovals(ctx context.Context, d *Data) error {
+	rows, err := p.pool.Query(ctx, `SELECT doc FROM approvals`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var doc []byte
+		if err := rows.Scan(&doc); err != nil {
+			return err
+		}
+		var a Approval
+		if err := json.Unmarshal(doc, &a); err != nil {
+			return err
+		}
+		d.Approvals[a.ID] = &a
+	}
+	return rows.Err()
+}
+
 func (p *pgPersistence) loadFlags(ctx context.Context, d *Data) error {
 	draftRows, err := p.pool.Query(ctx, `SELECT workspace_id, environment_id, key, content,
         state, risk, updated_by, updated_at, submitted_by, submitted_at, approved_by,
-        approved_at, review_note, deleted, base_revision FROM flag_drafts`)
+        approved_at, review_note, deleted, base_revision, submitted_token_id,
+        submitted_hash, approved_token_id, approved_hash, approval_expires_at FROM flag_drafts`)
 	if err != nil {
 		return err
 	}
@@ -1865,7 +1938,9 @@ func (p *pgPersistence) loadFlags(ctx context.Context, d *Data) error {
 		var state, risk string
 		if err := draftRows.Scan(&dr.WorkspaceID, &dr.EnvironmentID, &dr.Key, &content,
 			&state, &risk, &dr.UpdatedBy, &dr.UpdatedAt, &dr.SubmittedBy, &dr.SubmittedAt,
-			&dr.ApprovedBy, &dr.ApprovedAt, &dr.ReviewNote, &dr.Deleted, &dr.BaseRevision); err != nil {
+			&dr.ApprovedBy, &dr.ApprovedAt, &dr.ReviewNote, &dr.Deleted, &dr.BaseRevision,
+			&dr.SubmittedTokenID, &dr.SubmittedHash, &dr.ApprovedTokenID, &dr.ApprovedHash,
+			&dr.ApprovalExpiresAt); err != nil {
 			return err
 		}
 		dr.State = DraftState(state)
@@ -1933,7 +2008,9 @@ func (p *pgPersistence) loadFlags(ctx context.Context, d *Data) error {
 	}
 
 	segDraftRows, err := p.pool.Query(ctx, `SELECT workspace_id, environment_id, key, content,
-        state, risk, updated_by, updated_at, submitted_by, approved_by, base_revision
+        state, risk, updated_by, updated_at, submitted_by, approved_by, base_revision,
+        submitted_token_id, submitted_at, submitted_hash, approved_token_id,
+        approved_at, approved_hash, approval_expires_at
         FROM segment_drafts`)
 	if err != nil {
 		return err
@@ -1945,7 +2022,8 @@ func (p *pgPersistence) loadFlags(ctx context.Context, d *Data) error {
 		var state, risk string
 		if err := segDraftRows.Scan(&dr.WorkspaceID, &dr.EnvironmentID, &dr.Key, &content,
 			&state, &risk, &dr.UpdatedBy, &dr.UpdatedAt, &dr.SubmittedBy, &dr.ApprovedBy,
-			&dr.BaseRevision); err != nil {
+			&dr.BaseRevision, &dr.SubmittedTokenID, &dr.SubmittedAt, &dr.SubmittedHash,
+			&dr.ApprovedTokenID, &dr.ApprovedAt, &dr.ApprovedHash, &dr.ApprovalExpiresAt); err != nil {
 			return err
 		}
 		dr.State = DraftState(state)

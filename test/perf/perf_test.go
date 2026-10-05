@@ -204,10 +204,11 @@ func TestPerfLocalEvaluationP99(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type perfServer struct {
-	store *platform.Store
-	api   *api.Server
-	srv   *httptest.Server
-	owner string
+	store    *platform.Store
+	api      *api.Server
+	srv      *httptest.Server
+	owner    string
+	reviewer string
 
 	wsMu      sync.Mutex
 	createdWS map[string]bool
@@ -227,7 +228,11 @@ func newPerfServer(t *testing.T, rps float64) *perfServer {
 	if err != nil {
 		t.Fatalf("owner token: %v", err)
 	}
-	return &perfServer{store: store, api: apiSrv, srv: srv, owner: ct.Secret,
+	reviewer, err := store.CreateToken(platform.TokenAdmin, "perf-reviewer", platform.RoleOwner, "", "", "bootstrap")
+	if err != nil {
+		t.Fatalf("reviewer token: %v", err)
+	}
+	return &perfServer{store: store, api: apiSrv, srv: srv, owner: ct.Secret, reviewer: reviewer.Secret,
 		createdWS: map[string]bool{}}
 }
 
@@ -323,10 +328,10 @@ func (p *perfServer) publishFlag(t *testing.T, ws, env string, flag *model.Flag)
 		map[string]any{"content": flag, "risk": "normal"}, nil); code != http.StatusOK {
 		t.Fatalf("draft: %d", code)
 	}
-	if code := p.do(t, "POST", base+"/submit", p.owner, nil, nil); code != http.StatusOK {
+	if code := p.do(t, "POST", base+"/submit", p.owner, map[string]any{"reason": "performance verification"}, nil); code != http.StatusOK {
 		t.Fatalf("submit: %d", code)
 	}
-	if code := p.do(t, "POST", base+"/approve", p.owner, map[string]any{"note": "ok"}, nil); code != http.StatusOK {
+	if code := p.do(t, "POST", base+"/approve", p.reviewer, map[string]any{"note": "ok"}, nil); code != http.StatusOK {
 		t.Fatalf("approve: %d", code)
 	}
 	var res struct {

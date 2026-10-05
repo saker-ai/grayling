@@ -50,6 +50,7 @@ const (
 	collFlagRevisions     collection = "flagRevisions"
 	collFlagState         collection = "flagState" // current/next revision + tombstone
 	collSegmentDrafts     collection = "segmentDrafts"
+	collApprovals         collection = "approvals"
 	collSegmentRevisions  collection = "segmentRevisions"
 	collSegmentState      collection = "segmentState"
 	collManifestRevisions collection = "manifestRevisions"

@@ -23,7 +23,7 @@ var (
 	ErrAccessDenied  = errors.New("platform: access denied")
 	ErrQuotaExceeded = errors.New("platform: quota exceeded")
 	ErrValidation    = errors.New("platform: validation failed")
-	ErrSelfApproval  = errors.New("platform: submitter cannot approve own high-risk change")
+	ErrSelfApproval  = errors.New("platform: applicant cannot approve own change")
 )
 
 // Data is the serializable store state.
@@ -48,6 +48,7 @@ type Data struct {
 	FlagTombstones map[string]int64           `json:"flagTombstones"` // ws/env/key -> manifest rev of deletion
 
 	SegmentDrafts     map[string]*SegmentDraft      `json:"segmentDrafts"`
+	Approvals         map[string]*Approval          `json:"approvals"`
 	SegmentRevisions  map[string][]*SegmentRevision `json:"segmentRevisions"`
 	CurrentSegmentRev map[string]int64              `json:"currentSegmentRev"`
 	NextSegmentRev    map[string]int64              `json:"nextSegmentRev"`
@@ -146,6 +147,9 @@ func newStore(p Persistence) (*Store, error) {
 	if d == nil {
 		d = newData()
 	}
+	if d.Approvals == nil {
+		d.Approvals = map[string]*Approval{}
+	}
 	needsBootstrap := len(d.HMACKeyRing) == 0
 	s.data = d
 	if err := s.normalizeKeyRing(); err != nil {
@@ -217,6 +221,7 @@ func newData() *Data {
 		NextFlagRev:       map[string]int64{},
 		FlagTombstones:    map[string]int64{},
 		SegmentDrafts:     map[string]*SegmentDraft{},
+		Approvals:         map[string]*Approval{},
 		SegmentRevisions:  map[string][]*SegmentRevision{},
 		CurrentSegmentRev: map[string]int64{},
 		NextSegmentRev:    map[string]int64{},

@@ -122,6 +122,7 @@ func TestProxyBinaryDeployment(t *testing.T) {
 	}
 
 	// Provision workspace/env/tokens/flag through the real admin API.
+	authToken := owner
 	admin := func(method, path string, body any, out any) int {
 		var rdr io.Reader
 		if body != nil {
@@ -129,7 +130,7 @@ func TestProxyBinaryDeployment(t *testing.T) {
 			rdr = bytes.NewReader(b)
 		}
 		req, _ := http.NewRequest(method, apiBase+path, rdr)
-		req.Header.Set("Authorization", "Bearer "+owner)
+		req.Header.Set("Authorization", "Bearer "+authToken)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -176,12 +177,19 @@ func TestProxyBinaryDeployment(t *testing.T) {
 	if code := admin("PUT", base+"/draft", map[string]any{"content": flagDoc}, nil); code != http.StatusOK {
 		t.Fatalf("draft: %d", code)
 	}
-	if code := admin("POST", base+"/submit", nil, nil); code != http.StatusOK {
+	if code := admin("POST", base+"/submit", map[string]any{"reason": "proxy boot"}, nil); code != http.StatusOK {
 		t.Fatalf("submit: %d", code)
 	}
+	var reviewer struct{ Secret string }
+	if code := admin("POST", "/api/v1/admin/workspaces/pxboot/tokens",
+		map[string]any{"name": "reviewer", "kind": "admin", "role": "publisher"}, &reviewer); code != http.StatusCreated {
+		t.Fatalf("reviewer token: %d", code)
+	}
+	authToken = reviewer.Secret
 	if code := admin("POST", base+"/approve", map[string]any{"note": "ok"}, nil); code != http.StatusOK {
 		t.Fatalf("approve: %d", code)
 	}
+	authToken = owner
 	if code := admin("POST", base+"/publish", map[string]any{"note": "ship"}, nil); code != http.StatusOK {
 		t.Fatalf("publish: %d", code)
 	}

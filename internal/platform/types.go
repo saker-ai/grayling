@@ -86,8 +86,7 @@ const (
 	DraftApproved  DraftState = "approved"
 )
 
-// Risk classifies a draft. High-risk drafts cannot be approved by their own
-// submitter (§9: 审批人不能批准自己的高风险变更).
+// Risk classifies a draft. Every change requires a distinct approver.
 type Risk string
 
 const (
@@ -97,21 +96,26 @@ const (
 
 // FlagDraft is the mutable working copy of one flag in one environment.
 type FlagDraft struct {
-	WorkspaceID   string      `json:"workspaceId"`
-	EnvironmentID string      `json:"environmentId"`
-	Key           string      `json:"key"`
-	Content       *model.Flag `json:"content"`
-	State         DraftState  `json:"state"`
-	Risk          Risk        `json:"risk"`
-	UpdatedBy     string      `json:"updatedBy"`
-	UpdatedAt     time.Time   `json:"updatedAt"`
-	SubmittedBy   string      `json:"submittedBy,omitempty"`
-	SubmittedAt   *time.Time  `json:"submittedAt,omitempty"`
-	ApprovedBy    string      `json:"approvedBy,omitempty"`
-	ApprovedAt    *time.Time  `json:"approvedAt,omitempty"`
-	ReviewNote    string      `json:"reviewNote,omitempty"`
-	Deleted       bool        `json:"deleted,omitempty"` // pending tombstone publish
-	BaseRevision  int64       `json:"baseRevision"`      // optimistic lock: revision this draft was edited against
+	WorkspaceID       string      `json:"workspaceId"`
+	EnvironmentID     string      `json:"environmentId"`
+	Key               string      `json:"key"`
+	Content           *model.Flag `json:"content"`
+	State             DraftState  `json:"state"`
+	Risk              Risk        `json:"risk"`
+	UpdatedBy         string      `json:"updatedBy"`
+	UpdatedAt         time.Time   `json:"updatedAt"`
+	SubmittedBy       string      `json:"submittedBy,omitempty"`
+	SubmittedTokenID  string      `json:"submittedTokenId,omitempty"`
+	SubmittedAt       *time.Time  `json:"submittedAt,omitempty"`
+	SubmittedHash     string      `json:"submittedHash,omitempty"`
+	ApprovedBy        string      `json:"approvedBy,omitempty"`
+	ApprovedTokenID   string      `json:"approvedTokenId,omitempty"`
+	ApprovedAt        *time.Time  `json:"approvedAt,omitempty"`
+	ApprovedHash      string      `json:"approvedHash,omitempty"`
+	ApprovalExpiresAt *time.Time  `json:"approvalExpiresAt,omitempty"`
+	ReviewNote        string      `json:"reviewNote,omitempty"`
+	Deleted           bool        `json:"deleted,omitempty"` // pending tombstone publish
+	BaseRevision      int64       `json:"baseRevision"`      // optimistic lock: revision this draft was edited against
 }
 
 // FlagRevision is one immutable published revision (§5.1).
@@ -133,17 +137,24 @@ type FlagRevision struct {
 
 // SegmentDraft / SegmentRevision mirror the flag lifecycle for segments.
 type SegmentDraft struct {
-	WorkspaceID   string         `json:"workspaceId"`
-	EnvironmentID string         `json:"environmentId"`
-	Key           string         `json:"key"`
-	Content       *model.Segment `json:"content"`
-	State         DraftState     `json:"state"`
-	Risk          Risk           `json:"risk"`
-	UpdatedBy     string         `json:"updatedBy"`
-	UpdatedAt     time.Time      `json:"updatedAt"`
-	SubmittedBy   string         `json:"submittedBy,omitempty"`
-	ApprovedBy    string         `json:"approvedBy,omitempty"`
-	BaseRevision  int64          `json:"baseRevision"`
+	WorkspaceID       string         `json:"workspaceId"`
+	EnvironmentID     string         `json:"environmentId"`
+	Key               string         `json:"key"`
+	Content           *model.Segment `json:"content"`
+	State             DraftState     `json:"state"`
+	Risk              Risk           `json:"risk"`
+	UpdatedBy         string         `json:"updatedBy"`
+	UpdatedAt         time.Time      `json:"updatedAt"`
+	SubmittedBy       string         `json:"submittedBy,omitempty"`
+	SubmittedTokenID  string         `json:"submittedTokenId,omitempty"`
+	SubmittedAt       *time.Time     `json:"submittedAt,omitempty"`
+	SubmittedHash     string         `json:"submittedHash,omitempty"`
+	ApprovedBy        string         `json:"approvedBy,omitempty"`
+	ApprovedTokenID   string         `json:"approvedTokenId,omitempty"`
+	ApprovedAt        *time.Time     `json:"approvedAt,omitempty"`
+	ApprovedHash      string         `json:"approvedHash,omitempty"`
+	ApprovalExpiresAt *time.Time     `json:"approvalExpiresAt,omitempty"`
+	BaseRevision      int64          `json:"baseRevision"`
 }
 
 type SegmentRevision struct {

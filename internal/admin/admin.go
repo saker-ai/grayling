@@ -61,6 +61,7 @@ type PublishResult struct {
 	ManifestRevision int64  `json:"manifestRevision"`
 	Hash             string `json:"hash"`
 	DataID           string `json:"dataId"`
+	ReviewID         string `json:"reviewId,omitempty"`
 }
 
 func (s *Service) notify(wsID, envID string, rev int64) {
@@ -77,6 +78,29 @@ func (s *Service) audit(actor Actor, action, wsID, envID, object string, detail 
 		}
 	}
 	_ = s.Store.Audit(actor.Name+" ("+actor.TokenID+")", actor.Role, action, wsID, envID, object, d)
+}
+
+// activeApprover rechecks the grant against the current credential state.
+// A revoked or downgraded credential cannot authorize a later publication.
+func (s *Service) activeApprover(tokenID, workspaceID string) error {
+	if tokenID == "" {
+		return nil // legacy store callers without a credential identity
+	}
+	if tokenID == "configured-admin-password" {
+		return nil // this credential is checked by API authentication
+	}
+	for _, token := range s.Store.ListTokens("") {
+		if token.ID == tokenID && !token.Revoked {
+			return Authorize(Actor{TokenID: token.ID, Name: token.Name, Kind: token.Kind,
+				Role: token.Role, WorkspaceID: token.WorkspaceID}, workspaceID, PermFlagApprove)
+		}
+	}
+	return fmt.Errorf("%w: approval credential revoked or missing", platform.ErrAccessDenied)
+}
+
+// CheckApprover verifies that a persisted approval still has a live grant.
+func (s *Service) CheckApprover(tokenID, workspaceID string) error {
+	return s.activeApprover(tokenID, workspaceID)
 }
 
 // resolveEnv loads and authorizes the (workspace, environment) pair. The
@@ -112,6 +136,10 @@ func (s *Service) SaveFlagDraft(actor Actor, workspaceID, environmentID string,
 	if content == nil {
 		return nil, fmt.Errorf("%w: nil flag", platform.ErrValidation)
 	}
+	if env.Slug == "prod" || env.Slug == "production" || content.Experiment != nil ||
+		s.Store.CurrentFlagRevision(env.WorkspaceID, env.ID, content.Key) > 0 {
+		risk = platform.RiskHigh
+	}
 	// Enforce per-flag size quota before touching state (§11).
 	raw, err := model.CanonicalJSON(content)
 	if err != nil {
@@ -131,15 +159,23 @@ func (s *Service) SaveFlagDraft(actor Actor, workspaceID, environmentID string,
 }
 
 // SubmitFlagDraft moves a draft into review.
-func (s *Service) SubmitFlagDraft(actor Actor, workspaceID, environmentID, key string) error {
+func (s *Service) SubmitFlagDraft(actor Actor, workspaceID, environmentID, key string, reason ...string) error {
 	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagWrite)
 	if err != nil {
 		return err
 	}
-	if err := s.Store.SubmitFlagDraft(env.WorkspaceID, env.ID, key, actor.Name); err != nil {
+	if err := s.Store.SubmitFlagDraft(env.WorkspaceID, env.ID, key, actor.Name, actor.TokenID); err != nil {
 		return err
 	}
-	s.audit(actor, "flag.draft.submit", env.WorkspaceID, env.ID, key, nil)
+	d, _ := s.Store.GetFlagDraft(env.WorkspaceID, env.ID, key)
+	why := "internal submission"
+	if len(reason) > 0 {
+		why = reason[0]
+	}
+	s.audit(actor, "flag.draft.submit", env.WorkspaceID, env.ID, key, map[string]any{
+		"hash": d.SubmittedHash, "baseRevision": d.BaseRevision, "risk": d.Risk,
+		"deleted": d.Deleted, "applicantTokenId": actor.TokenID, "reason": why,
+	})
 	return nil
 }
 
@@ -150,10 +186,14 @@ func (s *Service) ApproveFlagDraft(actor Actor, workspaceID, environmentID, key,
 	if err != nil {
 		return err
 	}
-	if err := s.Store.ApproveFlagDraft(env.WorkspaceID, env.ID, key, actor.Name, note); err != nil {
+	if err := s.Store.ApproveFlagDraft(env.WorkspaceID, env.ID, key, actor.Name, note, actor.TokenID); err != nil {
 		return err
 	}
-	s.audit(actor, "flag.draft.approve", env.WorkspaceID, env.ID, key, map[string]any{"note": note})
+	d, _ := s.Store.GetFlagDraft(env.WorkspaceID, env.ID, key)
+	s.audit(actor, "flag.draft.approve", env.WorkspaceID, env.ID, key, map[string]any{
+		"note": note, "hash": d.ApprovedHash, "baseRevision": d.BaseRevision,
+		"expiresAt": d.ApprovalExpiresAt, "approverTokenId": actor.TokenID,
+	})
 	return nil
 }
 
@@ -227,6 +267,21 @@ func (s *Service) acquirePublishLock(env *platform.Environment) (func(), error) 
 	}, nil
 }
 
+// WithScopeLock serializes approval consumption and its effect with other
+// management publishes in the same environment, including across replicas.
+func (s *Service) WithScopeLock(workspaceID, environmentID string, fn func() error) error {
+	env, err := s.Store.GetEnvironment(workspaceID, environmentID)
+	if err != nil {
+		return err
+	}
+	release, err := s.acquirePublishLock(env)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return fn()
+}
+
 // ---------------------------------------------------------------------------
 // Publish pipeline
 // ---------------------------------------------------------------------------
@@ -259,9 +314,16 @@ func (s *Service) PublishFlag(actor Actor, workspaceID, environmentID, key, note
 	if draft.State != platform.DraftApproved {
 		return nil, fmt.Errorf("%w: draft %q is %s, want approved", platform.ErrInvalidState, key, draft.State)
 	}
-	if draft.Deleted {
-		return s.publishDeletionLocked(actor, env, key)
+	if err := s.Store.VerifyFlagApproval(draft); err != nil {
+		return nil, err
 	}
+	if err := s.activeApprover(draft.ApprovedTokenID, env.WorkspaceID); err != nil {
+		return nil, err
+	}
+	if draft.Deleted {
+		return s.publishDeletionLocked(actor, env, key, draft.ApprovedHash)
+	}
+	approvalHash := draft.ApprovedHash
 
 	content := *draft.Content
 	rev := s.Store.NextFlagRevision(env.WorkspaceID, env.ID, key)
@@ -273,6 +335,7 @@ func (s *Service) PublishFlag(actor Actor, workspaceID, environmentID, key, note
 	}
 	s.audit(actor, "flag.publish", env.WorkspaceID, env.ID, key, map[string]any{
 		"revision": fr.Revision, "manifestRevision": m.Revision, "hash": fr.Hash,
+		"approvalHash": approvalHash, "reason": note,
 	})
 	return &PublishResult{FlagRevision: fr.Revision, ManifestRevision: m.Revision,
 		Hash: fr.Hash, DataID: fr.DataID}, nil
@@ -309,7 +372,7 @@ func (s *Service) publishRevisionLocked(actor Actor, env *platform.Environment,
 	if len(raw) > q.MaxFlagBytes {
 		return nil, nil, fmt.Errorf("%w: %d bytes > max %d", platform.ErrQuotaExceeded, len(raw), q.MaxFlagBytes)
 	}
-	if s.FlagPublishHook != nil {
+	if s.FlagPublishHook != nil && !content.Disable {
 		if err := s.FlagPublishHook(env.WorkspaceID, content); err != nil {
 			return nil, nil, err
 		}
@@ -335,11 +398,68 @@ func (s *Service) publishRevisionLocked(actor Actor, env *platform.Environment,
 	return fr, m, nil
 }
 
+// EmergencyDisableFlag immediately publishes a new disabled revision. Only
+// an owner can use this break-glass path; the result requires independent
+// post-action review just like an emergency rollback.
+func (s *Service) EmergencyDisableFlag(actor Actor, workspaceID, environmentID, key, reason string) (*PublishResult, error) {
+	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagPublish)
+	if err != nil {
+		return nil, err
+	}
+	if actor.Role != platform.RoleOwner {
+		return nil, platform.ErrAccessDenied
+	}
+	if reason == "" {
+		return nil, fmt.Errorf("%w: emergency disable requires a reason", platform.ErrValidation)
+	}
+	release, err := s.acquirePublishLock(env)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	current := s.Store.CurrentFlagContents(env.WorkspaceID, env.ID)[key]
+	if current == nil {
+		return nil, fmt.Errorf("%w: flag %s", platform.ErrNotFound, key)
+	}
+	if current.Content.Disable {
+		return nil, fmt.Errorf("%w: flag already disabled", platform.ErrInvalidState)
+	}
+	content := *current.Content
+	content.Disable = true
+	content.Version = model.FormatRevision(s.Store.NextFlagRevision(env.WorkspaceID, env.ID, key))
+	fr, m, err := s.publishRevisionLocked(actor, env, &content, reason)
+	if err != nil {
+		return nil, err
+	}
+	result := &PublishResult{FlagRevision: fr.Revision, ManifestRevision: m.Revision,
+		Hash: fr.Hash, DataID: fr.DataID}
+	s.audit(actor, "flag.emergency_disable", env.WorkspaceID, env.ID, key,
+		map[string]any{"fromRevision": current.Revision, "revision": fr.Revision,
+			"hash": fr.Hash, "manifestRevision": m.Revision, "reason": reason})
+	review, err := s.Store.RequestApproval(platform.Approval{
+		WorkspaceID: env.WorkspaceID, EnvironmentID: env.ID,
+		Action: "breakglass.review", Object: key, PayloadHash: fr.Hash,
+		BaseRevision: m.Revision, Reason: reason,
+		Impact:         "all users evaluated by this flag",
+		RollbackTarget: fmt.Sprintf("r%d (%s)", current.Revision, current.Hash),
+		Guardrails:     "immediate disabled revision; independent post-action review",
+		SubmittedBy:    actor.Name, SubmittedTokenID: actor.TokenID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result.ReviewID = review.ID
+	s.audit(actor, "breakglass.open", env.WorkspaceID, env.ID, review.ID,
+		map[string]any{"action": "flag.emergency_disable", "object": key,
+			"revision": fr.Revision, "manifestRevision": m.Revision, "reason": reason})
+	return result, nil
+}
+
 // publishDeletionLocked removes a flag from the current set and republishes
 // the manifest; the caller holds the publish lock. The immutable revisions
 // stay for audit; the tombstone tells delta-capable clients to evict,
 // full-sync clients evict on absence.
-func (s *Service) publishDeletionLocked(actor Actor, env *platform.Environment, key string) (*PublishResult, error) {
+func (s *Service) publishDeletionLocked(actor Actor, env *platform.Environment, key, approvalHash string) (*PublishResult, error) {
 	ws, err := s.Store.GetWorkspace(env.WorkspaceID)
 	if err != nil {
 		return nil, err
@@ -352,7 +472,8 @@ func (s *Service) publishDeletionLocked(actor Actor, env *platform.Environment, 
 	if err != nil {
 		return nil, err
 	}
-	s.audit(actor, "flag.delete", env.WorkspaceID, env.ID, key, map[string]any{"manifestRevision": m.Revision})
+	s.audit(actor, "flag.delete", env.WorkspaceID, env.ID, key,
+		map[string]any{"manifestRevision": m.Revision, "approvalHash": approvalHash})
 	return &PublishResult{ManifestRevision: m.Revision}, nil
 }
 
@@ -450,7 +571,7 @@ func (s *Service) RepublishManifest(actor Actor, workspaceID, environmentID, rea
 // revision must exist in the GoLab platform store AND read back from the
 // config substrate with the recorded hash.
 func (s *Service) RollbackFlag(actor Actor, workspaceID, environmentID, key string,
-	targetRevision int64, reason string) (*PublishResult, error) {
+	targetRevision int64, reason string, approvalID ...string) (*PublishResult, error) {
 
 	ws, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagPublish)
 	if err != nil {
@@ -464,6 +585,32 @@ func (s *Service) RollbackFlag(actor Actor, workspaceID, environmentID, key stri
 	if reason == "" {
 		return nil, fmt.Errorf("%w: rollback requires a reason", platform.ErrValidation)
 	}
+	planned := len(approvalID) > 0 && approvalID[0] != ""
+	if planned {
+		a, err := s.Store.GetApproval(approvalID[0])
+		if err != nil {
+			return nil, err
+		}
+		if err := s.activeApprover(a.ApprovedTokenID, env.WorkspaceID); err != nil {
+			return nil, err
+		}
+		hashRaw, err := model.CanonicalJSON(struct {
+			Revision int64 `json:"revision"`
+		}{targetRevision})
+		if err != nil {
+			return nil, err
+		}
+		base := s.Store.CurrentFlagRevision(env.WorkspaceID, env.ID, key)
+		if _, err := s.Store.UseApproval(a.ID, env.WorkspaceID, env.ID, "flag.rollback", key,
+			model.HashBytes(hashRaw), base); err != nil {
+			return nil, err
+		}
+		s.audit(actor, "approval.use", env.WorkspaceID, env.ID, a.ID,
+			map[string]any{"action": "flag.rollback", "object": key, "hash": a.PayloadHash, "baseRevision": base})
+	} else if actor.Role != platform.RoleOwner {
+		return nil, fmt.Errorf("%w: emergency rollback requires owner role", platform.ErrAccessDenied)
+	}
+	fromRevision := s.Store.CurrentFlagRevision(env.WorkspaceID, env.ID, key)
 	target, err := s.Store.GetFlagRevision(env.WorkspaceID, env.ID, key, targetRevision)
 	if err != nil {
 		return nil, err
@@ -488,10 +635,30 @@ func (s *Service) RollbackFlag(actor Actor, workspaceID, environmentID, key stri
 		return nil, err
 	}
 	s.audit(actor, "flag.rollback", env.WorkspaceID, env.ID, key, map[string]any{
-		"targetRevision": targetRevision, "manifestRevision": m.Revision, "reason": reason,
+		"fromRevision": fromRevision, "targetRevision": targetRevision,
+		"targetHash": target.Hash, "manifestRevision": m.Revision, "reason": reason,
+		"emergency": !planned,
 	})
-	return &PublishResult{FlagRevision: targetRevision, ManifestRevision: m.Revision,
-		Hash: target.Hash, DataID: target.DataID}, nil
+	result := &PublishResult{FlagRevision: targetRevision, ManifestRevision: m.Revision,
+		Hash: target.Hash, DataID: target.DataID}
+	if !planned {
+		review, err := s.Store.RequestApproval(platform.Approval{
+			WorkspaceID: env.WorkspaceID, EnvironmentID: env.ID,
+			Action: "breakglass.review", Object: key,
+			PayloadHash: target.Hash, BaseRevision: m.Revision, Reason: reason,
+			Impact: "all users evaluated by this flag", RollbackTarget: fmt.Sprintf("r%d", targetRevision),
+			Guardrails:  "verified retained target hash; post-action independent review",
+			SubmittedBy: actor.Name, SubmittedTokenID: actor.TokenID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		result.ReviewID = review.ID
+		s.audit(actor, "breakglass.open", env.WorkspaceID, env.ID, review.ID,
+			map[string]any{"object": key, "targetRevision": targetRevision,
+				"manifestRevision": m.Revision, "reason": reason})
+	}
+	return result, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -506,6 +673,10 @@ func (s *Service) SaveSegmentDraft(actor Actor, workspaceID, environmentID strin
 	if err != nil {
 		return nil, err
 	}
+	if content != nil && (env.Slug == "prod" || env.Slug == "production" ||
+		s.Store.CurrentSegmentRevision(env.WorkspaceID, env.ID, content.Key) > 0) {
+		risk = platform.RiskHigh
+	}
 	d, err := s.Store.SaveSegmentDraft(env.WorkspaceID, env.ID, content, risk, actor.Name)
 	if err != nil {
 		return nil, err
@@ -515,15 +686,23 @@ func (s *Service) SaveSegmentDraft(actor Actor, workspaceID, environmentID strin
 }
 
 // SubmitSegmentDraft / ApproveSegmentDraft mirror the flag review flow.
-func (s *Service) SubmitSegmentDraft(actor Actor, workspaceID, environmentID, key string) error {
+func (s *Service) SubmitSegmentDraft(actor Actor, workspaceID, environmentID, key string, reason ...string) error {
 	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagWrite)
 	if err != nil {
 		return err
 	}
-	if err := s.Store.SubmitSegmentDraft(env.WorkspaceID, env.ID, key, actor.Name); err != nil {
+	if err := s.Store.SubmitSegmentDraft(env.WorkspaceID, env.ID, key, actor.Name, actor.TokenID); err != nil {
 		return err
 	}
-	s.audit(actor, "segment.draft.submit", env.WorkspaceID, env.ID, key, nil)
+	d, _ := s.Store.GetSegmentDraft(env.WorkspaceID, env.ID, key)
+	why := "internal submission"
+	if len(reason) > 0 {
+		why = reason[0]
+	}
+	s.audit(actor, "segment.draft.submit", env.WorkspaceID, env.ID, key, map[string]any{
+		"hash": d.SubmittedHash, "baseRevision": d.BaseRevision, "risk": d.Risk,
+		"applicantTokenId": actor.TokenID, "reason": why,
+	})
 	return nil
 }
 
@@ -532,10 +711,14 @@ func (s *Service) ApproveSegmentDraft(actor Actor, workspaceID, environmentID, k
 	if err != nil {
 		return err
 	}
-	if err := s.Store.ApproveSegmentDraft(env.WorkspaceID, env.ID, key, actor.Name); err != nil {
+	if err := s.Store.ApproveSegmentDraft(env.WorkspaceID, env.ID, key, actor.Name, actor.TokenID); err != nil {
 		return err
 	}
-	s.audit(actor, "segment.draft.approve", env.WorkspaceID, env.ID, key, nil)
+	d, _ := s.Store.GetSegmentDraft(env.WorkspaceID, env.ID, key)
+	s.audit(actor, "segment.draft.approve", env.WorkspaceID, env.ID, key, map[string]any{
+		"hash": d.ApprovedHash, "baseRevision": d.BaseRevision,
+		"expiresAt": d.ApprovalExpiresAt, "approverTokenId": actor.TokenID,
+	})
 	return nil
 }
 
@@ -557,6 +740,13 @@ func (s *Service) PublishSegment(actor Actor, workspaceID, environmentID, key, n
 	}
 	if draft.State != platform.DraftApproved {
 		return nil, fmt.Errorf("%w: segment draft %q is %s", platform.ErrInvalidState, key, draft.State)
+	}
+	if err := s.Store.VerifySegmentApproval(draft); err != nil {
+		return nil, err
+	}
+	approvalHash := draft.ApprovedHash
+	if err := s.activeApprover(draft.ApprovedTokenID, env.WorkspaceID); err != nil {
+		return nil, err
 	}
 	content := *draft.Content
 	rev := s.Store.NextSegmentRevision(env.WorkspaceID, env.ID, key)
@@ -587,6 +777,7 @@ func (s *Service) PublishSegment(actor Actor, workspaceID, environmentID, key, n
 	}
 	s.audit(actor, "segment.publish", env.WorkspaceID, env.ID, key, map[string]any{
 		"revision": rev, "manifestRevision": m.Revision, "note": note,
+		"hash": sr.Hash, "approvalHash": approvalHash,
 	})
 	return &PublishResult{FlagRevision: rev, ManifestRevision: m.Revision,
 		Hash: sr.Hash, DataID: dataID}, nil
@@ -603,6 +794,7 @@ type FlagView struct {
 	CurrentRevision int64                    `json:"currentRevision"`
 	Current         *platform.FlagRevision   `json:"current,omitempty"`
 	Revisions       []*platform.FlagRevision `json:"revisions,omitempty"`
+	Preview         *ReviewPreview           `json:"preview,omitempty"`
 }
 
 // GetFlagView assembles draft + published state of one flag.
@@ -624,6 +816,9 @@ func (s *Service) GetFlagView(actor Actor, workspaceID, environmentID, key strin
 	}
 	if withHistory {
 		view.Revisions = s.Store.ListFlagRevisions(env.WorkspaceID, env.ID, key)
+	}
+	if view.Draft != nil {
+		view.Preview = s.flagPreview(env, view.Draft, view.Current)
 	}
 	return view, nil
 }
