@@ -54,6 +54,30 @@ func scopeLockKey(workspaceID, environmentID string) int64 {
 	return int64(h.Sum64())
 }
 
+func planLockKey(experimentID string) int64 {
+	h := fnv.New64a()
+	h.Write([]byte("golab-release-plan\x00"))
+	h.Write([]byte(experimentID))
+	return int64(h.Sum64())
+}
+
+// PlanLock serializes release-plan actions for one experiment across
+// replicas. Callers reload the store after acquiring it and release it only
+// after the plan update and any corresponding flag publish finish.
+func (s *Store) PlanLock(experimentID string) (func(), error) {
+	lk, ok := s.persist.(scopeLocker)
+	if !ok {
+		return func() {}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), publishLockTimeout)
+	defer cancel()
+	release, err := lk.LockScope(ctx, planLockKey(experimentID))
+	if err != nil {
+		return nil, fmt.Errorf("platform: plan lock: %w", err)
+	}
+	return release, nil
+}
+
 // PublishLock acquires the cross-process publish lock of one (workspace,
 // environment) scope when the backend supports it. The returned function
 // releases the lock and is always safe to call exactly once. On

@@ -62,6 +62,27 @@ func main() {
 		fmt.Println("golab dev (schema v1)")
 		return
 	}
+	adminPassword := os.Getenv("GOLAB_ADMIN_PASSWORD")
+	if passwordFile := os.Getenv("GOLAB_ADMIN_PASSWORD_FILE"); passwordFile != "" && adminPassword == "" {
+		info, err := os.Stat(passwordFile)
+		if err != nil {
+			logger.Fatalf("admin password file: %v", err)
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			logger.Fatal("admin password file must be readable only by its owner (mode 0600)")
+		}
+		contents, err := os.ReadFile(passwordFile)
+		if err != nil {
+			logger.Fatalf("admin password file: %v", err)
+		}
+		adminPassword = strings.TrimSuffix(strings.TrimSuffix(string(contents), "\n"), "\r")
+		if adminPassword == "" {
+			logger.Fatal("admin password file is empty")
+		}
+	}
+	if adminPassword != "" && (len(adminPassword) < 12 || strings.TrimSpace(adminPassword) == "") {
+		logger.Fatal("admin password must contain at least 12 bytes and non-whitespace characters")
+	}
 
 	// Fail loudly on non-loopback gonacos binds without an explicit opt-in:
 	// the substrate has no tenant authorization (§9).
@@ -135,8 +156,12 @@ func main() {
 	// ---- API + AI gate ----
 	apiSrv := api.NewServer(store, configstore.NewGonacosStore(bundle.Config), api.Options{
 		Logger:            log.New(os.Stderr, "golab-api ", log.LstdFlags),
+		AdminPassword:     adminPassword,
 		RequestsPerSecond: *requestsPerSec,
 	})
+	if adminPassword != "" {
+		logger.Printf("fixed admin password enabled")
+	}
 	apiSrv.SetAI(aisvc.NewService(store, bundle.AI))
 
 	// ---- staged-release auto-advance engine (§5.3 P4) ----

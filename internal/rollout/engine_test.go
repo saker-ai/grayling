@@ -8,19 +8,24 @@ package rollout_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/godeps/golab/internal/admin"
 	"github.com/godeps/golab/internal/api"
 	"github.com/godeps/golab/internal/configstore"
 	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/golab/internal/rollout"
 	"github.com/godeps/golab/pkg/bucketing"
 	"github.com/godeps/golab/pkg/evaluation"
 	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/golab/test/pgtest"
 	gconfig "github.com/godeps/gonacos/pkg/config"
 )
 
@@ -42,6 +47,82 @@ type harness struct {
 
 	fakeNow  time.Time
 	eventSeq int
+}
+
+func TestMultiReplicaManualPauseSerialized(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	a, err := platform.NewPGStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	ws, err := a.CreateWorkspace("w", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := a.CreateEnvironment(ws.ID, "e", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := a.CreateExperiment(&platform.Experiment{
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "f", Epoch: 1,
+		Unit: "user_id", Variants: []string{"a", "b"},
+		Proportions:   map[string]float64{"a": 50, "b": 50},
+		PrimaryMetric: platform.MetricSpec{Key: "m", Type: "proportion", Direction: "increase"},
+		Alpha:         0.05, AnalysisWindow: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SetReleasePlan(exp.ID, &platform.ReleasePlan{
+		State: platform.ReleasePlanRunning, Steps: []platform.ReleaseStep{{Name: "first", Ratio: 10}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := platform.NewPGStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	actor := admin.Actor{Kind: platform.TokenAdmin, Role: platform.RoleOwner}
+	engines := []*rollout.Engine{
+		rollout.NewEngine(a, admin.NewService(a, nil, nil), nil),
+		rollout.NewEngine(b, admin.NewService(b, nil, nil), nil),
+	}
+	start := make(chan struct{})
+	results := make(chan error, len(engines))
+	var wg sync.WaitGroup
+	for _, engine := range engines {
+		wg.Go(func() {
+			<-start
+			_, err := engine.Pause(actor, exp.ID, "operator pause")
+			results <- err
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	successes := 0
+	for err := range results {
+		if err == nil {
+			successes++
+		} else if !errors.Is(err, platform.ErrInvalidState) {
+			t.Fatalf("unexpected pause error: %v", err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("successful pauses = %d, want exactly one", successes)
+	}
+	if err := a.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := a.GetExperiment(exp.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReleasePlan.State != platform.ReleasePlanPaused || len(got.ReleasePlan.History) != 1 {
+		t.Fatalf("persisted plan = %+v, want one pause", got.ReleasePlan)
+	}
 }
 
 func newHarness(t *testing.T) *harness {

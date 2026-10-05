@@ -8,13 +8,21 @@ GoLab 是通用功能灰度与 A/B 实验平台，为传统后端、Web 应用�
 
 ```bash
 # 前置：Go 1.27+（gonacos 依赖已 pin 到确定 commit，从模块缓存构建，无需 sibling 仓库）
-make build          # 或 GOWORK=off go build ./cmd/golab
-# 契约根目录直接取自被 pin 的 gonacos 模块：
-./bin/golab -addr 127.0.0.1:8688 \
-  -gonacos-root "$(GOWORK=off go list -m -f '{{.Dir}}' github.com/godeps/gonacos)"
+make run
 ```
 
-启动日志会打印一次性的 **global owner token**（`glab_admin_...`）。浏览器打开 `http://127.0.0.1:8688/` 进入控制台，填入该 token 即可创建工作空间/环境、编辑与发布 flag、注册实验、管理分阶段放量计划（实验详情 rollout 区块：计划预注册/步骤与进度/执行历史/暂停恢复/手动推进/人工接管）、查看报告与审计。
+`make run` 会构建并启动 GoLab API、内嵌控制台和 gonacos 底座；GoLab 监听 `0.0.0.0:19080`，可通过 `http://<服务器 IP>:19080/` 从外部访问。若 `19080` 已被占用，启动会报错，不会终止占用端口的进程。gonacos 的 HTTP/gRPC 端口仅监听本机，由系统分配空闲端口（启动日志会显示实际端口）。启动日志会打印一次性的 **global owner token**（`glab_admin_...`）。在控制台填入该 token 即可创建工作空间/环境、编辑与发布 flag、注册实验、管理分阶段放量计划（实验详情 rollout 区块：计划预注册/步骤与进度/执行历史/暂停恢复/手动推进/人工接管）、查看报告与审计。
+
+首次运行 `make run` 会生成固定管理员密码，保存到权限为 `0600` 的 `data/admin-password`；重启后继续使用同一密码，启动日志不会打印密码。可在服务器上显式运行 `make show-admin-password` 查看文件中的密码。在控制台的“管理员密码或令牌”栏输入即可登录。
+
+若要启动时使用自己指定的密码（至少 12 字节），可设置 `GOLAB_ADMIN_PASSWORD`；它优先于密码文件。密码只对管理接口有效，原有管理员令牌仍可使用。修改密码文件后需重启服务。
+
+```bash
+mkdir -p data
+read -r -s -p '管理员密码: ' GOLAB_ADMIN_PASSWORD; echo
+export GOLAB_ADMIN_PASSWORD
+make run
+```
 
 控制台内置 **i18n（中文/英文双语，零构建步骤）**：词典为内嵌静态文件 `web/i18n.js`（en/zh 两套完整 catalog，`t(key, params)` 支持 `{name}` 参数插值，缺失键回退 en 并 `console.warn` 记录供测试收集）。**默认语言判定**顺序：`localStorage golab_lang` > `navigator.language`（`zh*` → 中文，其余 → 英文）> 英文；顶栏提供 **中/EN 切换**，切换后**不刷新页面**、就地重渲染导航与当前视图，选择**持久化**到 `localStorage`。日期/时长格式跟随语言（zh 用 `zh-CN` 本地化格式）。服务端返回的动态内容（flag key、备注、审计 actor、服务端错误消息本体、状态枚举值）原样展示不翻译，只翻译包裹它们的固定框架文案。双语 DOM 契约测试 `web/i18n_contract.mjs`（Node VM 加载真实 i18n.js+app.js）覆盖：语言判定顺序、全部关键视图 en/zh 双渲染（采样字符串命中对应语言且布局节点 ID 不变）、语言切换点击模拟（持久化+就地重渲染）、词典完整性（渲染全程 t() 缺失键为零、en/zh 键集对齐、静态提取的 t()/data-i18n 键全部在双 catalog 中）与静态扫描（app.js/index.html 中禁止 catalog 之外的 CJK 字面量，注释除外）；`GOWORK=off go test ./web/` 执行。
 
@@ -30,7 +38,7 @@ make build          # 或 GOWORK=off go build ./cmd/golab
 
 ```go
 client, err := sdk.New(ctx, sdk.Options{
-    BaseURL:      "http://127.0.0.1:8688",
+    BaseURL:      "http://127.0.0.1:19080",
     Token:        sdkToken,      // 环境级 sdk 凭证（工作空间/环境由凭证决定）
     CollectToken: collectToken,  // 独立采集凭证，用于曝光/转化上报
 })
@@ -56,7 +64,7 @@ if res.TrackEvents && res.Experiment != nil {
 from golab_sdk import GolabClient, Options
 
 client = GolabClient(Options(
-    base_url="http://127.0.0.1:8688",
+    base_url="http://127.0.0.1:19080",
     sdk_token="glab_sdk_...", collect_token="glab_collect_...",
 ))
 value, details = client.bool_variation(
@@ -71,7 +79,7 @@ client.close()
 import { GolabClient } from "./src/client.ts";
 
 const client = new GolabClient({
-  baseUrl: "http://127.0.0.1:8688",
+  baseUrl: "http://127.0.0.1:19080",
   sdkToken: "glab_sdk_...", collectToken: "glab_collect_...",
 });
 const { value, details } = await client.boolVariation(
@@ -126,7 +134,7 @@ targetingKey 自动镜像为随机化单元（默认写入 `user_id` 字段，�
 
 ```bash
 GOWORK=off go build -o bin/golab-proxy ./cmd/golab-proxy
-./bin/golab-proxy -addr 127.0.0.1:8689 -upstream http://127.0.0.1:8688
+./bin/golab-proxy -addr 127.0.0.1:8689 -upstream http://127.0.0.1:19080
 ```
 
 凭证原样透传（鉴权/受众分离/限流仍由上游执行）；`GET /healthz` liveness 不依赖上游，`GET /api/v1/health` readiness 探测上游；一元请求超时（默认 10s，超时 504/不可达 502），SSE 逐块 flush、客户端断开即取消上游订阅；连接池（`-max-idle-conns-per-host` 等）可调；管理 API 不转发。详见 [API 参考](docs/api.md#独立-proxycmdgolab-proxy)。

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,15 +19,16 @@ import (
 // pgPersistence is the production PostgreSQL backend (docs/技术方案.md §3,
 // §10.2). Design:
 //
-//   - Every Store operation commits as ONE transaction (单事务单元). Writes
-//     are absolute-state upserts or ledger-guarded inserts, so a retained
-//     ChangeSet can always be replayed safely after a failed commit.
+//   - Every Store operation commits as ONE transaction (单事务单元). Control
+//     records use absolute-state upserts; events use ledger-guarded inserts
+//     and increments, so a retained ChangeSet can be replayed safely.
 //   - Raw events live in a monthly RANGE-partitioned table; retention
 //     pruning drops whole partitions (按保留期分区删除) plus a boundary
 //     delete, and shrinks the global dedup ledger (event_index) to match.
 //   - Unit-level sufficient statistics (N, Σx, Σx²), exposed-unit sets and
-//     event counts are real aggregate tables, written from the FINAL
-//     in-memory values of each touched row.
+//     event counts are real aggregate tables. Event aggregates are updated
+//     from ledger-accepted rows inside the same transaction, so concurrent
+//     collectors cannot overwrite one another's increments.
 //   - HMAC pseudonymization keys form a versioned ring (hmac_keys).
 //     RotateHMACKey appends a version and re-hashes every stored pseudonym
 //     through the new layer inside one transaction (密钥轮换迁移路径); the
@@ -468,12 +471,12 @@ func (p *pgPersistence) Commit(data *Data, ch *ChangeSet) error {
 			return err
 		}
 	}
-	if len(ch.Aggs) > 0 {
+	if len(ch.Aggs) > 0 && len(ch.Events) == 0 {
 		if err := p.commitAggs(ctx, tx, ch.Aggs); err != nil {
 			return err
 		}
 	}
-	if len(ch.Counts) > 0 {
+	if len(ch.Counts) > 0 && len(ch.Events) == 0 {
 		if err := p.commitCounts(ctx, tx, ch.Counts); err != nil {
 			return err
 		}
@@ -1076,12 +1079,14 @@ func (c *copyEventSource) Values() ([]any, error) {
 }
 
 // ensureEventsPartition creates the monthly partition covering t (UTC) when
-// missing. A pre-check plus IF NOT EXISTS keeps the common path DDL-free;
-// concurrent creators would need multi-instance writes, which the single-node
-// topology excludes (§3: 多副本对账属未验证项).
+// missing. The transaction-level advisory lock serializes creation across
+// replicas; IF NOT EXISTS alone does not prevent a catalog race.
 func ensureEventsPartition(ctx context.Context, tx pgx.Tx, t time.Time) error {
 	utc := t.UTC()
 	name := fmt.Sprintf("events_%04d%02d", utc.Year(), int(utc.Month()))
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, scopeLockKey("events-partition", name)); err != nil {
+		return fmt.Errorf("platform: lock partition %s: %w", name, err)
+	}
 	var exists bool
 	if err := tx.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, "public."+name).Scan(&exists); err != nil {
 		return fmt.Errorf("platform: check partition %s: %w", name, err)
@@ -1106,7 +1111,7 @@ func (p *pgPersistence) commitEvents(ctx context.Context, tx pgx.Tx, events []*E
 		utc := ev.ServerTime.UTC()
 		months[time.Date(utc.Year(), utc.Month(), 1, 0, 0, 0, 0, time.UTC)] = true
 	}
-	for m := range months {
+	for _, m := range slices.SortedFunc(maps.Keys(months), time.Time.Compare) {
 		if err := ensureEventsPartition(ctx, tx, m); err != nil {
 			return err
 		}
@@ -1123,24 +1128,32 @@ func (p *pgPersistence) commitEvents(ctx context.Context, tx pgx.Tx, events []*E
 		&copyEventSource{events: events}); err != nil {
 		return fmt.Errorf("platform: stage events: %w", err)
 	}
-	// One statement: the dedup ledger decides which events are fresh; the
-	// partitioned payload rows and the exposed-unit sets follow from exactly
-	// those, so replays can never double-insert (§10.1 幂等).
+	if _, err := tx.Exec(ctx, `CREATE TEMP TABLE _accepted_ingest
+        (LIKE _ingest) ON COMMIT DROP`); err != nil {
+		return err
+	}
+	// The ledger is the sole authority on acceptance. Every derived write
+	// below reads only these rows; an ambiguous commit replay adds nothing.
 	_, err := tx.Exec(ctx, `
 WITH led AS (
     INSERT INTO event_index (event_id, server_time)
     SELECT event_id, server_time FROM _ingest
     ON CONFLICT (event_id) DO NOTHING
     RETURNING event_id
-),
-payload AS (
+)
+INSERT INTO _accepted_ingest SELECT i.* FROM _ingest i JOIN led USING (event_id)`)
+	if err != nil {
+		return fmt.Errorf("platform: accept events: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+WITH payload AS (
     INSERT INTO events (event_id, workspace_id, environment_id, type, experiment_id,
         epoch, flag_key, flag_revision, variant, unit_hash, session_id, task_id,
         source, metric_key, value, client_time, server_time)
     SELECT i.event_id, i.workspace_id, i.environment_id, i.type, i.experiment_id,
         i.epoch, i.flag_key, i.flag_revision, i.variant, i.unit_hash, i.session_id,
         i.task_id, i.source, i.metric_key, i.value, i.client_time, i.server_time
-    FROM _ingest i JOIN led USING (event_id)
+    FROM _accepted_ingest i
     ON CONFLICT (server_time, event_id) DO NOTHING
 ),
 exposures AS (
@@ -1148,7 +1161,7 @@ exposures AS (
         variant, unit_hash, first_at)
     SELECT i.workspace_id, i.environment_id, i.experiment_id, i.epoch, i.variant,
         i.unit_hash, min(i.client_time)
-    FROM _ingest i JOIN led USING (event_id)
+    FROM _accepted_ingest i
     WHERE i.type = 'exposure'
     GROUP BY 1, 2, 3, 4, 5, 6
     ON CONFLICT DO NOTHING
@@ -1158,14 +1171,42 @@ splits AS (
         epoch, variant, unit_hash, first_at)
     SELECT i.workspace_id, i.environment_id, i.experiment_id, i.epoch, i.variant,
         i.unit_hash, min(i.client_time)
-    FROM _ingest i JOIN led USING (event_id)
+    FROM _accepted_ingest i
     WHERE i.type = 'exposure' AND i.source = 'split'
     GROUP BY 1, 2, 3, 4, 5, 6
     ON CONFLICT DO NOTHING
 )
-SELECT count(*) FROM led`)
+SELECT count(*) FROM _accepted_ingest`)
 	if err != nil {
 		return fmt.Errorf("platform: persist events: %w", err)
+	}
+	// Aggregate increments are computed from accepted rows, never from a
+	// replica's potentially stale in-memory counters. PostgreSQL serializes
+	// conflicting row updates and each accepted event contributes once.
+	if _, err := tx.Exec(ctx, `
+INSERT INTO unit_aggs (workspace_id, environment_id, experiment_id, epoch,
+    variant, unit_hash, metric_key, cnt, sum_val, sum_sq, first_at, last_at)
+SELECT workspace_id, environment_id, experiment_id, epoch, variant, unit_hash,
+    metric_key, count(*), sum(value), sum(value * value),
+    min(client_time), max(client_time)
+FROM _accepted_ingest WHERE type = 'conversion'
+GROUP BY 1,2,3,4,5,6,7
+ON CONFLICT (workspace_id, environment_id, experiment_id, epoch, variant, unit_hash, metric_key)
+DO UPDATE SET cnt = unit_aggs.cnt + EXCLUDED.cnt,
+    sum_val = unit_aggs.sum_val + EXCLUDED.sum_val,
+    sum_sq = unit_aggs.sum_sq + EXCLUDED.sum_sq,
+    first_at = LEAST(unit_aggs.first_at, EXCLUDED.first_at),
+    last_at = GREATEST(unit_aggs.last_at, EXCLUDED.last_at)`); err != nil {
+		return fmt.Errorf("platform: persist unit aggregates: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+INSERT INTO event_counts (workspace_id, environment_id, experiment_id, epoch,
+    variant, kind, cnt)
+SELECT workspace_id, environment_id, experiment_id, epoch, variant, type, count(*)
+FROM _accepted_ingest GROUP BY 1,2,3,4,5,6
+ON CONFLICT (workspace_id, environment_id, experiment_id, epoch, variant, kind)
+DO UPDATE SET cnt = event_counts.cnt + EXCLUDED.cnt`); err != nil {
+		return fmt.Errorf("platform: persist event counts: %w", err)
 	}
 	return nil
 }

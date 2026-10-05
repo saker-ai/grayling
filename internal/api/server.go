@@ -16,12 +16,16 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -36,11 +40,13 @@ import (
 
 // Server wires the HTTP surface.
 type Server struct {
-	Admin   *admin.Service
-	Store   *platform.Store
-	Config  configstore.Store
-	Hub     *SSEHub
-	limiter *rateLimiter
+	Admin                *admin.Service
+	Store                *platform.Store
+	Config               configstore.Store
+	Hub                  *SSEHub
+	limiter              *rateLimiter
+	adminPasswordHash    [sha256.Size]byte
+	adminPasswordEnabled bool
 
 	// Rollout is the staged-release auto-advance engine (§5.3 P4). Created
 	// with the server; cmd/golab starts its ticker loop, tests may Tick it
@@ -65,6 +71,9 @@ type cachedSnapshot struct {
 // Options configures server construction.
 type Options struct {
 	Logger *log.Logger
+	// AdminPassword permits a configured password on admin endpoints only.
+	// The server retains its digest, not the plaintext value.
+	AdminPassword string
 	// RequestsPerSecond bounds per-token request rate on sdk/collect
 	// endpoints (0 = default 200).
 	RequestsPerSecond float64
@@ -86,6 +95,10 @@ func NewServer(store *platform.Store, cfg configstore.Store, opts Options) *Serv
 		Hub:     NewSSEHub(),
 		limiter: newRateLimiter(rps, int(rps)),
 		logger:  opts.Logger,
+	}
+	if opts.AdminPassword != "" {
+		s.adminPasswordHash = sha256.Sum256([]byte(opts.AdminPassword))
+		s.adminPasswordEnabled = true
 	}
 	s.Admin = admin.NewService(store, cfg, func(wsID, envID string, rev int64) {
 		s.Hub.Notify(wsID, envID, rev)
@@ -198,6 +211,15 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, kinds ...p
 		writeError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
 		return nil, false
 	}
+	if s.adminPasswordEnabled && slices.Contains(kinds, platform.TokenAdmin) {
+		hash := sha256.Sum256([]byte(secret))
+		if subtle.ConstantTimeCompare(hash[:], s.adminPasswordHash[:]) == 1 {
+			return &platform.Token{
+				ID: "configured-admin-password", Name: "configured-admin-password",
+				Kind: platform.TokenAdmin, Role: platform.RoleOwner,
+			}, true
+		}
+	}
 	tok, err := s.Store.ResolveToken(secret)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid or revoked token")
@@ -274,13 +296,16 @@ func tokenFrom(r *http.Request) *platform.Token {
 }
 
 func adminLimiterKey(r *http.Request) string {
-	if t := bearerToken(r); t != "" {
-		if len(t) > 16 {
-			return "admin:" + t[len(t)-16:]
-		}
-		return "admin:" + t
+	// Authentication happens after this limit. Keying by the submitted
+	// credential would give every password guess a fresh allowance.
+	peer, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		peer = r.RemoteAddr
 	}
-	return "admin:anon"
+	if peer == "" {
+		peer = "unknown"
+	}
+	return "admin:peer:" + peer
 }
 
 // ---------------------------------------------------------------------------

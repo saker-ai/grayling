@@ -551,6 +551,62 @@ func TestPGConcurrentIngest(t *testing.T) {
 	}
 }
 
+// Two replicas begin with the same working set. Their event writes must add
+// to durable aggregates instead of overwriting each other's stale values.
+func TestPGMultiReplicaIngestAggregates(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	a := openPGStore(t, dsn)
+	ws, err := a.CreateWorkspace("w", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := a.CreateEnvironment(ws.ID, "e", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := a.CreateExperiment(&Experiment{
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "f", Epoch: 1,
+		Unit: "user_id", Variants: []string{"a", "b"},
+		Proportions:   map[string]float64{"a": 50, "b": 50},
+		PrimaryMetric: MetricSpec{Key: "m", Type: "mean", Direction: "increase"},
+		Alpha:         0.05, AnalysisWindow: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := openPGStore(t, dsn)
+	unit := a.HashUnit(ws.ID, "same-unit")
+	makeEvent := func(id string) *Event {
+		return &Event{EventID: id, WorkspaceID: ws.ID, EnvironmentID: env.ID,
+			Type: EventConversion, ExperimentID: exp.ID, Epoch: 1,
+			Variant: "a", UnitHash: unit, MetricKey: "m", Value: 2, ClientTime: time.Now()}
+	}
+	var wg sync.WaitGroup
+	for replica, store := range []*Store{a, b} {
+		wg.Go(func() {
+			for i := range 10 {
+				if _, err := store.IngestEvents([]*Event{makeEvent(fmt.Sprintf("r%d-%d", replica, i))}); err != nil {
+					t.Errorf("replica %d ingest: %v", replica, err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+	if got := pgtest.Query(t, dsn, `SELECT cnt, sum_val FROM unit_aggs WHERE unit_hash = $1`, unit); got[0][0] != "20" || got[0][1] != "40" {
+		t.Fatalf("durable aggregate = %v, want count=20 sum=40", got)
+	}
+	if got := pgtest.Query(t, dsn, `SELECT cnt FROM event_counts WHERE kind = 'conversion'`); got[0][0] != "20" {
+		t.Fatalf("durable event count = %v, want 20", got)
+	}
+	if err := a.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.MetricAggregate(ws.ID, env.ID, exp.ID, 1, "m")["a"]; got == nil || got.Count != 20 || got.Sum != 40 {
+		t.Fatalf("reloaded metric = %+v, want count=20 sum=40", got)
+	}
+}
+
 // TestPGFlagLifecycleAndAIPins covers the persistence paths the roundtrip
 // test does not: segments, rollback (SetCurrentFlagRevision), tombstones,
 // revision pruning reconciliation, layer-slot assignment and AI version

@@ -11,11 +11,11 @@
 <div id="auth" class="auth-wrap hidden">
   <div class="auth-card">
     <h1>GoLab <span data-i18n="auth.subtitle">admin console</span></h1>
-    <p class="muted" data-i18n="auth.hint">Tokens are pre-provisioned by operators (glab_admin_…). There is no login endpoint.</p>
+    <p class="muted" data-i18n="auth.hint">Enter the configured admin password or an admin token.</p>
     <label class="field"><span data-i18n="auth.urlLabel">Server base URL</span>
       <input id="auth-url" data-i18n-ph="auth.urlPh" placeholder="blank = same origin (relative paths)" spellcheck="false"></label>
-    <label class="field"><span data-i18n="auth.tokenLabel">Admin token</span>
-      <input id="auth-token" type="password" placeholder="glab_admin_…" autocomplete="off" spellcheck="false"></label>
+    <label class="field"><span data-i18n="auth.tokenLabel">Admin password or token</span>
+      <input id="auth-token" type="password" placeholder="Password or glab_admin_…" autocomplete="off" spellcheck="false"></label>
     <div id="auth-error" class="err-text"></div>
     <button class="btn primary grow" id="btn-connect" data-i18n="auth.connect">Connect</button>
   </div>

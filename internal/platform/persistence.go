@@ -102,7 +102,9 @@ type ChangeSet struct {
 	// Events are newly accepted raw events. Backends derive the exposure
 	// unit-set rows from them and insert payloads conflict-guarded.
 	Events []*Event
-	// Aggs / Counts carry absolute aggregate rows touched by this op.
+	// Aggs / Counts carry absolute in-memory aggregate rows touched by this
+	// operation. PostgreSQL event commits derive their own increments from
+	// ledger-accepted Events instead.
 	Aggs   []AggUpsert
 	Counts []CountUpsert
 	// Audit entries appended by this op (IDs are final).
@@ -171,9 +173,9 @@ func (c *ChangeSet) empty() bool {
 
 type nopPersistence struct{}
 
-func (nopPersistence) Load() (*Data, error)              { return nil, nil }
-func (nopPersistence) Commit(*Data, *ChangeSet) error    { return nil }
-func (nopPersistence) Close() error                      { return nil }
+func (nopPersistence) Load() (*Data, error)           { return nil, nil }
+func (nopPersistence) Commit(*Data, *ChangeSet) error { return nil }
+func (nopPersistence) Close() error                   { return nil }
 
 // ---------------------------------------------------------------------------
 // File persistence (dev/single-node default): atomic full-state JSON dump —

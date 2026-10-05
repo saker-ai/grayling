@@ -26,8 +26,10 @@
 //   - ManualOverride is the 人工接管开关 (§9): while set, the engine takes
 //     no automatic action; operators drive the plan through the admin API.
 //
-// The engine runs inside the GoLab server process (single-node topology);
-// it holds no credentials — it acts as an internal system identity that is
+// Each GoLab replica may run an engine. Plan actions take a per-experiment
+// PostgreSQL advisory lock and reload state before deciding; the in-process
+// mutex covers concurrent ticks and manual operations on one replica.
+// The engine holds no credentials — it acts as an internal system identity that is
 // audited like any admin actor.
 package rollout
 
@@ -37,6 +39,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/godeps/golab/internal/admin"
@@ -66,6 +69,7 @@ type Engine struct {
 	Admin  *admin.Service
 	Now    func() time.Time
 	Logger *log.Logger
+	mu     sync.Mutex
 }
 
 // NewEngine assembles an engine. now may be nil (wall clock).
@@ -100,11 +104,42 @@ type TickSummary struct {
 func (e *Engine) Tick() TickSummary {
 	now := e.now()
 	var sum TickSummary
-	for _, exp := range e.Store.ExperimentsWithActivePlans() {
+	for _, candidate := range e.Store.ExperimentsWithActivePlans() {
 		sum.Inspected++
-		e.tickPlan(now, exp, &sum)
+		release, err := e.lockPlan(candidate.ID)
+		if err != nil {
+			sum.Errors = append(sum.Errors, candidate.ID+": "+err.Error())
+			continue
+		}
+		func() {
+			defer release()
+			exp, err := e.Store.GetExperiment(candidate.ID)
+			if err != nil {
+				sum.Errors = append(sum.Errors, candidate.ID+": "+err.Error())
+				return
+			}
+			e.tickPlan(now, exp, &sum)
+		}()
 	}
 	return sum
+}
+
+func (e *Engine) lockPlan(experimentID string) (func(), error) {
+	e.mu.Lock()
+	releaseDB, err := e.Store.PlanLock(experimentID)
+	if err != nil {
+		e.mu.Unlock()
+		return nil, err
+	}
+	if err := e.Store.ReloadFromBackend(); err != nil {
+		releaseDB()
+		e.mu.Unlock()
+		return nil, err
+	}
+	return func() {
+		releaseDB()
+		e.mu.Unlock()
+	}, nil
 }
 
 // Run ticks on a fixed interval until ctx is cancelled. interval <= 0
@@ -361,6 +396,11 @@ func (e *Engine) pause(exp *platform.Experiment, now time.Time, reason string, s
 
 // Pause holds the plan for an operator. Allowed from armed/running.
 func (e *Engine) Pause(actor admin.Actor, experimentID, reason string) (*platform.Experiment, error) {
+	release, err := e.lockPlan(experimentID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	exp, err := e.Store.GetExperiment(experimentID)
 	if err != nil {
 		return nil, err
@@ -394,6 +434,11 @@ func (e *Engine) Pause(actor admin.Actor, experimentID, reason string) (*platfor
 // elapse on clean data before the gate may fire again (§10.3: peeking on
 // contaminated data is not a valid analysis point).
 func (e *Engine) Resume(actor admin.Actor, experimentID string) (*platform.Experiment, error) {
+	release, err := e.lockPlan(experimentID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	exp, err := e.Store.GetExperiment(experimentID)
 	if err != nil {
 		return nil, err
@@ -429,6 +474,11 @@ func (e *Engine) Resume(actor admin.Actor, experimentID string) (*platform.Exper
 // automatic action on this plan; while disabled automatic operation resumes
 // from the recorded state.
 func (e *Engine) SetManualOverride(actor admin.Actor, experimentID string, enabled bool, reason string) (*platform.Experiment, error) {
+	release, err := e.lockPlan(experimentID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	exp, err := e.Store.GetExperiment(experimentID)
 	if err != nil {
 		return nil, err
@@ -463,6 +513,11 @@ func (e *Engine) SetManualOverride(actor admin.Actor, experimentID string, enabl
 // verdict is recorded in the history entry for traceability (§9: 任何信号
 // 不得绕过发布权限 — the caller needs publish permission).
 func (e *Engine) AdvanceNow(actor admin.Actor, experimentID, reason string) (*platform.Experiment, error) {
+	release, err := e.lockPlan(experimentID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	exp, err := e.Store.GetExperiment(experimentID)
 	if err != nil {
 		return nil, err
