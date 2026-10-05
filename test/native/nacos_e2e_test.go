@@ -140,6 +140,103 @@ func nativeSnapshot(client config_client.IConfigClient) (*evaluation.Evaluator, 
 	return e, m.Revision, err
 }
 
+// nativeConsumer models the minimum state a native client integration must
+// expose. A failed refresh never publishes an incomplete candidate.
+type nativeConsumer struct {
+	evaluator *evaluation.Evaluator
+	revision  int64
+	lastErr   error
+}
+
+func (c *nativeConsumer) refresh(client config_client.IConfigClient) {
+	candidate, revision, err := nativeSnapshot(client)
+	c.lastErr = err
+	if err == nil && revision > c.revision {
+		c.evaluator, c.revision = candidate, revision
+	}
+}
+
+func (c *nativeConsumer) value(key string) any {
+	return c.evaluator.Evaluate(key, model.EvaluationContext{}).Value
+}
+
+func publishNativeFlag(t *testing.T, store configstore.Store, namespace, key string, revision int64, value bool) model.ManifestEntry {
+	t.Helper()
+	variation := "off"
+	if value {
+		variation = "on"
+	}
+	flag := &model.Flag{SchemaVersion: model.SchemaVersion, Key: key, Type: model.FlagBool,
+		Variations: map[string]any{"on": true, "off": false}, DefaultRule: &model.Rule{Variation: variation}}
+	body, err := model.CanonicalJSON(flag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataID := configstore.FlagDataID(key, revision)
+	if _, err := store.PublishDoc(namespace, dataID, body); err != nil {
+		t.Fatal(err)
+	}
+	return model.ManifestEntry{Key: key, Revision: revision, DataID: dataID, Hash: model.HashBytes(body)}
+}
+
+func TestNativeSnapshotAtomicityAndStatus(t *testing.T) {
+	srv := nativeServer(t)
+	store := configstore.NewGonacosStore(srv.Services().Config)
+	const namespace = "native-atomic"
+	client := nativeClient(t, srv, namespace)
+	first := publishNativeFlag(t, store, namespace, "first", 1, false)
+	second := publishNativeFlag(t, store, namespace, "second", 1, false)
+	manifest := &model.Manifest{SchemaVersion: model.SchemaVersion, Workspace: "ws", Environment: "env",
+		Revision: 1, Flags: []model.ManifestEntry{first, second}}
+	if err := store.PublishManifest(namespace, manifest); err != nil {
+		t.Fatal(err)
+	}
+	var consumer nativeConsumer
+	consumer.refresh(client)
+	if consumer.lastErr != nil || consumer.revision != 1 || consumer.value("first") != false || consumer.value("second") != false {
+		t.Fatalf("initial state: revision=%d error=%v", consumer.revision, consumer.lastErr)
+	}
+
+	// One valid new document and one missing document must not expose a mix.
+	first = publishNativeFlag(t, store, namespace, "first", 2, true)
+	manifest.Revision = 2
+	manifest.Flags = []model.ManifestEntry{first, {Key: "second", Revision: 2,
+		DataID: configstore.FlagDataID("second", 2), Hash: model.HashBytes([]byte("missing"))}}
+	if err := store.PublishManifest(namespace, manifest); err != nil {
+		t.Fatal(err)
+	}
+	consumer.refresh(client)
+	if consumer.lastErr == nil || consumer.revision != 1 || consumer.value("first") != false || consumer.value("second") != false {
+		t.Fatalf("partial snapshot visible: revision=%d error=%v", consumer.revision, consumer.lastErr)
+	}
+
+	// A present document with a bad hash is equally ineligible.
+	second = publishNativeFlag(t, store, namespace, "second", 3, true)
+	second.Hash = model.HashBytes([]byte("wrong"))
+	manifest.Revision = 3
+	manifest.Flags = []model.ManifestEntry{first, second}
+	if err := store.PublishManifest(namespace, manifest); err != nil {
+		t.Fatal(err)
+	}
+	consumer.refresh(client)
+	if consumer.lastErr == nil || consumer.revision != 1 || consumer.value("first") != false || consumer.value("second") != false {
+		t.Fatalf("invalid hash replaced last known good: revision=%d error=%v", consumer.revision, consumer.lastErr)
+	}
+
+	// Repair with a newer complete manifest.
+	second = publishNativeFlag(t, store, namespace, "second", 4, true)
+	first = publishNativeFlag(t, store, namespace, "first", 4, true)
+	manifest.Revision = 4
+	manifest.Flags = []model.ManifestEntry{first, second}
+	if err := store.PublishManifest(namespace, manifest); err != nil {
+		t.Fatal(err)
+	}
+	consumer.refresh(client)
+	if consumer.lastErr != nil || consumer.revision != 4 || consumer.value("first") != true || consumer.value("second") != true {
+		t.Fatalf("repair did not converge: revision=%d error=%v", consumer.revision, consumer.lastErr)
+	}
+}
+
 func TestOfficialNacosClientPublishSubscribeEvaluate(t *testing.T) {
 	srv := nativeServer(t)
 	store := configstore.NewGonacosStore(srv.Services().Config)
