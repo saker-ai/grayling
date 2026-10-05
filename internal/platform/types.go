@@ -214,6 +214,24 @@ type GuardrailSpec struct {
 	MinSample             int64   `json:"minSample"` // below this, no breach — insufficient data
 }
 
+// HolmHypothesis is one confirmatory fixed-sample comparison. Every member of
+// a family is registered before exposure, including its metric and arm pair.
+type HolmHypothesis struct {
+	ID        string     `json:"id"`
+	Metric    MetricSpec `json:"metric"`
+	Control   string     `json:"control"`
+	Treatment string     `json:"treatment"`
+}
+
+// HolmFamily is the single actionable family for an experiment epoch. All
+// confirmatory metrics and variant comparisons share its experiment alpha.
+// Guardrails are operational rules outside this family; additional observed
+// comparisons are exploratory and cannot enter the family after registration.
+type HolmFamily struct {
+	ID         string           `json:"id"`
+	Hypotheses []HolmHypothesis `json:"hypotheses"`
+}
+
 // Experiment is the pre-registered analysis contract (§5.3). Changing the
 // randomization unit, metric definitions, proportions or resource bindings
 // creates a NEW epoch; history is never overwritten (§6).
@@ -231,18 +249,21 @@ type Experiment struct {
 	Variants      []string           `json:"variants"`    // explicit stable order
 	Proportions   map[string]float64 `json:"proportions"`
 	// AllocationMode is fixed-split (the legacy default) or bandit.
-	AllocationMode  string          `json:"allocationMode,omitempty"`
-	Bandit          *BanditSpec     `json:"bandit,omitempty"`
-	PrimaryMetric   MetricSpec      `json:"primaryMetric"`
-	Guardrails      []GuardrailSpec `json:"guardrails,omitempty"`
-	Alpha           float64         `json:"alpha"`
-	Power           float64         `json:"power"`
-	MDE             float64         `json:"mde"`
-	MinSamplePerArm int64           `json:"minSamplePerArm"`
-	MinRuntime      time.Duration   `json:"minRuntime"`
-	AnalysisWindow  time.Duration   `json:"analysisWindow"`
-	Hypothesis      string          `json:"hypothesis"`
-	AnalysisMethod  string          `json:"analysisMethod"` // pre-registered, v1: "welch" | "two-proportion-z"
+	AllocationMode string          `json:"allocationMode,omitempty"`
+	Bandit         *BanditSpec     `json:"bandit,omitempty"`
+	PrimaryMetric  MetricSpec      `json:"primaryMetric"`
+	Guardrails     []GuardrailSpec `json:"guardrails,omitempty"`
+	HolmFamily     *HolmFamily     `json:"holmFamily,omitempty"`
+	// RegistrationVersion fingerprints the immutable hypothesis contract.
+	RegistrationVersion string        `json:"registrationVersion,omitempty"`
+	Alpha               float64       `json:"alpha"`
+	Power               float64       `json:"power"`
+	MDE                 float64       `json:"mde"`
+	MinSamplePerArm     int64         `json:"minSamplePerArm"`
+	MinRuntime          time.Duration `json:"minRuntime"`
+	AnalysisWindow      time.Duration `json:"analysisWindow"`
+	Hypothesis          string        `json:"hypothesis"`
+	AnalysisMethod      string        `json:"analysisMethod"` // pre-registered, v1: "welch" | "two-proportion-z"
 	// ReleasePlan is the optional pre-registered staged-rollout plan driven
 	// by the auto-advance engine (§5.3 计划步骤/观察窗, P4).
 	ReleasePlan *ReleasePlan          `json:"releasePlan,omitempty"`

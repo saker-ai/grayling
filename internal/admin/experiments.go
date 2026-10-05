@@ -90,6 +90,7 @@ func (s *Service) CreateExperiment(actor Actor, workspaceID, environmentID strin
 	}
 	s.audit(actor, "experiment.create", env.WorkspaceID, env.ID, created.ID, map[string]any{
 		"flag": created.FlagKey, "epoch": created.Epoch, "layer": created.Layer,
+		"registrationVersion": created.RegistrationVersion, "holmFamily": created.HolmFamily,
 	})
 	return created, nil
 }

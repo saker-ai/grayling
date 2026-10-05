@@ -679,6 +679,8 @@ function viewExpCreate(m) {
       '<label class="field">' + esc(t('exp.windowD')) + '<input id="x-window" type="number" step="1" value="7"></label>' +
     '</div>' +
     '<label class="field">' + esc(t('exp.hypothesis')) + '<textarea id="x-hyp" rows="2"></textarea></label>' +
+    '<label class="field">' + esc(t('exp.holmFamily')) + '<textarea id="x-holm" rows="5" placeholder="{&quot;id&quot;:&quot;primary&quot;,&quot;hypotheses&quot;:[...]}"></textarea></label>' +
+    '<p class="muted">' + esc(t('exp.holmHelp')) + '</p>' +
     '<div class="row"><button class="btn primary" id="x-create">' + esc(t('exp.create')) + '</button></div></section>';
   const vars = $('#x-vars', m), guards = $('#x-guards', m);
   const addVar = (name, p) => {
@@ -777,6 +779,11 @@ function viewExpCreate(m) {
     if (layer) body.layer = layer;
     const elig = $('#x-elig', m).value;
     if (elig !== '') body.eligibility = Number(elig);
+    const holmText = $('#x-holm', m).value.trim();
+    if (holmText) {
+      try { body.holmFamily = JSON.parse(holmText); }
+      catch (_) { toast(t('exp.holmInvalid'), false); return; }
+    }
     try {
       const exp = await api(scopePath() + '/experiments', { method: 'POST', body });
       toast(t('toast.expCreated', { id: exp.id }));
@@ -815,6 +822,10 @@ async function viewExpDetail(m) {
           esc(g.direction || 'increase') + '</td><td>' + esc(g.maxRelativeRegression) + '</td><td>' + esc(g.minSample) + '</td></tr>').join('') +
         '</tbody></table>'
       : '') +
+    (e.holmFamily ? '<h4>' + esc(t('exp.holmFamily')) + '</h4><p class="muted">' + esc(t('exp.holmHelp')) +
+      ' · ' + esc(e.registrationVersion || '—') + '</p><ul class="plain">' +
+      (e.holmFamily.hypotheses || []).map(h => '<li>' + esc(h.id) + ': ' + esc(h.metric.key) +
+        ' (' + esc(h.control) + ' → ' + esc(h.treatment) + ')</li>').join('') + '</ul>' : '') +
     '</section>' +
     '<section class="card"><h3>' + esc(t('exp.lifecycle')) + '</h3>' +
       '<div class="row actions" style="border:0;padding:0;margin:0">' +
@@ -896,7 +907,8 @@ function renderReport(box, r) {
       '</td><td>' + esc(v.exposures) + '</td><td>' + esc(v.convertedUnits) + '</td><td>' + esc(v.primaryValue) + '</td></tr>').join('') ||
       '<tr><td colspan="6" class="muted">' + esc(t('report.noData')) + '</td></tr>') +
     '</tbody></table>' +
-    '<h4>' + esc(t('report.primary')) + (p ? ' <span class="muted">(' + esc(p.type || '') + ')</span>' : '') + '</h4>' +
+    '<h4>' + esc(t('report.primary')) + (p ? ' <span class="muted">(' + esc(p.type || '') + ')</span>' : '') +
+      (r.holm ? ' <span class="muted">' + esc(t('report.primaryRawNote')) + '</span>' : '') + '</h4>' +
     (p
       ? '<div>p = ' + esc(p.pValue ?? '—') + ' · diff = ' + esc(p.diff ?? '—') + ' · rel = ' + esc(p.relativeDiff ?? '—') +
         (p.relativeMeaningful === false ? ' ' + chip(t('chip.notMeaningful'), 'amber') : '') +
@@ -920,6 +932,17 @@ function renderReport(box, r) {
         ' · B=' + esc((p.quantile.quantileB ?? 0).toFixed(3)) + ' · A CI [' + esc((p.quantile.ciALow ?? 0).toFixed(3)) +
         ', ' + esc((p.quantile.ciAHigh ?? 0).toFixed(3)) + '] (' + esc(t('report.distFree')) + ')</div>'
       : '') +
+    (r.holm ? '<h4>' + esc(t('report.holm')) + '</h4><p class="muted">' + esc(t('report.holmNote')) +
+      ' · ' + esc(r.holm.familyId) + ' · ' + esc(r.holm.registrationVersion) + '</p>' +
+      (r.holm.error ? '<div class="banner err">' + esc(r.holm.error) + '</div>' :
+        '<table class="grid"><thead><tr><th>ID</th><th>' + esc(t('th.metric')) + '</th><th>' + esc(t('report.pair')) +
+        '</th><th>' + esc(t('report.rawP')) + '</th><th>' + esc(t('report.adjustedP')) + '</th><th>' +
+        esc(t('report.effectiveAlpha')) + '</th><th>' + esc(t('report.rank')) + '</th><th>' + esc(t('report.decision')) +
+        '</th></tr></thead><tbody>' + (r.holm.comparisons || []).map(c => '<tr><td>' + esc(c.id) + '</td><td>' +
+          esc(c.metric.key) + '</td><td>' + esc(c.control) + ' → ' + esc(c.treatment) + '</td><td>' + esc(c.rawP) +
+          '</td><td>' + esc(c.adjustedP) + '</td><td>' + esc(c.effectiveAlpha) + '</td><td>' + esc(c.rank) +
+          '</td><td>' + chip(c.rejected ? t('chip.significant') : t('chip.notSignificant'), c.rejected ? 'green' : 'gray') +
+          '</td></tr>').join('') + '</tbody></table>') : '') +
     '<h4>' + esc(t('report.sequential')) + ' <span class="muted">' + esc(t('report.sequentialNote')) + '</span></h4>' +
     (r.sequential
       ? '<div>' + esc(t('report.anytimeP')) + ' = ' + esc((r.sequential.pValue ?? 0).toExponential(3)) + ' ' +

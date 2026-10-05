@@ -1,9 +1,13 @@
 package platform
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
+	"reflect"
+	"slices"
 	"sort"
 	"time"
 
@@ -77,9 +81,51 @@ func (s *Store) CreateExperiment(exp *Experiment) (*Experiment, error) {
 	if exp.Power <= 0 {
 		exp.Power = 0.8
 	}
-	s.data.Experiments[exp.ID] = exp
+	version, err := ExperimentRegistrationVersion(exp)
+	if err != nil {
+		return nil, err
+	}
+	exp.RegistrationVersion = version
+	stored := exp
+	if exp.HolmFamily != nil {
+		stored = cloneRegisteredExperiment(exp)
+	}
+	s.data.Experiments[exp.ID] = stored
 	s.changes.markDirty(collExperiments, exp.ID)
 	return exp, s.commitLocked()
+}
+
+// cloneRegisteredExperiment keeps the pre-registered decision contract out of
+// reach of callers holding an Experiment pointer. State transitions mutate
+// the store's copy; reads return another copy for Holm experiments.
+func cloneRegisteredExperiment(exp *Experiment) *Experiment {
+	clone := *exp
+	clone.Variants = slices.Clone(exp.Variants)
+	clone.Proportions = maps.Clone(exp.Proportions)
+	if exp.LayerSlot != nil {
+		clone.LayerSlot = new(*exp.LayerSlot)
+	}
+	clone.PrimaryMetric = cloneRegisteredMetric(exp.PrimaryMetric)
+	clone.Guardrails = slices.Clone(exp.Guardrails)
+	if exp.HolmFamily != nil {
+		family := *exp.HolmFamily
+		family.Hypotheses = slices.Clone(family.Hypotheses)
+		for i := range family.Hypotheses {
+			family.Hypotheses[i].Metric = cloneRegisteredMetric(family.Hypotheses[i].Metric)
+		}
+		clone.HolmFamily = &family
+	}
+	return &clone
+}
+
+func cloneRegisteredMetric(metric MetricSpec) MetricSpec {
+	if metric.Floor != nil {
+		metric.Floor = new(*metric.Floor)
+	}
+	if metric.Ceil != nil {
+		metric.Ceil = new(*metric.Ceil)
+	}
+	return metric
 }
 
 func validateExperimentInvariants(exp *Experiment) error {
@@ -171,13 +217,113 @@ func validateExperimentInvariants(exp *Experiment) error {
 	default:
 		return fmt.Errorf("%w: unknown pre-registered analysis method %q", ErrValidation, exp.AnalysisMethod)
 	}
-	if exp.Alpha <= 0 || exp.Alpha >= 1 {
+	if math.IsNaN(exp.Alpha) || exp.Alpha <= 0 || exp.Alpha >= 1 {
 		return fmt.Errorf("%w: alpha %v out of (0,1)", ErrValidation, exp.Alpha)
 	}
 	if exp.Layer != "" && exp.LayerSlot == nil {
 		return fmt.Errorf("%w: layer %q requires a slot assignment", ErrValidation, exp.Layer)
 	}
+	if err := validateHolmFamily(exp); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateHolmFamily(exp *Experiment) error {
+	family := exp.HolmFamily
+	if family == nil {
+		return nil
+	}
+	if exp.AllocationMode == "bandit" || family.ID == "" || len(family.Hypotheses) < 2 {
+		return fmt.Errorf("%w: Holm requires a named family with at least two fixed-sample hypotheses", ErrValidation)
+	}
+	if len(family.Hypotheses) > 100 {
+		return fmt.Errorf("%w: Holm family exceeds 100 hypotheses", ErrValidation)
+	}
+	if (exp.PrimaryMetric.Type == "proportion" && exp.AnalysisMethod != "" && exp.AnalysisMethod != "two-proportion-z") ||
+		(exp.PrimaryMetric.Type == "mean" && exp.AnalysisMethod != "" && exp.AnalysisMethod != "welch") {
+		return fmt.Errorf("%w: Holm analysis method must match the primary mean/proportion test", ErrValidation)
+	}
+	seen := map[string]bool{}
+	for i, h := range family.Hypotheses {
+		if h.ID == "" || seen[h.ID] || h.Control == h.Treatment ||
+			!slices.Contains(exp.Variants, h.Control) || !slices.Contains(exp.Variants, h.Treatment) {
+			return fmt.Errorf("%w: Holm hypothesis %d has duplicate/empty ID or invalid arm pair", ErrValidation, i)
+		}
+		seen[h.ID] = true
+		if h.Metric.Key == "" || (h.Metric.Type != "mean" && h.Metric.Type != "proportion") ||
+			(h.Metric.Direction != "increase" && h.Metric.Direction != "decrease") ||
+			h.Metric.CovariateKey != "" || h.Metric.NumeratorKey != "" || h.Metric.DenominatorKey != "" || h.Metric.QuantileLevel != 0 {
+			return fmt.Errorf("%w: Holm hypothesis %q needs a mean or proportion metric without advanced-method parameters", ErrValidation, h.ID)
+		}
+		if h.Metric.Floor != nil || h.Metric.Ceil != nil {
+			return fmt.Errorf("%w: Holm hypothesis %q cannot use unimplemented clamps", ErrValidation, h.ID)
+		}
+		for j := 0; j < i; j++ {
+			prior := family.Hypotheses[j]
+			if prior.Metric.Key == h.Metric.Key && prior.Metric.Type == h.Metric.Type &&
+				prior.Control == h.Control && prior.Treatment == h.Treatment {
+				return fmt.Errorf("%w: duplicate Holm comparison %q", ErrValidation, h.ID)
+			}
+		}
+	}
+	first := family.Hypotheses[0]
+	if first.Control != exp.Variants[0] || first.Treatment != exp.Variants[1] || !reflect.DeepEqual(first.Metric, exp.PrimaryMetric) {
+		return fmt.Errorf("%w: first Holm hypothesis must exactly match primaryMetric and first arm pair", ErrValidation)
+	}
+	if len(exp.Variants) > 2 {
+		for _, variant := range exp.Variants[1:] {
+			found := false
+			for _, h := range family.Hypotheses {
+				found = found || h.Treatment == variant
+			}
+			if !found {
+				return fmt.Errorf("%w: variant %q has no Holm comparison", ErrValidation, variant)
+			}
+		}
+	}
+	return nil
+}
+
+// ExperimentRegistrationVersion is the SHA-256 of the decision contract. It
+// is persisted in the experiment, audit create event, and each report. Any
+// accidental in-memory modification of the registered family fails closed.
+func ExperimentRegistrationVersion(exp *Experiment) (string, error) {
+	contract := struct {
+		FlagKey         string
+		FlagRevision    int64
+		Epoch           int64
+		Unit            string
+		Layer           string
+		LayerSlot       *model.BucketRange
+		Eligibility     float64
+		Variants        []string
+		Proportions     map[string]float64
+		PrimaryMetric   MetricSpec
+		Guardrails      []GuardrailSpec
+		HolmFamily      *HolmFamily
+		Alpha           float64
+		Power           float64
+		MDE             float64
+		MinSamplePerArm int64
+		MinRuntime      time.Duration
+		AnalysisWindow  time.Duration
+		Hypothesis      string
+		AnalysisMethod  string
+	}{
+		FlagKey: exp.FlagKey, FlagRevision: exp.FlagRevision, Epoch: exp.Epoch,
+		Unit: exp.Unit, Layer: exp.Layer, LayerSlot: exp.LayerSlot, Eligibility: exp.Eligibility,
+		Variants: exp.Variants, Proportions: exp.Proportions, PrimaryMetric: exp.PrimaryMetric,
+		Guardrails: exp.Guardrails, HolmFamily: exp.HolmFamily, Alpha: exp.Alpha,
+		Power: exp.Power, MDE: exp.MDE, MinSamplePerArm: exp.MinSamplePerArm,
+		MinRuntime: exp.MinRuntime, AnalysisWindow: exp.AnalysisWindow,
+		Hypothesis: exp.Hypothesis, AnalysisMethod: exp.AnalysisMethod,
+	}
+	b, err := json.Marshal(contract)
+	if err != nil {
+		return "", fmt.Errorf("%w: serialize registration: %v", ErrValidation, err)
+	}
+	return fmt.Sprintf("sha256:%x", sha256.Sum256(b)), nil
 }
 
 // GetExperiment returns one experiment.
@@ -187,6 +333,9 @@ func (s *Store) GetExperiment(id string) (*Experiment, error) {
 	e, ok := s.data.Experiments[id]
 	if !ok {
 		return nil, fmt.Errorf("%w: experiment %q", ErrNotFound, id)
+	}
+	if e.HolmFamily != nil {
+		return cloneRegisteredExperiment(e), nil
 	}
 	return e, nil
 }
@@ -199,7 +348,11 @@ func (s *Store) ListExperiments(workspaceID, environmentID string) []*Experiment
 	out := []*Experiment{}
 	for _, e := range s.data.Experiments {
 		if e.WorkspaceID == workspaceID && (environmentID == "" || e.EnvironmentID == environmentID) {
-			out = append(out, e)
+			if e.HolmFamily != nil {
+				out = append(out, cloneRegisteredExperiment(e))
+			} else {
+				out = append(out, e)
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
@@ -216,6 +369,9 @@ func (s *Store) TransitionExperiment(id string, to model.ExperimentState, actor 
 		return nil, fmt.Errorf("%w: experiment %q", ErrNotFound, id)
 	}
 	if e.State == to {
+		if e.HolmFamily != nil {
+			return cloneRegisteredExperiment(e), nil
+		}
 		return e, nil // idempotent
 	}
 	if !ExperimentTransitionAllowed(e.State, to) {
@@ -235,7 +391,11 @@ func (s *Store) TransitionExperiment(id string, to model.ExperimentState, actor 
 	e.State = to
 	e.UpdatedAt = now
 	s.changes.markDirty(collExperiments, id)
-	return e, s.commitLocked()
+	err := s.commitLocked()
+	if e.HolmFamily != nil {
+		return cloneRegisteredExperiment(e), err
+	}
+	return e, err
 }
 
 // NextEpoch returns the next unused epoch for one flag (epochs are never

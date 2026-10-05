@@ -2,8 +2,8 @@
 // experiment from PostgreSQL raw events or local unit-level aggregates
 // (docs/技术方案.md §10).
 //
-// Scope of v1 (per §10.3): fixed-sample, TWO-ARM, single pre-registered
-// primary metric of type mean (Welch) or proportion (two-proportion z).
+// Legacy reports are two-arm, single-primary fixed-sample analyses. Explicit
+// Holm families also support multiple mean/proportion metrics and variants.
 // The analysis population is the RANDOMIZED subset — units exposed through
 // the percentage split; deterministic targeting/default arms are reported
 // for visibility but never enter the primary statistics or SRM.
@@ -64,8 +64,10 @@ type Report struct {
 	Sequential *stats.SequentialResult `json:"sequential,omitempty"`
 	// Bayesian is the posterior / expected-loss / probability-of-superiority
 	// view (mean or proportion family depending on the metric type).
-	Bayesian *BayesianSection `json:"bayesian,omitempty"`
-	Bandit   *BanditSection   `json:"bandit,omitempty"`
+	Bayesian            *BayesianSection `json:"bayesian,omitempty"`
+	Bandit              *BanditSection   `json:"bandit,omitempty"`
+	RegistrationVersion string           `json:"registrationVersion,omitempty"`
+	Holm                *HolmSection     `json:"holm,omitempty"`
 }
 
 // BayesianSection carries the Bayesian posterior summary, kept structurally
@@ -119,6 +121,10 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	if err != nil {
 		return nil, err
 	}
+	version, err := platform.ExperimentRegistrationVersion(exp)
+	if err != nil || (exp.HolmFamily != nil && version != exp.RegistrationVersion) {
+		return nil, fmt.Errorf("experiment %s registration contract differs from persisted version", experimentID)
+	}
 	if exp.AllocationMode == "bandit" {
 		rep, err := BuildBanditReport(store, exp, now)
 		if err == nil {
@@ -140,7 +146,7 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 			HealthIssues: []string{section.FreezeReason}, Bandit: section,
 			Decision: stats.Decision{Verdict: stats.VerdictHold}}, nil
 	}
-	if len(exp.Variants) != 2 {
+	if len(exp.Variants) != 2 && exp.HolmFamily == nil {
 		return nil, fmt.Errorf("experiment %s has %d variants; v1 reports are fixed-sample two-arm (§10.3)",
 			experimentID, len(exp.Variants))
 	}
@@ -155,6 +161,7 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		State: exp.State, GeneratedAt: now.UTC(),
 		AnalysisMethod: exp.AnalysisMethod, Alpha: exp.Alpha, MDE: exp.MDE,
 		Control: control, Treatment: treatment, Window: window,
+		RegistrationVersion: exp.RegistrationVersion,
 	}
 	if window.Backend == "postgresql-raw" {
 		rep.HealthIssues = append(rep.HealthIssues, window.Issues...)
@@ -165,7 +172,7 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	splitSets := analysis.SplitExposedUnitSet(exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch)
 
 	byVariant := map[string]*VariantReport{}
-	order := []string{control, treatment}
+	order := exp.Variants
 	for _, v := range order {
 		vr := &VariantReport{Variant: v}
 		if agg, ok := allExposed[v]; ok {
@@ -220,6 +227,28 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 
 	byVariant[control].ConvertedUnits = convCtrl
 	byVariant[treatment].ConvertedUnits = convTreat
+	for _, variant := range exp.Variants[2:] {
+		switch exp.PrimaryMetric.Type {
+		case "proportion":
+			_, value, _, count := buildMetricStats("proportion", primaryAgg, splitSets, control, variant)
+			byVariant[variant].ConvertedUnits = count
+			if n := byVariant[variant].RandomizedUnits; n > 0 {
+				byVariant[variant].PrimaryValue = float64(value.(stats.ProportionStats).Conversions) / float64(n)
+			}
+		case "mean":
+			_, value, _, count := buildMetricStats("mean", primaryAgg, splitSets, control, variant)
+			byVariant[variant].ConvertedUnits = count
+			if count > 0 {
+				byVariant[variant].PrimaryValue = value.(stats.MeanStats).Mean()
+			}
+		case "ratio":
+			_, count := buildRatioStats(primaryAgg, analysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.DenominatorKey), splitSets, control, variant)
+			byVariant[variant].ConvertedUnits = count.N
+		case "quantile":
+			_, vals := buildQuantileValues(primaryAgg, splitSets, control, variant)
+			byVariant[variant].ConvertedUnits = int64(len(vals))
+		}
+	}
 	// PrimaryValue renders the per-arm point estimate for the console table.
 	setPrimaryValue := func(vr *VariantReport, prop stats.ProportionStats, mean stats.MeanStats,
 		ratio stats.RatioStats, vals []float64) {
@@ -253,11 +282,18 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	// ---- SRM: randomized units vs pre-registered proportions ----
 	// Experiment proportions are percentages (sum 100); SRMTest expects
 	// fractions (sum 1).
-	observed := []int64{int64(len(splitSets[control])), int64(len(splitSets[treatment]))}
-	expected := []float64{exp.Proportions[control] / 100, exp.Proportions[treatment] / 100}
+	observed := make([]int64, 0, len(order))
+	expected := make([]float64, 0, len(order))
+	var totalObserved int64
+	for _, variant := range order {
+		n := int64(len(splitSets[variant]))
+		observed = append(observed, n)
+		expected = append(expected, exp.Proportions[variant]/100)
+		totalObserved += n
+	}
 	srm, srmErr := stats.SRMTest(observed, expected, stats.DefaultSRMThreshold)
 	if srmErr != nil {
-		if observed[0]+observed[1] == 0 {
+		if totalObserved == 0 {
 			rep.Healthy = false
 			rep.HealthIssues = append(rep.HealthIssues, "no randomized exposures recorded yet")
 		} else {
@@ -267,8 +303,8 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		rep.SRM = &srm
 		if !srm.Healthy {
 			rep.HealthIssues = append(rep.HealthIssues, fmt.Sprintf(
-				"SRM alarm: observed %v vs expected %.2f%%/%.2f%% (p=%.2g) — assignment pipeline suspect",
-				observed, expected[0], expected[1], srm.PValue))
+				"SRM alarm: observed %v vs expected %v (p=%.2g) — assignment pipeline suspect",
+				observed, expected, srm.PValue))
 		}
 	}
 
@@ -410,13 +446,24 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 
 	// ---- guardrails (operational rules, separate from significance) ----
 	for _, g := range exp.Guardrails {
-		check := evaluateGuardrail(analysis, exp, g, control, treatment, splitSets)
-		rep.Guardrails = append(rep.Guardrails, check)
+		for _, variant := range exp.Variants[1:] {
+			check := evaluateGuardrail(analysis, exp, g, control, variant, splitSets)
+			if len(exp.Variants) > 2 {
+				check.Metric += ":" + variant
+			}
+			rep.Guardrails = append(rep.Guardrails, check)
+		}
+	}
+	if exp.HolmFamily != nil {
+		rep.Holm = buildHolmSection(analysis, exp, splitSets, rep.Primary)
+		if rep.Holm.Error != "" {
+			rep.HealthIssues = append(rep.HealthIssues, "Holm family incomplete: "+rep.Holm.Error)
+		}
 	}
 
 	// ---- health & decision ----
 	dataHealthy := len(rep.HealthIssues) == 0 && rep.PrimaryError == "" &&
-		(observed[0]+observed[1]) > 0
+		totalObserved > 0
 	rep.Healthy = dataHealthy && (rep.SRM == nil || rep.SRM.Healthy)
 
 	in := stats.DecisionInput{
@@ -430,12 +477,41 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		MinRuntimeSatisfied: rep.MinRuntimeSatisfied,
 		DataHealthy:         dataHealthy,
 	}
+	if exp.HolmFamily != nil {
+		for _, count := range observed[2:] {
+			in.NB = min(in.NB, count)
+		}
+	}
+	if rep.Holm != nil && rep.Holm.Error == "" {
+		// A confirmatory ship requires every pre-registered comparison to
+		// reject in its favorable direction; negative discoveries roll back.
+		allImproved := true
+		for _, comparison := range rep.Holm.Comparisons {
+			allImproved = allImproved && comparison.Rejected && comparison.DirectedDiff > 0
+		}
+		in.PrimaryPValue = rep.Holm.Comparisons[0].AdjustedP
+		if allImproved && in.PrimaryPValue == exp.Alpha {
+			// Decide's legacy single-test rule uses strict <. Holm uses <=
+			// at its step threshold; preserve that exact boundary here.
+			in.PrimaryPValue = math.Nextafter(exp.Alpha, 0)
+		}
+		in.PrimarySignificant = allImproved
+	}
 	if rep.SRM != nil {
 		in.SRM = *rep.SRM
 	} else {
 		in.SRM = stats.SRMResult{Healthy: false} // unknown SRM never passes the gate
 	}
 	rep.Decision = stats.Decide(in)
+	if rep.Holm != nil && rep.Holm.Error == "" && rep.Decision.Verdict == stats.VerdictContinue {
+		for _, comparison := range rep.Holm.Comparisons {
+			if comparison.Rejected && comparison.DirectedDiff < 0 {
+				rep.Decision = stats.Decision{Verdict: stats.VerdictRollback,
+					Reasons: []string{"Holm-adjusted confirmatory comparison regressed: " + comparison.ID}}
+				break
+			}
+		}
+	}
 	return rep, nil
 }
 

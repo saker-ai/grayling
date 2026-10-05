@@ -60,12 +60,32 @@
 
 | 端点 | 说明 |
 |---|---|
-| `POST {env前缀}/experiments` | 预注册（flagKey/unit/variants/proportions/primaryMetric/guardrails/alpha/power/mde/minSamplePerArm/minRuntime(ns)/analysisWindow(ns)/hypothesis/layer?/eligibility?）；epoch 自动分配、永不复用；layer 槽位注册即分配。`primaryMetric.type ∈ proportion\|mean\|ratio\|quantile`；ratio 需 `denominatorKey`（`numeratorKey` 缺省用 `key`），quantile 需 `quantileLevel ∈(0,1)`，mean 可带 `covariateKey` 启用 CUPED（见下"高级统计"） |
+| `POST {env前缀}/experiments` | 预注册（flagKey/unit/variants/proportions/primaryMetric/guardrails/alpha/power/mde/minSamplePerArm/minRuntime(ns)/analysisWindow(ns)/hypothesis/layer?/eligibility?/holmFamily?）；epoch 自动分配、永不复用；layer 槽位注册即分配。`primaryMetric.type ∈ proportion\|mean\|ratio\|quantile`；ratio 需 `denominatorKey`（`numeratorKey` 缺省用 `key`），quantile 需 `quantileLevel ∈(0,1)`，mean 可带 `covariateKey` 启用 CUPED（见下"高级统计"） |
 | `GET {env前缀}/experiments`、`GET /api/v1/admin/experiments/{id}` | 列表/详情 |
 | `POST /experiments/{id}/review` | Draft→Reviewed |
 | `POST /experiments/{id}/bind` | 校验 flag 结构与比例一致后注入绑定，生成高风险草稿并转 Scheduled（需二人审批后发布） |
 | `POST /experiments/{id}/transition` | `{to, reason}`；状态变更自动重发布绑定 flag（重试收敛） |
-| `GET /experiments/{id}/report` | 分析报告：健康位/SRM/per-variant/主指标（welch\|two-proportion-z\|ratio-delta\|quantile\|cuped）/护栏/决策门（ship/rollback/continue/hold）；P5 另附**分离呈现**的序贯（`sequential`）与贝叶斯（`bayesian`）视图（见下） |
+| `GET /experiments/{id}/report` | 分析报告：健康位/SRM/per-variant/主指标（welch\|two-proportion-z\|ratio-delta\|quantile\|cuped）/护栏/决策门（ship/rollback/continue/hold）；显式注册多重比较时另有 `holm`，并保留分离呈现的序贯（`sequential`）与贝叶斯（`bayesian`）视图 |
+
+### Holm 假设家族（固定样本）
+
+旧的单主指标双臂实验不传 `holmFamily`，原始 p 值、CI 和决策保持原样。需要多个确认性主指标或多个变体比较时，在**创建实验前**把所有将用于发布决策的比较放入同一个 `holmFamily`。目前一个 epoch 只支持一个确认性家族、每家族 2–100 项，成员指标限 `mean`（Welch）或 `proportion`（双比例 z）；CUPED、ratio、quantile 可继续用于单主指标实验，但尚不进入 Holm 家族。第一项必须与 `primaryMetric` 完全一致，且比较 `variants[0]` 与 `variants[1]`；每个额外变体至少有一项注册比较。每项需唯一 `id`、完整 `metric`、`control`、`treatment`。同一指标跨多个变体的比较是多个家族成员，重复的指标/有序臂对拒绝注册。与共享 control 的比较可以相关；Holm 仍控制家族错误率。
+
+```json
+{
+  "primaryMetric": {"key":"conversion", "type":"proportion", "direction":"increase"},
+  "variants": ["control", "treatment", "third"],
+  "holmFamily": {"id":"launch", "hypotheses":[
+    {"id":"conversion-B", "metric":{"key":"conversion", "type":"proportion", "direction":"increase"}, "control":"control", "treatment":"treatment"},
+    {"id":"engagement-B", "metric":{"key":"engagement", "type":"proportion", "direction":"increase"}, "control":"control", "treatment":"treatment"},
+    {"id":"conversion-C", "metric":{"key":"conversion", "type":"proportion", "direction":"increase"}, "control":"control", "treatment":"third"}
+  ]}
+}
+```
+
+示例仅示意相关字段；完整创建请求还需 flag、比例、分析窗口等预注册字段。护栏是独立运营阈值，针对每个非基线变体检查，**不进入 Holm**；未注册的事后比较只能标为探索性，不产生确认性结论。Bandit 不使用固定样本 Holm。`primary`、`sequential`、`bayesian` 均描述首组变体比较；后两者分别是任意时刻有效推断与后验视图，不并入 Holm 或固定样本决策门。
+
+创建返回的 `registrationVersion` 是含 epoch、变体、主指标、护栏、家族、alpha 与假设的 SHA-256 指纹；创建审计含版本及家族，报告重复输出版本。API 无修改假设或家族成员的端点；需变更须注册新 epoch。报告发现注册内容与版本不一致时拒绝生成，防止看数后静默改族。`holm.comparisons` 按注册顺序展示 `rawP`、`adjustedP`、`effectiveAlpha`、`rank`（按原始 p 排序，1 起）、`rejected`、差值与**未调整**的单项 CI。Holm 按排序后 `alpha/(m-rank+1)` 逐步拒绝，调整 p 值取前缀最大值并截断到 1；等 p 值按注册顺序稳定排序。缺失任何成员的有效检验时整个家族不给确认性判定，报告 hold。所有成员调整后显著且方向有利才 ship；任一调整后显著且方向不利则 rollback；SRM、护栏、最短运行时间和最小样本门仍优先执行。固定样本 p 值不可用于反复偷看后的提前成功宣告。
 
 ### 高级统计与报告字段（P5，§10.3/§10.4）
 

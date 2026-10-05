@@ -862,7 +862,9 @@ paths:
         请求体是完整的 Experiment 预注册契约（flagKey、unit、variants、
         proportions、primaryMetric、guardrails、alpha/power/mde、
         minSamplePerArm、minRuntime(ns)、analysisWindow(ns)、hypothesis、
-        可选 layer/eligibility）。服务端赋值：id、workspaceId、environmentId、
+        可选 layer/eligibility/holmFamily）。holmFamily 中仅预注册固定样本
+        确认性 mean/proportion 比较；护栏不进入家族，未列出比较仅供探索。
+        服务端赋值：id、workspaceId、environmentId、
         flagRevision、epoch、state、时间戳、createdBy。layer 槽位在注册时分配。
         实验没有更新路径——改 unit/比例/指标/绑定必须新建记录（新 epoch）。
       operationId: createExperiment
@@ -3239,7 +3241,8 @@ components:
         （key/type/direction）、alpha ∈ (0,1)、analysisWindow > 0（纳秒）。
         服务端赋值：id、workspaceId、environmentId、flagRevision、epoch、
         layerSlot、state、时间戳、createdBy。更改随机化单元、指标定义、
-        比例或资源绑定 = 新 epoch，历史永不覆写。
+        比例或资源绑定 = 新 epoch，历史永不覆写。显式 Holm 家族冻结于
+        创建时，所有用于决策的多指标/多变体比较须放在同一家族。
       required: [flagKey, unit, variants, proportions, primaryMetric, alpha, analysisWindow]
       properties:
         id:
@@ -3271,7 +3274,7 @@ components:
           description: 入组百分比；0 = 100。
         variants:
           type: array
-          description: 显式稳定顺序（v1 分析要求恰好 2 个臂）。
+          description: 显式稳定顺序；无 Holm 家族的旧报告要求恰好 2 臂，多臂须注册 Holm 家族。
           items:
             type: string
         proportions:
@@ -3291,6 +3294,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/GuardrailSpec"
+        holmFamily:
+          $ref: "#/components/schemas/HolmFamily"
+        registrationVersion:
+          type: string
+          description: 服务端生成的 SHA-256 注册契约版本；报告与创建审计均引用此值。
         alpha:
           type: number
           description: 显著性水平，(0,1)。
@@ -3336,6 +3344,31 @@ components:
           format: date-time
         createdBy:
           type: string
+    HolmHypothesis:
+      type: object
+      additionalProperties: false
+      required: [id, metric, control, treatment]
+      properties:
+        id: { type: string }
+        metric:
+          allOf:
+            - $ref: "#/components/schemas/MetricSpec"
+          description: 仅 mean 或 proportion；不支持 CUPED/ratio/quantile 等高级参数。
+        control: { type: string }
+        treatment: { type: string }
+    HolmFamily:
+      type: object
+      additionalProperties: false
+      required: [id, hypotheses]
+      properties:
+        id: { type: string }
+        hypotheses:
+          type: array
+          minItems: 2
+          maxItems: 100
+          description: 首项须与 primaryMetric 和 variants[0:2] 完全一致；每个额外变体至少有一项。
+          items:
+            $ref: "#/components/schemas/HolmHypothesis"
     TransitionRequest:
       type: object
       additionalProperties: false
@@ -3455,6 +3488,7 @@ components:
         不给出固定样本 p 值、CI 或胜出结论。
         分析人群是随机化子集；确定性 targeting/default 臂仅作展示，不进入
         主统计与 SRM。报告是纯读——不改实验状态。
+        primary/sequential/bayesian 仅描述首组变体比较；多比较确认性判定见 holm。
       required:
         - experimentId
         - epoch
@@ -3535,6 +3569,39 @@ components:
             固定样本 95% CI 混成同一决策规则（§10.3）。
         bandit:
           $ref: "#/components/schemas/BanditSection"
+        registrationVersion:
+          type: string
+          description: 预注册决策契约版本，与创建审计相同。
+        holm:
+          $ref: "#/components/schemas/HolmSection"
+    HolmComparison:
+      type: object
+      required: [id, metric, control, treatment, rawP, adjustedP, effectiveAlpha, rank, rejected, diff, directedDiff, ciLow, ciHigh]
+      properties:
+        id: { type: string }
+        metric: { $ref: "#/components/schemas/MetricSpec" }
+        control: { type: string }
+        treatment: { type: string }
+        rawP: { type: number }
+        adjustedP: { type: number }
+        effectiveAlpha: { type: number }
+        rank: { type: integer, minimum: 1 }
+        rejected: { type: boolean }
+        diff: { type: number }
+        directedDiff: { type: number }
+        ciLow: { type: number, description: 单项未调整置信区间下界。 }
+        ciHigh: { type: number, description: 单项未调整置信区间上界。 }
+    HolmSection:
+      type: object
+      required: [familyId, registrationVersion, alpha, comparisons]
+      properties:
+        familyId: { type: string }
+        registrationVersion: { type: string }
+        alpha: { type: number }
+        comparisons:
+          type: array
+          items: { $ref: "#/components/schemas/HolmComparison" }
+        error: { type: string, description: 某项检验无法计算时整个家族不作确认性判定。 }
     BanditSection:
       type: object
       required: [policyVersion, stateVersion, feedbackWatermark, trials, successes, posteriorMean, pending, missingFeedback, fallbackAssignments, srmAlarm, frozen]

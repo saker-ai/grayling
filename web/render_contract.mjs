@@ -106,6 +106,22 @@ html = render({
 });
 assert(html.includes('posterior A=Beta('), 'bayesian proportion posterior line missing');
 
+// A registered fixed-sample family has its own raw/adjusted p-value table,
+// registration fingerprint and scope note; exploratory/guardrail results are
+// explicitly excluded from the Holm claims.
+html = render({
+  ...base,
+  primary: { type: 'two-proportion-z', pValue: 0.01, diff: 0.1, significant: true },
+  registrationVersion: 'sha256:fixture',
+  holm: { familyId: 'launch', registrationVersion: 'sha256:fixture', alpha: 0.05,
+    comparisons: [{ id: 'conversion-B', metric: { key: 'conversion' }, control: 'control', treatment: 'treatment',
+      rawP: 0.01, adjustedP: 0.02, effectiveAlpha: 0.025, rank: 1, rejected: true }] },
+});
+assert(html.includes('Holm fixed-sample family') && html.includes('sha256:fixture') &&
+  html.includes('Raw p') && html.includes('Adjusted p') && html.includes('Effective α') &&
+  html.includes('conversion-B') && html.includes('unlisted comparisons are exploratory'),
+  'Holm family table or scope explanation missing');
+
 // 6. A report with no P5 sections must render the "not computed" placeholders
 //    (graceful — the renderer must not crash on the v1 shape).
 html = render({ ...base, primary: { type: 'welch', pValue: 0.2, diff: 0.01, relativeDiff: 0.01, relativeMeaningful: true, ciLow: -0.01, ciHigh: 0.03, significant: false } });
