@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -41,26 +42,30 @@ import (
 
 func main() {
 	var (
-		listenAddr     = flag.String("addr", "127.0.0.1:8688", "GoLab HTTP listen address")
-		dataFile       = flag.String("data", filepath.Join("data", "golab-store.json"), "platform store file ('' = memory-only; ignored when -pg is set)")
-		pgDSN          = flag.String("pg", "", "PostgreSQL DSN for the production platform store (e.g. postgres://golab:secret@127.0.0.1:5432/golab); overrides -data")
-		gonacosRoot    = flag.String("gonacos-root", "", "gonacos contract root (repo with api/openapi/upstream); empty disables 501-stub registration")
-		gonacosData    = flag.String("gonacos-data", "", "gonacos embedded-redis dump dir (default <data dir>/gonacos)")
-		gonacosAddr    = flag.String("gonacos-addr", "127.0.0.1:18848", "gonacos HTTP bind — KEEP LOOPBACK/PRIVATE (§9)")
-		gonacosGRPC    = flag.String("gonacos-grpc-addr", "127.0.0.1:19848", "gonacos gRPC bind — KEEP LOOPBACK/PRIVATE (§9)")
-		redisAddr      = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
-		authSecret     = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
-		authSecretFile = flag.String("auth-secret-file", "", "owner-only file containing the gonacos HMAC/auth secret")
-		rolloutIv      = flag.Duration("rollout-interval", 30*time.Second, "auto-advance engine tick interval for staged release plans (0 disables automation; manual plan operations stay available)")
-		reconcileIv    = flag.Duration("reconcile-interval", 30*time.Second, "publish reconciliation tick interval: re-verifies the gonacos substrate against the platform store and idempotently republishes drift (0 disables); PostgreSQL control changes sync separately every 500ms")
-		requestsPerSec = flag.Float64("requests-per-second", 0, "per-token request rate limit on sdk/collect endpoints (0 = default 200)")
-		bootstrapName  = flag.String("bootstrap-owner-name", "bootstrap-owner", "display name of the auto-created global owner token")
-		printVersion   = flag.Bool("version", false, "print version and exit")
-		recoveryPoint  = flag.String("recovery-point", "", "checkpoint to verify before opening the API after a restore")
-		writePoint     = flag.String("write-recovery-point", "", "write a checkpoint from quiesced PostgreSQL and gonacos state, then exit")
-		verifyPoint    = flag.String("verify-recovery-point", "", "verify restored components against a checkpoint, then exit without opening listeners")
+		listenAddr           = flag.String("addr", "127.0.0.1:8688", "GoLab HTTP listen address")
+		dataFile             = flag.String("data", filepath.Join("data", "golab-store.json"), "platform store file ('' = memory-only; ignored when -pg is set)")
+		pgDSN                = flag.String("pg", "", "PostgreSQL DSN for the production platform store (e.g. postgres://golab:secret@127.0.0.1:5432/golab); overrides -data")
+		gonacosRoot          = flag.String("gonacos-root", "", "gonacos contract root (repo with api/openapi/upstream); empty disables 501-stub registration")
+		gonacosData          = flag.String("gonacos-data", "", "gonacos embedded-redis dump dir (default <data dir>/gonacos)")
+		gonacosAddr          = flag.String("gonacos-addr", "127.0.0.1:18848", "gonacos HTTP bind — KEEP LOOPBACK/PRIVATE (§9)")
+		gonacosGRPC          = flag.String("gonacos-grpc-addr", "127.0.0.1:19848", "gonacos gRPC bind — KEEP LOOPBACK/PRIVATE (§9)")
+		redisAddr            = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
+		authSecret           = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
+		authSecretFile       = flag.String("auth-secret-file", "", "owner-only file containing the gonacos HMAC/auth secret")
+		rolloutIv            = flag.Duration("rollout-interval", 30*time.Second, "auto-advance engine tick interval for staged release plans (0 disables automation; manual plan operations stay available)")
+		reconcileIv          = flag.Duration("reconcile-interval", 30*time.Second, "publish reconciliation tick interval: re-verifies the gonacos substrate against the platform store and idempotently republishes drift (0 disables); PostgreSQL control changes sync separately every 500ms")
+		requestsPerSec       = flag.Float64("requests-per-second", 0, "per-token request rate limit on sdk/collect endpoints (0 = default 200)")
+		evaluationSampleRate = flag.Float64("evaluation-sample-rate", 0, "fraction [0,1] of safe feature-flag evaluation events to write as structured logs")
+		bootstrapName        = flag.String("bootstrap-owner-name", "bootstrap-owner", "display name of the auto-created global owner token")
+		printVersion         = flag.Bool("version", false, "print version and exit")
+		recoveryPoint        = flag.String("recovery-point", "", "checkpoint to verify before opening the API after a restore")
+		writePoint           = flag.String("write-recovery-point", "", "write a checkpoint from quiesced PostgreSQL and gonacos state, then exit")
+		verifyPoint          = flag.String("verify-recovery-point", "", "verify restored components against a checkpoint, then exit without opening listeners")
 	)
 	flag.Parse()
+	if *evaluationSampleRate < 0 || *evaluationSampleRate > 1 {
+		log.Fatal("-evaluation-sample-rate must be within [0,1]")
+	}
 
 	logger := log.New(os.Stderr, "golab ", log.LstdFlags|log.Lmsgprefix)
 	if *printVersion {
@@ -262,10 +267,25 @@ func main() {
 
 	// ---- API + AI gate ----
 	apiSrv := api.NewServer(store, configstore.NewGonacosStore(bundle.Config), api.Options{
-		Logger:            log.New(os.Stderr, "golab-api ", log.LstdFlags),
-		AdminPassword:     adminPassword,
-		RequestsPerSecond: *requestsPerSec,
+		Logger:               log.New(os.Stderr, "golab-api ", log.LstdFlags),
+		AdminPassword:        adminPassword,
+		RequestsPerSecond:    *requestsPerSec,
+		EvaluationSampleRate: *evaluationSampleRate,
 	})
+	if *evaluationSampleRate > 0 {
+		telemetryLogger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+		go func() {
+			for {
+				select {
+				case event := <-apiSrv.SampledEvents():
+					telemetryLogger.InfoContext(ctx, event.Name,
+						"decision_id", event.DecisionID, "attributes", event.Attributes)
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
 	if adminPassword != "" {
 		logger.Printf("fixed admin password enabled")
 	}

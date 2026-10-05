@@ -86,6 +86,9 @@ type Options struct {
 	Logger *log.Logger
 	// OnSyncError is invoked (async) whenever a background sync fails.
 	OnSyncError func(err error)
+	// EvaluationSampleRate controls safe evaluation event sampling [0,1].
+	// SampledEvents is bounded; collection analytics remain unsampled.
+	EvaluationSampleRate float64
 }
 
 func (o *Options) withDefaults() Options {
@@ -127,12 +130,19 @@ type Client struct {
 	internalCtx    context.Context
 	internalCancel context.CancelFunc
 
-	mu        sync.RWMutex
-	state     *clientState // atomically swapped
-	etag      string
-	lastSync  time.Time
-	lastErr   error
-	syncCount int64
+	mu             sync.RWMutex
+	state          *clientState // atomically swapped
+	etag           string
+	lastSync       time.Time
+	lastErr        error
+	syncCount      int64
+	syncErrorCount int64
+	decisions      map[string]model.DecisionDiagnostic
+	decisionUnits  map[string]string
+	decisionOrder  []string
+	evalCount      atomic.Int64
+	sampledEvents  chan model.EvaluationEvent
+	droppedSamples atomic.Int64
 
 	exposures        chan *collectEvent
 	droppedExposures atomic.Int64
@@ -153,6 +163,7 @@ type clientState struct {
 
 // Status reports synchronization health (observability, §11).
 type Status struct {
+	State            string        `json:"state"`
 	Ready            bool          `json:"ready"`
 	Stale            bool          `json:"stale"`
 	ManifestRevision int64         `json:"manifestRevision"`
@@ -160,8 +171,11 @@ type Status struct {
 	LastSync         time.Time     `json:"lastSync"`
 	LastError        string        `json:"lastError,omitempty"`
 	SyncCount        int64         `json:"syncCount"`
+	SyncErrorCount   int64         `json:"syncErrorCount"`
 	NotModifiedCount int64         `json:"notModifiedCount"`
 	FlagCount        int           `json:"flagCount"`
+	EvaluationCount  int64         `json:"evaluationCount"`
+	DroppedSamples   int64         `json:"droppedSamples"`
 	DroppedExposures int64         `json:"droppedExposures"`
 	FlushedExposures int64         `json:"flushedExposures"`
 }
@@ -185,6 +199,9 @@ func New(ctx context.Context, opts Options) (*Client, error) {
 		internalCancel: internalCancel,
 		exposures:      make(chan *collectEvent, o.ExposureQueueCap),
 		closed:         make(chan struct{}),
+		decisions:      make(map[string]model.DecisionDiagnostic),
+		decisionUnits:  make(map[string]string),
+		sampledEvents:  make(chan model.EvaluationEvent, 256),
 	}
 	err := c.Sync(ctx)
 	return c, err
@@ -231,6 +248,9 @@ func (c *Client) Status() Status {
 	defer c.mu.RUnlock()
 	st := Status{
 		SyncCount:        c.syncCount,
+		SyncErrorCount:   c.syncErrorCount,
+		EvaluationCount:  c.evalCount.Load(),
+		DroppedSamples:   c.droppedSamples.Load(),
 		NotModifiedCount: c.notModified.Load(),
 		DroppedExposures: c.droppedExposures.Load(),
 		FlushedExposures: c.flushedExposures.Load(),
@@ -245,6 +265,16 @@ func (c *Client) Status() Status {
 		st.Age = time.Since(c.state.fetchedAt)
 		st.FlagCount = len(c.state.snapshot.Flags)
 		st.Stale = st.Age > c.opts.MaxStaleness
+	}
+	switch {
+	case st.Stale:
+		st.State = "STALE"
+	case st.LastError != "":
+		st.State = "ERROR"
+	case st.Ready:
+		st.State = "READY"
+	default:
+		st.State = "NOT_READY"
 	}
 	return st
 }
@@ -326,6 +356,7 @@ func (c *Client) Sync(ctx context.Context) error {
 				fetchedAt: time.Now(),
 			}
 		}
+		c.lastErr = nil
 		c.mu.Unlock()
 		return nil
 	case http.StatusOK:
@@ -371,6 +402,7 @@ func (c *Client) Sync(ctx context.Context) error {
 func (c *Client) recordSyncError(err error) {
 	c.mu.Lock()
 	c.lastErr = err
+	c.syncErrorCount++
 	c.mu.Unlock()
 	c.opts.Logger.Printf("sdk: sync failed: %v", err)
 	if c.opts.OnSyncError != nil {
@@ -523,11 +555,65 @@ func (c *Client) Evaluate(flagKey string, evalCtx model.EvaluationContext) model
 	if fail != nil {
 		res := *fail
 		res.FlagKey = flagKey
-		return res
+		return c.annotate(nil, res)
 	}
 	res := state.evaluator.Evaluate(flagKey, evalCtx)
+	res = c.annotate(state, res)
 	if res.TrackEvents && res.Experiment != nil {
 		c.queueExposure(state.snapshot, evalCtx, res)
+	}
+	return res
+}
+
+// Diagnose returns a recent decision made by this scoped client. The bounded
+// registry contains no targeting context or raw unit identifier.
+func (c *Client) Diagnose(decisionID string) (model.DecisionDiagnostic, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	d, ok := c.decisions[decisionID]
+	return d, ok
+}
+
+// SampledEvents exposes optional, nonblocking evaluation telemetry.
+func (c *Client) SampledEvents() <-chan model.EvaluationEvent { return c.sampledEvents }
+
+func (c *Client) annotate(state *clientState, res model.Result) model.Result {
+	res.DecisionID = randomEventID("dec")
+	if state == nil {
+		c.mu.RLock()
+		state = c.state
+		c.mu.RUnlock()
+	}
+	if state != nil {
+		res.ManifestRevision = state.snapshot.ManifestRevision
+		generated := state.snapshot.GeneratedAt
+		if generated.IsZero() {
+			generated = state.fetchedAt
+		}
+		res.SnapshotAgeMillis = max(0, time.Since(generated).Milliseconds())
+	}
+	if res.TrackEvents && res.Experiment != nil {
+		res.ExposureEventID = "exp-" + res.DecisionID
+	}
+	c.evalCount.Add(1)
+	c.mu.Lock()
+	if c.decisions == nil {
+		c.decisions = make(map[string]model.DecisionDiagnostic)
+	}
+	if len(c.decisionOrder) >= 10_000 {
+		delete(c.decisions, c.decisionOrder[0])
+		delete(c.decisionUnits, c.decisionOrder[0])
+		c.decisionOrder = c.decisionOrder[1:]
+	}
+	c.decisions[res.DecisionID] = model.DecisionDiagnostic{Result: res, ExposureStatus: "none"}
+	c.decisionOrder = append(c.decisionOrder, res.DecisionID)
+	c.mu.Unlock()
+	if model.SampleDecision(res.DecisionID, c.opts.EvaluationSampleRate) && c.sampledEvents != nil {
+		select {
+		case c.sampledEvents <- res.TelemetryEvent():
+		default:
+			c.droppedSamples.Add(1)
+		}
 	}
 	return res
 }
@@ -538,9 +624,10 @@ func (c *Client) BoolVariation(flagKey string, evalCtx model.EvaluationContext, 
 	if fail != nil {
 		res := *fail
 		res.FlagKey = flagKey
-		return def, res
+		return def, c.annotate(nil, res)
 	}
 	v, res := state.evaluator.BoolVariation(flagKey, evalCtx, def)
+	res = c.annotate(state, res)
 	if res.TrackEvents && res.Experiment != nil {
 		c.queueExposure(state.snapshot, evalCtx, res)
 	}
@@ -553,9 +640,10 @@ func (c *Client) StringVariation(flagKey string, evalCtx model.EvaluationContext
 	if fail != nil {
 		res := *fail
 		res.FlagKey = flagKey
-		return def, res
+		return def, c.annotate(nil, res)
 	}
 	v, res := state.evaluator.StringVariation(flagKey, evalCtx, def)
+	res = c.annotate(state, res)
 	if res.TrackEvents && res.Experiment != nil {
 		c.queueExposure(state.snapshot, evalCtx, res)
 	}
@@ -568,9 +656,10 @@ func (c *Client) NumberVariation(flagKey string, evalCtx model.EvaluationContext
 	if fail != nil {
 		res := *fail
 		res.FlagKey = flagKey
-		return def, res
+		return def, c.annotate(nil, res)
 	}
 	v, res := state.evaluator.NumberVariation(flagKey, evalCtx, def)
+	res = c.annotate(state, res)
 	if res.TrackEvents && res.Experiment != nil {
 		c.queueExposure(state.snapshot, evalCtx, res)
 	}
@@ -583,9 +672,10 @@ func (c *Client) JSONVariation(flagKey string, evalCtx model.EvaluationContext, 
 	if fail != nil {
 		res := *fail
 		res.FlagKey = flagKey
-		return def, res
+		return def, c.annotate(nil, res)
 	}
 	v, res := state.evaluator.JSONVariation(flagKey, evalCtx, def)
+	res = c.annotate(state, res)
 	if res.TrackEvents && res.Experiment != nil {
 		c.queueExposure(state.snapshot, evalCtx, res)
 	}
@@ -598,6 +688,7 @@ func (c *Client) JSONVariation(flagKey string, evalCtx model.EvaluationContext, 
 
 type collectEvent struct {
 	EventID      string    `json:"eventId"`
+	DecisionID   string    `json:"decisionId,omitempty"`
 	Type         string    `json:"type"`
 	ExperimentID string    `json:"experimentId"`
 	Epoch        int64     `json:"epoch"`
@@ -630,6 +721,7 @@ func randomEventID(prefix string) string {
 func (c *Client) queueExposure(snapshot *model.Snapshot, evalCtx model.EvaluationContext, res model.Result) {
 	if c.opts.CollectToken == "" {
 		c.droppedExposures.Add(1)
+		c.setExposureStatus(res.DecisionID, "dropped")
 		return
 	}
 	unit := ""
@@ -644,6 +736,7 @@ func (c *Client) queueExposure(snapshot *model.Snapshot, evalCtx model.Evaluatio
 		// No unit → the evaluator would not have produced an exposure;
 		// defensive drop.
 		c.droppedExposures.Add(1)
+		c.setExposureStatus(res.DecisionID, "dropped")
 		return
 	}
 	rev := int64(0)
@@ -651,7 +744,7 @@ func (c *Client) queueExposure(snapshot *model.Snapshot, evalCtx model.Evaluatio
 		_, _ = fmt.Sscanf(f.Version, "%d", &rev)
 	}
 	ev := &collectEvent{
-		EventID: randomEventID("exp"), Type: "exposure",
+		EventID: res.ExposureEventID, DecisionID: res.DecisionID, Type: "exposure",
 		ExperimentID: res.Experiment.ExperimentID, Epoch: res.Experiment.Epoch,
 		FlagKey: res.FlagKey, FlagRevision: rev,
 		Variant: res.Experiment.Variant, Unit: unit, Source: res.Experiment.Source,
@@ -659,8 +752,69 @@ func (c *Client) queueExposure(snapshot *model.Snapshot, evalCtx model.Evaluatio
 	}
 	select {
 	case c.exposures <- ev:
+		if res.DecisionID != "" {
+			c.mu.Lock()
+			d := c.decisions[res.DecisionID]
+			d.ExposureStatus = "queued"
+			c.decisions[res.DecisionID] = d
+			if c.decisionUnits == nil {
+				c.decisionUnits = make(map[string]string)
+			}
+			c.decisionUnits[res.DecisionID] = unit
+			c.mu.Unlock()
+		}
 	default:
 		c.droppedExposures.Add(1)
+		c.setExposureStatus(res.DecisionID, "dropped")
+	}
+}
+
+func (c *Client) setExposureStatus(decisionID, status string) {
+	if decisionID == "" {
+		return
+	}
+	c.mu.Lock()
+	if d, ok := c.decisions[decisionID]; ok {
+		d.ExposureStatus = status
+		c.decisions[decisionID] = d
+	}
+	c.mu.Unlock()
+}
+
+// TrackConversionByDecisionID links an OpenFeature tracking call to a prior
+// local exposure without asking the caller to repeat its randomization unit.
+func (c *Client) TrackConversionByDecisionID(decisionID, metricKey string, value float64) error {
+	c.mu.RLock()
+	d, ok := c.decisions[decisionID]
+	unit := c.decisionUnits[decisionID]
+	c.mu.RUnlock()
+	if !ok || unit == "" || d.Result.Experiment == nil {
+		return errors.New("sdk: decision has no tracked exposure")
+	}
+	if c.opts.CollectToken == "" {
+		return errors.New("sdk: collect token not configured")
+	}
+	res := d.Result
+	var revision int64
+	_, _ = fmt.Sscanf(res.FlagVersion, "%d", &revision)
+	ev := &collectEvent{
+		EventID: randomEventID("conv"), DecisionID: decisionID, Type: "conversion",
+		ExperimentID: res.Experiment.ExperimentID, Epoch: res.Experiment.Epoch,
+		FlagKey: res.FlagKey, FlagRevision: revision, Variant: res.Experiment.Variant,
+		Unit: unit, Source: res.Experiment.Source, MetricKey: metricKey,
+		Value: value, ClientTime: time.Now().UTC(),
+	}
+	select {
+	case c.exposures <- ev:
+		c.mu.Lock()
+		d = c.decisions[decisionID]
+		d.ConversionCount++
+		c.decisions[decisionID] = d
+		c.mu.Unlock()
+		return nil
+	default:
+		c.droppedExposures.Add(1)
+		return errors.New("sdk: exposure queue full, conversion dropped")
 	}
 }
 
@@ -697,7 +851,7 @@ func TrackConversion(c *Client, evalCtx model.EvaluationContext, res model.Resul
 		}
 	}
 	ev := &collectEvent{
-		EventID: randomEventID("conv"), Type: "conversion",
+		EventID: randomEventID("conv"), DecisionID: res.DecisionID, Type: "conversion",
 		ExperimentID: res.Experiment.ExperimentID, Epoch: res.Experiment.Epoch,
 		FlagKey: res.FlagKey, FlagRevision: rev,
 		Variant: res.Experiment.Variant, Unit: unit, Source: res.Experiment.Source,
@@ -706,6 +860,11 @@ func TrackConversion(c *Client, evalCtx model.EvaluationContext, res model.Resul
 	}
 	select {
 	case c.exposures <- ev:
+		c.mu.Lock()
+		d := c.decisions[res.DecisionID]
+		d.ConversionCount++
+		c.decisions[res.DecisionID] = d
+		c.mu.Unlock()
 		return nil
 	default:
 		c.droppedExposures.Add(1)
@@ -753,18 +912,30 @@ send:
 		case <-time.After(500 * time.Millisecond):
 		case <-ctx.Done():
 			c.droppedExposures.Add(int64(len(batch)))
+			c.markBatchExposure(batch, "dropped")
 			return
 		case <-c.closed:
 			c.droppedExposures.Add(int64(len(batch)))
+			c.markBatchExposure(batch, "dropped")
 			return
 		}
 		if err := c.postEvents(ctx, batch); err != nil {
 			c.opts.Logger.Printf("sdk: exposure flush failed twice, dropping %d events: %v", len(batch), err)
 			c.droppedExposures.Add(int64(len(batch)))
+			c.markBatchExposure(batch, "dropped")
 			return
 		}
 	}
 	c.flushedExposures.Add(int64(len(batch)))
+	c.markBatchExposure(batch, "submitted")
+}
+
+func (c *Client) markBatchExposure(batch []*collectEvent, status string) {
+	for _, ev := range batch {
+		if ev.Type == "exposure" {
+			c.setExposureStatus(ev.DecisionID, status)
+		}
+	}
 }
 
 func (c *Client) postEvents(ctx context.Context, batch []*collectEvent) error {

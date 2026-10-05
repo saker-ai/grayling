@@ -66,6 +66,11 @@ class Result:
     track_events: bool = False
     experiment: Optional[Exposure] = None
     bucket: int = -1
+    rule: str = ""
+    decision_id: str = ""
+    manifest_revision: int = 0
+    snapshot_age_millis: int = 0
+    exposure_event_id: str = ""
 
     @classmethod
     def from_wire(cls, raw: Dict[str, Any]) -> "Result":
@@ -81,7 +86,12 @@ class Result:
             flag_version=raw.get("flagVersion", "") or "",
             track_events=bool(raw.get("trackEvents", False)),
             experiment=Exposure.from_wire(exp) if exp else None,
-            bucket=int(raw.get("bucket", -1) or -1),
+            bucket=int(raw.get("bucket", -1)),
+            rule=raw.get("rule", "") or "",
+            decision_id=raw.get("decisionId", "") or "",
+            manifest_revision=int(raw.get("manifestRevision", 0)),
+            snapshot_age_millis=int(raw.get("snapshotAgeMillis", 0)),
+            exposure_event_id=raw.get("exposureEventId", "") or "",
         )
 
     @classmethod

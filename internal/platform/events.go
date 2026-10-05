@@ -8,6 +8,39 @@ import (
 	"github.com/godeps/golab/pkg/model"
 )
 
+// EventMetricTotals aggregates accepted events for one credential scope.
+// Its fixed keys are safe metric dimensions; no flag, experiment, or unit ID
+// is exported.
+func (s *Store) EventMetricTotals(workspaceID, environmentID string) (exposures, conversions int64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	prefix := workspaceID + "/" + environmentID + "/"
+	for key, count := range s.data.EventCounts {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(key, "/exposure"):
+			exposures += count
+		case strings.HasSuffix(key, "/conversion"):
+			conversions += count
+		}
+	}
+	return exposures, conversions
+}
+
+// HasAcceptedEvent checks the recent raw-event window after ingestion.
+func (s *Store) HasAcceptedEvent(eventID, workspaceID, environmentID string, eventType EventType) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	idx, ok := s.data.EventIndex[eventID]
+	if !ok || idx < 0 || idx >= len(s.data.Events) {
+		return false
+	}
+	ev := s.data.Events[idx]
+	return ev.WorkspaceID == workspaceID && ev.EnvironmentID == environmentID && ev.Type == eventType
+}
+
 // IngestResult reports what happened to one event batch (§10.1: 服务端去重、
 // 处理迟到数据).
 type IngestResult struct {

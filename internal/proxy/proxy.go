@@ -174,6 +174,8 @@ func (p *Proxy) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/sdk/eval", p.relayUnary)
 	mux.HandleFunc("GET /api/v1/sdk/config", p.relayUnary)
 	mux.HandleFunc("GET /api/v1/sdk/revision", p.relayUnary)
+	mux.HandleFunc("GET /api/v1/sdk/decisions/{id}", p.relayUnary)
+	mux.HandleFunc("GET /api/v1/sdk/metrics", p.relayUnary)
 	mux.HandleFunc("POST /api/v1/collect", p.relayUnary)
 	mux.HandleFunc("GET /api/v1/sdk/stream", p.relayStream)
 	// Traefik ≥3.6 multi-layer routing forwardAuth evaluation (§4). Traefik

@@ -1,5 +1,9 @@
 # GoLab TypeScript SDK
 
+`details.result.decisionId` 可用 `client.diagnose(id)` 查询同作用域的近期
+求值依据和曝光/转化状态；`status().state` 报告 NOT_READY、READY、ERROR、
+STALE。完整字段与保留窗口见[求值诊断与事件](../../docs/求值诊断与事件.md)。
+
 远程求值优先的 GoLab TypeScript/Node SDK（首版，`docs/技术方案.md` §8 受限投影），与 Python SDK 契约完全一致：
 
 - **不下发全量快照**——求值走 `POST /api/v1/sdk/eval`（可指向 `cmd/golab-proxy` 独立中继），内部规则/segment/AI 内容永不出服务端，适合浏览器伴随服务、Node 后端与边缘运行时。

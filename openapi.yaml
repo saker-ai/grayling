@@ -1672,6 +1672,54 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/Internal"
+  "/api/v1/sdk/decisions/{id}":
+    get:
+      tags: [sdk]
+      summary: 查询当前进程保留的同作用域决策诊断
+      description: >-
+        SDK 凭证的工作空间和环境必须与决策一致。诊断只保留最近 10000 个决策，
+        不包含原始随机化单元或求值上下文；进程重启后不保证可查。
+      operationId: getSDKDecision
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: 决策、曝光与转化状态。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DecisionDiagnostic"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  "/api/v1/sdk/metrics":
+    get:
+      tags: [sdk]
+      summary: 凭证作用域的低基数曝光与转化计数
+      description: 只返回 exposures 和 conversions 聚合数，不包含 flag、实验或单元 ID。
+      operationId: getSDKMetrics
+      responses:
+        "200":
+          description: 已接受事件的聚合计数。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exposures: {type: integer, format: int64}
+                  conversions: {type: integer, format: int64}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   "/api/v1/sdk/stream":
     get:
       tags: [sdk]
@@ -2761,7 +2809,38 @@ components:
           $ref: "#/components/schemas/Exposure"
         bucket:
           type: integer
-          description: 命中的桶（未使用时为 -1；omitempty 时 0 被省略）。
+          description: 命中的桶（未使用时为 -1；0 是有效桶）。
+        rule:
+          type: string
+          description: 命中的规则名，匿名规则为 targeting[index]，默认规则为 default。
+        decisionId:
+          type: string
+          description: 单次求值的不可猜测关联 ID。
+        manifestRevision:
+          type: integer
+          format: int64
+        snapshotAgeMillis:
+          type: integer
+          format: int64
+          description: 当前快照生成后经过的毫秒数。
+        exposureEventId:
+          type: string
+          description: 本次决策产生的曝光事件 ID；未曝光时省略。
+    DecisionDiagnostic:
+      type: object
+      required: [result, exposureStatus, conversionCount]
+      properties:
+        result:
+          $ref: "#/components/schemas/Result"
+        exposureStatus:
+          type: string
+          enum: [none, queued, submitted, recorded, dropped]
+        conversionCount:
+          type: integer
+          format: int64
+        conversionsTruncated:
+          type: boolean
+          description: 单次决策的转化去重计数达到 1024 上限。
     FlagDraft:
       type: object
       required:
@@ -4234,6 +4313,9 @@ components:
         eventId:
           type: string
           description: 幂等去重键；重复计入 duplicates。
+        decisionId:
+          type: string
+          description: 关联原始求值、曝光及转化；缺省时事件仍按原有规则处理。
         type:
           type: string
           enum: [exposure, conversion]

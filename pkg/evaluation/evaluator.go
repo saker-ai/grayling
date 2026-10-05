@@ -263,7 +263,7 @@ func (e *Evaluator) Evaluate(flagKey string, ctx model.EvaluationContext) model.
 
 func (e *Evaluator) evaluateCompiled(cf *compiledFlag, ctx model.EvaluationContext) model.Result {
 	f := cf.flag
-	base := model.Result{Bucket: -1}
+	base := model.Result{Bucket: -1, Rule: "default"}
 
 	// Kill switch first (§5.2: 优先判断禁用/紧急关闭).
 	if f.Disable {
@@ -276,6 +276,7 @@ func (e *Evaluator) evaluateCompiled(cf *compiledFlag, ctx model.EvaluationConte
 		}
 		base.VariationType, base.Value, base.Reason = name, value, model.ReasonDisabled
 		base.Bucket = bucket
+		base.Rule = "default"
 		if err := model.CheckVariationType(f.Type, value); err != nil {
 			return typeMismatch(base, err)
 		}
@@ -331,10 +332,15 @@ func (e *Evaluator) evaluateCompiled(cf *compiledFlag, ctx model.EvaluationConte
 		if !e.matchRule(r, ctx) {
 			continue
 		}
+		base.Rule = r.rule.Name
+		if base.Rule == "" {
+			base.Rule = fmt.Sprintf("targeting[%d]", i)
+		}
 		return e.finish(cf, r, ctx, model.ReasonTargetingMatch, "targeting", enrolled, base)
 	}
 
 	// Default rule.
+	base.Rule = "default"
 	return e.finish(cf, &cf.defaultRule, ctx, model.ReasonDefault, "default", enrolled, base)
 }
 

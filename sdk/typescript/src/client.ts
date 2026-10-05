@@ -42,6 +42,8 @@ export interface Options {
   requestTimeoutMs?: number;
   /** LRU bound of the evaluation cache (default 10_000). */
   cacheMaxEntries?: number;
+  /** Maximum age of a successful revision/evaluation observation. */
+  maxStalenessMs?: number;
   exposureFlushIntervalMs?: number;
   exposureBatchSize?: number;
   exposureQueueCap?: number;
@@ -57,6 +59,7 @@ interface CacheEntry {
 }
 
 export interface Status {
+  state: "NOT_READY" | "READY" | "ERROR" | "STALE";
   revision: number | null;
   cacheSize: number;
   evals: number;
@@ -95,12 +98,14 @@ export class GolabClient {
   readonly #pollMs: number;
   readonly #timeoutMs: number;
   readonly #cacheMax: number;
+  readonly #maxStaleness: number;
   readonly #flushMs: number;
   readonly #batchSize: number;
   readonly #queueCap: number;
 
   #cache = new Map<string, CacheEntry>();
   #revision: number | null = null;
+  #lastSuccess = 0;
   #queue: Record<string, unknown>[] = [];
   #pollTimer: ReturnType<typeof setInterval> | null = null;
   #flushTimer: ReturnType<typeof setInterval> | null = null;
@@ -119,6 +124,7 @@ export class GolabClient {
     this.#pollMs = opts.pollIntervalMs ?? 30_000;
     this.#timeoutMs = opts.requestTimeoutMs ?? 10_000;
     this.#cacheMax = opts.cacheMaxEntries ?? 10_000;
+    this.#maxStaleness = opts.maxStalenessMs ?? 300_000;
     this.#flushMs = opts.exposureFlushIntervalMs ?? 3_000;
     this.#batchSize = opts.exposureBatchSize ?? 100;
     this.#queueCap = opts.exposureQueueCap ?? 10_000;
@@ -184,6 +190,7 @@ export class GolabClient {
       ? Number(details.result.flagVersion) : 0;
     this.#enqueue({
       eventId: `conv-${randomUUID()}`,
+      decisionId: details.result.decisionId,
       type: "conversion",
       experimentId: exp.experimentId,
       epoch: exp.epoch,
@@ -226,12 +233,20 @@ export class GolabClient {
 
   /** Probe /api/v1/sdk/revision; invalidate the cache when it moved. */
   async syncRevision(): Promise<number> {
-    const body = await this.#http<Record<string, unknown>>("GET", "/api/v1/sdk/revision", this.#opts.sdkToken);
+    let body: Record<string, unknown>;
+    try {
+      body = await this.#http<Record<string, unknown>>("GET", "/api/v1/sdk/revision", this.#opts.sdkToken);
+    } catch (err) {
+      this.#stats.lastError = "revision probe failed";
+      throw err;
+    }
     const revision = Number(body.revision ?? 0);
     if (this.#revision !== null && revision !== this.#revision) {
       this.#cache.clear();
     }
     this.#revision = revision;
+    this.#lastSuccess = Date.now();
+    this.#stats.lastError = "";
     this.#stats.revisionSyncs++;
     return revision;
   }
@@ -251,7 +266,11 @@ export class GolabClient {
   }
 
   status(): Status {
+    const state = this.#revision !== null && this.#lastSuccess > 0 &&
+      Date.now() - this.#lastSuccess > this.#maxStaleness ? "STALE" :
+      this.#stats.lastError ? "ERROR" : this.#revision === null ? "NOT_READY" : "READY";
     return {
+      state,
       revision: this.#revision,
       cacheSize: this.#cache.size,
       evals: this.#stats.evals,
@@ -265,6 +284,12 @@ export class GolabClient {
       lastError: this.#stats.lastError,
       closed: this.#closed,
     };
+  }
+
+  /** Look up a recent decision within this SDK token's scope. */
+  async diagnose(decisionId: string): Promise<Record<string, unknown>> {
+    return this.#http<Record<string, unknown>>(
+      "GET", `/api/v1/sdk/decisions/${encodeURIComponent(decisionId)}`, this.#opts.sdkToken);
   }
 
   /** Stop timers and flush pending events once. */
@@ -312,7 +337,8 @@ export class GolabClient {
 
     this.#stats.evals++;
     const hit = this.#cache.get(cacheKey);
-    if (hit && (this.#revision === null || hit.revision === this.#revision)) {
+    if (hit && this.status().state !== "STALE" &&
+      (this.#revision === null || hit.revision === this.#revision)) {
       this.#stats.cacheHits++;
       return { ...hit.details, fromCache: true };
     }
@@ -331,6 +357,8 @@ export class GolabClient {
     }
 
     const result: Result = resultFromWire(body.result as Partial<Result>);
+    this.#lastSuccess = Date.now();
+    this.#stats.lastError = "";
     const details: EvaluationDetails = {
       value: body.value ?? null,
       result,

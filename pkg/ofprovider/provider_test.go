@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,6 +37,7 @@ type harness struct {
 	t        *testing.T
 	store    *platform.Store
 	srv      *httptest.Server
+	api      *api.Server
 	owner    string
 	reviewer string
 	sdkTok   string
@@ -52,11 +54,11 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("NewStore: %v", err)
 	}
 	cfg := configstore.NewGonacosStore(gconfig.NewService())
-	apiSrv := api.NewServer(store, cfg, api.Options{})
+	apiSrv := api.NewServer(store, cfg, api.Options{EvaluationSampleRate: 1})
 	srv := httptest.NewServer(apiSrv.Handler())
 	t.Cleanup(srv.Close)
 
-	h := &harness{t: t, store: store, srv: srv, baseURL: srv.URL}
+	h := &harness{t: t, store: store, srv: srv, api: apiSrv, baseURL: srv.URL}
 	ct, err := store.CreateToken(platform.TokenAdmin, "root", platform.RoleOwner, "", "", "bootstrap")
 	if err != nil {
 		t.Fatalf("owner token: %v", err)
@@ -453,14 +455,37 @@ func TestOFExperimentExposureAttribution(t *testing.T) {
 	// targetingKey (flush interval 100ms; generous CI bound).
 	wantHash := h.store.HashUnit(h.ws.ID, "user-77")
 	deadline = time.Now().Add(5 * time.Second)
+	exposed := false
 	for time.Now().Before(deadline) {
 		set := h.store.SplitExposedUnitSet(h.ws.ID, h.env.ID, exp.ID, exp.Epoch)
 		if units, ok := set[sd.Variant]; ok && units[wantHash] {
-			return // attributed ✓
+			exposed = true
+			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("exposure from OpenFeature evaluation never reached the store (variant %s)", sd.Variant)
+	if !exposed {
+		t.Fatalf("exposure from OpenFeature evaluation never reached the store (variant %s)", sd.Variant)
+	}
+	decisionID, ok := sd.FlagMetadata["golabDecisionId"].(string)
+	if !ok || decisionID == "" {
+		t.Fatalf("decision metadata: %+v", sd.FlagMetadata)
+	}
+	diagnostic, ok := provider.client.Diagnose(decisionID)
+	if !ok || diagnostic.Result.VariationType != sd.Variant || diagnostic.Result.ManifestRevision == 0 {
+		t.Fatalf("local diagnostic: %+v, %v", diagnostic, ok)
+	}
+	client.Track(ctx, "conversion", evalCtx,
+		of.NewTrackingEventDetails(1).Add("decisionId", decisionID))
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_, conversions := h.store.EventMetricTotals(h.ws.ID, h.env.ID)
+		if conversions > 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("OpenFeature Track conversion did not reach collection")
 }
 
 func TestOFProviderStateLifecycle(t *testing.T) {
@@ -512,5 +537,147 @@ func TestOFInitValidation(t *testing.T) {
 	p := NewProvider(Options{}) // no client, no BaseURL/Token
 	if err := p.Init(of.EvaluationContext{}); err == nil {
 		t.Fatal("Init without BaseURL/Token must fail")
+	}
+}
+
+func TestRemoteEvaluationSampleHasNoContextOrValue(t *testing.T) {
+	h := newHarness(t)
+	h.publishFlag(&model.Flag{
+		SchemaVersion: model.SchemaVersion, Key: "sampled", Type: model.FlagString,
+		Variations:  map[string]any{"chosen": "private-flag-value"},
+		DefaultRule: &model.Rule{Variation: "chosen"},
+	})
+	body := []byte(`{"flagKey":"sampled","context":{"targetingKey":"private-user"}}`)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
+		h.srv.URL+"/api/v1/sdk/eval", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+h.sdkTok)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("eval status %d", resp.StatusCode)
+	}
+	var result struct {
+		Result model.Result `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-h.api.SampledEvents():
+		if event.DecisionID != result.Result.DecisionID ||
+			event.Attributes["feature_flag.result.variant"] != "chosen" {
+			t.Fatalf("sampled event: %+v", event)
+		}
+		encoded, _ := json.Marshal(event)
+		if bytes.Contains(encoded, []byte("private-user")) ||
+			bytes.Contains(encoded, []byte("private-flag-value")) {
+			t.Fatalf("sampled event leaked private data: %s", encoded)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing server sampled event")
+	}
+}
+
+func TestProviderLifecycleEvents(t *testing.T) {
+	var revision atomic.Int64
+	revision.Store(1)
+	var failing atomic.Bool
+	failing.Store(true)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/sdk/config" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if failing.Load() {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		snap := model.Snapshot{
+			SchemaVersion: model.SchemaVersion, Workspace: "w", Environment: "e",
+			ManifestRevision: revision.Load(), GeneratedAt: time.Now().UTC(),
+			Flags: map[string]*model.Flag{}, Segments: map[string]*model.Segment{},
+		}
+		_ = json.NewEncoder(w).Encode(snap)
+	}))
+	defer srv.Close()
+	p := NewProvider(Options{ClientOptions: sdk.Options{
+		BaseURL: srv.URL, Token: "test", PollInterval: time.Hour,
+		MaxStaleness: 180 * time.Millisecond,
+	}, MonitorInterval: 10 * time.Millisecond})
+	if err := p.Init(of.EvaluationContext{}); err != nil {
+		t.Fatal(err)
+	}
+	defer p.Shutdown()
+	next := func(want of.EventType) of.Event {
+		t.Helper()
+		deadline := time.After(3 * time.Second)
+		for {
+			select {
+			case ev := <-p.EventChannel():
+				if ev.EventType == want {
+					return ev
+				}
+			case <-deadline:
+				t.Fatalf("missing %s event", want)
+				return of.Event{}
+			}
+		}
+	}
+	startupError := next(of.ProviderError)
+	if startupError.Message == "" {
+		t.Fatal("startup error event lacked a reason")
+	}
+	failing.Store(false)
+	if err := p.client.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	next(of.ProviderReady)
+	revision.Store(2)
+	if err := p.client.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	changed := next(of.ProviderConfigChange)
+	if changed.EventMetadata["manifestRevision"] != int64(2) {
+		t.Fatalf("revision metadata: %+v", changed)
+	}
+	failing.Store(true)
+	if err := p.client.Sync(t.Context()); err == nil {
+		t.Fatal("upstream error was ignored")
+	}
+	errorEvent := next(of.ProviderError)
+	if errorEvent.Message == "" || errorEvent.ErrorCode != of.GeneralCode {
+		t.Fatalf("error event: %+v", errorEvent)
+	}
+	_ = p.client.Sync(t.Context())
+	staleSeen := false
+	select {
+	case ev := <-p.EventChannel():
+		if ev.EventType == of.ProviderError {
+			t.Fatalf("repeated failure emitted error storm: %+v", ev)
+		}
+		staleSeen = ev.EventType == of.ProviderStale
+	case <-time.After(30 * time.Millisecond):
+	}
+	if !staleSeen {
+		next(of.ProviderStale)
+	}
+	failing.Store(false)
+	if err := p.client.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	next(of.ProviderReady)
+	select {
+	case ev := <-p.EventChannel():
+		if ev.EventType == of.ProviderConfigChange {
+			t.Fatalf("unchanged revision emitted config change: %+v", ev)
+		}
+	case <-time.After(50 * time.Millisecond):
 	}
 }

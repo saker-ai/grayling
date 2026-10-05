@@ -28,6 +28,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/godeps/golab/internal/admin"
@@ -56,7 +57,13 @@ type Server struct {
 	// ai is optional; when nil, AI endpoints answer 501.
 	ai *aisvc.Service
 
-	snapshotCache sync.Map // namespaceID -> *evaluatorCacheEntry
+	snapshotCache  sync.Map // namespaceID -> *evaluatorCacheEntry
+	decisionMu     sync.RWMutex
+	decisions      map[string]scopedDecision
+	decisionOrder  []string
+	sampleRate     float64
+	sampledEvents  chan model.EvaluationEvent
+	droppedSamples atomic.Int64
 
 	logger *log.Logger
 }
@@ -71,6 +78,8 @@ type cachedSnapshot struct {
 // Options configures server construction.
 type Options struct {
 	Logger *log.Logger
+	// EvaluationSampleRate enables bounded, safe evaluation telemetry [0,1].
+	EvaluationSampleRate float64
 	// AdminPassword permits a configured password on admin endpoints only.
 	// The server retains its digest, not the plaintext value.
 	AdminPassword string
@@ -90,11 +99,14 @@ func NewServer(store *platform.Store, cfg configstore.Store, opts Options) *Serv
 		rps = 200
 	}
 	s := &Server{
-		Store:   store,
-		Config:  cfg,
-		Hub:     NewSSEHub(),
-		limiter: newRateLimiter(rps, int(rps)),
-		logger:  opts.Logger,
+		Store:         store,
+		Config:        cfg,
+		Hub:           NewSSEHub(),
+		limiter:       newRateLimiter(rps, int(rps)),
+		logger:        opts.Logger,
+		decisions:     make(map[string]scopedDecision),
+		sampleRate:    opts.EvaluationSampleRate,
+		sampledEvents: make(chan model.EvaluationEvent, 256),
 	}
 	if opts.AdminPassword != "" {
 		s.adminPasswordHash = sha256.Sum256([]byte(opts.AdminPassword))
@@ -107,6 +119,13 @@ func NewServer(store *platform.Store, cfg configstore.Store, opts Options) *Serv
 	s.Rollout = rollout.NewEngine(store, s.Admin, opts.Logger)
 	return s
 }
+
+// SampledEvents yields optional feature-flag evaluation events without
+// context attributes or raw units. A slow consumer cannot block evaluations.
+func (s *Server) SampledEvents() <-chan model.EvaluationEvent { return s.sampledEvents }
+
+// DroppedSamples reports events skipped because the sample channel was full.
+func (s *Server) DroppedSamples() int64 { return s.droppedSamples.Load() }
 
 // Handler returns the routed HTTP handler.
 func (s *Server) Handler() http.Handler {
@@ -179,6 +198,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/sdk/config", s.sdkOnly(s.handleSDKConfig))
 	mux.HandleFunc("GET /api/v1/sdk/revision", s.sdkOnly(s.handleSDKRevision))
 	mux.HandleFunc("POST /api/v1/sdk/eval", s.sdkOnly(s.handleSDKEval))
+	mux.HandleFunc("GET /api/v1/sdk/decisions/{id}", s.sdkOnly(s.handleSDKDecision))
+	mux.HandleFunc("GET /api/v1/sdk/metrics", s.sdkOnly(s.handleSDKMetrics))
 	mux.HandleFunc("GET /api/v1/sdk/stream", s.sdkOnly(s.handleSDKStream))
 	mux.HandleFunc("POST /api/v1/sdk/ai/resolve", s.sdkOnly(s.handleSDKAIResolve))
 	mux.HandleFunc("POST /api/v1/sdk/ai/session", s.sdkOnly(s.handleSDKAISession))

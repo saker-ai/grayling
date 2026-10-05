@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -192,6 +193,47 @@ type evalResponse struct {
 	RandomizationUnit string `json:"randomizationUnit,omitempty"`
 }
 
+type scopedDecision struct {
+	workspaceID   string
+	environmentID string
+	diagnostic    model.DecisionDiagnostic
+	conversionIDs map[string]bool
+	unitHash      string
+}
+
+func (s *Server) rememberDecision(workspaceID, environmentID, unitHash string, d model.DecisionDiagnostic) {
+	s.decisionMu.Lock()
+	defer s.decisionMu.Unlock()
+	if len(s.decisionOrder) >= 10_000 {
+		delete(s.decisions, s.decisionOrder[0])
+		s.decisionOrder = s.decisionOrder[1:]
+	}
+	id := d.Result.DecisionID
+	s.decisions[id] = scopedDecision{workspaceID: workspaceID,
+		environmentID: environmentID, diagnostic: d, unitHash: unitHash}
+	s.decisionOrder = append(s.decisionOrder, id)
+}
+
+func (s *Server) handleSDKDecision(w http.ResponseWriter, r *http.Request) {
+	tok := tokenFrom(r)
+	s.decisionMu.RLock()
+	d, ok := s.decisions[r.PathValue("id")]
+	s.decisionMu.RUnlock()
+	if !ok || d.workspaceID != tok.WorkspaceID || d.environmentID != tok.EnvironmentID {
+		writeError(w, http.StatusNotFound, "decision_not_found", "decision not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, d.diagnostic)
+}
+
+func (s *Server) handleSDKMetrics(w http.ResponseWriter, r *http.Request) {
+	tok := tokenFrom(r)
+	exposures, conversions := s.Store.EventMetricTotals(tok.WorkspaceID, tok.EnvironmentID)
+	writeJSON(w, http.StatusOK, map[string]int64{
+		"exposures": exposures, "conversions": conversions,
+	})
+}
+
 func (s *Server) handleSDKEval(w http.ResponseWriter, r *http.Request) {
 	tok := tokenFrom(r)
 	env, err := s.Store.GetEnvironment(tok.WorkspaceID, tok.EnvironmentID)
@@ -210,8 +252,16 @@ func (s *Server) handleSDKEval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := ev.Evaluate(req.FlagKey, req.Context)
+	res.DecisionID = "dec-" + rand.Text()
+	res.ManifestRevision = revision
+	generated := snapshot.GeneratedAt
+	if generated.IsZero() {
+		generated = time.Now()
+	}
+	res.SnapshotAgeMillis = max(0, time.Since(generated).Milliseconds())
 
-	resp := evalResponse{Result: res, Value: res.Value, Revision: revision}
+	resp := evalResponse{Value: res.Value, Revision: revision}
+	diagnostic := model.DecisionDiagnostic{ExposureStatus: "none"}
 
 	// Server-side exposure capture: remote clients (browsers, thin
 	// services) cannot be trusted to report exposures, so the server
@@ -223,6 +273,22 @@ func (s *Server) handleSDKEval(w http.ResponseWriter, r *http.Request) {
 		if id, unit := s.recordRemoteExposure(tok, env, snapshot, req, res); id != "" {
 			resp.ExposureID = id
 			resp.RandomizationUnit = unit
+			res.ExposureEventID = id
+			diagnostic.ExposureStatus = "recorded"
+		}
+	}
+	resp.Result = res
+	diagnostic.Result = res
+	unitHash := ""
+	if resp.RandomizationUnit != "" {
+		unitHash = s.Store.HashUnit(env.WorkspaceID, resp.RandomizationUnit)
+	}
+	s.rememberDecision(env.WorkspaceID, env.ID, unitHash, diagnostic)
+	if model.SampleDecision(res.DecisionID, s.sampleRate) {
+		select {
+		case s.sampledEvents <- res.TelemetryEvent():
+		default:
+			s.droppedSamples.Add(1)
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -280,6 +346,7 @@ func flagRevisionIn(snapshot *model.Snapshot, key string) int64 {
 
 type collectEventDTO struct {
 	EventID      string    `json:"eventId"`
+	DecisionID   string    `json:"decisionId,omitempty"`
 	Type         string    `json:"type"`
 	ExperimentID string    `json:"experimentId"`
 	Epoch        int64     `json:"epoch"`
@@ -352,6 +419,43 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeStoreError(w, err)
 		return
+	}
+	if res.Accepted > 0 || res.Duplicates > 0 {
+		s.decisionMu.Lock()
+		for _, dto := range req.Events {
+			if dto.DecisionID == "" || dto.Unit == "" {
+				continue
+			}
+			if !s.Store.HasAcceptedEvent(dto.EventID, env.WorkspaceID, env.ID, platform.EventType(dto.Type)) {
+				continue
+			}
+			d, ok := s.decisions[dto.DecisionID]
+			if !ok || d.workspaceID != env.WorkspaceID || d.environmentID != env.ID {
+				continue
+			}
+			exp := d.diagnostic.Result.Experiment
+			if exp == nil || d.unitHash == "" || d.unitHash != s.Store.HashUnit(env.WorkspaceID, dto.Unit) ||
+				exp.ExperimentID != dto.ExperimentID || exp.Epoch != dto.Epoch || exp.Variant != dto.Variant {
+				continue
+			}
+			if dto.Type == "conversion" {
+				if d.conversionIDs == nil {
+					d.conversionIDs = make(map[string]bool)
+				}
+				if !d.conversionIDs[dto.EventID] {
+					if len(d.conversionIDs) >= 1024 {
+						d.diagnostic.ConversionsTruncated = true
+					} else {
+						d.diagnostic.ConversionCount++
+						d.conversionIDs[dto.EventID] = true
+					}
+				}
+			} else if dto.Type == "exposure" {
+				d.diagnostic.ExposureStatus = "recorded"
+			}
+			s.decisions[dto.DecisionID] = d
+		}
+		s.decisionMu.Unlock()
 	}
 	msgs := res.RejectMsgs
 	if skippedNoUnit > 0 {

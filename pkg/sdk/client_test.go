@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -211,5 +212,47 @@ func TestEmptyEnvironmentConverges(t *testing.T) {
 	v, r := c.StringVariation("f", model.EvaluationContext{}, "safe")
 	if v != "rev-1" || r.Failed {
 		t.Fatalf("converged eval: %q %+v", v, r)
+	}
+}
+
+func TestLocalDecisionDiagnostic(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(snapshotJSON(t, 7, map[string]*model.Flag{"f": boolFlag("f", "7")}))
+	}))
+	defer srv.Close()
+	c, err := New(t.Context(), Options{BaseURL: srv.URL, Token: "test", EvaluationSampleRate: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	v, res := c.StringVariation("f", model.EvaluationContext{
+		Attributes: map[string]any{"user_id": "private-user"},
+	}, "?")
+	if v != "rev-7" || res.DecisionID == "" || res.ManifestRevision != 7 || res.Rule != "default" {
+		t.Fatalf("result: %+v", res)
+	}
+	d, ok := c.Diagnose(res.DecisionID)
+	if !ok || d.Result.DecisionID != res.DecisionID || d.ExposureStatus != "none" {
+		t.Fatalf("diagnostic: %+v, %v", d, ok)
+	}
+	encoded, _ := json.Marshal(d)
+	if bytes.Contains(encoded, []byte("private-user")) {
+		t.Fatalf("raw unit leaked: %s", encoded)
+	}
+	if st := c.Status(); st.State != "READY" || st.EvaluationCount != 1 {
+		t.Fatalf("status: %+v", st)
+	}
+	select {
+	case event := <-c.SampledEvents():
+		if event.Name != "feature_flag.evaluation" || event.DecisionID != res.DecisionID ||
+			event.Attributes["feature_flag.result.variant"] != res.VariationType {
+			t.Fatalf("sampled event: %+v", event)
+		}
+		encoded, _ := json.Marshal(event)
+		if bytes.Contains(encoded, []byte("private-user")) || bytes.Contains(encoded, []byte("rev-7")) {
+			t.Fatalf("sampled event leaked context or value: %s", encoded)
+		}
+	default:
+		t.Fatal("missing sampled event")
 	}
 }

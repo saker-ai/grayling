@@ -57,6 +57,7 @@ class Options:
     poll_interval: float = 30.0      # revision probe cadence
     request_timeout: float = 10.0    # per-request HTTP timeout
     cache_max_entries: int = 10_000  # LRU bound on the evaluation cache
+    max_staleness: float = 300.0
     exposure_flush_interval: float = 3.0
     exposure_batch_size: int = 100
     exposure_queue_cap: int = 10_000
@@ -108,6 +109,7 @@ class GolabClient:
         self._lock = threading.Lock()
         self._cache: "Dict[Tuple[str, str], _CacheEntry]" = {}
         self._revision: Optional[int] = None  # None = unknown (nothing synced yet)
+        self._last_success = 0.0
         self._stats = _Stats()
         self._events: "queue.Queue[Dict[str, Any]]" = queue.Queue(
             maxsize=options.exposure_queue_cap)
@@ -191,6 +193,7 @@ class GolabClient:
             flag_revision = int(details.result.flag_version)
         self._enqueue({
             "eventId": f"conv-{uuid.uuid4().hex}",
+            "decisionId": res.decision_id,
             "type": "conversion",
             "experimentId": res.experiment.experiment_id,
             "epoch": res.experiment.epoch,
@@ -238,16 +241,28 @@ class GolabClient:
         """Probe /api/v1/sdk/revision and invalidate the cache on change.
         Runs automatically on the poll interval; exposed for tests and
         explicit freshness checks. Raises GolabError on failure."""
-        body = self._http_json("GET", "/api/v1/sdk/revision",
-                               token=self._opts.sdk_token)
+        try:
+            body = self._http_json("GET", "/api/v1/sdk/revision",
+                                   token=self._opts.sdk_token)
+        except Exception:
+            with self._lock:
+                self._stats.last_error = "revision probe failed"
+            raise
         revision = int(body.get("revision", 0))
         with self._lock:
             changed = self._revision is not None and revision != self._revision
             self._revision = revision
+            self._last_success = time.monotonic()
+            self._stats.last_error = ""
             self._stats.revision_syncs += 1
             if changed:
                 self._invalidate_locked()
         return revision
+
+    def diagnose(self, decision_id: str) -> Dict[str, Any]:
+        """Look up a recent decision within this SDK token's scope."""
+        return self._http_json("GET", f"/api/v1/sdk/decisions/{decision_id}",
+                               token=self._opts.sdk_token)
 
     def flush(self, timeout: float = 10.0) -> int:
         """Synchronously drain queued events to /api/v1/collect.
@@ -273,7 +288,13 @@ class GolabClient:
     def status(self) -> Dict[str, Any]:
         with self._lock:
             st = self._stats
+            state = ("STALE" if self._revision is not None and
+                     self._last_success and
+                     time.monotonic() - self._last_success > self._opts.max_staleness
+                     else "ERROR" if st.last_error else
+                     "NOT_READY" if self._revision is None else "READY")
             return {
+                "state": state,
                 "revision": self._revision,
                 "cacheSize": len(self._cache),
                 "evals": st.evals,
@@ -338,7 +359,9 @@ class GolabClient:
             self._stats.evals += 1
             known = self._revision
             entry = self._cache.get(cache_key)
-            if entry is not None and (known is None or entry.revision == known):
+            stale = (self._last_success and time.monotonic() - self._last_success >
+                     self._opts.max_staleness)
+            if entry is not None and not stale and (known is None or entry.revision == known):
                 self._stats.cache_hits += 1
                 cached = EvaluationDetails(
                     value=entry.details.value,
@@ -375,6 +398,8 @@ class GolabClient:
         )
 
         with self._lock:
+            self._last_success = time.monotonic()
+            self._stats.last_error = ""
             # The eval response is itself a revision observation: newer than
             # our view → invalidate everything computed against older config.
             if self._revision is None or details.manifest_revision > self._revision:
@@ -401,7 +426,11 @@ class GolabClient:
             reason=details.result.reason, error_code="TYPE_MISMATCH",
             error_details=f"flag value is {got}, want {want}",
             failed=True, flag_version=details.result.flag_version,
-            track_events=False, experiment=None, bucket=details.result.bucket)
+            track_events=False, experiment=None, bucket=details.result.bucket,
+            rule=details.result.rule, decision_id=details.result.decision_id,
+            manifest_revision=details.result.manifest_revision,
+            snapshot_age_millis=details.result.snapshot_age_millis,
+            exposure_event_id=details.result.exposure_event_id)
         return EvaluationDetails(value=details.value, result=res,
                                  manifest_revision=details.manifest_revision,
                                  exposure_event_id=details.exposure_event_id,

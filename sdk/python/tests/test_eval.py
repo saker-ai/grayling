@@ -34,6 +34,26 @@ def test_bool_variation_targeting(env):
         assert details.result.failed is False
         assert details.manifest_revision > 0
 
+        # Scoped diagnosis uses the same semantic fields as the Go SDK.
+        diag = client.diagnose(details.result.decision_id)
+        assert diag["result"]["rule"] == details.result.rule
+        assert diag["result"]["reason"] == details.result.reason
+        assert diag["result"]["manifestRevision"] == details.manifest_revision
+        assert diag["exposureStatus"] == "none"
+        assert "user_id" not in str(diag)
+        status, _ = env.server.request(
+            "GET", f"/api/v1/sdk/decisions/{details.result.decision_id}",
+            env.collect_token)
+        assert status == 403
+        env.server.create_workspace("diag-other")
+        env.server.create_environment("diag-other", "prod")
+        other_token = env.server.create_token("diag-other", "diag-sdk", "sdk",
+                                              environment="prod")
+        status, _ = env.server.request(
+            "GET", f"/api/v1/sdk/decisions/{details.result.decision_id}",
+            other_token)
+        assert status == 404
+
         # Default rule for everyone else.
         value, details = client.bool_variation(
             "py-bool", False, attributes={"tenant": "other"})
@@ -80,6 +100,20 @@ def test_transport_error_returns_caller_default(env):
         assert details.result.failed is True
         assert details.result.reason == "ERROR"
         assert client.status()["evalErrors"] == 1
+        assert client.status()["state"] == "ERROR"
+
+
+def test_remote_status_expiry_and_recovery(env):
+    with make_client(env, max_staleness=0.02) as client:
+        assert client.status()["state"] == "NOT_READY"
+        _, details = client.string_variation("py-string", "?")
+        assert details.manifest_revision > 0
+        assert client.status()["state"] == "READY"
+        import time
+        time.sleep(0.04)
+        assert client.status()["state"] == "STALE"
+        client.sync_revision()
+        assert client.status()["state"] == "READY"
 
 
 def test_unauthorized_token_never_crashes(env):

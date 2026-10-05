@@ -34,6 +34,11 @@ export interface Result {
   trackEvents: boolean;
   experiment: Exposure | null;
   bucket: number;
+  rule: string;
+  decisionId: string;
+  manifestRevision: number;
+  snapshotAgeMillis: number;
+  exposureEventId: string;
 }
 
 /** Value + full result + server-side exposure metadata of one eval. */
@@ -68,6 +73,11 @@ export function resultFromWire(raw: Partial<Result> | undefined): Result {
     trackEvents: Boolean(r.trackEvents),
     experiment: r.experiment ?? null,
     bucket: typeof r.bucket === "number" ? r.bucket : -1,
+    rule: r.rule ?? "",
+    decisionId: r.decisionId ?? "",
+    manifestRevision: r.manifestRevision ?? 0,
+    snapshotAgeMillis: r.snapshotAgeMillis ?? 0,
+    exposureEventId: r.exposureEventId ?? "",
   };
 }
 
@@ -79,5 +89,7 @@ export function errorResult(flagKey: string, details: string, code = "GENERAL"):
     flagKey, value: null, variationType: "", reason: "ERROR",
     errorCode: code, errorDetails: details, failed: true,
     flagVersion: "", trackEvents: false, experiment: null, bucket: -1,
+    rule: "", decisionId: "", manifestRevision: 0, snapshotAgeMillis: 0,
+    exposureEventId: "",
   };
 }

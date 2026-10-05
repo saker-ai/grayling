@@ -313,15 +313,29 @@ type Exposure struct {
 // caller-provided default in the typed APIs and must never be interpreted
 // as an assignment.
 type Result struct {
-	FlagKey       string    `json:"flagKey"`
-	Value         any       `json:"value"`
-	VariationType string    `json:"variationType"`
-	Reason        Reason    `json:"reason"`
-	ErrorCode     ErrorCode `json:"errorCode,omitempty"`
-	ErrorDetails  string    `json:"errorDetails,omitempty"`
-	Failed        bool      `json:"failed"`
-	FlagVersion   string    `json:"flagVersion,omitempty"`
-	TrackEvents   bool      `json:"trackEvents"`
-	Experiment    *Exposure `json:"experiment,omitempty"`
-	Bucket        int       `json:"bucket,omitempty"` // -1 when unused
+	FlagKey           string    `json:"flagKey"`
+	Value             any       `json:"value"`
+	VariationType     string    `json:"variationType"`
+	Reason            Reason    `json:"reason"`
+	ErrorCode         ErrorCode `json:"errorCode,omitempty"`
+	ErrorDetails      string    `json:"errorDetails,omitempty"`
+	Failed            bool      `json:"failed"`
+	FlagVersion       string    `json:"flagVersion,omitempty"`
+	TrackEvents       bool      `json:"trackEvents"`
+	Experiment        *Exposure `json:"experiment,omitempty"`
+	Bucket            int       `json:"bucket"`         // -1 when unused; bucket 0 is valid
+	Rule              string    `json:"rule,omitempty"` // matched rule name or "default"
+	DecisionID        string    `json:"decisionId,omitempty"`
+	ManifestRevision  int64     `json:"manifestRevision"`
+	SnapshotAgeMillis int64     `json:"snapshotAgeMillis"`
+	ExposureEventID   string    `json:"exposureEventId,omitempty"`
+}
+
+// DecisionDiagnostic is a scoped, bounded record of a recent evaluation.
+// It intentionally contains no context attributes or randomization unit.
+type DecisionDiagnostic struct {
+	Result               Result `json:"result"`
+	ExposureStatus       string `json:"exposureStatus"` // none|queued|submitted|recorded|dropped
+	ConversionCount      int64  `json:"conversionCount"`
+	ConversionsTruncated bool   `json:"conversionsTruncated,omitzero"`
 }

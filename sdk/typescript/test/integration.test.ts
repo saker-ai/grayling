@@ -46,6 +46,12 @@ test("bool variation: targeting + default rule", async () => {
     assert.equal(hit.details.result.reason, "TARGETING_MATCH");
     assert.equal(hit.details.result.failed, false);
     assert.ok(hit.details.manifestRevision > 0);
+    const diag = await client.diagnose(hit.details.result.decisionId);
+    const result = diag.result as Record<string, unknown>;
+    assert.equal(result.rule, hit.details.result.rule);
+    assert.equal(result.manifestRevision, hit.details.manifestRevision);
+    assert.equal(diag.exposureStatus, "none");
+    assert.ok(!JSON.stringify(diag).includes("user_id"));
 
     const miss = await client.boolVariation("ts-bool", false, { attributes: { tenant: "other" } });
     assert.equal(miss.value, false);
@@ -99,6 +105,21 @@ test("transport error → caller default + ERROR, counted", async () => {
     assert.equal(v.details.result.failed, true);
     assert.equal(v.details.result.reason, "ERROR");
     assert.equal(client.status().evalErrors, 1);
+    assert.equal(client.status().state, "ERROR");
+  } finally { await client.close(); }
+});
+
+test("remote status expires and recovers after revision probe", async () => {
+  const client = makeClient({ maxStalenessMs: 20 });
+  try {
+    assert.equal(client.status().state, "NOT_READY");
+    const result = await client.stringVariation("ts-string", "?");
+    assert.ok(result.details.manifestRevision > 0);
+    assert.equal(client.status().state, "READY");
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.equal(client.status().state, "STALE");
+    await client.syncRevision();
+    assert.equal(client.status().state, "READY");
   } finally { await client.close(); }
 });
 
@@ -154,6 +175,7 @@ test("trackConversion attribution lands in the report", async () => {
   const client = makeClient({ exposureFlushIntervalMs: 200 });
   try {
     let converted = 0;
+    let decisionId = "";
     for (let i = 0; i < 30; i++) {
       const unit = `ts-conv-${i}`;
       const v = await client.stringVariation("ts-exp", "?", { attributes: { user_id: unit } });
@@ -161,12 +183,22 @@ test("trackConversion attribution lands in the report", async () => {
       assert.ok(exp);
       if (exp.variant === "treatment") {
         client.trackConversion(v.details, "conversion", 1, { sessionId: `sess-${unit}` });
+        decisionId = v.details.result.decisionId;
         converted++;
       }
     }
     assert.ok(converted > 0, "30 units at 50/50 must hit treatment");
     const flushed = await client.flush();
     assert.ok(flushed >= converted);
+    const diag = await client.diagnose(decisionId);
+    assert.equal(diag.exposureStatus, "recorded");
+    assert.ok(Number(diag.conversionCount) >= 1);
+    const metrics = await fetch(`${env.server.baseUrl}/api/v1/sdk/metrics`, {
+      headers: { Authorization: `Bearer ${env.sdkToken}` },
+    }).then(r => r.json()) as Record<string, number>;
+    assert.ok(metrics.exposures >= converted);
+    assert.ok(metrics.conversions >= converted);
+    assert.deepEqual(Object.keys(metrics).sort(), ["conversions", "exposures"]);
 
     const rep = await env.report();
     const treat = rep.perVariant.find((v: any) => v.variant === "treatment");

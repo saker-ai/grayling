@@ -84,18 +84,20 @@ type Options struct {
 
 // Provider is an OpenFeature FeatureProvider backed by golab local
 // evaluation. It also implements the StateHandler (Init/Shutdown) and
-// EventHandler (PROVIDER_READY / PROVIDER_STALE) contracts.
+// EventHandler contracts.
 type Provider struct {
 	opts   Options
 	client *sdk.Client
 
 	events chan of.Event
 
-	mu       sync.Mutex
-	lastSent of.State
-	stop     chan struct{}
-	stopOnce sync.Once
-	wg       sync.WaitGroup
+	mu           sync.Mutex
+	lastSent     of.State
+	lastRevision int64
+	seenRevision bool
+	stop         chan struct{}
+	stopOnce     sync.Once
+	wg           sync.WaitGroup
 }
 
 // Compile-time contract checks against the OpenFeature SDK interfaces.
@@ -103,6 +105,7 @@ var (
 	_ of.FeatureProvider = (*Provider)(nil)
 	_ of.StateHandler    = (*Provider)(nil)
 	_ of.EventHandler    = (*Provider)(nil)
+	_ of.Tracker         = (*Provider)(nil)
 )
 
 // NewProvider builds the provider. Call OpenFeature's SetProvider/SetProviderAndWait
@@ -115,8 +118,8 @@ func NewProvider(opts Options) *Provider {
 		opts.MonitorInterval = 500 * time.Millisecond
 	}
 	return &Provider{
-		opts:   opts,
-		events: make(chan of.Event, 8),
+		opts:     opts,
+		events:   make(chan of.Event, 8),
 		lastSent: of.NotReadyState,
 	}
 }
@@ -127,6 +130,21 @@ func (p *Provider) Metadata() of.Metadata { return of.Metadata{Name: Name} }
 // Hooks implements of.FeatureProvider. Golab exposure capture happens inside
 // evaluation (only on real enrollment), so no OF hooks are attached.
 func (p *Provider) Hooks() []of.Hook { return nil }
+
+// Track maps an OpenFeature tracking event to the metric of a prior decision.
+// Callers pass the opaque golabDecisionId from evaluation metadata as the
+// tracking event detail "decisionId". The SDK resolves the unit privately.
+func (p *Provider) Track(_ context.Context, trackingEventName string,
+	_ of.EvaluationContext, details of.TrackingEventDetails) {
+	if p.client == nil || trackingEventName == "" {
+		return
+	}
+	id, ok := details.Attribute("decisionId").(string)
+	if !ok || id == "" {
+		return
+	}
+	_ = p.client.TrackConversionByDecisionID(id, trackingEventName, details.Value())
+}
 
 // Init implements of.StateHandler: it starts (or adopts and starts) the
 // golab SDK client and launches the provider-state monitor. A failed initial
@@ -156,8 +174,7 @@ func (p *Provider) Init(_ of.EvaluationContext) error {
 	p.client = client
 	p.client.Start(context.Background())
 
-	p.wg.Add(1)
-	go p.monitor()
+	p.wg.Go(p.monitor)
 	return nil
 }
 
@@ -182,23 +199,36 @@ func (p *Provider) Shutdown() {
 // EventChannel implements of.EventHandler.
 func (p *Provider) EventChannel() <-chan of.Event { return p.events }
 
+// SampledEvents exposes opt-in OpenTelemetry-shaped evaluation events after
+// Init. Collection exposures and conversions are never sampled.
+func (p *Provider) SampledEvents() <-chan model.EvaluationEvent {
+	if p.client == nil {
+		return nil
+	}
+	return p.client.SampledEvents()
+}
+
 // monitor translates golab SDK sync health into OpenFeature provider state
 // transitions: NOT_READY → READY on first snapshot, READY ↔ STALE across the
 // MaxStaleness kill-switch window.
 func (p *Provider) monitor() {
-	defer p.wg.Done()
 	t := time.NewTicker(p.opts.MonitorInterval)
 	defer t.Stop()
 	for {
 		if p.client != nil {
 			st := p.client.Status()
 			switch {
+			case st.LastError != "" && !st.Stale:
+				p.transition(of.ErrorState, "golab upstream synchronization failed")
 			case !st.Ready:
-				// stay NOT_READY (initial state); nothing to emit
+				// no validated snapshot yet
 			case st.Stale:
 				p.transition(of.StaleState, "golab snapshot exceeded max staleness")
 			default:
 				p.transition(of.ReadyState, "golab snapshot synchronized")
+			}
+			if st.Ready {
+				p.configurationChanged(st.ManifestRevision)
 			}
 		}
 		select {
@@ -224,13 +254,46 @@ func (p *Provider) transition(to of.State, message string) {
 		eventType = of.ProviderReady
 	case of.StaleState:
 		eventType = of.ProviderStale
+	case of.ErrorState:
+		eventType = of.ProviderError
 	default:
 		return
 	}
+	details := of.ProviderEventDetails{Message: message}
+	if p.client != nil {
+		details.EventMetadata = map[string]any{
+			"manifestRevision": p.client.Status().ManifestRevision,
+		}
+	}
+	if to == of.ErrorState {
+		details.ErrorCode = of.GeneralCode
+	}
 	select {
 	case p.events <- of.Event{ProviderName: Name, EventType: eventType,
-		ProviderEventDetails: of.ProviderEventDetails{Message: message}}:
-	default: // slow consumer: the next transition retry will re-emit
+		ProviderEventDetails: details}:
+	default: // bounded channel; slow consumers receive the newest future state
+	}
+}
+
+func (p *Provider) configurationChanged(revision int64) {
+	p.mu.Lock()
+	previous := p.lastRevision
+	first := !p.seenRevision
+	p.seenRevision = true
+	if first || revision == previous {
+		p.lastRevision = revision
+		p.mu.Unlock()
+		return
+	}
+	p.lastRevision = revision
+	p.mu.Unlock()
+	select {
+	case p.events <- of.Event{ProviderName: Name, EventType: of.ProviderConfigChange,
+		ProviderEventDetails: of.ProviderEventDetails{
+			Message:       "golab configuration changed",
+			EventMetadata: map[string]any{"manifestRevision": revision},
+		}}:
+	default:
 	}
 }
 
@@ -413,6 +476,15 @@ func metadata(res model.Result) of.FlagMetadata {
 	}
 	if res.Bucket >= 0 {
 		md["golabBucket"] = int64(res.Bucket)
+	}
+	if res.DecisionID != "" {
+		md["golabDecisionId"] = res.DecisionID
+		md["golabManifestRevision"] = res.ManifestRevision
+		md["golabSnapshotAgeMillis"] = res.SnapshotAgeMillis
+		md["golabRule"] = res.Rule
+		if res.ExposureEventID != "" {
+			md["golabExposureEventId"] = res.ExposureEventID
+		}
 	}
 	return md
 }

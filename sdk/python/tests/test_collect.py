@@ -34,6 +34,7 @@ def _now_rfc3339() -> str:
 def test_track_conversion_reaches_report(env):
     with make_client(env, exposure_flush_interval=0.2) as client:
         converted = 0
+        converted_details = None
         for i in range(30):
             unit = f"conv-user-{i}"
             _, details = client.string_variation(
@@ -43,9 +44,30 @@ def test_track_conversion_reaches_report(env):
                 client.track_conversion(details, "conversion", 1.0,
                                         session_id=f"sess-{unit}")
                 converted += 1
+                decision = details.result.decision_id
+                converted_details = details
         assert converted > 0, "30 units at 50/50 must hit treatment"
         n = client.flush()
         assert n >= converted
+        diag = client.diagnose(decision)
+        assert diag["exposureStatus"] == "recorded"
+        assert diag["conversionCount"] >= 1
+        before = diag["conversionCount"]
+        exp = converted_details.result.experiment
+        raw_collect(env, [{
+            "eventId": f"forged-{uuid.uuid4().hex}",
+            "decisionId": decision, "type": "conversion",
+            "experimentId": exp.experiment_id, "epoch": exp.epoch,
+            "flagKey": "py-exp", "variant": exp.variant,
+            "unit": "different-unit", "metricKey": "conversion", "value": 1,
+            "clientTime": _now_rfc3339(),
+        }])
+        assert client.diagnose(decision)["conversionCount"] == before
+        _, metrics = env.server.request("GET", "/api/v1/sdk/metrics",
+                                        env.sdk_token, expect=200)
+        assert metrics["exposures"] >= converted
+        assert metrics["conversions"] >= converted
+        assert set(metrics) == {"exposures", "conversions"}
 
         rep = env.report()
         treat = next(v for v in rep["perVariant"] if v["variant"] == "treatment")
