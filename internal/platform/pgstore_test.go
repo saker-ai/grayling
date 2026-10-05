@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -811,7 +814,7 @@ func TestPGFlagLifecycleAndAIPins(t *testing.T) {
 }
 
 // TestPGMigrationsIdempotent: repeated opens re-run the migration gate
-// without error and the schema records exactly one applied version.
+// without error and the schema records each applied version once.
 func TestPGMigrationsIdempotent(t *testing.T) {
 	dsn := pgtest.DSN(t)
 	for i := 0; i < 3; i++ {
@@ -823,10 +826,297 @@ func TestPGMigrationsIdempotent(t *testing.T) {
 			t.Fatalf("close %d: %v", i, err)
 		}
 	}
-	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM schema_migrations`); got[0][0] != "1" {
+	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM schema_migrations`); got[0][0] != "2" {
 		t.Fatalf("schema_migrations rows: %v", got)
 	}
 	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM workspaces`); got[0][0] != "3" {
 		t.Fatalf("workspaces: %v", got)
 	}
+}
+
+func TestPGManagementConcurrentWrites(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	a, b := openPGStore(t, dsn), openPGStore(t, dsn)
+	type created struct {
+		ws  *Workspace
+		err error
+	}
+	results := make(chan created, 2)
+	start := make(chan struct{})
+	for _, s := range []*Store{a, b} {
+		go func() { <-start; ws, err := s.CreateWorkspace("shared", ""); results <- created{ws, err} }()
+	}
+	close(start)
+	r1, r2 := <-results, <-results
+	if (r1.err == nil) == (r2.err == nil) {
+		t.Fatalf("expected one winner and one conflict: %v, %v", r1.err, r2.err)
+	}
+	loser := r1
+	winner := r2
+	if r2.err != nil {
+		loser, winner = r2, r1
+	}
+	if !errors.Is(loser.err, ErrConflict) {
+		t.Fatalf("loser: %v", loser.err)
+	}
+	if _, err := a.CreateWorkspace("shared", ""); !errors.Is(err, ErrExists) {
+		t.Fatalf("retry same slug: %v", err)
+	}
+	if _, err := b.CreateWorkspace("shared", ""); !errors.Is(err, ErrExists) {
+		t.Fatalf("retry same slug on other replica: %v", err)
+	}
+	ws := winner.ws
+	if err := a.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	first, err := a.CreateToken(TokenAdmin, "first", RoleViewer, ws.ID, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.CreateToken(TokenAdmin, "second", RoleViewer, ws.ID, "", "test"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale token create: %v", err)
+	}
+	second, err := b.CreateToken(TokenAdmin, "second", RoleViewer, ws.ID, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Token.ID == second.Token.ID {
+		t.Fatalf("duplicate token ID %q", first.Token.ID)
+	}
+	if err := a.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RevokeToken(first.Token.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ResolveToken(first.Secret); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("revoked token accepted on other replica: %v", err)
+	}
+	if err := b.Audit("test", RoleOwner, "test.first", ws.ID, "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Audit("test", RoleOwner, "test.second", ws.ID, "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	start = make(chan struct{})
+	auditErrors := make(chan error, 2)
+	for _, s := range []*Store{a, b} {
+		go func() { <-start; auditErrors <- s.Audit("test", RoleOwner, "test.concurrent", ws.ID, "", "", "") }()
+	}
+	close(start)
+	for range 2 {
+		if err := <-auditErrors; err != nil {
+			t.Fatalf("concurrent audit: %v", err)
+		}
+	}
+	if err := a.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	q1, q2 := DefaultQuotas(), DefaultQuotas()
+	q1.MaxFlags, q2.MaxFlags = 101, 102
+	if err := a.SetQuotas(ws.ID, q1); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SetQuotas(ws.ID, q2); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale quota update: %v", err)
+	}
+	if err := b.SetQuotas(ws.ID, q2); err != nil {
+		t.Fatalf("quota retry: %v", err)
+	}
+	c := openPGStore(t, dsn)
+	if got := c.GetQuotas(ws.ID).MaxFlags; got != 102 {
+		t.Fatalf("quota after restart: %d", got)
+	}
+	if got := c.ListTokens(ws.ID); len(got) != 2 || !got[0].Revoked && !got[1].Revoked {
+		t.Fatalf("tokens after restart: %+v", got)
+	}
+	audits := c.AuditList(ws.ID, 0)
+	if len(audits) != 4 || audits[0].ID == audits[1].ID || audits[1].ID == audits[2].ID || audits[2].ID == audits[3].ID {
+		t.Fatalf("audit after restart: %+v", audits)
+	}
+}
+
+// The two contenders below are separate OS processes with independent pools
+// and memory images, both connected to the same real PostgreSQL database.
+func TestPGManagementSubprocess(t *testing.T) {
+	if dsn := os.Getenv("GOLAB_PG_CHILD_DSN"); dsn != "" {
+		store := openPGStore(t, dsn)
+		ready, start := os.Getenv("GOLAB_PG_CHILD_READY"), os.Getenv("GOLAB_PG_CHILD_START")
+		if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			if _, err := os.Stat(start); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("start barrier timeout")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		var err error
+		switch os.Getenv("GOLAB_PG_CHILD_ACTION") {
+		case "create":
+			_, err = store.CreateWorkspace("process-shared", "")
+		case "update":
+			q := DefaultQuotas()
+			q.MaxFlags = 77
+			err = store.SetQuotas(os.Getenv("GOLAB_PG_CHILD_WS"), q)
+		case "revoke":
+			err = store.RevokeToken(os.Getenv("GOLAB_PG_CHILD_TOKEN"))
+		case "audit":
+			err = store.Audit("child", RoleOwner, "child.concurrent", os.Getenv("GOLAB_PG_CHILD_WS"), "", "", "")
+		default:
+			t.Fatal("unknown child action")
+		}
+		switch {
+		case err == nil:
+			fmt.Println("RESULT WIN")
+		case errors.Is(err, ErrConflict):
+			fmt.Println("RESULT CONFLICT")
+		default:
+			t.Fatal(err)
+		}
+		return
+	}
+	dsn := pgtest.DSN(t)
+	type outcome struct {
+		output []byte
+		err    error
+	}
+	runRace := func(action, wsID, tokenID string, wantWins, wantConflicts int) {
+		t.Helper()
+		dir := t.TempDir()
+		start := filepath.Join(dir, "start")
+		results := make(chan outcome, 2)
+		for i := range 2 {
+			ready := filepath.Join(dir, fmt.Sprintf("ready-%d", i))
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestPGManagementSubprocess$", "-test.v")
+			cmd.Env = append(os.Environ(), "GOLAB_PG_CHILD_DSN="+dsn,
+				"GOLAB_PG_CHILD_ACTION="+action, "GOLAB_PG_CHILD_WS="+wsID,
+				"GOLAB_PG_CHILD_TOKEN="+tokenID,
+				"GOLAB_PG_CHILD_READY="+ready, "GOLAB_PG_CHILD_START="+start)
+			go func() { output, err := cmd.CombinedOutput(); results <- outcome{output, err} }()
+		}
+		deadline := time.Now().Add(20 * time.Second)
+		for i := range 2 {
+			ready := filepath.Join(dir, fmt.Sprintf("ready-%d", i))
+			for {
+				if _, err := os.Stat(ready); err == nil {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("%s process %d failed to reach barrier", action, i)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+		if err := os.WriteFile(start, []byte("start"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		wins, conflicts := 0, 0
+		for range 2 {
+			r := <-results
+			if r.err != nil {
+				t.Fatalf("%s child: %v\n%s", action, r.err, r.output)
+			}
+			if strings.Contains(string(r.output), "RESULT WIN") {
+				wins++
+			}
+			if strings.Contains(string(r.output), "RESULT CONFLICT") {
+				conflicts++
+			}
+		}
+		if wins != wantWins || conflicts != wantConflicts {
+			t.Fatalf("%s: wins=%d conflicts=%d", action, wins, conflicts)
+		}
+	}
+	runRace("create", "", "", 1, 1)
+	c := openPGStore(t, dsn)
+	if got := c.ListWorkspaces(); len(got) != 1 {
+		t.Fatalf("workspaces after restart: %+v", got)
+	}
+	wsID := c.ListWorkspaces()[0].ID
+	runRace("update", wsID, "", 1, 1)
+	if err := c.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.GetQuotas(wsID).MaxFlags; got != 77 {
+		t.Fatalf("quota after processes: %d", got)
+	}
+	created, err := c.CreateToken(TokenAdmin, "process-token", RoleViewer, wsID, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runRace("revoke", wsID, created.Token.ID, 1, 1)
+	if _, err := c.ResolveToken(created.Secret); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("revoked token after processes: %v", err)
+	}
+	runRace("audit", wsID, "", 2, 0)
+	if err := c.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.AuditList(wsID, 0); len(got) != 2 || got[0].ID == got[1].ID {
+		t.Fatalf("audit after processes: %+v", got)
+	}
+}
+
+func TestPGManagementLockTimeoutAndDisconnect(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	a, b := openPGStore(t, dsn), openPGStore(t, dsn)
+	key := int64(0x676f6c61622d7465)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	release, err := a.persist.(*pgPersistence).LockScope(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	short, stop := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer stop()
+	if _, err := b.persist.(*pgPersistence).LockScope(short, key); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("lock timeout: %v", err)
+	}
+	release()
+	reacquire, err := b.persist.(*pgPersistence).LockScope(ctx, key)
+	if err != nil {
+		t.Fatalf("lock after release: %v", err)
+	}
+	reacquire()
+	// A killed PostgreSQL session must release its advisory lock.
+	conn, err := a.persist.(*pgPersistence).pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pid int32
+	if err := conn.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, key); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.persist.(*pgPersistence).pool.Exec(ctx, `SELECT pg_terminate_backend($1)`, pid); err != nil {
+		t.Fatal(err)
+	}
+	conn.Release()
+	reacquire, err = b.persist.(*pgPersistence).LockScope(ctx, key)
+	if err != nil {
+		t.Fatalf("lock after terminated session: %v", err)
+	}
+	reacquire()
 }

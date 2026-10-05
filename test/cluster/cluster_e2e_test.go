@@ -280,6 +280,20 @@ type client struct {
 }
 
 func (c *client) do(method, path string, body any, out any) int {
+	// Management writes use a PostgreSQL compare-and-swap epoch. A replica
+	// that just joined or reloaded may legitimately return a retryable 409
+	// when another replica committed first; refresh happens on that conflict.
+	for attempt := range 5 {
+		status := c.doOnce(method, path, body, out)
+		if status != http.StatusConflict || attempt == 4 {
+			return status
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return http.StatusConflict
+}
+
+func (c *client) doOnce(method, path string, body any, out any) int {
 	c.t.Helper()
 	var rdr io.Reader
 	if body != nil {

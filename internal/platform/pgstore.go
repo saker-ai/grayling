@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -35,9 +36,9 @@ import (
 //     through the new layer inside one transaction (密钥轮换迁移路径); the
 //     hash-chain property keeps unit identity linkable across rotations.
 //
-// Reads are served from the in-memory working set (loaded in full at open),
-// matching the single-node topology of the file backend; PostgreSQL is the
-// durable source of truth across restarts.
+// Most reads use the in-memory working set; token authentication queries
+// PostgreSQL directly so cross-replica revocation is immediately enforced.
+// Management writes compare the loaded control version in the database.
 type pgPersistence struct {
 	pool            *pgxpool.Pool
 	lastAcceptedIDs map[string]bool
@@ -99,6 +100,7 @@ type pgMigration struct {
 
 var pgMigrations = []pgMigration{
 	{1, pgSchemaV1},
+	{2, `ALTER TABLE meta ADD COLUMN control_version bigint NOT NULL DEFAULT 0`},
 }
 
 const pgSchemaV1 = `
@@ -393,6 +395,11 @@ CREATE TABLE quotas (
 func (p *pgPersistence) migrate(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, pgCommitTimeout)
 	defer cancel()
+	release, err := p.LockScope(ctx, 0x676f6c61622d6462)
+	if err != nil {
+		return fmt.Errorf("platform: migration lock: %w", err)
+	}
+	defer release()
 	if _, err := p.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
         version int PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return fmt.Errorf("platform: init schema_migrations: %w", err)
@@ -449,12 +456,24 @@ func (p *pgPersistence) Commit(data *Data, ch *ChangeSet) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	control := ch.Meta || ch.Rotation || len(ch.Audit) > 0
+	for _, keys := range ch.Dirty {
+		control = control || len(keys) > 0
+	}
+	for _, keys := range ch.Deleted {
+		control = control || len(keys) > 0
+	}
+	if control {
+		if err := p.claimControlVersion(ctx, tx, data); err != nil {
+			return err
+		}
+	}
 
 	// Rotation BEFORE meta: it detects missing ring versions, and meta then
 	// persists the ring rows idempotently.
 	if ch.Rotation {
 		if err := p.applyRotation(ctx, tx, data); err != nil {
-			return err
+			return pgConflict(err)
 		}
 	}
 	if ch.Meta {
@@ -463,10 +482,10 @@ func (p *pgPersistence) Commit(data *Data, ch *ChangeSet) error {
 		}
 	}
 	if err := p.commitDirty(ctx, tx, data, ch); err != nil {
-		return err
+		return pgConflict(err)
 	}
 	if err := p.commitDeleted(ctx, tx, ch); err != nil {
-		return err
+		return pgConflict(err)
 	}
 	accepted := map[string]bool{}
 	if len(ch.Events) > 0 {
@@ -487,7 +506,7 @@ func (p *pgPersistence) Commit(data *Data, ch *ChangeSet) error {
 	}
 	if len(ch.Audit) > 0 {
 		if err := p.commitAudit(ctx, tx, ch.Audit); err != nil {
-			return err
+			return pgConflict(err)
 		}
 	}
 	if !ch.PruneEventsBefore.IsZero() {
@@ -496,23 +515,44 @@ func (p *pgPersistence) Commit(data *Data, ch *ChangeSet) error {
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return err
+		return pgConflict(err)
+	}
+	if control {
+		data.ControlVersion++
 	}
 	p.lastAcceptedIDs = accepted
 	return nil
 }
 
-func (p *pgPersistence) commitMeta(ctx context.Context, tx pgx.Tx, data *Data) error {
-	_, err := tx.Exec(ctx, `
-        INSERT INTO meta (id, next_counter, next_audit, schema_version, updated_at)
-        VALUES (1, $1, $2, $3, now())
-        ON CONFLICT (id) DO UPDATE
-        SET next_counter = EXCLUDED.next_counter, next_audit = EXCLUDED.next_audit,
-            schema_version = EXCLUDED.schema_version, updated_at = now()`,
-		data.NextCounter, data.NextAudit, dataSchemaVersion)
-	if err != nil {
-		return fmt.Errorf("platform: persist meta: %w", err)
+func pgConflict(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505", "40001", "40P01":
+			return fmt.Errorf("%w: PostgreSQL write conflict (%s); reload and retry: %v", ErrConflict, pgErr.Code, err)
+		}
 	}
+	return err
+}
+
+func (p *pgPersistence) claimControlVersion(ctx context.Context, tx pgx.Tx, data *Data) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO meta (id, next_counter, next_audit, schema_version, control_version)
+		VALUES (1, 1, 0, $1, 0) ON CONFLICT (id) DO NOTHING`, dataSchemaVersion); err != nil {
+		return pgConflict(err)
+	}
+	result, err := tx.Exec(ctx, `UPDATE meta SET next_counter=$1, next_audit=$2,
+		control_version=control_version+1, updated_at=now()
+		WHERE id=1 AND control_version=$3`, data.NextCounter, data.NextAudit, data.ControlVersion)
+	if err != nil {
+		return pgConflict(err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("%w: management state changed on another replica; reload and retry", ErrConflict)
+	}
+	return nil
+}
+
+func (p *pgPersistence) commitMeta(ctx context.Context, tx pgx.Tx, data *Data) error {
 	batch := &pgx.Batch{}
 	for i, key := range data.HMACKeyRing {
 		batch.Queue(`INSERT INTO hmac_keys (version, key_hex) VALUES ($1, $2)
@@ -1278,8 +1318,7 @@ func (p *pgPersistence) commitAudit(ctx context.Context, tx pgx.Tx, entries []*A
 	for _, e := range entries {
 		batch.Queue(`INSERT INTO audit
             (id, time, actor, actor_role, action, workspace_id, environment_id, object, detail)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-            ON CONFLICT (id) DO NOTHING`,
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 			e.ID, e.Time.UTC(), e.Actor, string(e.ActorRole), e.Action,
 			e.WorkspaceID, e.EnvironmentID, e.Object, e.Detail)
 	}
@@ -1529,14 +1568,37 @@ func (p *pgPersistence) analysisEvents(exp *Experiment, now time.Time) ([]*Event
 // ---------------------------------------------------------------------------
 
 func (p *pgPersistence) Load() (*Data, error) {
+	for range 5 {
+		d, err := p.loadOnce()
+		if err != nil {
+			return nil, err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), pgLoadTimeout)
+		var version int64
+		err = p.pool.QueryRow(ctx, `SELECT control_version FROM meta WHERE id=1`).Scan(&version)
+		cancel()
+		if errors.Is(err, pgx.ErrNoRows) && d.ControlVersion == 0 {
+			return d, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if version == d.ControlVersion {
+			return d, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: management state changed repeatedly during reload; retry", ErrConflict)
+}
+
+func (p *pgPersistence) loadOnce() (*Data, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), pgLoadTimeout)
 	defer cancel()
 	d := newData()
 
 	var nextCounter, nextAudit, schemaVersion int64
 	err := p.pool.QueryRow(ctx,
-		`SELECT next_counter, next_audit, schema_version FROM meta WHERE id = 1`).
-		Scan(&nextCounter, &nextAudit, &schemaVersion)
+		`SELECT next_counter, next_audit, schema_version, control_version FROM meta WHERE id = 1`).
+		Scan(&nextCounter, &nextAudit, &schemaVersion, &d.ControlVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, nil // empty backend; bootstrap follows
 	}
@@ -1585,6 +1647,36 @@ func (p *pgPersistence) Load() (*Data, error) {
 		return nil, err
 	}
 	return d, nil
+}
+
+// LookupToken checks the primary database for every authentication decision.
+// A token revoked on another replica must never remain valid through this
+// replica's cached working set.
+func (p *pgPersistence) LookupToken(hash string) (*Token, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	t := &Token{}
+	var kind, role string
+	var lastUsed *time.Time
+	err := p.pool.QueryRow(ctx, `SELECT id, name, kind, role, workspace_id, environment_id,
+		secret_hash, prefix, created_at, last_used_at, revoked, created_by
+		FROM tokens WHERE secret_hash=$1`, hash).Scan(&t.ID, &t.Name, &kind, &role,
+		&t.WorkspaceID, &t.EnvironmentID, &t.SecretHash, &t.Prefix, &t.CreatedAt,
+		&lastUsed, &t.Revoked, &t.CreatedBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("%w: unknown token", ErrAccessDenied)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if t.Revoked {
+		return nil, fmt.Errorf("%w: token revoked", ErrAccessDenied)
+	}
+	t.Kind, t.Role = TokenKind(kind), Role(role)
+	if lastUsed != nil {
+		t.LastUsedAt = *lastUsed
+	}
+	return t, nil
 }
 
 func (p *pgPersistence) loadTenants(ctx context.Context, d *Data) error {

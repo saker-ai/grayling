@@ -31,6 +31,8 @@ type Data struct {
 	SchemaVersion int `json:"schemaVersion"`
 
 	NextCounter int64 `json:"nextCounter"`
+	// ControlVersion is a PostgreSQL compare-and-swap epoch for management writes.
+	ControlVersion int64 `json:"controlVersion,omitempty"`
 
 	Workspaces   map[string]*Workspace   `json:"workspaces"`   // by ID
 	EnvBySlugKey map[string]string       `json:"envBySlugKey"` // wsID/slug -> envID
@@ -151,7 +153,11 @@ func newStore(p Persistence) (*Store, error) {
 	// behavior of NewStore writing the store file on open.
 	s.changes.Meta = true
 	if err := s.commitLocked(); err != nil {
-		return nil, err
+		if !errors.Is(err, ErrConflict) {
+			return nil, err
+		}
+		// Another replica initialized or advanced the shared store while we
+		// opened it. Reloaded by commitLocked; no bootstrap write is needed.
 	}
 	return s, nil
 }
@@ -229,6 +235,16 @@ func (s *Store) commitLocked() error {
 		return nil
 	}
 	if err := s.persist.Commit(s.data, s.changes); err != nil {
+		if errors.Is(err, ErrConflict) {
+			// The attempted mutation did not commit. Discard its working-set
+			// changes before another request can see or replay them.
+			if d, loadErr := s.persist.Load(); loadErr == nil && d != nil {
+				s.data = d
+				s.changes = newChangeSet()
+			} else if loadErr != nil {
+				return fmt.Errorf("platform: reload after conflict: %w (original: %v)", loadErr, err)
+			}
+		}
 		return fmt.Errorf("platform: persist: %w", err)
 	}
 	s.changes = newChangeSet()
@@ -453,12 +469,15 @@ func hashSecret(secret string) string {
 // ResolveToken authenticates a presented secret and returns the token
 // metadata. Revoked or unknown tokens yield ErrAccessDenied.
 //
-// LastUsedAt is updated in memory with a 60s throttle and WITHOUT forcing a
-// disk save: SDK/collect endpoints authenticate on every request, and a
-// full-store persist per request would dominate latency. The touch rides
-// along with the next mutation that saves.
+// PostgreSQL looks up the token in the database on every request so revocation
+// on another replica takes effect immediately. File/memory stores update
+// LastUsedAt in memory with a 60s throttle; that touch rides along with the
+// next mutation that saves.
 func (s *Store) ResolveToken(secret string) (*Token, error) {
 	hash := hashSecret(secret)
+	if lookup, ok := s.persist.(interface{ LookupToken(string) (*Token, error) }); ok {
+		return lookup.LookupToken(hash)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id, ok := s.data.TokensByHash[hash]
@@ -517,16 +536,23 @@ func (s *Store) ListTokens(workspaceID string) []*Token {
 func (s *Store) Audit(actor string, role Role, action, workspaceID, environmentID, object, detail string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry := &AuditEntry{
-		ID: s.data.NextAudit, Time: s.now(), Actor: actor, ActorRole: role,
-		Action: action, WorkspaceID: workspaceID, EnvironmentID: environmentID,
-		Object: object, Detail: detail,
+	for attempt := range 20 {
+		entry := &AuditEntry{
+			ID: s.data.NextAudit, Time: s.now(), Actor: actor, ActorRole: role,
+			Action: action, WorkspaceID: workspaceID, EnvironmentID: environmentID,
+			Object: object, Detail: detail,
+		}
+		s.data.NextAudit++
+		s.data.Audit = append(s.data.Audit, entry)
+		s.changes.Audit = append(s.changes.Audit, entry)
+		s.changes.Meta = true
+		err := s.commitLocked()
+		if !errors.Is(err, ErrConflict) || attempt == 19 {
+			return err
+		}
+		time.Sleep(time.Duration(attempt+1) * time.Millisecond)
 	}
-	s.data.NextAudit++
-	s.data.Audit = append(s.data.Audit, entry)
-	s.changes.Audit = append(s.changes.Audit, entry)
-	s.changes.Meta = true
-	return s.commitLocked()
+	return nil
 }
 
 // AuditList returns the most recent entries first, limited to n (0 = all).

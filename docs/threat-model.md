@@ -95,7 +95,7 @@
 
 | 威胁场景 | 现状缓解（证据） | 残余风险与建议 |
 |---|---|---|
-| SQL 注入（PostgreSQL 后端） | **抽查结论：行级 DML 全部参数化，未发现用户输入拼接进 SQL。**抽查点：`commitMeta`/`hmac_keys` upsert（`$1,$2`）、`commitAggs`（`$1..$12`）、`commitCounts`（`$1..$7`）、`commitAudit`（`$1..$9`）、`rehashStored` 重映射（`$1,$2,$3` + 固定 UPDATE…FROM）、`pruneEvents` 边界删除（`$1`）、`KnownEventIDs`（`= ANY($1)`）、`loadFlags`/`loadEvents` 等为无参固定 SELECT；事件批量写入用 `CopyFrom` 临时表 + 固定 CTE（`commitEvents`），无字符串插值。全文件仅两处 `fmt.Sprintf` 进 SQL，均为 DDL 且输入非用户可控：① 建月分区 `events_YYYYMM`，名字与 FROM/TO 边界由服务端 UTC 时钟整数与 RFC3339 生成（`ensureEventsPartition`）；② `DROP TABLE IF EXISTS %s`，表名来自 `pg_class/pg_inherits` 目录查询（父表限定 `events`）并经 `partitionUpperBound` 格式校验（6 位数字、月份 1–12） | 无已知注入路径。DDL 依赖"单写入方"假设（`ensureEventsPartition` 注释：并发建分区属多实例写，单节点拓扑排除）；多副本部署前需复核（实施状态已知限制 2） |
+| SQL 注入（PostgreSQL 后端） | **抽查结论：行级 DML 全部参数化，未发现用户输入拼接进 SQL。**抽查点：`commitMeta`/`hmac_keys` upsert（`$1,$2`）、`commitAggs`（`$1..$12`）、`commitCounts`（`$1..$7`）、`commitAudit`（`$1..$9`）、`rehashStored` 重映射（`$1,$2,$3` + 固定 UPDATE…FROM）、`pruneEvents` 边界删除（`$1`）、`KnownEventIDs`（`= ANY($1)`）、`loadFlags`/`loadEvents` 等为无参固定 SELECT；事件批量写入用 `CopyFrom` 临时表 + 固定 CTE（`commitEvents`），无字符串插值。全文件仅两处 `fmt.Sprintf` 进 SQL，均为 DDL 且输入非用户可控：① 建月分区 `events_YYYYMM`，名字与 FROM/TO 边界由服务端 UTC 时钟整数与 RFC3339 生成（`ensureEventsPartition`）；② `DROP TABLE IF EXISTS %s`，表名来自 `pg_class/pg_inherits` 目录查询（父表限定 `events`）并经 `partitionUpperBound` 格式校验（6 位数字、月份 1–12） | 无已知注入路径。分区 DDL 多副本安全性由真实 PostgreSQL 并发事件测试覆盖；管理写入的条件事务与唯一键见[多副本管理写入](多副本管理写入.md) |
 | flag DSL / 正则 ReDoS | 正则模式 ≤512B（`MaxRegexLen`）且发布时必须编译通过（`pkg/model/validate.go:validateConstraint`）；求值侧对单次匹配输入截断 ≤4096B（`pkg/evaluation/constraints.go:MaxRegexInputBytes`，`TestRegexInputLengthBound`）；Go `regexp` 为 RE2 线性时间引擎，无灾难性回溯 | 512B 内仍可构造高成本 RE2 模式（如大重复乘积），复杂度线性于输入但常数可大；发布是受 RBAC 控制的管理操作，风险面限于租户自伤。可选：求值超时/成本采样 |
 | 约束操作符注入 | 操作符闭集 17 个（`pkg/model/types.go:Operators`），未注册操作符直接拒绝；字段闭集（仅注册字段可被约束，"§5.2 closed field set"）；每类操作符的操作数类型/格式逐一校验（CIDR、semver、RFC3339/epoch、数值、标量）；数量上限：variations 64、targeting 64、constraints 32、segments/rule 16、集合值 512、segment 深度 ≤8 且循环引用拒绝（`validateSegmentTree`，`TestSegmentsNestedAndCycles`）；flag/segment key 受 `KeyPattern`（`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`）约束后才可嵌入 gonacos dataId | 无已知残余 |
 | JSON 请求走私/字段污染 | 所有 API body 经 `decodeJSON`：`MaxBytesReader` 字节上限 + `DisallowUnknownFields` 严格解码（`server.go`），未知字段 400；admin body ≤2MiB（`admin_handlers.go:maxAdminBodyBytes`）；gff 导入同样严格解析、不支持字段显式报错（技术方案 §5.2，`internal/gffimport`） | 无已知残余 |
@@ -173,7 +173,7 @@
 | TLS 终止 | `cmd/golab` 与 `cmd/golab-proxy` 均监听明文 HTTP（默认且建议 loopback：`127.0.0.1:8688`/`8689`）；仓库无 TLS 配置代码 | 运维：前置 TLS 终止（LB/Ingress）；租户流量绝不走明文网络 |
 | HMAC 密钥轮换 API | `Store.RotateHMACKey` 只有存储层入口，未暴露管理 API（实施状态已知限制 1） | 运维：按迁移流程执行；仓库：待审计流程设计后再开 API |
 | 备份 / 恢复联合演练 | gonacos Snapshot、PostgreSQL、密钥须按同一恢复点联合备份与演练（技术方案 §11）；**演练未做**（实施状态已知限制 1） | 运维：多租户生产前完成一次端到端演练并核对 revision |
-| 多节点 / 集群 | gonacos 集群模式（外部 Redis）、GoLab 多副本对账**未验证**；PG 后端读路径服务自单节点内存工作集，多副本需要读扩散/失效协议（实施状态已知限制 2；`ensureEventsPartition` 单写入方假设） | 运维：当前只按单节点部署；扩容前先在仓库侧完成多副本设计 |
+| 多节点 / 集群 | 双真实进程与共享 PostgreSQL/Redis 的发布对账已验证；普通管理写入由 `meta.control_version` 条件事务保护，冲突返回 409；令牌认证直接查库。其余管理读路径仍依赖对账 tick 收敛（实施状态已知限制 2） | 运维：保留对账任务并监控冲突重试；参见[多副本管理写入](多副本管理写入.md) |
 | gonacos 非 loopback 的生产网络验证 | 代码提供 opt-in 闸门（§2.2），但技术方案 §12.5 要求的"生产验证未授权直连被拒"未完成 | 运维+仓库：多租户生产前必办（§3.2） |
 | 正式压测基线 | `test/perf` 已提供三项正式压测（本地求值 P99、发布→SDK 可见时延、SSE 并发连接；`-short` 下跳过），结果连同硬件与样本量已记入 [实施状态](实施状态.md)"性能证据"节，§13 待测目标在本机回环基线下达成 | 运维+仓库：本机回环基线不等于跨网络 SLO；生产配额（`DefaultQuotas` 自述为开发保守值）与限流参数仍须以生产同构环境压测复核后设定 |
 
@@ -203,7 +203,7 @@
 2. **生产网络策略验证**：gonacos 底座对租户直连不可达（默认 loopback；如显式 opt-in 非 loopback，须按技术方案 §9 完成"未授权直连被拒"的实测）。
 3. **备份/恢复联合演练**：gonacos Snapshot + PostgreSQL + HMAC 密钥按同一恢复点演练，恢复后重建 manifest/SDK 快照并核对 revision（技术方案 §11；实施状态已知限制 1）。
 4. **密钥轮换流程**：以 `Store.RotateHMACKey` 为存储层入口制定运维迁移与审计流程；是否暴露管理 API 待审计设计后决定（实施状态已知限制 1）。
-5. **多节点决策**：当前仅支持单节点拓扑（内存工作集读路径、分区 DDL 单写入方假设）；扩容前完成多副本读扩散/失效设计与验证（实施状态已知限制 2）。
+5. **多节点决策**：共享 PostgreSQL/Redis 双副本已验证；管理读路径除令牌认证外仍由周期重载收敛，扩容时配置并监控对账间隔（实施状态已知限制 2）。
 6. **正式压测与生产配额**：以压测确定 P99/SLO、限流参数与 `Quotas` 生产值（`DefaultQuotas` 为开发保守值；实施状态 P0 行）。
 7. **浏览器/瘦客户端接入方式**：只经 `/api/v1/sdk/eval`（可经 `cmd/golab-proxy`），不下发全量快照（实施状态已知限制 6）。
 8. **依赖升级纪律**：gonacos/gff 升级必须重跑 `test/smoke` 契约测试与全量测试，并建议补充 govulncheck 类漏洞扫描（当前仓库未配置）。
