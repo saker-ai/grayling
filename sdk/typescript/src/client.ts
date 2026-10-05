@@ -394,6 +394,9 @@ export class GolabClient {
       ...d,
       result: {
         ...d.result,
+        value: null,
+        variationType: "",
+        reason: "ERROR",
         errorCode: "TYPE_MISMATCH",
         errorDetails: `flag value is ${typeof d.value}, want ${want}`,
         failed: true,

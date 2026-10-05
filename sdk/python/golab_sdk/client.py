@@ -421,9 +421,9 @@ class GolabClient:
                        want: str) -> EvaluationDetails:
         got = type(details.value).__name__
         res = Result(
-            flag_key=flag_key, value=details.value,
-            variation_type=details.result.variation_type,
-            reason=details.result.reason, error_code="TYPE_MISMATCH",
+            flag_key=flag_key, value=None,
+            variation_type="",
+            reason="ERROR", error_code="TYPE_MISMATCH",
             error_details=f"flag value is {got}, want {want}",
             failed=True, flag_version=details.result.flag_version,
             track_events=False, experiment=None, bucket=details.result.bucket,

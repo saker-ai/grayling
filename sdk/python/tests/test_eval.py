@@ -89,6 +89,8 @@ def test_type_mismatch_returns_caller_default(env):
         assert value is True
         assert details.result.failed is True
         assert details.result.error_code == "TYPE_MISMATCH"
+        assert details.result.reason == "ERROR"
+        assert details.result.variation_type == ""
 
 
 def test_transport_error_returns_caller_default(env):

@@ -91,6 +91,8 @@ test("type mismatch → caller default + TYPE_MISMATCH", async () => {
     assert.equal(v.value, true);
     assert.equal(v.details.result.failed, true);
     assert.equal(v.details.result.errorCode, "TYPE_MISMATCH");
+    assert.equal(v.details.result.reason, "ERROR");
+    assert.equal(v.details.result.variationType, "");
   } finally { await client.close(); }
 });
 
