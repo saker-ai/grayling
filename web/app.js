@@ -650,7 +650,7 @@ function viewExpCreate(m) {
     '<h4>' + esc(t('exp.primaryMetric')) + '</h4>' +
     '<div class="form-grid">' +
       '<label class="field">' + esc(t('exp.metricKey')) + '<input id="x-mkey" placeholder="checkout_success"></label>' +
-      '<label class="field">' + esc(t('th.type')) + '<select id="x-mtype"><option>proportion</option><option>mean</option><option>ratio</option><option>quantile</option></select></label>' +
+      '<label class="field">' + esc(t('th.type')) + '<select id="x-mtype"><option>proportion</option><option>mean</option><option>ratio</option><option>quantile</option><option>funnel</option><option>retention</option></select></label>' +
       '<label class="field">' + esc(t('exp.betterDir')) + '<select id="x-mdir"><option>increase</option><option>decrease</option></select></label>' +
     '</div>' +
     '<div class="form-grid" id="x-metric-adv">' +
@@ -658,6 +658,7 @@ function viewExpCreate(m) {
       '<label class="field" id="x-denkey-wrap">' + esc(t('exp.denominatorKey')) + ' <span class="muted">' + esc(t('exp.denominatorHint')) + '</span><input id="x-denkey" placeholder="sessions"></label>' +
       '<label class="field" id="x-qlevel-wrap">' + esc(t('exp.quantileLevel')) + ' <span class="muted">' + esc(t('exp.quantileHint')) + '</span><input id="x-qlevel" type="number" step="0.01" min="0.01" max="0.99" placeholder="0.95"></label>' +
       '<label class="field" id="x-covkey-wrap">' + esc(t('exp.covariateKey')) + ' <span class="muted">' + esc(t('exp.covariateHint')) + '</span><input id="x-covkey" placeholder="pre_period_value"></label>' +
+      '<label class="field" id="x-journey-wrap">' + esc(t('exp.journeySpec')) + '<textarea id="x-journey" rows="3" placeholder="{&quot;steps&quot;:[&quot;view&quot;,&quot;pay&quot;],&quot;dedupUnit&quot;:&quot;user&quot;,&quot;stepTimeout&quot;:3600000000000}"></textarea></label>' +
     '</div>' +
 	'<div class="form-grid" id="x-bandit" style="display:none">' +
 	  '<label class="field">' + esc(t('exp.policyVersion')) + '<input id="x-policy-version" value="bandit-v1"></label>' +
@@ -706,6 +707,7 @@ function viewExpCreate(m) {
     show('x-denkey-wrap', t === 'ratio');
     show('x-qlevel-wrap', t === 'quantile');
     show('x-covkey-wrap', t === 'mean');
+    show('x-journey-wrap', t === 'funnel' || t === 'retention');
   };
   mtype.onchange = syncMetricAdv;
   syncMetricAdv();
@@ -714,10 +716,11 @@ function viewExpCreate(m) {
     const row = document.createElement('div');
     row.className = 'vrow';
     row.innerHTML = '<input class="g-key" placeholder="metricKey">' +
-      '<select class="g-type"><option>proportion</option><option>mean</option></select>' +
+      '<select class="g-type"><option>proportion</option><option>mean</option><option>funnel</option><option>retention</option></select>' +
       '<select class="g-dir"><option value="increase">' + esc(t('exp.increaseGood')) + '</option><option value="decrease">' + esc(t('exp.decreaseGood')) + '</option></select>' +
       '<input class="g-reg" type="number" step="0.01" placeholder="' + esc(t('ph.maxReg')) + '">' +
       '<input class="g-min" type="number" placeholder="minSample">' +
+      '<textarea class="g-journey" rows="2" placeholder="' + esc(t('exp.journeySpec')) + ' JSON"></textarea>' +
       '<button class="btn sm">✕</button>';
     $('button', row).onclick = () => row.remove();
     guards.appendChild(row);
@@ -739,6 +742,12 @@ function viewExpCreate(m) {
       maxRelativeRegression: Number($('.g-reg', r).value || 0),
       minSample: Number($('.g-min', r).value || 0),
     })).filter(g => g.metricKey);
+    try {
+      $$('.vrow', guards).filter(r => $('.g-key', r).value.trim()).forEach((r, i) => {
+        const g = guardrails[i];
+        if (g.type === 'funnel' || g.type === 'retention') g[g.type] = JSON.parse($('.g-journey', r).value);
+      });
+    } catch { toast(t('exp.journeyInvalid'), false); return; }
     const pm = { key: $('#x-mkey', m).value.trim(), type: $('#x-mtype', m).value, direction: $('#x-mdir', m).value };
     if (pm.type === 'ratio') {
       const num = $('#x-numkey', m).value.trim();
@@ -749,6 +758,9 @@ function viewExpCreate(m) {
     } else if (pm.type === 'mean') {
       const cov = $('#x-covkey', m).value.trim();
       if (cov) pm.covariateKey = cov;
+    } else if (pm.type === 'funnel' || pm.type === 'retention') {
+      try { pm[pm.type] = JSON.parse($('#x-journey', m).value); }
+      catch { toast(t('exp.journeyInvalid'), false); return; }
     }
     const body = {
       flagKey: $('#x-flag', m).value.trim(),
@@ -907,6 +919,17 @@ function renderReport(box, r) {
       '</td><td>' + esc(v.exposures) + '</td><td>' + esc(v.convertedUnits) + '</td><td>' + esc(v.primaryValue) + '</td></tr>').join('') ||
       '<tr><td colspan="6" class="muted">' + esc(t('report.noData')) + '</td></tr>') +
     '</tbody></table>' +
+    ((r.journeys || []).length ? '<h4>' + esc(t('report.journeys')) + '</h4>' +
+      r.journeys.map(j => '<div><b>' + esc(j.metric) + '</b> · ' + esc(j.type) +
+        ' · ' + esc(t('report.watermark')) + ': ' + esc(j.watermark) +
+        '<pre class="pre small">' + esc(JSON.stringify(j.funnel || j.retention)) + '</pre>' +
+        '<table class="grid"><thead><tr><th>' + esc(t('th.variant')) + '</th><th>' + esc(t('report.denominator')) +
+        '</th><th>' + esc(t('report.numerator')) + '</th><th>' + esc(t('report.immature')) +
+        '</th><th>' + esc(t('report.excluded')) + '</th></tr></thead><tbody>' +
+        (j.arms || []).map(a => '<tr><td>' + esc(a.variant) + '</td><td>' + esc(a.denominator) +
+          '</td><td>' + esc(a.numerator) + '</td><td>' + esc(a.immature) +
+          '</td><td class="mono">' + esc(JSON.stringify(a.excluded || {})) + '</td></tr>').join('') +
+        '</tbody></table></div>').join('') : '') +
     '<h4>' + esc(t('report.primary')) + (p ? ' <span class="muted">(' + esc(p.type || '') + ')</span>' : '') +
       (r.holm ? ' <span class="muted">' + esc(t('report.primaryRawNote')) + '</span>' : '') + '</h4>' +
     (p

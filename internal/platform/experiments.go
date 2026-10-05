@@ -50,6 +50,9 @@ func (s *Store) CreateExperiment(exp *Experiment) (*Experiment, error) {
 	if exp.AllocationMode == "" {
 		exp.AllocationMode = "fixed-split"
 	}
+	if exp.AnalysisMethod == "" && (exp.PrimaryMetric.Type == "funnel" || exp.PrimaryMetric.Type == "retention") {
+		exp.AnalysisMethod = "two-proportion-z"
+	}
 	if err := validateExperimentInvariants(exp); err != nil {
 		return nil, err
 	}
@@ -87,7 +90,7 @@ func (s *Store) CreateExperiment(exp *Experiment) (*Experiment, error) {
 	}
 	exp.RegistrationVersion = version
 	stored := exp
-	if exp.HolmFamily != nil {
+	if exp.HolmFamily != nil || exp.PrimaryMetric.Funnel != nil || exp.PrimaryMetric.Retention != nil || hasJourneyGuardrail(exp.Guardrails) {
 		stored = cloneRegisteredExperiment(exp)
 	}
 	s.data.Experiments[exp.ID] = stored
@@ -107,6 +110,10 @@ func cloneRegisteredExperiment(exp *Experiment) *Experiment {
 	}
 	clone.PrimaryMetric = cloneRegisteredMetric(exp.PrimaryMetric)
 	clone.Guardrails = slices.Clone(exp.Guardrails)
+	for i := range clone.Guardrails {
+		clone.Guardrails[i].Funnel = cloneFunnel(exp.Guardrails[i].Funnel)
+		clone.Guardrails[i].Retention = cloneRetention(exp.Guardrails[i].Retention)
+	}
 	if exp.HolmFamily != nil {
 		family := *exp.HolmFamily
 		family.Hypotheses = slices.Clone(family.Hypotheses)
@@ -119,6 +126,8 @@ func cloneRegisteredExperiment(exp *Experiment) *Experiment {
 }
 
 func cloneRegisteredMetric(metric MetricSpec) MetricSpec {
+	metric.Funnel = cloneFunnel(metric.Funnel)
+	metric.Retention = cloneRetention(metric.Retention)
 	if metric.Floor != nil {
 		metric.Floor = new(*metric.Floor)
 	}
@@ -126,6 +135,62 @@ func cloneRegisteredMetric(metric MetricSpec) MetricSpec {
 		metric.Ceil = new(*metric.Ceil)
 	}
 	return metric
+}
+
+func cloneFunnel(spec *FunnelSpec) *FunnelSpec {
+	if spec == nil {
+		return nil
+	}
+	clone := *spec
+	clone.Steps = slices.Clone(spec.Steps)
+	return &clone
+}
+
+func cloneRetention(spec *RetentionSpec) *RetentionSpec {
+	if spec == nil {
+		return nil
+	}
+	return new(*spec)
+}
+
+func hasJourneyGuardrail(guards []GuardrailSpec) bool {
+	for _, g := range guards {
+		if g.Funnel != nil || g.Retention != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func validateJourney(typ string, funnel *FunnelSpec, retention *RetentionSpec) error {
+	if typ == "funnel" {
+		if funnel == nil || retention != nil || len(funnel.Steps) < 2 || len(funnel.Steps) > 32 || funnel.StepTimeout <= 0 ||
+			(funnel.DedupUnit != "user" && funnel.DedupUnit != "session") {
+			return fmt.Errorf("%w: funnel requires ordered steps, user|session dedup and positive stepTimeout", ErrValidation)
+		}
+		seen := map[string]bool{}
+		for _, step := range funnel.Steps {
+			if step == "" || seen[step] {
+				return fmt.Errorf("%w: funnel steps must be nonempty and unique", ErrValidation)
+			}
+			seen[step] = true
+		}
+		return nil
+	}
+	if typ == "retention" {
+		if retention == nil || funnel != nil || retention.ReturnKey == "" ||
+			(retention.Day != 1 && retention.Day != 7) || retention.Timezone == "" {
+			return fmt.Errorf("%w: retention requires returnKey, D1|D7 and timezone", ErrValidation)
+		}
+		if _, err := time.LoadLocation(retention.Timezone); err != nil {
+			return fmt.Errorf("%w: invalid retention timezone: %v", ErrValidation, err)
+		}
+		return nil
+	}
+	if funnel != nil || retention != nil {
+		return fmt.Errorf("%w: journey spec requires funnel or retention metric", ErrValidation)
+	}
+	return nil
 }
 
 func validateExperimentInvariants(exp *Experiment) error {
@@ -181,7 +246,7 @@ func validateExperimentInvariants(exp *Experiment) error {
 		return fmt.Errorf("%w: proportions sum to %v, want 100", ErrValidation, sum)
 	}
 	switch exp.PrimaryMetric.Type {
-	case "proportion", "mean":
+	case "proportion", "mean", "funnel", "retention":
 	case "ratio":
 		// Ratio needs a numerator and a denominator metric key (§10.1). Key may
 		// serve as the numerator, but the denominator must be explicit.
@@ -200,6 +265,34 @@ func validateExperimentInvariants(exp *Experiment) error {
 	default:
 		return fmt.Errorf("%w: primary metric type must be proportion|mean|ratio|quantile, got %q",
 			ErrValidation, exp.PrimaryMetric.Type)
+	}
+	if err := validateJourney(exp.PrimaryMetric.Type, exp.PrimaryMetric.Funnel, exp.PrimaryMetric.Retention); err != nil {
+		return err
+	}
+	if exp.PrimaryMetric.Type == "funnel" || exp.PrimaryMetric.Type == "retention" {
+		if exp.PrimaryMetric.NumeratorKey != "" || exp.PrimaryMetric.DenominatorKey != "" || exp.PrimaryMetric.QuantileLevel != 0 || exp.PrimaryMetric.Floor != nil || exp.PrimaryMetric.Ceil != nil {
+			return fmt.Errorf("%w: journey metrics cannot use ratio, quantile or clamp parameters", ErrValidation)
+		}
+		if exp.AnalysisMethod != "" && exp.AnalysisMethod != "two-proportion-z" {
+			return fmt.Errorf("%w: journey primary requires two-proportion-z analysis", ErrValidation)
+		}
+	}
+	for _, g := range exp.Guardrails {
+		if g.Type != "mean" && g.Type != "proportion" && g.Type != "funnel" && g.Type != "retention" {
+			return fmt.Errorf("%w: unsupported guardrail type %q", ErrValidation, g.Type)
+		}
+		if err := validateJourney(g.Type, g.Funnel, g.Retention); err != nil {
+			return err
+		}
+		if (g.Type == "funnel" || g.Type == "retention") && (g.MetricKey == "" || g.MinSample <= 0 || g.MaxRelativeRegression < 0) {
+			return fmt.Errorf("%w: journey guardrail needs metricKey, minSample and nonnegative threshold", ErrValidation)
+		}
+		if (g.Type == "funnel" || g.Type == "retention") && g.Direction != "increase" && g.Direction != "decrease" {
+			return fmt.Errorf("%w: journey guardrail direction must be increase|decrease", ErrValidation)
+		}
+	}
+	if (exp.PrimaryMetric.Type == "funnel" || exp.PrimaryMetric.Type == "retention" || hasJourneyGuardrail(exp.Guardrails)) && exp.AllocationMode == "bandit" {
+		return fmt.Errorf("%w: journey metrics require fixed-split allocation", ErrValidation)
 	}
 	if exp.PrimaryMetric.Key == "" && exp.PrimaryMetric.NumeratorKey == "" {
 		return fmt.Errorf("%w: primary metric key required", ErrValidation)
@@ -334,7 +427,7 @@ func (s *Store) GetExperiment(id string) (*Experiment, error) {
 	if !ok {
 		return nil, fmt.Errorf("%w: experiment %q", ErrNotFound, id)
 	}
-	if e.HolmFamily != nil {
+	if e.HolmFamily != nil || e.PrimaryMetric.Funnel != nil || e.PrimaryMetric.Retention != nil || hasJourneyGuardrail(e.Guardrails) {
 		return cloneRegisteredExperiment(e), nil
 	}
 	return e, nil
@@ -348,7 +441,7 @@ func (s *Store) ListExperiments(workspaceID, environmentID string) []*Experiment
 	out := []*Experiment{}
 	for _, e := range s.data.Experiments {
 		if e.WorkspaceID == workspaceID && (environmentID == "" || e.EnvironmentID == environmentID) {
-			if e.HolmFamily != nil {
+			if e.HolmFamily != nil || e.PrimaryMetric.Funnel != nil || e.PrimaryMetric.Retention != nil || hasJourneyGuardrail(e.Guardrails) {
 				out = append(out, cloneRegisteredExperiment(e))
 			} else {
 				out = append(out, e)
@@ -369,7 +462,7 @@ func (s *Store) TransitionExperiment(id string, to model.ExperimentState, actor 
 		return nil, fmt.Errorf("%w: experiment %q", ErrNotFound, id)
 	}
 	if e.State == to {
-		if e.HolmFamily != nil {
+		if e.HolmFamily != nil || e.PrimaryMetric.Funnel != nil || e.PrimaryMetric.Retention != nil || hasJourneyGuardrail(e.Guardrails) {
 			return cloneRegisteredExperiment(e), nil
 		}
 		return e, nil // idempotent
@@ -392,7 +485,7 @@ func (s *Store) TransitionExperiment(id string, to model.ExperimentState, actor 
 	e.UpdatedAt = now
 	s.changes.markDirty(collExperiments, id)
 	err := s.commitLocked()
-	if e.HolmFamily != nil {
+	if e.HolmFamily != nil || e.PrimaryMetric.Funnel != nil || e.PrimaryMetric.Retention != nil || hasJourneyGuardrail(e.Guardrails) {
 		return cloneRegisteredExperiment(e), err
 	}
 	return e, err

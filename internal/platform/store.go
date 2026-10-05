@@ -660,6 +660,9 @@ func (s *Store) RotateHMACKey(newKeyHex string) error {
 	// Re-hash every stored pseudonym in memory with the new layer.
 	for _, ev := range s.data.Events {
 		ev.UnitHash = hashUnitLayer(newKeyHex, ev.WorkspaceID, ev.UnitHash)
+		if ev.SessionID != "" {
+			ev.SessionID = hashUnitLayer(newKeyHex, ev.WorkspaceID, ev.SessionID)
+		}
 	}
 	s.data.UnitAggs = rehashAggKeys(s.data.UnitAggs, newKeyHex)
 	s.data.ExposedUnits = rehashUnitSets(s.data.ExposedUnits, newKeyHex)

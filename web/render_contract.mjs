@@ -75,6 +75,15 @@ const incomplete = render({ ...base, healthy: false, healthIssues: ['watermark p
   window: { ...base.window, complete: false, issues: ['watermark pending'] } });
 assert(incomplete.includes('Incomplete') && incomplete.includes('watermark pending'), 'incomplete window reason missing');
 
+const journey = render({ ...base, healthy: false, healthIssues: ['immature cohorts'],
+  journeys: [{ metric: 'd1', type: 'retention', watermark: '2026-10-02T00:00:00Z',
+    retention: { returnKey: 'visit', day: 1, timezone: 'UTC' },
+    arms: [{ variant: 'control', denominator: 8, numerator: 3, immature: 2,
+      excluded: { immature_cohort: 2, no_return_in_window: 5 } }] }] });
+assert(journey.includes('Funnel / retention populations') && journey.includes('Denominator') &&
+  journey.includes('Numerator') && journey.includes('Immature') && journey.includes('immature_cohort') &&
+  journey.includes('2026-10-02T00:00:00Z'), 'journey counts or watermark missing');
+
 // 2. ratio primary → delta-method detail line.
 html = render({
   ...base,
@@ -138,4 +147,4 @@ assert(html.includes('Adaptive Bandit report') && html.includes('p1'), 'bandit p
 assert(!html.includes('two-proportion-z') && !html.includes('SHIP') && !html.includes('p = 0.001'),
   'fixed-sample inference leaked into bandit report');
 
-console.log('renderReport DOM contract: all assertions passed (7 report shapes)');
+console.log('renderReport DOM contract: all assertions passed (8 report shapes)');

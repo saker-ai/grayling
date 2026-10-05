@@ -736,6 +736,7 @@ func (p *pgPersistence) applyRotation(ctx context.Context, tx pgx.Tx, data *Data
 func (p *pgPersistence) rehashStored(ctx context.Context, tx pgx.Tx, keyHex string) error {
 	rows, err := tx.Query(ctx, `
         SELECT DISTINCT workspace_id, unit_hash FROM events
+        UNION SELECT DISTINCT workspace_id, session_id FROM events WHERE session_id <> ''
         UNION SELECT workspace_id, unit_hash FROM exposed_units
         UNION SELECT workspace_id, unit_hash FROM split_exposed_units
         UNION SELECT workspace_id, unit_hash FROM unit_aggs
@@ -774,6 +775,8 @@ func (p *pgPersistence) rehashStored(ctx context.Context, tx pgx.Tx, keyHex stri
 	for _, stmt := range []string{
 		`UPDATE events e SET unit_hash = r.new_hash
 		   FROM _remap r WHERE e.workspace_id = r.workspace_id AND e.unit_hash = r.old_hash`,
+		`UPDATE events e SET session_id = r.new_hash
+		   FROM _remap r WHERE e.workspace_id = r.workspace_id AND e.session_id = r.old_hash`,
 		`UPDATE exposed_units u SET unit_hash = r.new_hash
 		   FROM _remap r WHERE u.workspace_id = r.workspace_id AND u.unit_hash = r.old_hash`,
 		`UPDATE split_exposed_units u SET unit_hash = r.new_hash

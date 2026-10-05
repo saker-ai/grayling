@@ -196,7 +196,26 @@ type MetricSpec struct {
 	// (§10.1: CUPED 需实验前协变量和实验后结果的同单元配对数据). When set on a
 	// mean metric and paired data exists, the report uses the CUPED-adjusted
 	// (variance-reduced) test as the primary result.
-	CovariateKey string `json:"covariateKey,omitempty"`
+	CovariateKey string         `json:"covariateKey,omitempty"`
+	Funnel       *FunnelSpec    `json:"funnel,omitempty"`
+	Retention    *RetentionSpec `json:"retention,omitempty"`
+}
+
+// FunnelSpec names ordered conversion metric keys. The first matching event
+// starts the timeout. Session dedup requires an opaque session ID on events.
+type FunnelSpec struct {
+	Steps       []string      `json:"steps"`
+	DedupUnit   string        `json:"dedupUnit"` // user|session
+	StepTimeout time.Duration `json:"stepTimeout"`
+}
+
+// RetentionSpec uses the first split exposure (or first CohortKey conversion)
+// as cohort start. Day is a local calendar day, not a 24-hour duration.
+type RetentionSpec struct {
+	CohortKey string `json:"cohortKey"` // empty means first split exposure
+	ReturnKey string `json:"returnKey"`
+	Day       int    `json:"day"` // 1 or 7
+	Timezone  string `json:"timezone"`
 }
 
 // GuardrailSpec is an operational protection rule, evaluated separately from
@@ -210,8 +229,10 @@ type GuardrailSpec struct {
 	Direction string `json:"direction,omitempty"`
 	// MaxRelativeRegression: breach when the treatment arm regresses against
 	// control by more than this fraction (0.05 = 5%).
-	MaxRelativeRegression float64 `json:"maxRelativeRegression"`
-	MinSample             int64   `json:"minSample"` // below this, no breach — insufficient data
+	MaxRelativeRegression float64        `json:"maxRelativeRegression"`
+	MinSample             int64          `json:"minSample"` // below this, no breach — insufficient data
+	Funnel                *FunnelSpec    `json:"funnel,omitempty"`
+	Retention             *RetentionSpec `json:"retention,omitempty"`
 }
 
 // HolmHypothesis is one confirmatory fixed-sample comparison. Every member of

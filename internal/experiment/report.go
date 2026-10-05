@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/godeps/golab/internal/platform"
@@ -68,6 +69,7 @@ type Report struct {
 	Bandit              *BanditSection   `json:"bandit,omitempty"`
 	RegistrationVersion string           `json:"registrationVersion,omitempty"`
 	Holm                *HolmSection     `json:"holm,omitempty"`
+	Journeys            []JourneySection `json:"journeys,omitempty"`
 }
 
 // BayesianSection carries the Bayesian posterior summary, kept structurally
@@ -122,7 +124,11 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		return nil, err
 	}
 	version, err := platform.ExperimentRegistrationVersion(exp)
-	if err != nil || (exp.HolmFamily != nil && version != exp.RegistrationVersion) {
+	registeredJourney := exp.PrimaryMetric.Type == "funnel" || exp.PrimaryMetric.Type == "retention"
+	for _, g := range exp.Guardrails {
+		registeredJourney = registeredJourney || g.Type == "funnel" || g.Type == "retention"
+	}
+	if err != nil || ((exp.HolmFamily != nil || registeredJourney) && version != exp.RegistrationVersion) {
 		return nil, fmt.Errorf("experiment %s registration contract differs from persisted version", experimentID)
 	}
 	if exp.AllocationMode == "bandit" {
@@ -166,6 +172,21 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	if window.Backend == "postgresql-raw" {
 		rep.HealthIssues = append(rep.HealthIssues, window.Issues...)
 	}
+	journeyPrimary := exp.PrimaryMetric.Type == "funnel" || exp.PrimaryMetric.Type == "retention"
+	journeyGuard := false
+	for _, g := range exp.Guardrails {
+		journeyGuard = journeyGuard || g.Type == "funnel" || g.Type == "retention"
+	}
+	var journeyEvents []*platform.Event
+	if journeyPrimary || journeyGuard {
+		journeyEvents, err = store.AnalysisEventSnapshot(exp, now)
+		if err != nil {
+			return nil, fmt.Errorf("experiment %s: journey raw events: %w", experimentID, err)
+		}
+		if !window.Recomputable {
+			rep.HealthIssues = append(rep.HealthIssues, "journey decision requires recomputable PostgreSQL raw events")
+		}
+	}
 
 	// ---- volumes ----
 	allExposed := analysis.ExperimentAggregate(exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch, nil)
@@ -198,6 +219,17 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		convCtrl, convTreat   int64
 	)
 	switch exp.PrimaryMetric.Type {
+	case "funnel", "retention":
+		section := buildJourney(exp, exp.PrimaryMetric.Type, exp.PrimaryMetric.Key, exp.PrimaryMetric.Funnel,
+			exp.PrimaryMetric.Retention, journeyEvents, window)
+		rep.Journeys = append(rep.Journeys, section)
+		ctrlProp, treatProp = journeyStats(section, control, treatment)
+		convCtrl, convTreat = ctrlProp.Conversions, treatProp.Conversions
+		for _, arm := range section.Arms {
+			if arm.Immature > 0 {
+				rep.HealthIssues = append(rep.HealthIssues, fmt.Sprintf("%s %s has %d immature cohorts", section.Metric, arm.Variant, arm.Immature))
+			}
+		}
 	case "proportion", "mean":
 		cs, ts, cc, ct := buildMetricStats(exp.PrimaryMetric.Type, primaryAgg, splitSets, control, treatment)
 		convCtrl, convTreat = cc, ct
@@ -253,9 +285,9 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	setPrimaryValue := func(vr *VariantReport, prop stats.ProportionStats, mean stats.MeanStats,
 		ratio stats.RatioStats, vals []float64) {
 		switch exp.PrimaryMetric.Type {
-		case "proportion":
-			if n := vr.RandomizedUnits; n > 0 {
-				vr.PrimaryValue = float64(prop.Conversions) / float64(n)
+		case "proportion", "funnel", "retention":
+			if prop.N > 0 {
+				vr.PrimaryValue = float64(prop.Conversions) / float64(prop.N)
 			}
 		case "mean":
 			if mean.N > 0 {
@@ -325,7 +357,7 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	var pValue, diff, ciLow, ciHigh float64
 	var significant bool
 	switch exp.PrimaryMetric.Type {
-	case "proportion":
+	case "proportion", "funnel", "retention":
 		res, terr := stats.TwoProportionZTest(ctrlProp, treatProp, exp.Alpha)
 		if terr != nil {
 			rep.PrimaryError = terr.Error()
@@ -446,8 +478,30 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 
 	// ---- guardrails (operational rules, separate from significance) ----
 	for _, g := range exp.Guardrails {
+		var journey *JourneySection
+		if g.Type == "funnel" || g.Type == "retention" {
+			section := buildJourney(exp, g.Type, g.MetricKey, g.Funnel, g.Retention, journeyEvents, window)
+			journey = &section
+			rep.Journeys = append(rep.Journeys, section)
+			for _, arm := range section.Arms {
+				if arm.Immature > 0 {
+					rep.HealthIssues = append(rep.HealthIssues, fmt.Sprintf("guardrail %s %s has %d immature cohorts", section.Metric, arm.Variant, arm.Immature))
+				}
+			}
+		}
 		for _, variant := range exp.Variants[1:] {
-			check := evaluateGuardrail(analysis, exp, g, control, variant, splitSets)
+			var check stats.GuardrailCheck
+			if journey != nil {
+				check = journeyGuardrail(*journey, g, control, variant)
+				if int64(len(splitSets[control])) < g.MinSample || int64(len(splitSets[variant])) < g.MinSample {
+					rep.HealthIssues = append(rep.HealthIssues, "journey guardrail randomized units below min sample: "+g.MetricKey)
+				}
+				if strings.HasPrefix(check.Detail, "journey denominator") || strings.HasPrefix(check.Detail, "journey baseline") {
+					rep.HealthIssues = append(rep.HealthIssues, "journey guardrail unavailable: "+check.Detail)
+				}
+			} else {
+				check = evaluateGuardrail(analysis, exp, g, control, variant, splitSets)
+			}
 			if len(exp.Variants) > 2 {
 				check.Metric += ":" + variant
 			}
@@ -476,6 +530,10 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		Guardrails:          rep.Guardrails,
 		MinRuntimeSatisfied: rep.MinRuntimeSatisfied,
 		DataHealthy:         dataHealthy,
+	}
+	if journeyPrimary {
+		in.NA = min(in.NA, ctrlProp.N)
+		in.NB = min(in.NB, treatProp.N)
 	}
 	if exp.HolmFamily != nil {
 		for _, count := range observed[2:] {

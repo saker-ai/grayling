@@ -104,6 +104,17 @@ func (s *Store) AnalysisStore(exp *Experiment, now time.Time) (*Store, AnalysisW
 	return s, status, nil
 }
 
+// AnalysisEventSnapshot supplies the accepted raw event stream for ordered
+// journey metrics. PostgreSQL reads the durable ledger; local backends are
+// useful for previews but cannot establish historical completeness.
+func (s *Store) AnalysisEventSnapshot(exp *Experiment, now time.Time) ([]*Event, error) {
+	if pg, ok := s.persist.(*pgPersistence); ok {
+		events, _, _, _, err := pg.analysisEvents(exp, now.UTC())
+		return events, err
+	}
+	return s.EventsForExperiment(exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch, ""), nil
+}
+
 func buildAnalysisStore(events []*Event, window AnalysisWindowStatus) *Store {
 	view := &Store{data: newData()}
 	type unitKey struct{ variant, unit string }
@@ -198,6 +209,17 @@ func (s *Store) IngestEvents(events []*Event) (IngestResult, error) {
 			continue
 		}
 		seen[ev.EventID] = true
+		if ev.SessionID != "" {
+			// Never retain a caller supplied session identifier. Copy first so
+			// retries cannot hash the same input twice.
+			copy := *ev
+			hash := "session:" + ev.SessionID
+			for _, key := range s.data.HMACKeyRing {
+				hash = hashUnitLayer(key, ev.WorkspaceID, hash)
+			}
+			copy.SessionID = hash
+			ev = &copy
+		}
 		candidates = append(candidates, ev)
 	}
 

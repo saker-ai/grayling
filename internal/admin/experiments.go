@@ -63,6 +63,8 @@ func (s *Service) CreateExperiment(actor Actor, workspaceID, environmentID strin
 			exp.AnalysisMethod = "ratio-delta"
 		case "quantile":
 			exp.AnalysisMethod = "quantile"
+		case "funnel", "retention":
+			exp.AnalysisMethod = "two-proportion-z"
 		}
 	}
 	if exp.AnalysisWindow <= 0 {

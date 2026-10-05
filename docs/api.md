@@ -60,7 +60,7 @@
 
 | 端点 | 说明 |
 |---|---|
-| `POST {env前缀}/experiments` | 预注册（flagKey/unit/variants/proportions/primaryMetric/guardrails/alpha/power/mde/minSamplePerArm/minRuntime(ns)/analysisWindow(ns)/hypothesis/layer?/eligibility?/holmFamily?）；epoch 自动分配、永不复用；layer 槽位注册即分配。`primaryMetric.type ∈ proportion\|mean\|ratio\|quantile`；ratio 需 `denominatorKey`（`numeratorKey` 缺省用 `key`），quantile 需 `quantileLevel ∈(0,1)`，mean 可带 `covariateKey` 启用 CUPED（见下"高级统计"） |
+| `POST {env前缀}/experiments` | 预注册（flagKey/unit/variants/proportions/primaryMetric/guardrails/alpha/power/mde/minSamplePerArm/minRuntime(ns)/analysisWindow(ns)/hypothesis/layer?/eligibility?/holmFamily?）；epoch 自动分配、永不复用；layer 槽位注册即分配。`primaryMetric.type ∈ proportion\|mean\|ratio\|quantile\|funnel\|retention`；ratio 需 `denominatorKey`（`numeratorKey` 缺省用 `key`），quantile 需 `quantileLevel ∈(0,1)`，mean 可带 `covariateKey` 启用 CUPED；funnel/retention 的预注册结构见 `docs/漏斗与留存.md`（见下"高级统计"） |
 | `GET {env前缀}/experiments`、`GET /api/v1/admin/experiments/{id}` | 列表/详情 |
 | `POST /experiments/{id}/review` | Draft→Reviewed |
 | `POST /experiments/{id}/bind` | 校验 flag 结构与比例一致后注入绑定，生成高风险草稿并转 Scheduled（需二人审批后发布） |
@@ -69,7 +69,7 @@
 
 ### Holm 假设家族（固定样本）
 
-旧的单主指标双臂实验不传 `holmFamily`，原始 p 值、CI 和决策保持原样。需要多个确认性主指标或多个变体比较时，在**创建实验前**把所有将用于发布决策的比较放入同一个 `holmFamily`。目前一个 epoch 只支持一个确认性家族、每家族 2–100 项，成员指标限 `mean`（Welch）或 `proportion`（双比例 z）；CUPED、ratio、quantile 可继续用于单主指标实验，但尚不进入 Holm 家族。第一项必须与 `primaryMetric` 完全一致，且比较 `variants[0]` 与 `variants[1]`；每个额外变体至少有一项注册比较。每项需唯一 `id`、完整 `metric`、`control`、`treatment`。同一指标跨多个变体的比较是多个家族成员，重复的指标/有序臂对拒绝注册。与共享 control 的比较可以相关；Holm 仍控制家族错误率。
+旧的单主指标双臂实验不传 `holmFamily`，原始 p 值、CI 和决策保持原样。需要多个确认性主指标或多个变体比较时，在**创建实验前**把所有将用于发布决策的比较放入同一个 `holmFamily`。目前一个 epoch 只支持一个确认性家族、每家族 2–100 项，成员指标限 `mean`（Welch）或 `proportion`（双比例 z）；CUPED、ratio、quantile、funnel、retention 可继续用于单主指标实验，但尚不进入 Holm 家族。第一项必须与 `primaryMetric` 完全一致，且比较 `variants[0]` 与 `variants[1]`；每个额外变体至少有一项注册比较。每项需唯一 `id`、完整 `metric`、`control`、`treatment`。同一指标跨多个变体的比较是多个家族成员，重复的指标/有序臂对拒绝注册。与共享 control 的比较可以相关；Holm 仍控制家族错误率。
 
 ```json
 {
@@ -150,7 +150,7 @@
 
 ## 采集（collect 凭证）
 
-`POST /api/v1/collect` — `{events:[{eventId, type:"exposure"|"conversion", experimentId, epoch, flagKey?, flagRevision?, variant, unit, source?, metricKey?, value?, sessionId?, taskId?, clientTime}]}`。
+`POST /api/v1/collect` — `{events:[{eventId, type:"exposure"|"conversion", experimentId, epoch, flagKey?, flagRevision?, variant, unit, source?, metricKey?, value?, sessionId?, taskId?, clientTime}]}`。`sessionId` 在服务端哈希后保存；funnel/retention 使用预注册的 `metricKey` 事件（见 `docs/漏斗与留存.md`）。
 
 - `unit` 必填明文，服务端做租户内 HMAC-SHA256 伪名化后存储（原始 unit 不落盘）。
 - `eventId` 幂等去重；重复计入 `duplicates`。
