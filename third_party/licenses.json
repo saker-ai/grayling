@@ -3,6 +3,13 @@
   "scope": "Go module graph (includes test/tool modules), plus TypeScript lockfile; Python SDK has no pinned runtime packages",
   "go": [
     {
+      "module": "cel.dev/expr",
+      "version": "v0.24.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "cloud.google.com/go",
       "version": "v0.123.0",
       "runtime": false,
@@ -10,8 +17,43 @@
       "evidence": []
     },
     {
+      "module": "cloud.google.com/go/bigquery",
+      "version": "v1.8.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "cloud.google.com/go/compute/metadata",
       "version": "v0.9.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "cloud.google.com/go/datastore",
+      "version": "v1.1.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "cloud.google.com/go/pubsub",
+      "version": "v1.3.1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "cloud.google.com/go/storage",
+      "version": "v1.10.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "dmitri.shuralyov.com/gpu/mtl",
+      "version": "v0.0.0-20190408044501-666a987793e9",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -40,6 +82,41 @@
     {
       "module": "github.com/AzureAD/microsoft-authentication-library-for-go",
       "version": "v1.6.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/BurntSushi/toml",
+      "version": "v0.3.1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/BurntSushi/xgb",
+      "version": "v0.0.0-20160522181843-27f122750802",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp",
+      "version": "v1.27.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/alecthomas/template",
+      "version": "v0.0.0-20190718012654-fb15b899a751",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/alecthomas/units",
+      "version": "v0.0.0-20190924025748-f65c72e2690d",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -363,6 +440,13 @@
       "evidence": []
     },
     {
+      "module": "github.com/benbjohnson/clock",
+      "version": "v1.1.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/beorn7/perks",
       "version": "v1.0.1",
       "runtime": false,
@@ -424,6 +508,13 @@
       "evidence": []
     },
     {
+      "module": "github.com/census-instrumentation/opencensus-proto",
+      "version": "v0.2.1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/cespare/xxhash/v2",
       "version": "v2.3.0",
       "runtime": true,
@@ -464,8 +555,29 @@
       "evidence": []
     },
     {
+      "module": "github.com/client9/misspell",
+      "version": "v0.3.4",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/cloudwego/base64x",
       "version": "v0.1.6",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/cncf/udpa/go",
+      "version": "v0.0.0-20191209042840-269d4d468f6f",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/cncf/xds/go",
+      "version": "v0.0.0-20250501225837-2ac532fd4443",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -525,8 +637,92 @@
       ]
     },
     {
+      "module": "github.com/envoyproxy/go-control-plane",
+      "version": "v0.13.4",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/envoyproxy/go-control-plane/envoy",
+      "version": "v1.32.4",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/envoyproxy/go-control-plane/ratelimit",
+      "version": "v0.1.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/envoyproxy/protoc-gen-validate",
+      "version": "v1.2.1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/getkin/kin-openapi",
       "version": "v0.118.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/go-gl/glfw",
+      "version": "v0.0.0-20190409004039-e6da0acd62b1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/go-gl/glfw/v3.3/glfw",
+      "version": "v0.0.0-20200222043503-6f7a984d4dc4",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/go-jose/go-jose/v4",
+      "version": "v4.0.5",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/go-kit/kit",
+      "version": "v0.9.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/go-kit/log",
+      "version": "v0.1.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/go-logfmt/logfmt",
+      "version": "v0.5.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/go-logr/logr",
+      "version": "v1.4.3",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/go-logr/stdr",
+      "version": "v1.2.2",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -546,6 +742,13 @@
       "evidence": []
     },
     {
+      "module": "github.com/go-stack/stack",
+      "version": "v1.8.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/godeps/gonacos",
       "version": "v0.0.0-20260706000526-514208bd40a1",
       "runtime": true,
@@ -553,8 +756,36 @@
       "evidence": []
     },
     {
+      "module": "github.com/gogo/protobuf",
+      "version": "v1.1.1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/goji/httpauth",
+      "version": "v0.0.0-20160601135302-2da839ab0f4d",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/golang-jwt/jwt/v5",
       "version": "v5.3.1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/golang/glog",
+      "version": "v1.2.5",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/golang/groupcache",
+      "version": "v0.0.0-20200121045136-8c9f03a8e57e",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -574,8 +805,22 @@
       "evidence": []
     },
     {
+      "module": "github.com/google/btree",
+      "version": "v1.0.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/google/go-cmp",
       "version": "v0.7.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/google/gofuzz",
+      "version": "v1.0.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -593,8 +838,50 @@
       ]
     },
     {
+      "module": "github.com/google/martian",
+      "version": "v2.1.0+incompatible",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/google/martian/v3",
+      "version": "v3.0.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/google/pprof",
+      "version": "v0.0.0-20200708004538-1a94d8640e99",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/google/renameio",
+      "version": "v0.1.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/google/uuid",
       "version": "v1.6.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/googleapis/gax-go/v2",
+      "version": "v2.0.5",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/gopherjs/gopherjs",
+      "version": "v0.0.0-20200217142428-fce0ec30dd00",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -631,6 +918,13 @@
           "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
         }
       ]
+    },
+    {
+      "module": "github.com/ianlancetaylor/demangle",
+      "version": "v0.0.0-20181102032728-5e5cf60278f6",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
     },
     {
       "module": "github.com/invopop/jsonschema",
@@ -709,8 +1003,43 @@
       "evidence": []
     },
     {
+      "module": "github.com/jpillora/backoff",
+      "version": "v1.0.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/json-iterator/go",
       "version": "v1.1.12",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/jstemmer/go-junit-report",
+      "version": "v0.9.1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/jtolds/gls",
+      "version": "v4.20.0+incompatible",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/julienschmidt/httprouter",
+      "version": "v1.3.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/kisielk/gotool",
+      "version": "v1.0.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -730,8 +1059,29 @@
       "evidence": []
     },
     {
+      "module": "github.com/konsorten/go-windows-terminal-sequences",
+      "version": "v1.0.3",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/kr/logfmt",
+      "version": "v0.0.0-20140226030751-b84e30acd515",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/kr/pretty",
       "version": "v0.3.1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/kr/pty",
+      "version": "v1.1.1",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -826,8 +1176,22 @@
       "evidence": []
     },
     {
+      "module": "github.com/mwitkow/go-conntrack",
+      "version": "v0.0.0-20190716064945-2f068394615f",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/nacos-group/nacos-sdk-go/v2",
       "version": "v2.3.5",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/niemeyer/pretty",
+      "version": "v0.0.0-20200227124842-a10e7caefd8e",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -877,6 +1241,13 @@
     {
       "module": "github.com/pkg/errors",
       "version": "v0.9.1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/planetscale/vtprotobuf",
+      "version": "v0.6.1-0.20240319094008-0393e58bdf10",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -967,6 +1338,27 @@
       ]
     },
     {
+      "module": "github.com/sirupsen/logrus",
+      "version": "v1.6.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/smartystreets/assertions",
+      "version": "v1.1.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/smartystreets/goconvey",
+      "version": "v1.6.4",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/spf13/cast",
       "version": "v1.10.0",
       "runtime": false,
@@ -981,8 +1373,15 @@
       "evidence": []
     },
     {
+      "module": "github.com/spiffe/go-spiffe/v2",
+      "version": "v2.5.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/stretchr/objx",
-      "version": "v0.1.0",
+      "version": "v0.2.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -1101,8 +1500,71 @@
       ]
     },
     {
+      "module": "github.com/zeebo/errs",
+      "version": "v1.4.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/zeebo/xxh3",
       "version": "v1.1.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "go.opencensus.io",
+      "version": "v0.22.4",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "go.opentelemetry.io/auto/sdk",
+      "version": "v1.1.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "go.opentelemetry.io/contrib/detectors/gcp",
+      "version": "v1.36.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "go.opentelemetry.io/otel",
+      "version": "v1.36.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "go.opentelemetry.io/otel/metric",
+      "version": "v1.36.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "go.opentelemetry.io/otel/sdk",
+      "version": "v1.36.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "go.opentelemetry.io/otel/sdk/metric",
+      "version": "v1.36.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "go.opentelemetry.io/otel/trace",
+      "version": "v1.36.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -1191,6 +1653,27 @@
           "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
         }
       ]
+    },
+    {
+      "module": "golang.org/x/image",
+      "version": "v0.0.0-20190802002840-cff245a6509b",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "golang.org/x/lint",
+      "version": "v0.0.0-20200302205851-738671d3881b",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "golang.org/x/mobile",
+      "version": "v0.0.0-20190719004257-d2bd2a29d028",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
     },
     {
       "module": "golang.org/x/mod",
@@ -1300,6 +1783,41 @@
       "evidence": []
     },
     {
+      "module": "golang.org/x/xerrors",
+      "version": "v0.0.0-20200804184101-5ec99f83aff1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "google.golang.org/api",
+      "version": "v0.30.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "google.golang.org/appengine",
+      "version": "v1.6.6",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "google.golang.org/genproto",
+      "version": "v0.0.0-20200825200019-8632dd797987",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "google.golang.org/genproto/googleapis/api",
+      "version": "v0.0.0-20250528174236-200df99c418a",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "google.golang.org/genproto/googleapis/rpc",
       "version": "v0.0.0-20250818200422-3122310a409c",
       "runtime": false,
@@ -1321,8 +1839,22 @@
       "evidence": []
     },
     {
+      "module": "gopkg.in/alecthomas/kingpin.v2",
+      "version": "v2.2.6",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "gopkg.in/check.v1",
       "version": "v1.0.0-20201130134442-10cb98267c6c",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "gopkg.in/errgo.v2",
+      "version": "v2.1.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -1363,6 +1895,34 @@
           "sha256": "f6c2dd3a67b576eafb89b80200b8b1627230bf3821a0c14cb99a22ac19107d00"
         }
       ]
+    },
+    {
+      "module": "honnef.co/go/tools",
+      "version": "v0.0.1-2020.1.4",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "rsc.io/binaryregexp",
+      "version": "v0.2.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "rsc.io/quote/v3",
+      "version": "v3.1.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "rsc.io/sampler",
+      "version": "v1.3.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
     }
   ],
   "npm": [
