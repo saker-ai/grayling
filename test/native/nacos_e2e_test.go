@@ -150,6 +150,12 @@ type nativeConsumer struct {
 
 func (c *nativeConsumer) refresh(client config_client.IConfigClient) {
 	candidate, revision, err := nativeSnapshot(client)
+	c.apply(candidate, revision, err)
+}
+
+// apply also handles a completed fetch that arrives after a newer revision.
+// Only a fully verified, strictly newer candidate may replace the live view.
+func (c *nativeConsumer) apply(candidate *evaluation.Evaluator, revision int64, err error) {
 	c.lastErr = err
 	if err == nil && revision > c.revision {
 		c.evaluator, c.revision = candidate, revision
@@ -196,6 +202,10 @@ func TestNativeSnapshotAtomicityAndStatus(t *testing.T) {
 	if consumer.lastErr != nil || consumer.revision != 1 || consumer.value("first") != false || consumer.value("second") != false {
 		t.Fatalf("initial state: revision=%d error=%v", consumer.revision, consumer.lastErr)
 	}
+	staleEvaluator, staleRevision, err := nativeSnapshot(client)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// One valid new document and one missing document must not expose a mix.
 	first = publishNativeFlag(t, store, namespace, "first", 2, true)
@@ -234,6 +244,11 @@ func TestNativeSnapshotAtomicityAndStatus(t *testing.T) {
 	consumer.refresh(client)
 	if consumer.lastErr != nil || consumer.revision != 4 || consumer.value("first") != true || consumer.value("second") != true {
 		t.Fatalf("repair did not converge: revision=%d error=%v", consumer.revision, consumer.lastErr)
+	}
+	// Finish an older in-flight fetch after revision 4 was installed.
+	consumer.apply(staleEvaluator, staleRevision, nil)
+	if consumer.revision != 4 || consumer.value("first") != true || consumer.value("second") != true {
+		t.Fatalf("delayed candidate replaced revision 4: revision=%d", consumer.revision)
 	}
 }
 
@@ -298,7 +313,6 @@ func TestOfficialNacosClientPublishSubscribeEvaluate(t *testing.T) {
 	if e.Evaluate("checkout", model.EvaluationContext{}).Value != true {
 		t.Fatal("last known good changed")
 	}
-	stale, staleRevision := e, revision
 	// Repair the manifest and show a new official client converges without any
 	// earlier push notification (the reconnect / lost-notification path).
 	publish(t, store, namespace, 4, false)
@@ -319,13 +333,6 @@ func TestOfficialNacosClientPublishSubscribeEvaluate(t *testing.T) {
 	}
 	if err != nil || next != 4 || newEval.Evaluate("checkout", model.EvaluationContext{}).Value != false {
 		t.Fatalf("reconnect revision=%d evaluator=%v err=%v", next, newEval, err)
-	}
-	// A delayed candidate captured at r2 must not replace the r4 evaluator.
-	if staleRevision > next {
-		newEval, next = stale, staleRevision
-	}
-	if next != 4 || newEval.Evaluate("checkout", model.EvaluationContext{}).Value != false {
-		t.Fatal("late manifest replaced current evaluator")
 	}
 }
 
