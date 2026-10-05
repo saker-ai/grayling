@@ -17,6 +17,99 @@ type IngestResult struct {
 	RejectMsgs []string `json:"rejectMessages,omitempty"`
 }
 
+// AnalysisWindowStatus records the versioned UTC population rule used by a
+// report. End is exclusive; Watermark is the latest client time for which the
+// 72-hour ingestion allowance has elapsed.
+type AnalysisWindowStatus struct {
+	Version      string    `json:"version"`
+	Start        time.Time `json:"start"`
+	End          time.Time `json:"end"`
+	Watermark    time.Time `json:"watermark"`
+	Complete     bool      `json:"complete"`
+	Backend      string    `json:"backend"`
+	Recomputable bool      `json:"recomputable"`
+	Issues       []string  `json:"issues,omitempty"`
+}
+
+// AnalysisStore rebuilds the PostgreSQL analysis population from accepted raw
+// events. The local/file backends retain their incremental view for developer
+// use; they cannot establish a durable, complete raw-event watermark.
+func (s *Store) AnalysisStore(exp *Experiment, now time.Time) (*Store, AnalysisWindowStatus, error) {
+	status := AnalysisWindowStatus{Version: "utc-exposure-v1", Backend: "incremental",
+		Watermark: now.UTC().Add(-maxLateWindow)}
+	pg, postgres := s.persist.(*pgPersistence)
+	if postgres {
+		status.Backend = "postgresql-raw"
+		status.Recomputable = true
+	}
+	if exp.StartedAt == nil || exp.AnalysisWindow <= 0 {
+		status.Issues = append(status.Issues, "missing experiment start or analysis window")
+		return s, status, nil
+	}
+	status.Start = exp.StartedAt.UTC()
+	status.End = status.Start.Add(exp.AnalysisWindow)
+	if postgres {
+		events, total, durable, aggregateMismatch, err := pg.analysisEvents(exp, now.UTC())
+		if err != nil {
+			return nil, status, err
+		}
+		if total != durable {
+			status.Issues = append(status.Issues, fmt.Sprintf("raw events %d differ from incremental count %d (retention or replay mismatch)", total, durable))
+		}
+		if aggregateMismatch {
+			status.Issues = append(status.Issues, "raw events differ from incremental unit or exposure aggregates")
+		}
+		if status.Watermark.Before(status.End) {
+			status.Issues = append(status.Issues, "late-event watermark has not reached window end")
+		}
+		view := buildAnalysisStore(events, status)
+		status.Complete = len(status.Issues) == 0
+		return view, status, nil
+	}
+	status.Complete = true // best-effort local view; no durable replay guarantee
+	return s, status, nil
+}
+
+func buildAnalysisStore(events []*Event, window AnalysisWindowStatus) *Store {
+	view := &Store{data: newData()}
+	type unitKey struct{ variant, unit string }
+	exposures := make(map[unitKey]time.Time)
+	splitExposures := make(map[unitKey]time.Time)
+	for _, ev := range events {
+		if ev.Type != EventExposure || ev.ClientTime.Before(window.Start) || !ev.ClientTime.Before(window.End) {
+			continue
+		}
+		key := unitKey{ev.Variant, ev.UnitHash}
+		if first, ok := exposures[key]; !ok || ev.ClientTime.Before(first) {
+			exposures[key] = ev.ClientTime
+		}
+		if ev.Source == "split" {
+			if first, ok := splitExposures[key]; !ok || ev.ClientTime.Before(first) {
+				splitExposures[key] = ev.ClientTime
+			}
+		}
+		view.appendEventLocked(ev)
+	}
+	for _, ev := range events {
+		if ev.Type != EventConversion || !ev.ClientTime.Before(window.End) {
+			continue
+		}
+		first, ok := exposures[unitKey{ev.Variant, ev.UnitHash}]
+		if !ok || ev.ClientTime.Before(first) {
+			continue
+		}
+		if splitAt, randomized := splitExposures[unitKey{ev.Variant, ev.UnitHash}]; randomized && ev.ClientTime.Before(splitAt) {
+			continue
+		}
+		// The pre-registered duration also bounds attribution per exposure.
+		if !ev.ClientTime.Before(first.Add(window.End.Sub(window.Start))) {
+			continue
+		}
+		view.appendEventLocked(ev)
+	}
+	return view
+}
+
 // maxLateWindow bounds how old clientTime may be for attribution (§10.1:
 // 按实验预注册窗口归因 — the platform-level hard bound; per-experiment
 // attribution windows are applied at analysis time).
@@ -140,6 +233,25 @@ func (s *Store) IngestEvents(events []*Event) (IngestResult, error) {
 		}
 		if err := s.commitLocked(); err != nil {
 			return res, err
+		}
+		if pg, ok := s.persist.(*pgPersistence); ok {
+			// A second replica may have won the ledger race after our initial
+			// KnownEventIDs read. The committed ledger is authoritative.
+			accepted := 0
+			for _, ev := range candidates {
+				if pg.lastAcceptedIDs[ev.EventID] {
+					accepted++
+				}
+			}
+			if accepted < res.Accepted {
+				res.Duplicates += res.Accepted - accepted
+				res.Accepted = accepted
+				fresh, err := pg.Load()
+				if err != nil {
+					return res, fmt.Errorf("platform: reload after concurrent ingest: %w", err)
+				}
+				s.data = fresh
+			}
 		}
 	}
 	return res, nil

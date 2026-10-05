@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,7 +39,8 @@ import (
 // matching the single-node topology of the file backend; PostgreSQL is the
 // durable source of truth across restarts.
 type pgPersistence struct {
-	pool *pgxpool.Pool
+	pool            *pgxpool.Pool
+	lastAcceptedIDs map[string]bool
 }
 
 // pgCommitTimeout bounds one Store-operation transaction.
@@ -466,8 +468,10 @@ func (p *pgPersistence) Commit(data *Data, ch *ChangeSet) error {
 	if err := p.commitDeleted(ctx, tx, ch); err != nil {
 		return err
 	}
+	accepted := map[string]bool{}
 	if len(ch.Events) > 0 {
-		if err := p.commitEvents(ctx, tx, ch.Events); err != nil {
+		accepted, err = p.commitEvents(ctx, tx, ch.Events)
+		if err != nil {
 			return err
 		}
 	}
@@ -491,7 +495,11 @@ func (p *pgPersistence) Commit(data *Data, ch *ChangeSet) error {
 			return err
 		}
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	p.lastAcceptedIDs = accepted
+	return nil
 }
 
 func (p *pgPersistence) commitMeta(ctx context.Context, tx pgx.Tx, data *Data) error {
@@ -1105,7 +1113,7 @@ func ensureEventsPartition(ctx context.Context, tx pgx.Tx, t time.Time) error {
 	return nil
 }
 
-func (p *pgPersistence) commitEvents(ctx context.Context, tx pgx.Tx, events []*Event) error {
+func (p *pgPersistence) commitEvents(ctx context.Context, tx pgx.Tx, events []*Event) (map[string]bool, error) {
 	months := map[time.Time]bool{}
 	for _, ev := range events {
 		utc := ev.ServerTime.UTC()
@@ -1113,7 +1121,7 @@ func (p *pgPersistence) commitEvents(ctx context.Context, tx pgx.Tx, events []*E
 	}
 	for _, m := range slices.SortedFunc(maps.Keys(months), time.Time.Compare) {
 		if err := ensureEventsPartition(ctx, tx, m); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if _, err := tx.Exec(ctx, `CREATE TEMP TABLE _ingest (
@@ -1122,15 +1130,15 @@ func (p *pgPersistence) commitEvents(ctx context.Context, tx pgx.Tx, events []*E
         variant text, unit_hash text, session_id text, task_id text,
         source text, metric_key text, value double precision,
         client_time timestamptz, server_time timestamptz) ON COMMIT DROP`); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"_ingest"}, eventColumns,
 		&copyEventSource{events: events}); err != nil {
-		return fmt.Errorf("platform: stage events: %w", err)
+		return nil, fmt.Errorf("platform: stage events: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `CREATE TEMP TABLE _accepted_ingest
         (LIKE _ingest) ON COMMIT DROP`); err != nil {
-		return err
+		return nil, err
 	}
 	// The ledger is the sole authority on acceptance. Every derived write
 	// below reads only these rows; an ambiguous commit replay adds nothing.
@@ -1143,8 +1151,26 @@ WITH led AS (
 )
 INSERT INTO _accepted_ingest SELECT i.* FROM _ingest i JOIN led USING (event_id)`)
 	if err != nil {
-		return fmt.Errorf("platform: accept events: %w", err)
+		return nil, fmt.Errorf("platform: accept events: %w", err)
 	}
+	accepted := map[string]bool{}
+	rows, err := tx.Query(ctx, `SELECT event_id FROM _accepted_ingest`)
+	if err != nil {
+		return nil, fmt.Errorf("platform: read accepted event ids: %w", err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("platform: scan accepted event id: %w", err)
+		}
+		accepted[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("platform: read accepted event ids: %w", err)
+	}
+	rows.Close()
 	_, err = tx.Exec(ctx, `
 WITH payload AS (
     INSERT INTO events (event_id, workspace_id, environment_id, type, experiment_id,
@@ -1178,7 +1204,7 @@ splits AS (
 )
 SELECT count(*) FROM _accepted_ingest`)
 	if err != nil {
-		return fmt.Errorf("platform: persist events: %w", err)
+		return nil, fmt.Errorf("platform: persist events: %w", err)
 	}
 	// Aggregate increments are computed from accepted rows, never from a
 	// replica's potentially stale in-memory counters. PostgreSQL serializes
@@ -1197,7 +1223,7 @@ DO UPDATE SET cnt = unit_aggs.cnt + EXCLUDED.cnt,
     sum_sq = unit_aggs.sum_sq + EXCLUDED.sum_sq,
     first_at = LEAST(unit_aggs.first_at, EXCLUDED.first_at),
     last_at = GREATEST(unit_aggs.last_at, EXCLUDED.last_at)`); err != nil {
-		return fmt.Errorf("platform: persist unit aggregates: %w", err)
+		return nil, fmt.Errorf("platform: persist unit aggregates: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 INSERT INTO event_counts (workspace_id, environment_id, experiment_id, epoch,
@@ -1206,9 +1232,9 @@ SELECT workspace_id, environment_id, experiment_id, epoch, variant, type, count(
 FROM _accepted_ingest GROUP BY 1,2,3,4,5,6
 ON CONFLICT (workspace_id, environment_id, experiment_id, epoch, variant, kind)
 DO UPDATE SET cnt = event_counts.cnt + EXCLUDED.cnt`); err != nil {
-		return fmt.Errorf("platform: persist event counts: %w", err)
+		return nil, fmt.Errorf("platform: persist event counts: %w", err)
 	}
-	return nil
+	return accepted, nil
 }
 
 func (p *pgPersistence) commitAggs(ctx context.Context, tx pgx.Tx, aggs []AggUpsert) error {
@@ -1357,6 +1383,145 @@ func (p *pgPersistence) KnownEventIDs(ids []string) (map[string]bool, error) {
 		out[id] = true
 	}
 	return out, rows.Err()
+}
+
+// analysisEvents reads a consistent raw-event snapshot and the independently
+// maintained event_counts ledger for the same experiment epoch.
+func (p *pgPersistence) analysisEvents(exp *Experiment, now time.Time) ([]*Event, int64, int64, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), pgLoadTimeout)
+	defer cancel()
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, 0, 0, false, fmt.Errorf("platform: begin analysis snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	rows, err := tx.Query(ctx, `SELECT event_id, workspace_id, environment_id, type,
+        experiment_id, epoch, flag_key, flag_revision, variant, unit_hash, session_id,
+        task_id, source, metric_key, value, client_time, server_time
+        FROM events WHERE workspace_id=$1 AND environment_id=$2 AND experiment_id=$3
+        AND epoch=$4 AND server_time <= $5 ORDER BY server_time, event_id`,
+		exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch, now)
+	if err != nil {
+		return nil, 0, 0, false, fmt.Errorf("platform: query analysis events: %w", err)
+	}
+	var events []*Event
+	for rows.Next() {
+		ev := &Event{}
+		var typ string
+		if err := rows.Scan(&ev.EventID, &ev.WorkspaceID, &ev.EnvironmentID, &typ,
+			&ev.ExperimentID, &ev.Epoch, &ev.FlagKey, &ev.FlagRevision, &ev.Variant,
+			&ev.UnitHash, &ev.SessionID, &ev.TaskID, &ev.Source, &ev.MetricKey,
+			&ev.Value, &ev.ClientTime, &ev.ServerTime); err != nil {
+			rows.Close()
+			return nil, 0, 0, false, fmt.Errorf("platform: scan analysis event: %w", err)
+		}
+		ev.Type = EventType(typ)
+		events = append(events, ev)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, 0, 0, false, fmt.Errorf("platform: read analysis events: %w", err)
+	}
+	rows.Close()
+	var durable int64
+	if err := tx.QueryRow(ctx, `SELECT coalesce(sum(cnt), 0) FROM event_counts
+        WHERE workspace_id=$1 AND environment_id=$2 AND experiment_id=$3 AND epoch=$4`,
+		exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch).Scan(&durable); err != nil {
+		return nil, 0, 0, false, fmt.Errorf("platform: read analysis counts: %w", err)
+	}
+	type aggregateKey struct{ variant, unit, metric string }
+	type aggregateValue struct {
+		count        int64
+		sum, squares float64
+	}
+	rawAggs := map[aggregateKey]aggregateValue{}
+	type exposureKey struct{ variant, unit string }
+	rawExposed := map[exposureKey]bool{}
+	rawSplit := map[exposureKey]bool{}
+	for _, ev := range events {
+		if ev.Type == EventExposure {
+			key := exposureKey{ev.Variant, ev.UnitHash}
+			rawExposed[key] = true
+			if ev.Source == "split" {
+				rawSplit[key] = true
+			}
+		}
+		if ev.Type == EventConversion {
+			key := aggregateKey{ev.Variant, ev.UnitHash, ev.MetricKey}
+			v := rawAggs[key]
+			v.count++
+			v.sum += ev.Value
+			v.squares += ev.Value * ev.Value
+			rawAggs[key] = v
+		}
+	}
+	aggRows, err := tx.Query(ctx, `SELECT variant, unit_hash, metric_key, cnt, sum_val, sum_sq FROM unit_aggs
+        WHERE workspace_id=$1 AND environment_id=$2 AND experiment_id=$3 AND epoch=$4
+        `, exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch)
+	if err != nil {
+		return nil, 0, 0, false, fmt.Errorf("platform: read analysis aggregates: %w", err)
+	}
+	aggregateMismatch := false
+	for aggRows.Next() {
+		var key aggregateKey
+		var persisted aggregateValue
+		if err := aggRows.Scan(&key.variant, &key.unit, &key.metric, &persisted.count,
+			&persisted.sum, &persisted.squares); err != nil {
+			aggRows.Close()
+			return nil, 0, 0, false, fmt.Errorf("platform: scan analysis aggregate: %w", err)
+		}
+		raw, ok := rawAggs[key]
+		if !ok || raw.count != persisted.count ||
+			math.Abs(raw.sum-persisted.sum) > 1e-9*math.Max(1, math.Abs(persisted.sum)) ||
+			math.Abs(raw.squares-persisted.squares) > 1e-9*math.Max(1, math.Abs(persisted.squares)) {
+			aggregateMismatch = true
+		}
+		delete(rawAggs, key)
+	}
+	if err := aggRows.Err(); err != nil {
+		aggRows.Close()
+		return nil, 0, 0, false, fmt.Errorf("platform: read analysis aggregates: %w", err)
+	}
+	aggRows.Close()
+	if len(rawAggs) > 0 {
+		aggregateMismatch = true
+	}
+	for _, view := range []struct {
+		table    string
+		expected map[exposureKey]bool
+	}{
+		{"exposed_units", rawExposed}, {"split_exposed_units", rawSplit},
+	} {
+		query := fmt.Sprintf(`SELECT variant, unit_hash FROM %s WHERE workspace_id=$1 AND environment_id=$2 AND experiment_id=$3 AND epoch=$4`, view.table)
+		rows, err := tx.Query(ctx, query, exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch)
+		if err != nil {
+			return nil, 0, 0, false, fmt.Errorf("platform: read analysis exposures: %w", err)
+		}
+		seen := map[exposureKey]bool{}
+		for rows.Next() {
+			var key exposureKey
+			if err := rows.Scan(&key.variant, &key.unit); err != nil {
+				rows.Close()
+				return nil, 0, 0, false, fmt.Errorf("platform: scan analysis exposure: %w", err)
+			}
+			seen[key] = true
+			if !view.expected[key] {
+				aggregateMismatch = true
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, 0, 0, false, fmt.Errorf("platform: read analysis exposures: %w", err)
+		}
+		rows.Close()
+		if len(seen) != len(view.expected) {
+			aggregateMismatch = true
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, 0, 0, false, fmt.Errorf("platform: commit analysis snapshot: %w", err)
+	}
+	return events, int64(len(events)), durable, aggregateMismatch, nil
 }
 
 // ---------------------------------------------------------------------------

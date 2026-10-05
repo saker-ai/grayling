@@ -28,6 +28,61 @@ func openPGStore(t *testing.T, dsn string) *Store {
 	return s
 }
 
+func TestPGConcurrentDuplicateCountMatchesLedger(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	a := openPGStore(t, dsn)
+	ws, err := a.CreateWorkspace("w", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := a.CreateEnvironment(ws.ID, "e", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := a.CreateExperiment(&Experiment{
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "f", Epoch: 1,
+		Unit: "user_id", Variants: []string{"a", "b"},
+		Proportions:   map[string]float64{"a": 50, "b": 50},
+		PrimaryMetric: MetricSpec{Key: "m", Type: "proportion", Direction: "increase"},
+		Alpha:         0.05, AnalysisWindow: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := openPGStore(t, dsn)
+	start := make(chan struct{})
+	results := make(chan IngestResult, 2)
+	var wg sync.WaitGroup
+	for _, store := range []*Store{a, b} {
+		wg.Go(func() {
+			<-start
+			res, err := store.IngestEvents([]*Event{{
+				EventID: "same", WorkspaceID: ws.ID, EnvironmentID: env.ID,
+				Type: EventExposure, ExperimentID: exp.ID, Epoch: exp.Epoch,
+				Variant: "a", UnitHash: "unit", Source: "split", ClientTime: time.Now().UTC(),
+			}})
+			if err != nil {
+				t.Errorf("ingest: %v", err)
+			}
+			results <- res
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	accepted, duplicates := 0, 0
+	for res := range results {
+		accepted += res.Accepted
+		duplicates += res.Duplicates
+	}
+	if accepted != 1 || duplicates != 1 {
+		t.Fatalf("API accepted=%d duplicate=%d", accepted, duplicates)
+	}
+	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM events`); got[0][0] != "1" {
+		t.Fatalf("database accepted=%v, want 1", got)
+	}
+}
+
 func testFlag(key string) *model.Flag {
 	return &model.Flag{
 		SchemaVersion: model.SchemaVersion, Key: key, Type: model.FlagBool,

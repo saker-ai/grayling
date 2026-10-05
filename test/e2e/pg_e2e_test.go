@@ -6,20 +6,100 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/godeps/golab/internal/api"
 	"github.com/godeps/golab/internal/configstore"
+	"github.com/godeps/golab/internal/experiment"
 	"github.com/godeps/golab/internal/platform"
 	"github.com/godeps/golab/pkg/model"
 	"github.com/godeps/golab/pkg/sdk"
 	"github.com/godeps/golab/test/pgtest"
 	gconfig "github.com/godeps/gonacos/pkg/config"
 )
+
+func TestE2EPostgresConcurrentCollectCounts(t *testing.T) {
+	dsn, h := newPGHarness(t)
+	h.setupWorkspace()
+	exp, err := h.store.CreateExperiment(&platform.Experiment{
+		WorkspaceID: h.ws.ID, EnvironmentID: h.env.ID, FlagKey: "f", Epoch: 1,
+		Unit: "user_id", Variants: []string{"control", "treatment"},
+		Proportions:   map[string]float64{"control": 50, "treatment": 50},
+		PrimaryMetric: platform.MetricSpec{Key: "m", Type: "proportion", Direction: "increase"},
+		Alpha:         0.05, AnalysisWindow: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := platform.NewPGStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	other := httptest.NewServer(api.NewServer(b, h.api.Config, api.Options{}).Handler())
+	defer other.Close()
+	body, err := json.Marshal(map[string]any{"events": []any{map[string]any{
+		"eventId": "same-http-event", "type": "exposure", "experimentId": exp.ID,
+		"epoch": 1, "variant": "control", "unit": "u1", "source": "split", "clientTime": time.Now().UTC(),
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan map[string]any, 2)
+	var wg sync.WaitGroup
+	for _, endpoint := range []string{h.srv.URL, other.URL} {
+		wg.Go(func() {
+			<-start
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint+"/api/v1/collect", bytes.NewReader(body))
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			req.Header.Set("Authorization", "Bearer "+h.colTok)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("collect status: %d", resp.StatusCode)
+				return
+			}
+			var out map[string]any
+			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+				t.Error(err)
+				return
+			}
+			results <- out
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	accepted, duplicates := 0.0, 0.0
+	for result := range results {
+		accepted += result["accepted"].(float64)
+		duplicates += result["duplicates"].(float64)
+	}
+	if accepted != 1 || duplicates != 1 {
+		t.Fatalf("API counts: accepted=%v duplicates=%v", accepted, duplicates)
+	}
+	if rows := pgtest.Query(t, dsn, `SELECT count(*) FROM events`); rows[0][0] != "1" {
+		t.Fatalf("database accepted=%v", rows)
+	}
+}
 
 func newPGHarness(t *testing.T) (string, *harness) {
 	t.Helper()
@@ -139,8 +219,32 @@ func TestE2EPostgresExperimentLoop(t *testing.T) {
 	if code := h.do("GET", "/api/v1/admin/experiments/"+exp.ID+"/report", h.owner, nil, &rep); code != 200 {
 		t.Fatalf("report: %d", code)
 	}
-	if rep["healthy"] != true {
-		t.Fatalf("report unhealthy: %v (issues %v)", rep["healthy"], rep["healthIssues"])
+	if rep["healthy"] != false {
+		t.Fatalf("new window must await late-event watermark: %v", rep)
+	}
+	window, _ := rep["window"].(map[string]any)
+	if window == nil || window["complete"] != false {
+		t.Fatalf("incomplete window missing: %v", rep)
+	}
+	registered, err := h.store.GetExperiment(exp.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeAt := registered.StartedAt.Add(registered.AnalysisWindow + 72*time.Hour)
+	completed, err := experiment.BuildReport(h.store, exp.ID, completeAt)
+	if err != nil || !completed.Window.Complete || !completed.Healthy {
+		t.Fatalf("completed report: %+v %v", completed, err)
+	}
+	splitCounts := h.store.SplitExposedUnitCounts(h.ws.ID, h.env.ID, exp.ID, exp.Epoch)
+	metricAgg := h.store.MetricAggregate(h.ws.ID, h.env.ID, exp.ID, exp.Epoch, "conversion")
+	for _, arm := range completed.PerVariant {
+		converted := int64(0)
+		if metricAgg[arm.Variant] != nil {
+			converted = int64(len(metricAgg[arm.Variant].Units))
+		}
+		if arm.RandomizedUnits != splitCounts[arm.Variant] || arm.ConvertedUnits != converted {
+			t.Fatalf("raw recomputation differs from incremental arm %s: report=%+v split=%d metric=%+v", arm.Variant, arm, splitCounts[arm.Variant], metricAgg[arm.Variant])
+		}
 	}
 	srm, _ := rep["srm"].(map[string]any)
 	if srm == nil || srm["healthy"] != true {
@@ -175,8 +279,16 @@ func TestE2EPostgresExperimentLoop(t *testing.T) {
 	if code := h.do("GET", "/api/v1/admin/experiments/"+exp.ID+"/report", h.owner, nil, &rep2); code != 200 {
 		t.Fatalf("report after reload: %d", code)
 	}
-	if rep2["healthy"] != true {
-		t.Fatalf("report after reload unhealthy: %v (issues %v)", rep2["healthy"], rep2["healthIssues"])
+	if rep2["healthy"] != false {
+		t.Fatalf("reloaded live report must still await watermark: %v", rep2)
+	}
+	completed2, err := experiment.BuildReport(reloaded, exp.ID, completeAt)
+	if err != nil || !completed2.Window.Complete || !completed2.Healthy {
+		t.Fatalf("completed report after reload: %+v %v", completed2, err)
+	}
+	if !reflect.DeepEqual(completed.SRM, completed2.SRM) || !reflect.DeepEqual(completed.PerVariant, completed2.PerVariant) ||
+		!reflect.DeepEqual(completed.Decision, completed2.Decision) {
+		t.Fatalf("SRM, arms or decision changed on raw replay: before=%+v after=%+v", completed, completed2)
 	}
 	primary2, _ := rep2["primary"].(map[string]any)
 	if primary2 == nil || primary2["significant"] != true {

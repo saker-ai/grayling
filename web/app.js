@@ -792,6 +792,7 @@ async function viewExpDetail(m) {
 
 function renderReport(box, r) {
   const p = r.primary, d = r.decision || {}, srm = r.srm;
+  const window = r.window;
   box.innerHTML =
     (r.healthy
       ? '<div class="banner ok">' + esc(t('report.healthy', { epoch: r.epoch, state: r.state })) + '</div>'
@@ -799,6 +800,16 @@ function renderReport(box, r) {
         (r.healthIssues || []).map(i => '<li>' + esc(i) + '</li>').join('') + '</ul></div>') +
     '<div class="row">' + chip(r.minRuntimeSatisfied ? t('chip.minRuntimeOk') : t('chip.minRuntimeNo'), r.minRuntimeSatisfied ? 'green' : 'amber') +
     ' ' + chip(r.analysisMethod || '—', 'gray') + '</div>' +
+    (window ? '<h4>' + esc(t('report.window')) + '</h4>' +
+      '<div>' + esc(t('report.windowVersion')) + ': <span class="mono">' + esc(window.version) + '</span> · ' +
+      esc(t('report.windowStart')) + ': <span class="mono">' + esc(window.start) + '</span> · ' +
+      esc(t('report.windowEnd')) + ': <span class="mono">' + esc(window.end) + '</span></div>' +
+      '<div>' + esc(t('report.watermark')) + ': <span class="mono">' + esc(window.watermark) + '</span> · ' +
+      esc(t('report.backend')) + ': ' + esc(window.backend) + ' ' +
+      chip(window.complete ? t('report.complete') : t('report.incomplete'), window.complete ? 'green' : 'amber') +
+      (window.recomputable ? '' : ' ' + chip(t('report.notRecomputable'), 'amber')) + '</div>' +
+      ((window.issues || []).length ? '<ul>' + window.issues.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>' : '')
+    : '') +
     '<h4>' + esc(t('report.srm')) + '</h4>' +
     (srm
       ? '<div>χ² = ' + esc(srm.chiSquare ?? '—') + ' · p = ' + esc(srm.pValue ?? '—') + ' ' +

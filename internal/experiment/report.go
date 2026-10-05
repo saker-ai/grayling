@@ -1,5 +1,5 @@
 // Package experiment builds the analysis report for a pre-registered
-// experiment from the platform store's unit-level aggregates
+// experiment from PostgreSQL raw events or local unit-level aggregates
 // (docs/技术方案.md §10).
 //
 // Scope of v1 (per §10.3): fixed-sample, TWO-ARM, single pre-registered
@@ -25,11 +25,12 @@ import (
 
 // Report is the full analysis output for one experiment epoch.
 type Report struct {
-	ExperimentID string                `json:"experimentId"`
-	Epoch        int64                 `json:"epoch"`
-	FlagKey      string                `json:"flagKey"`
-	State        model.ExperimentState `json:"state"`
-	GeneratedAt  time.Time             `json:"generatedAt"`
+	ExperimentID string                        `json:"experimentId"`
+	Epoch        int64                         `json:"epoch"`
+	FlagKey      string                        `json:"flagKey"`
+	State        model.ExperimentState         `json:"state"`
+	GeneratedAt  time.Time                     `json:"generatedAt"`
+	Window       platform.AnalysisWindowStatus `json:"window"`
 
 	AnalysisMethod string  `json:"analysisMethod"`
 	Alpha          float64 `json:"alpha"`
@@ -122,17 +123,24 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 			experimentID, len(exp.Variants))
 	}
 	control, treatment := exp.Variants[0], exp.Variants[1]
+	analysis, window, err := store.AnalysisStore(exp, now)
+	if err != nil {
+		return nil, fmt.Errorf("experiment %s: build analysis window: %w", experimentID, err)
+	}
 
 	rep := &Report{
 		ExperimentID: exp.ID, Epoch: exp.Epoch, FlagKey: exp.FlagKey,
 		State: exp.State, GeneratedAt: now.UTC(),
 		AnalysisMethod: exp.AnalysisMethod, Alpha: exp.Alpha, MDE: exp.MDE,
-		Control: control, Treatment: treatment,
+		Control: control, Treatment: treatment, Window: window,
+	}
+	if window.Backend == "postgresql-raw" {
+		rep.HealthIssues = append(rep.HealthIssues, window.Issues...)
 	}
 
 	// ---- volumes ----
-	allExposed := store.ExperimentAggregate(exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch, nil)
-	splitSets := store.SplitExposedUnitSet(exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch)
+	allExposed := analysis.ExperimentAggregate(exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch, nil)
+	splitSets := analysis.SplitExposedUnitSet(exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch)
 
 	byVariant := map[string]*VariantReport{}
 	order := []string{control, treatment}
@@ -151,7 +159,7 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	// metric for quantile, the outcome for a CUPED-adjusted mean. Ratio and
 	// CUPED fetch their second metric (denominator / covariate) as well.
 	wsID, envID := exp.WorkspaceID, exp.EnvironmentID
-	primaryAgg := store.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.Key)
+	primaryAgg := analysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.Key)
 
 	var (
 		ctrlProp, treatProp   stats.ProportionStats
@@ -178,9 +186,9 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		}
 		numAgg := primaryAgg
 		if numKey != exp.PrimaryMetric.Key {
-			numAgg = store.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, numKey)
+			numAgg = analysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, numKey)
 		}
-		denAgg := store.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.DenominatorKey)
+		denAgg := analysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.DenominatorKey)
 		ctrlRatio, treatRatio = buildRatioStats(numAgg, denAgg, splitSets, control, treatment)
 		convCtrl, convTreat = ctrlRatio.N, treatRatio.N
 	case "quantile":
@@ -284,7 +292,7 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		// data exists; otherwise (or on insufficient pairs) fall back to Welch.
 		cupedDone := false
 		if exp.PrimaryMetric.CovariateKey != "" {
-			covAgg := store.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.CovariateKey)
+			covAgg := analysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.CovariateKey)
 			cp, tp := buildPairedStats(covAgg, primaryAgg, splitSets, control, treatment)
 			if cp.N >= 2 && tp.N >= 2 {
 				if cres, cerr := stats.CUPEDTest(cp, tp, exp.Alpha); cerr == nil {
@@ -380,7 +388,7 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 
 	// ---- guardrails (operational rules, separate from significance) ----
 	for _, g := range exp.Guardrails {
-		check := evaluateGuardrail(store, exp, g, control, treatment, splitSets)
+		check := evaluateGuardrail(analysis, exp, g, control, treatment, splitSets)
 		rep.Guardrails = append(rep.Guardrails, check)
 	}
 

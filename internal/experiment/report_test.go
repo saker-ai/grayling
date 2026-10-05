@@ -3,12 +3,132 @@ package experiment
 import (
 	"fmt"
 	"math/rand"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/godeps/golab/internal/platform"
 	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/golab/test/pgtest"
+	"github.com/jackc/pgx/v5"
 )
+
+func TestPostgresReportWindowRecomputesAfterReload(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	store, err := platform.NewPGStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ws, err := store.CreateWorkspace("window", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := store.CreateEnvironment(ws.ID, "prod", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := store.CreateExperiment(&platform.Experiment{
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "f", Epoch: 1, Unit: "user_id",
+		Variants: []string{"control", "treatment"}, Proportions: map[string]float64{"control": 50, "treatment": 50},
+		PrimaryMetric: platform.MetricSpec{Key: "conversion", Type: "proportion", Direction: "increase"},
+		Alpha:         0.05, AnalysisWindow: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.TransitionExperiment(exp.ID, model.ExperimentReviewed, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.TransitionExperiment(exp.ID, model.ExperimentRunning, "test"); err != nil {
+		t.Fatal(err)
+	}
+	start := *exp.StartedAt
+	base := platform.Event{WorkspaceID: ws.ID, EnvironmentID: env.ID, ExperimentID: exp.ID, Epoch: 1, FlagKey: "f"}
+	makeEvent := func(id string, typ platform.EventType, arm, unit string, at time.Time) *platform.Event {
+		ev := base
+		ev.EventID, ev.Type, ev.Variant, ev.UnitHash, ev.ClientTime = id, typ, arm, unit, at
+		if typ == platform.EventExposure {
+			ev.Source = "split"
+		} else {
+			ev.MetricKey, ev.Value = "conversion", 1
+		}
+		return &ev
+	}
+	events := []*platform.Event{
+		makeEvent("before", platform.EventExposure, "control", "outside-before", start.Add(-time.Nanosecond)),
+		makeEvent("targeted", platform.EventExposure, "control", "u1", start.Add(100*time.Microsecond)),
+		makeEvent("pre-conv", platform.EventConversion, "control", "u1", start.Add(time.Millisecond)),
+		makeEvent("in-a", platform.EventExposure, "control", "u1", start.Add(2*time.Millisecond)),
+		makeEvent("in-b", platform.EventExposure, "treatment", "u2", start),
+		makeEvent("valid", platform.EventConversion, "control", "u1", start.Add(3*time.Millisecond)),
+		makeEvent("at-end", platform.EventExposure, "treatment", "outside-end", start.Add(time.Second)),
+		makeEvent("conv-end", platform.EventConversion, "treatment", "u2", start.Add(time.Second)),
+	}
+	events[1].Source = "targeting"
+	res, err := store.IngestEvents(events)
+	if err != nil || res.Accepted != len(events) {
+		t.Fatalf("ingest: %+v %v", res, err)
+	}
+	res, err = store.IngestEvents([]*platform.Event{events[5]})
+	if err != nil || res.Duplicates != 1 || res.Accepted != 0 {
+		t.Fatalf("duplicate: %+v %v", res, err)
+	}
+	late := makeEvent("late", platform.EventExposure, "control", "late-unit", start.Add(-73*time.Hour))
+	wrongEpoch := makeEvent("wrong-epoch", platform.EventExposure, "control", "other-epoch", start)
+	wrongEpoch.Epoch = 2
+	res, err = store.IngestEvents([]*platform.Event{late, wrongEpoch})
+	if err != nil || res.Rejected != 2 || res.Accepted != 0 {
+		t.Fatalf("late and cross-epoch events: %+v %v", res, err)
+	}
+	clock := start.Add(time.Second + 72*time.Hour)
+	rep, err := BuildReport(store, exp.ID, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Window.Complete || rep.Window.Version != "utc-exposure-v1" || rep.Window.Backend != "postgresql-raw" {
+		t.Fatalf("window: %+v", rep.Window)
+	}
+	if rep.PerVariant[0].RandomizedUnits != 1 || rep.PerVariant[1].RandomizedUnits != 1 ||
+		rep.PerVariant[0].ConvertedUnits != 1 || rep.PerVariant[1].ConvertedUnits != 0 ||
+		rep.PerVariant[0].Exposures != 2 || rep.PerVariant[1].Exposures != 1 {
+		t.Fatalf("windowed arms: %+v", rep.PerVariant)
+	}
+	if rep.SRM == nil || !rep.SRM.Healthy {
+		t.Fatalf("SRM: %+v", rep.SRM)
+	}
+	pending, err := BuildReport(store, exp.ID, start.Add(time.Second+71*time.Hour))
+	if err != nil || pending.Window.Complete || pending.Healthy || pending.Decision.Verdict != "hold" {
+		t.Fatalf("pending watermark: %+v %v", pending, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := platform.NewPGStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reloaded.Close()
+	again, err := BuildReport(reloaded, exp.ID, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(rep, again) {
+		t.Fatalf("recomputed report differs after reload: before=%+v after=%+v", rep, again)
+	}
+	conn, err := pgx.Connect(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(t.Context())
+	if _, err := conn.Exec(t.Context(), `UPDATE unit_aggs SET sum_val=sum_val+1 WHERE experiment_id=$1`, exp.ID); err != nil {
+		t.Fatal(err)
+	}
+	drift, err := BuildReport(reloaded, exp.ID, clock)
+	if err != nil || drift.Window.Complete || drift.Healthy || drift.Decision.Verdict != "hold" {
+		t.Fatalf("aggregate drift must hold: %+v %v", drift, err)
+	}
+}
 
 func setup(t *testing.T) (*platform.Store, *platform.Workspace, *platform.Environment) {
 	t.Helper()
