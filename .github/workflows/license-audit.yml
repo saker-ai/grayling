@@ -1,0 +1,19 @@
+name: License evidence
+
+on:
+  push:
+    branches: [main]
+    paths: [go.mod, go.sum, sdk/typescript/package-lock.json, scripts/license_audit.py, scripts/test_license_audit.py, third_party/licenses.json, THIRD_PARTY_NOTICES.md, .github/workflows/license-audit.yml]
+  pull_request:
+    paths: [go.mod, go.sum, sdk/typescript/package-lock.json, scripts/license_audit.py, scripts/test_license_audit.py, third_party/licenses.json, THIRD_PARTY_NOTICES.md, .github/workflows/license-audit.yml]
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: python3 scripts/license_audit.py check
+      - run: python3 -m unittest discover -s scripts -p 'test_license_audit.py'

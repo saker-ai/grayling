@@ -218,4 +218,6 @@ PostgreSQL 后端测试连**真实数据库**：默认用 docker 自动起一次
 
 **Apache-2.0** —— 全文见根目录 [LICENSE](LICENSE)（项目初始 README 即声明 Apache-2.0 意图，阶段五落地许可文件）。
 
-> **上游依赖许可现状（外部未决项，如实记录）**：gonacos（本项目 pin 于 `v0.0.0-20260706000526-514208bd40a1`）仓库**无 LICENSE 文件**，其 README 的 License 节为 `MIT (placeholder — confirm before publishing)`（2026-09-25 按被 pin commit 的模块缓存核实）。本仓库的 Apache-2.0 不覆盖 gonacos 自身代码；gonacos 正式许可确认前，本项目**不得对外提供多租户生产服务**（技术方案 §12.5、威胁模型必办清单第 1 条）。其余依赖许可见 `go.mod`/`go.sum` 与 `sdk/*/package-lock.json`（gff core 为 MIT，OpenFeature go-sdk 为 Apache-2.0）。
+**第三方声明**见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，完整选定版本、实际进入二进制的模块及许可文件 SHA-256 见 [third_party/licenses.json](third_party/licenses.json)。`make license-check` 在依赖或证据变化时要求复核，`make release-check` 和 `make dist` 在许可缺口解除前失败；发布包由 `make dist` 纳入 README、GoLab LICENSE、第三方清单和许可全文。Python/TypeScript SDK 的项目元数据同为 Apache-2.0，TypeScript 锁文件中的包仅为开发工具。
+
+**当前结论：对外多租户生产上线阻断。** gonacos pin `v0.0.0-20260706000526-514208bd40a1`（commit `514208bd40a131b5badb830bff2daf704ab97ee9`）没有许可证文件，其 README 文字仍为待确认占位，不能作为授权依据。已向[上游公开请求确认](https://github.com/godeps/gonacos/issues/1)；GoLab 负责人为 [cinience](https://github.com/cinience)。取得覆盖该 commit 的明确授权并完成法律/合同复核前，不得发布 GoLab 二进制或对外提供多租户生产服务。证据、分发义务与替代路线见 [许可证据与发布门槛](docs/许可证据与发布门槛.md)。

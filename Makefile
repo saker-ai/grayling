@@ -7,7 +7,7 @@ GO     := GOWORK=$(GOWORK) go
 RUN_ARGS ?=
 ADMIN_PASSWORD_FILE ?= data/admin-password
 
-.PHONY: all build test vet tidy smoke run check-run-port ensure-admin-password show-admin-password clean sdk-test sdk-python sdk-typescript
+.PHONY: all build test vet tidy smoke run check-run-port ensure-admin-password show-admin-password clean sdk-test sdk-python sdk-typescript license-check release-check dist
 
 all: vet test build
 
@@ -37,6 +37,15 @@ sdk-test: sdk-python sdk-typescript
 
 vet:
 	$(GO) vet ./...
+
+license-check:
+	python3 scripts/license_audit.py check
+
+release-check:
+	python3 scripts/license_audit.py release-check
+
+dist: release-check build
+	python3 scripts/license_audit.py bundle --output dist/golab
 
 tidy:
 	$(GO) mod tidy
