@@ -336,6 +336,96 @@ func TestOfficialNacosClientPublishSubscribeEvaluate(t *testing.T) {
 	}
 }
 
+// Restart the real service on the same ports while retaining the official
+// client's subscription. The client must reconcile from the current manifest
+// after its established gRPC connection is severed.
+func TestOfficialNacosClientReconnectsAfterServerRestart(t *testing.T) {
+	dataDir := t.TempDir()
+	srv, err := server.New(server.WithAddr("127.0.0.1:0"), server.WithGRPCAddr("127.0.0.1:0"),
+		server.WithDataDir(dataDir), server.WithShutdownTimeout(300*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpAddr, grpcAddr := srv.HTTPAddr(), srv.GRPCAddr()
+	ctx, cancel := context.WithCancel(t.Context())
+	stopped := make(chan error, 1)
+	go func() { stopped <- srv.Start(ctx) }()
+	firstStopped := false
+	t.Cleanup(func() {
+		if !firstStopped {
+			cancel()
+			<-stopped
+		}
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
+		defer cleanupCancel()
+		_ = srv.Shutdown(cleanupCtx)
+	})
+	const namespace = "native-restart"
+	client := nativeClient(t, srv, namespace)
+	store := configstore.NewGonacosStore(srv.Services().Config)
+	publish(t, store, namespace, 1, false)
+	var consumer nativeConsumer
+	consumer.refresh(client)
+	if consumer.lastErr != nil || consumer.revision != 1 || consumer.value("checkout") != false {
+		t.Fatalf("initial state: revision=%d error=%v", consumer.revision, consumer.lastErr)
+	}
+	changes := make(chan int64, 8)
+	if err := client.ListenConfig(vo.ConfigParam{DataId: configstore.ManifestDataID, Group: configstore.Group,
+		OnChange: func(_, _, _, content string) {
+			var m model.Manifest
+			if json.Unmarshal([]byte(content), &m) == nil {
+				select {
+				case changes <- m.Revision:
+				default:
+				}
+			}
+		}}); err != nil {
+		t.Fatal(err)
+	}
+
+	envelope, err := srv.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	<-stopped // active subscription may force gonacos' graceful shutdown deadline
+	firstStopped = true
+	// The same client remains alive. Start a new service on the original ports
+	// and publish while its old subscription connection is gone.
+	restarted, err := server.New(server.WithAddr(httpAddr), server.WithGRPCAddr(grpcAddr), server.WithDataDir(dataDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Restore(envelope); err != nil {
+		t.Fatal(err)
+	}
+	restartCtx, stopRestart := context.WithCancel(t.Context())
+	restartDone := make(chan error, 1)
+	go func() { restartDone <- restarted.Start(restartCtx) }()
+	t.Cleanup(func() { stopRestart(); <-restartDone })
+	publish(t, configstore.NewGonacosStore(restarted.Services().Config), namespace, 2, true)
+
+	deadline := time.After(20 * time.Second)
+	for consumer.revision != 2 {
+		consumer.refresh(client) // periodic manifest reconciliation after a lost push
+		if consumer.revision == 2 {
+			break
+		}
+		if consumer.value("checkout") != false {
+			t.Fatal("partial snapshot visible during reconnect")
+		}
+		select {
+		case <-changes: // notification is only an invalidation hint
+		case <-time.After(200 * time.Millisecond):
+		case <-deadline:
+			t.Fatalf("same client did not reconnect: revision=%d error=%v", consumer.revision, consumer.lastErr)
+		}
+	}
+	if consumer.lastErr != nil || consumer.value("checkout") != true {
+		t.Fatalf("reconnected state: revision=%d error=%v", consumer.revision, consumer.lastErr)
+	}
+}
+
 // This characterizes the current security gap: gonacos's gRPC config query
 // and subscription accept a caller-selected namespace without a tenant
 // credential. Until the upstream endpoint enforces ACLs, native clients must
