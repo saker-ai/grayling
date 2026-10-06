@@ -160,7 +160,7 @@
 
 | 威胁场景 | 现状缓解（证据） | 残余风险与建议 |
 |---|---|---|
-| gonacos 依赖漂移/不可复现构建 | 已从 sibling `replace` 固定为确定 commit 伪版本 `v0.0.0-20260706000526-514208bd40a1`（= main@514208bd40a131b5…，`go.mod` 注释），构建仅依赖模块缓存；契约行为由 `test/smoke:TestEmbeddedGonacosRoundtrip` 在每次测试运行中复核（Publish/Get、AI prompt 版本读写） | gonacos **无正式 LICENSE**（README 的 MIT 占位不是许可证文件，技术方案 §2/§14；实施状态已知限制 3）——许可确认前不得对外多租户生产（§3.2） |
+| gonacos 依赖漂移/不可复现构建 | 已从 sibling `replace` 固定为确定 commit 伪版本 `v0.0.0-20261006082753-5ac0bf0b6806`（= main@5ac0bf0b6806…，`go.mod` 注释），构建仅依赖模块缓存；契约行为由 `test/smoke:TestEmbeddedGonacosRoundtrip` 在每次测试运行中复核（Publish/Get、AI prompt 版本读写） | gonacos 当前 pin 含 Apache-2.0 LICENSE/NOTICE；旧固定提交的项目原创贡献适用范围由上游新提交明确，许可清单记录哈希；实际第三方文件与分发物仍须人工复核 |
 | gff core 依赖 | 固定 `thomaspoignant/go-feature-flag/modules/core v0.7.2`；其所需 `nikunjy/rules` fork replace 已在本仓库 `go.mod` 重述（`=> hairyhenderson/rules v0.0.0-20250704181428-…`）；legacy 求值路径有对照测试 `TestGffCoreLegacyEvaluate`；GoLab 原生算法与 gff 分离，黄金向量 20 条经独立 Python 实现交叉验证（`pkg/bucketing/testdata/golden_vectors.json`，`TestGoldenVectors`） | 传递依赖许可证据已列入 `third_party/licenses.json`，仍需人工复核原文 |
 | 依赖升级引入回归/漏洞 | 升级流程要求重跑契约/兼容测试（实施状态已知限制 3；技术方案 §12.1）；`Makefile` 提供 `vet`/`test`/`smoke`、许可复核和发布阻断目标；`.github/workflows/license-audit.yml` 检测依赖或证据漂移 | 尚未配置 govulncheck/SBOM；许可证自动初筛不替代法律复核 |
 
@@ -183,7 +183,7 @@
 
 | # | 残余风险 | 威胁面 | 严重度（多租户生产语境） | 处置 |
 |---|---|---|---|---|
-| R1 | gonacos 无正式 LICENSE，且非 loopback 场景的生产网络验证未完成 | 供应链/隔离 | 高（合规+隔离前提） | §3.2 第 1、2 条，未完成不得对外 |
+| R1 | gonacos 许可文件已补齐；非 loopback 场景的生产网络与租户隔离验证未完成 | 供应链/隔离 | 高（合规+隔离前提） | §3.2 第 1、2 条，未完成不得对外 |
 | R2 | 全局 owner token 与 bootstrap token 为平台级单点凭证，无 TTL；bootstrap 明文出现在一次性启动日志 | 凭证 | 高 | 立即轮换/吊销 bootstrap；部署侧凭证保管 |
 | R3 | collect token 被盗后可在本 scope 内伪造曝光/转化数据（服务端无法区分） | 统计完整性 | 中（SRM/数据健康门部分兜底） | 最小化发放、监控摄入异常 |
 | R4 | 日志/审计注入（用户字符串未转义）；500 错误回传内部错误原文 | 注入 | 低–中 | 仓库待办：渲染层转义、500 收敛 |
@@ -199,7 +199,7 @@
 
 与 [实施状态](实施状态.md)"已知限制与生产前必办"及技术方案 §12 验收前置一致；本文（威胁模型）即 P0 退出条件中的威胁模型项，完成后 P0 剩余缺口为正式压测基线：
 
-1. **确认 gonacos 正式许可证**（技术方案 §12.5；实施状态已知限制 3）——未确认不得对外提供多租户生产服务。
+1. **复核 gonacos 许可与分发内容**（技术方案 §12.5；实施状态已知限制 3）：当前固定版本有 Apache-2.0 LICENSE/NOTICE；每次升级与实际分发仍须核对第三方声明。
 2. **生产网络策略验证**：gonacos 底座对租户直连不可达（默认 loopback；如显式 opt-in 非 loopback，须按技术方案 §9 完成"未授权直连被拒"的实测）。
 3. **备份/恢复联合演练**：gonacos Snapshot + PostgreSQL + HMAC 密钥按同一恢复点演练，恢复后重建 manifest/SDK 快照并核对 revision（技术方案 §11；实施状态已知限制 1）。
 4. **密钥轮换流程**：以 `Store.RotateHMACKey` 为存储层入口制定运维迁移与审计流程；是否暴露管理 API 待审计设计后决定（实施状态已知限制 1）。

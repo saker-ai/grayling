@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "third_party" / "licenses.json"
 NOTICES = ROOT / "THIRD_PARTY_NOTICES.md"
 GONACOS = "github.com/godeps/gonacos"
-GONACOS_VERSION = "v0.0.0-20260706000526-514208bd40a1"
+GONACOS_VERSION = "v0.0.0-20261006082753-5ac0bf0b6806"
 
 
 def sha(data):
@@ -88,7 +88,7 @@ def notice_text(current):
         evidence = "<br>".join(f"{entry['file']} `{entry['sha256']}`" for entry in row["evidence"]) or "**No license file; release blocked**"
         resolved = f" → {row['resolved_module']}@{row['resolved_version']}" if "resolved_module" in row else ""
         lines.append(f"| {row['module']}{resolved} | {row['version']} | {row['license']} | {evidence} |")
-    lines += ["", "GoLab itself is Apache-2.0 under `LICENSE`. The gonacos entry remains unresolved pending [upstream confirmation](https://github.com/godeps/gonacos/issues/1).", ""]
+    lines += ["", "GoLab itself is Apache-2.0 under `LICENSE`. The pinned gonacos commit includes Apache-2.0 `LICENSE` and `NOTICE`; its [upstream declaration](https://github.com/godeps/gonacos/commit/5ac0bf0b6806) explicitly covers project-authored contributions in the earlier pinned commit.", ""]
     return "\n".join(lines)
 
 
@@ -99,8 +99,10 @@ def check(current, expected, release=False):
     gonacos = next((r for r in current["go"] if r["module"] == GONACOS), None)
     if gonacos is None or gonacos["version"] != GONACOS_VERSION:
         raise RuntimeError("gonacos pin changed; review upstream license scope and update the pinned-version gate")
-    if gonacos["license"] == "UNRESOLVED":
-        print("BLOCKED: gonacos pin has no license file; upstream confirmation: https://github.com/godeps/gonacos/issues/1", file=sys.stderr)
+    if gonacos["license"] != "Apache-2.0" or not {"LICENSE", "NOTICE"}.issubset(
+        {entry["file"] for entry in gonacos["evidence"]}
+    ):
+        raise RuntimeError("gonacos pin lacks the reviewed Apache-2.0 LICENSE and NOTICE evidence")
     if release and unresolved:
         raise RuntimeError("release blocked by unresolved license evidence: " + ", ".join(unresolved))
     print(f"license inventory matches: {len(current['go'])} Go modules, {len(current['npm'])} npm packages")

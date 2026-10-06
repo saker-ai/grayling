@@ -157,6 +157,8 @@ github.com/go-logr/stdr v1.2.2/go.mod h1:mMo/vtBO5dYbehREoey6XUKy/eSumjCCveDpRre
 github.com/go-stack/stack v1.8.0/go.mod h1:v0f6uXyyMGvRgIKkXu+yp6POWl0qKG85gN/melR3HDY=
 github.com/godeps/gonacos v0.0.0-20260706000526-514208bd40a1 h1:H1vILm1VzBkVoVXTd0QSXSuFMx6eQBJVUlmz1IITHc8=
 github.com/godeps/gonacos v0.0.0-20260706000526-514208bd40a1/go.mod h1:KwsaOWm+KVklZ/56PXCfonSJUrQZ24FZnHooyLwS4Vk=
+github.com/godeps/gonacos v0.0.0-20261006082753-5ac0bf0b6806 h1:K4HrhAJuVbyoPaHVEO37ZLr8tZnVqyPnRLS4+BHqXTQ=
+github.com/godeps/gonacos v0.0.0-20261006082753-5ac0bf0b6806/go.mod h1:KwsaOWm+KVklZ/56PXCfonSJUrQZ24FZnHooyLwS4Vk=
 github.com/gogo/protobuf v1.1.1/go.mod h1:r8qH/GZQm5c6nD/R0oafs1akxWv10x8SbQlK7atdtwQ=
 github.com/goji/httpauth v0.0.0-20160601135302-2da839ab0f4d/go.mod h1:nnjvkQ9ptGaCkuDUx6wNykzzlUixGxvkme+H/lnzb+A=
 github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=

@@ -750,10 +750,19 @@
     },
     {
       "module": "github.com/godeps/gonacos",
-      "version": "v0.0.0-20260706000526-514208bd40a1",
+      "version": "v0.0.0-20261006082753-5ac0bf0b6806",
       "runtime": true,
-      "license": "UNRESOLVED",
-      "evidence": []
+      "license": "Apache-2.0",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "file": "NOTICE",
+          "sha256": "f51c9c2c8fff66b0eb813fa9daf4476a5be3cf392fc6d6d5ea3603cc3ede9127"
+        }
+      ]
     },
     {
       "module": "github.com/gogo/protobuf",
