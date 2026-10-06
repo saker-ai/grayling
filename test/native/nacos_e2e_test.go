@@ -34,12 +34,16 @@ func nativeServer(t *testing.T) *server.Server {
 }
 
 func nativeClient(t *testing.T, srv *server.Server, namespace string) config_client.IConfigClient {
+	return nativeClientAt(t, srv.HTTPAddr(), srv.GRPCAddr(), namespace)
+}
+
+func nativeClientAt(t *testing.T, httpAddr, grpcAddr, namespace string) config_client.IConfigClient {
 	t.Helper()
-	_, httpPort, err := net.SplitHostPort(srv.HTTPAddr())
+	_, httpPort, err := net.SplitHostPort(httpAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, grpcPort, err := net.SplitHostPort(srv.GRPCAddr())
+	_, grpcPort, err := net.SplitHostPort(grpcAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
