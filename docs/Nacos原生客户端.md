@@ -6,7 +6,7 @@
 
 `TestNativeSnapshotAtomicityAndStatus` 还通过真实 gonacos 验证了多文档候选：一个新文档可读、另一个缺失或 hash 错误时，生效 revision 和两个求值结果都留在旧版本，错误状态可见；修复为更高的完整 revision 后两个值一起切换。测试随后将先前读取的旧候选延迟提交，确认 revision 和两个求值结果均不回退。断连恢复测试使用一个新建官方客户端模拟错过通知后重连取当前 manifest，尚未对已建立的同一个 gRPC 连接执行强制断网及恢复演练。
 
-**原生订阅不是 GoLab 的正式支持接口。** gonacos gRPC 配置查询允许客户端自选 namespace，且无需租户凭证。测试证明：客户端用 B 的 namespace 不能直接看到 A 的文档，但任何能连接 gonacos 端口的客户端，只要指定 A 的 namespace ID，就能读到 A 的 manifest 和配置。这不满足跨租户隔离验收要求。`cmd/golab` 默认仅将 gonacos HTTP/gRPC 绑定到 loopback；不得把端口开放给租户或把 GoLab SDK token 当作 Nacos 凭证。上游 gonacos 需要对 gRPC 查询、订阅和推送执行可验证的租户 ACL，完成后再做拒绝跨租户读取的真实客户端测试，才能考虑正式支持。`go test -race ./test/native -count=3` 还在 gonacos 的双向 gRPC 流写入与 flush 之间检测到数据竞争（模块缓存的 `pkg/protocol/grpc/server.go`）；该上游并发缺陷需修复并复测。当前仓库已有的 gonacos 许可发布阻断仍独立生效。
+**原生订阅不是 GoLab 的正式支持接口。** gonacos gRPC 配置查询允许客户端自选 namespace，且无需租户凭证。测试证明：客户端用 B 的 namespace 不能直接看到 A 的文档，但任何能连接 gonacos 端口的客户端，只要指定 A 的 namespace ID，就能读取 A 的 manifest 和不可变配置文档，并订阅 A 的 manifest 更新。这不满足跨租户隔离验收要求。`cmd/golab` 默认仅将 gonacos HTTP/gRPC 绑定到 loopback；不得把端口开放给租户或把 GoLab SDK token 当作 Nacos 凭证。上游 gonacos 需要对 gRPC 查询、订阅和推送执行可验证的租户 ACL，完成后再做拒绝跨租户读取的真实客户端测试，才能考虑正式支持。`go test -race ./test/native -count=3` 曾在 gonacos 的双向 gRPC 流写入与 flush 之间检测到数据竞争（模块缓存的 `pkg/protocol/grpc/server.go`）；新增跨租户订阅用例的 race 运行还检测到官方 `nacos-sdk-go/v2 v2.3.5` 在 `CloseClient` 清理时与后台任务并发访问。两处上游并发缺陷都需修复并复测。当前仓库已有的 gonacos 许可发布阻断仍独立生效。
 
 ## 试验协议
 

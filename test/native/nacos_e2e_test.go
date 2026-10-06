@@ -337,9 +337,9 @@ func TestOfficialNacosClientPublishSubscribeEvaluate(t *testing.T) {
 }
 
 // This characterizes the current security gap: gonacos's gRPC config query
-// accepts a caller-selected namespace without a tenant credential. Until the
-// upstream endpoint enforces ACLs, native clients must remain on loopback and
-// cannot be a public multi-tenant GoLab interface.
+// and subscription accept a caller-selected namespace without a tenant
+// credential. Until the upstream endpoint enforces ACLs, native clients must
+// remain on loopback and cannot be a public multi-tenant GoLab interface.
 func TestNativeClientCanReadOtherTenantWithoutAuthorization(t *testing.T) {
 	srv := nativeServer(t)
 	store := configstore.NewGonacosStore(srv.Services().Config)
@@ -353,5 +353,33 @@ func TestNativeClientCanReadOtherTenantWithoutAuthorization(t *testing.T) {
 	impersonated := nativeClient(t, srv, "tenant-a")
 	if _, _, err := nativeSnapshot(impersonated); err != nil {
 		t.Fatalf("security characterization changed; recheck ACL contract: %v", err)
+	}
+	if _, err := impersonated.GetConfig(vo.ConfigParam{DataId: configstore.FlagDataID("checkout", 1), Group: configstore.Group}); err != nil {
+		t.Fatalf("immutable document query behavior changed; recheck ACL contract: %v", err)
+	}
+	changes := make(chan int64, 8)
+	if err := impersonated.ListenConfig(vo.ConfigParam{DataId: configstore.ManifestDataID, Group: configstore.Group,
+		OnChange: func(_, _, _, content string) {
+			var manifest model.Manifest
+			if json.Unmarshal([]byte(content), &manifest) == nil {
+				select {
+				case changes <- manifest.Revision:
+				default:
+				}
+			}
+		}}); err != nil {
+		t.Fatal(err)
+	}
+	publish(t, store, "tenant-a", 2, false)
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case revision := <-changes:
+			if revision == 2 {
+				return
+			}
+		case <-deadline:
+			t.Fatal("unauthorized native subscription did not observe tenant A update; recheck ACL contract")
+		}
 	}
 }
