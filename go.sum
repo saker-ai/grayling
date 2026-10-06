@@ -161,6 +161,10 @@ github.com/godeps/gonacos v0.0.0-20261006082753-5ac0bf0b6806 h1:K4HrhAJuVbyoPaHV
 github.com/godeps/gonacos v0.0.0-20261006082753-5ac0bf0b6806/go.mod h1:KwsaOWm+KVklZ/56PXCfonSJUrQZ24FZnHooyLwS4Vk=
 github.com/godeps/gonacos v0.0.0-20261006115049-b001ebd8082f h1:3kXPse+/a08jfMlcef3aQPi9iDaZNn63a0gv97xjptc=
 github.com/godeps/gonacos v0.0.0-20261006115049-b001ebd8082f/go.mod h1:KwsaOWm+KVklZ/56PXCfonSJUrQZ24FZnHooyLwS4Vk=
+github.com/godeps/gonacos v0.0.0-20261006193555-383621903029 h1:cQfdlJXGKZNtcTL3GUrYHPAAOouCjIYABsz4QzW/tE4=
+github.com/godeps/gonacos v0.0.0-20261006193555-383621903029/go.mod h1:KwsaOWm+KVklZ/56PXCfonSJUrQZ24FZnHooyLwS4Vk=
+github.com/godeps/gonacos v0.0.0-20261006194453-ea39c83bf6f0 h1:43VYNV7/ryetTfIRzdMS+Ok3v5eQDxEVWKHs/iJUuAc=
+github.com/godeps/gonacos v0.0.0-20261006194453-ea39c83bf6f0/go.mod h1:KwsaOWm+KVklZ/56PXCfonSJUrQZ24FZnHooyLwS4Vk=
 github.com/gogo/protobuf v1.1.1/go.mod h1:r8qH/GZQm5c6nD/R0oafs1akxWv10x8SbQlK7atdtwQ=
 github.com/goji/httpauth v0.0.0-20160601135302-2da839ab0f4d/go.mod h1:nnjvkQ9ptGaCkuDUx6wNykzzlUixGxvkme+H/lnzb+A=
 github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=

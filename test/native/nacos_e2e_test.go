@@ -19,10 +19,11 @@ import (
 	"github.com/nacos-group/nacos-sdk-go/v2/vo"
 )
 
-func nativeServer(t *testing.T) *server.Server {
+func nativeServer(t *testing.T, extra ...server.Option) *server.Server {
 	t.Helper()
 	// The official SDK uses the configured HTTP port and its explicit gRPC port.
-	srv, err := server.New(server.WithAddr("127.0.0.1:0"), server.WithGRPCAddr("127.0.0.1:0"), server.WithDataDir(t.TempDir()))
+	opts := []server.Option{server.WithAddr("127.0.0.1:0"), server.WithGRPCAddr("127.0.0.1:0"), server.WithDataDir(t.TempDir())}
+	srv, err := server.New(append(opts, extra...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,6 +39,10 @@ func nativeClient(t *testing.T, srv *server.Server, namespace string) config_cli
 }
 
 func nativeClientAt(t *testing.T, httpAddr, grpcAddr, namespace string) config_client.IConfigClient {
+	return nativeClientAtWithOptions(t, httpAddr, grpcAddr, namespace)
+}
+
+func nativeClientAtWithOptions(t *testing.T, httpAddr, grpcAddr, namespace string, extra ...constant.ClientOption) config_client.IConfigClient {
 	t.Helper()
 	_, httpPort, err := net.SplitHostPort(httpAddr)
 	if err != nil {
@@ -49,10 +54,11 @@ func nativeClientAt(t *testing.T, httpAddr, grpcAddr, namespace string) config_c
 	}
 	hp, _ := strconv.Atoi(httpPort)
 	gp, _ := strconv.Atoi(grpcPort)
+	opts := []constant.ClientOption{
+		constant.WithNamespaceId(namespace), constant.WithTimeoutMs(3000),
+		constant.WithNotLoadCacheAtStart(true), constant.WithCacheDir(t.TempDir()), constant.WithLogDir(t.TempDir())}
 	c, err := clients.NewConfigClient(vo.NacosClientParam{
-		ClientConfig: constant.NewClientConfig(
-			constant.WithNamespaceId(namespace), constant.WithTimeoutMs(3000),
-			constant.WithNotLoadCacheAtStart(true), constant.WithCacheDir(t.TempDir()), constant.WithLogDir(t.TempDir())),
+		ClientConfig:  constant.NewClientConfig(append(opts, extra...)...),
 		ServerConfigs: []constant.ServerConfig{*constant.NewServerConfig("127.0.0.1", uint64(hp), constant.WithGrpcPort(uint64(gp)))},
 	})
 	if err != nil {

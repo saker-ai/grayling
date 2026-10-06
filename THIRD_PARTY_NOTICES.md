@@ -11,7 +11,7 @@ A release bundle includes the full license and NOTICE texts for every linked mod
 | github.com/blang/semver/v4 | v4.0.0 | MIT | LICENSE `895d625d7bae6d50064367de0c9f283fbd4565da9cdeb103620fe357d80d52a1` |
 | github.com/cespare/xxhash/v2 | v2.3.0 | MIT | LICENSE.txt `f566a9f97bacdaf00d9f21dd991e81dc11201c4e016c86b470799429a1c9a79c` |
 | github.com/diegoholiveira/jsonlogic/v3 | v3.10.1 | MIT | LICENSE `83cc4811d39670c6e26357aa500dac3e78ebee3445ae2055a5a60ec61080a490` |
-| github.com/godeps/gonacos | v0.0.0-20261006115049-b001ebd8082f | Apache-2.0 | LICENSE `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`<br>NOTICE `f51c9c2c8fff66b0eb813fa9daf4476a5be3cf392fc6d6d5ea3603cc3ede9127` |
+| github.com/godeps/gonacos | v0.0.0-20261006194453-ea39c83bf6f0 | Apache-2.0 | LICENSE `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`<br>NOTICE `f51c9c2c8fff66b0eb813fa9daf4476a5be3cf392fc6d6d5ea3603cc3ede9127` |
 | github.com/google/jsonschema-go | v0.4.3 | MIT | LICENSE `2d56c53449691d85d9aea245eb8dac12713e9075d70d5557b82ae1e94805b357` |
 | github.com/higress-group/openapi-to-mcpserver | v1.0.0 | Apache-2.0 | LICENSE `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
 | github.com/jackc/pgpassfile | v1.0.0 | MIT | LICENSE `adb1663fda031df8f4344aa68f299fd87d80353e31339406742ded21dae65702` |

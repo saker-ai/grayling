@@ -92,7 +92,16 @@ func TestOfficialNacosClientConvergesAfterNetworkBlackhole(t *testing.T) {
 	client := nativeClientAt(t, httpProxy.listener.Addr().String(), grpcProxy.listener.Addr().String(), namespace)
 	publish(t, store, namespace, 1, false)
 	var consumer nativeConsumer
-	consumer.refresh(client)
+	// The official SDK establishes its gRPC connection asynchronously. Wait
+	// for the initial verified snapshot before injecting the network fault.
+	readyDeadline := time.Now().Add(10 * time.Second)
+	for consumer.revision != 1 && time.Now().Before(readyDeadline) {
+		consumer.refresh(client)
+		if consumer.revision == 1 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	if consumer.lastErr != nil || consumer.revision != 1 || consumer.value("checkout") != false {
 		t.Fatalf("initial state: revision=%d error=%v", consumer.revision, consumer.lastErr)
 	}

@@ -1,0 +1,34 @@
+package main
+
+import (
+	"strings"
+
+	"github.com/godeps/golab/internal/configstore"
+	"github.com/godeps/golab/internal/platform"
+)
+
+// authorizeNativeConfig derives the only readable Nacos namespace from the
+// SDK credential. It is called on login, every config query/subscription, and
+// each push, so revocation also affects already established subscriptions.
+func authorizeNativeConfig(store *platform.Store, secret, namespace, group, dataID string) error {
+	if store == nil {
+		return platform.ErrAccessDenied
+	}
+	tok, err := store.ResolveToken(secret)
+	if err != nil || tok == nil || tok.Kind != platform.TokenSDK {
+		return platform.ErrAccessDenied
+	}
+	if namespace == "" && group == "" && dataID == "" {
+		return nil
+	}
+	if group != configstore.Group || dataID == "" ||
+		(dataID != configstore.ManifestDataID &&
+			!strings.HasPrefix(dataID, "golab.flag.") && !strings.HasPrefix(dataID, "golab.segment.")) {
+		return platform.ErrAccessDenied
+	}
+	env, err := store.GetEnvironment(tok.WorkspaceID, tok.EnvironmentID)
+	if err != nil || env == nil || env.NamespaceID != namespace {
+		return platform.ErrAccessDenied
+	}
+	return nil
+}

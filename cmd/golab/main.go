@@ -49,6 +49,7 @@ func main() {
 		gonacosData          = flag.String("gonacos-data", "", "gonacos embedded-redis dump dir (default <data dir>/gonacos)")
 		gonacosAddr          = flag.String("gonacos-addr", "127.0.0.1:18848", "gonacos HTTP bind — KEEP LOOPBACK/PRIVATE (§9)")
 		gonacosGRPC          = flag.String("gonacos-grpc-addr", "127.0.0.1:19848", "gonacos gRPC bind — KEEP LOOPBACK/PRIVATE (§9)")
+		nativeConfigAuth     = flag.Bool("nacos-native-auth", false, "enable SDK-token-scoped native Nacos config reads; HTTP exposes only SDK login")
 		redisAddr            = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
 		authSecret           = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
 		authSecretFile       = flag.String("auth-secret-file", "", "owner-only file containing the gonacos HMAC/auth secret")
@@ -147,9 +148,15 @@ func main() {
 	}
 
 	// ---- gonacos substrate ----
+	var store *platform.Store
 	gopts := []server.Option{
 		server.WithAddr(*gonacosAddr),
 		server.WithGRPCAddr(*gonacosGRPC),
+	}
+	if *nativeConfigAuth {
+		gopts = append(gopts, server.WithNativeConfigAuth(func(secret, namespace, group, dataID string) error {
+			return authorizeNativeConfig(store, secret, namespace, group, dataID)
+		}))
 	}
 	if *gonacosRoot != "" {
 		gopts = append(gopts, server.WithRoot(*gonacosRoot))
@@ -180,7 +187,6 @@ func main() {
 	// Substrate handlers start serving only after the recovery gate passes.
 
 	// ---- platform store ----
-	var store *platform.Store
 	if *pgDSN != "" {
 		store, err = platform.NewPGStore(ctx, *pgDSN)
 		if err != nil {

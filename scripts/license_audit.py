@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "third_party" / "licenses.json"
 NOTICES = ROOT / "THIRD_PARTY_NOTICES.md"
 GONACOS = "github.com/godeps/gonacos"
-GONACOS_VERSION = "v0.0.0-20261006115049-b001ebd8082f"
+GONACOS_VERSION = "v0.0.0-20261006194453-ea39c83bf6f0"
 
 
 def sha(data):

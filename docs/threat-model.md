@@ -160,7 +160,7 @@
 
 | 威胁场景 | 现状缓解（证据） | 残余风险与建议 |
 |---|---|---|
-| gonacos 依赖漂移/不可复现构建 | 已从 sibling `replace` 固定为确定 commit 伪版本 `v0.0.0-20261006115049-b001ebd8082f`（= main@b001ebd8082f，`go.mod` 注释），构建仅依赖模块缓存；契约行为由 `test/smoke:TestEmbeddedGonacosRoundtrip` 在每次测试运行中复核（Publish/Get、AI prompt 版本读写） | gonacos 当前 pin 含 Apache-2.0 LICENSE/NOTICE；旧固定提交的项目原创贡献适用范围由上游声明明确，许可清单记录哈希；Issue #6 已获用户认可，后续依赖或分发内容变化仍须重新核验 |
+| gonacos 依赖漂移/不可复现构建 | 已从 sibling `replace` 固定为确定 commit 伪版本 `v0.0.0-20261006194453-ea39c83bf6f0`（= main@ea39c83bf6f0，`go.mod` 注释），构建仅依赖模块缓存；契约行为由 `test/smoke:TestEmbeddedGonacosRoundtrip` 在每次测试运行中复核（Publish/Get、AI prompt 版本读写） | gonacos 当前 pin 含 Apache-2.0 LICENSE/NOTICE；旧固定提交的项目原创贡献适用范围由上游声明明确，许可清单记录哈希；Issue #6 已获用户认可，后续依赖或分发内容变化仍须重新核验 |
 | gff core 依赖 | 固定 `thomaspoignant/go-feature-flag/modules/core v0.7.2`；其所需 `nikunjy/rules` fork replace 已在本仓库 `go.mod` 重述（`=> hairyhenderson/rules v0.0.0-20250704181428-…`）；legacy 求值路径有对照测试 `TestGffCoreLegacyEvaluate`；GoLab 原生算法与 gff 分离，黄金向量 20 条经独立 Python 实现交叉验证（`pkg/bucketing/testdata/golden_vectors.json`，`TestGoldenVectors`） | 传递依赖许可证据已列入 `third_party/licenses.json`，仍需人工复核原文 |
 | 依赖升级引入回归/漏洞 | 升级流程要求重跑契约/兼容测试（实施状态已知限制 3；技术方案 §12.1）；`Makefile` 提供 `vet`/`test`/`smoke`、许可复核和发布阻断目标；`.github/workflows/license-audit.yml` 检测依赖或证据漂移 | 尚未配置 govulncheck/SBOM；许可证自动初筛不替代法律复核 |
 
