@@ -2,7 +2,7 @@
 
 ## 结论与支持边界
 
-在固定的 gonacos `v0.0.0-20261006082753-5ac0bf0b6806` 上，官方 Go 客户端 `github.com/nacos-group/nacos-sdk-go/v2 v2.3.5` 已通过真实服务测试：首次读取、`ListenConfig` 收到 manifest 更新、重新获取文档并本地求值、缺文档时保留旧值、漏通知后同一客户端定期复核 manifest 并跳过中间 revision 收敛，以及新客户端按当前 revision 恢复。测试入口是 `GOWORK=off go test ./test/native -count=1`。
+在固定的 gonacos `v0.0.0-20261006115049-b001ebd8082f` 上，官方 Go 客户端 `github.com/nacos-group/nacos-sdk-go/v2 v2.3.5` 已通过真实服务测试：首次读取、`ListenConfig` 收到 manifest 更新、重新获取文档并本地求值、缺文档时保留旧值、漏通知后同一客户端定期复核 manifest 并跳过中间 revision 收敛，以及新客户端按当前 revision 恢复。测试入口是 `GOWORK=off go test ./test/native -count=1`。
 
 `TestNativeSnapshotAtomicityAndStatus` 还通过真实 gonacos 验证了多文档候选：一个新文档可读、另一个缺失或 hash 错误时，生效 revision 和两个求值结果都留在旧版本，错误状态可见；修复为更高的完整 revision 后两个值一起切换。测试随后将先前读取的旧候选延迟提交，确认 revision 和两个求值结果均不回退。`TestOfficialNacosClientReconnectsAfterServerRestart` 保留同一个官方客户端及其订阅，关闭真实 gonacos 服务并在原端口重启，发布新 revision 后靠 manifest 复核收敛；旧求值在收敛前不变。该重启用例覆盖已建立 gRPC 连接断开，不覆盖网络黑洞或跨节点故障切换。
 
@@ -10,7 +10,9 @@
 
 `TestOfficialNacosClientFailsOverAcrossGolabNodes` 在共享真实 PostgreSQL 与 Redis 的两个独立 GoLab 进程上验证跨节点恢复。客户端配置 B、A 两个地址，B 先离线，首次从 A 读取完整 revision；B 恢复且两个 GoLab SDK 副本确认共享状态后，终止 A，改从 B 发布新 revision。保留同一个官方客户端和 manifest 订阅，反复获取 manifest 及其引用文档并校验 hash、key，最终从 B 读到新 revision。用例连续运行两次通过。它验证原生客户端的连接切换与新版本可读性；客户端侧的多文档原子换入由 `TestNativeSnapshotAtomicityAndStatus` 单独验证。
 
-**原生订阅不是 GoLab 的正式支持接口。** gonacos gRPC 配置查询允许客户端自选 namespace，且无需租户凭证。测试证明：客户端用 B 的 namespace 不能直接看到 A 的文档，但任何能连接 gonacos 端口的客户端，只要指定 A 的 namespace ID，就能读取 A 的 manifest 和不可变配置文档，并订阅 A 的 manifest 更新。这不满足跨租户隔离验收要求。`cmd/golab` 默认仅将 gonacos HTTP/gRPC 绑定到 loopback；不得把端口开放给租户或把 GoLab SDK token 当作 Nacos 凭证。上游 gonacos 需要对 gRPC 查询、订阅和推送执行可验证的租户 ACL，完成后再做拒绝跨租户读取的真实客户端测试，才能考虑正式支持。`go test -race ./test/native -count=3` 曾在 gonacos 的双向 gRPC 流写入与 flush 之间检测到数据竞争（模块缓存的 `pkg/protocol/grpc/server.go`）；跨租户订阅用例的 race 运行还检测到官方 `nacos-sdk-go/v2 v2.3.5` 在 `CloseClient` 清理时与后台任务并发访问。`go test -race ./test/native -run TestOfficialNacosClientReconnectsAfterServerRestart -count=1` 还检测到旧订阅仍活跃时再次 `server.New` 会与 gonacos 的进程级全局状态写入发生竞争。上游并发缺陷需修复并复测。gonacos 已补 Apache-2.0 LICENSE/NOTICE；许可文件更新不解除这里的租户 ACL 阻断。
+**原生订阅不是 GoLab 的正式支持接口。** gonacos gRPC 配置查询允许客户端自选 namespace，且无需租户凭证。测试证明：客户端用 B 的 namespace 不能直接看到 A 的文档，但任何能连接 gonacos 端口的客户端，只要指定 A 的 namespace ID，就能读取 A 的 manifest 和不可变配置文档，并订阅 A 的 manifest 更新。这不满足跨租户隔离验收要求。`cmd/golab` 默认仅将 gonacos HTTP/gRPC 绑定到 loopback；不得把端口开放给租户或把 GoLab SDK token 当作 Nacos 凭证。上游 gonacos 需要对 gRPC 查询、订阅和推送执行可验证的租户 ACL，完成后再做拒绝跨租户读取的真实客户端测试，才能考虑正式支持。
+
+gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f) 已将推送订阅从客户端 IP 改为服务端连接 ID，修复同一 IP/NAT 下不同连接共用订阅与清理状态的问题，并串行化双向流写入；相关包的 `go test -race` 通过。官方客户端 `test/native` 的普通兼容测试也在新 pin 上通过。原生客户端完整 `-race` 验收仍未通过：官方 `nacos-sdk-go/v2 v2.3.5` 的 `CloseClient` 后台清理以及 gonacos 重启时的进程级全局状态曾触发竞态，需要分别定位和复测。即使推送隔离已修复，租户 ACL 缺失仍是 #11 的独立阻断。
 
 ## 试验协议
 

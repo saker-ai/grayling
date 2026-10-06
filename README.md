@@ -211,7 +211,7 @@ PostgreSQL 后端测试连**真实数据库**：默认用 docker 自动起一次
 
 ## 关键前置条件（生产多租户前）
 
-1. ~~固定 gonacos commit~~ **已完成**（`v0.0.0-20261006082753-5ac0bf0b6806`，smoke/boot 契约测试重跑全绿）；后续升级需重跑契约测试。gonacos 已采用 Apache-2.0，当前固定版本含 LICENSE/NOTICE；历史版本覆盖声明及证据见下"许可"节。
+1. ~~固定 gonacos commit~~ **已完成**（`v0.0.0-20261006115049-b001ebd8082f`，smoke/boot 契约测试重跑全绿）；后续升级需重跑契约测试。gonacos 已采用 Apache-2.0，当前固定版本含 LICENSE/NOTICE；历史版本覆盖声明及证据见下"许可"节。
 2. ~~验证 gonacos 集群推送与断连恢复；GoLab 多副本对账演练~~ **已完成**（`test/cluster`：双副本+双 gonacos 节点+外部真实 Redis+共享真实 PG——发布收敛/Redis 断连恢复/重启一致/跨副本并发发布串行化，见[实施状态](docs/实施状态.md)"多节点集群验证证据"节）。Nacos **原生客户端** `nacos-sdk-go/v2 v2.3.5` 在真实 gonacos 上已验证基础发布/订阅/求值，但原生 gRPC 配置读未做租户授权，**不属于正式支持接口**；详见 [兼容性验证](docs/Nacos原生客户端.md)。gonacos 非 loopback 场景的生产网络策略验证（端口隔离）仍未做。
 3. ~~平台存储切换 PostgreSQL 后端~~ **已完成**（真实 PG 测试）；备份/恢复联合演练（gonacos Snapshot + PostgreSQL + 密钥同一恢复点）仍待做。
 4. ~~以压测确立 P99/收敛 SLO~~ **本机回环基线已完成**（`test/perf`：本地求值 P99=3.68µs、发布→SDK 可见 max=3.77ms、1000 并发 SSE fan-out p99<6ms，硬件/样本量见[实施状态](docs/实施状态.md)性能证据节）；生产配额与限流参数仍须以生产同构环境压测复核后设定。
@@ -222,4 +222,4 @@ PostgreSQL 后端测试连**真实数据库**：默认用 docker 自动起一次
 
 **第三方声明**见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，完整选定版本、实际进入二进制的模块及许可文件 SHA-256 见 [third_party/licenses.json](third_party/licenses.json)。`make license-check` 在依赖或证据变化时要求复核，`make release-check` 和 `make dist` 在许可缺口解除前失败；发布包由 `make dist` 纳入 README、GoLab LICENSE、第三方清单和许可全文。Python/TypeScript SDK 的项目元数据同为 Apache-2.0，TypeScript 锁文件中的包仅为开发工具。
 
-**许可文件门槛已具备；对外多租户生产仍受原生 gRPC 租户隔离等验收项约束。** gonacos 当前固定版本 `v0.0.0-20261006082753-5ac0bf0b6806` 含 [Apache-2.0 LICENSE 与 NOTICE](https://github.com/godeps/gonacos/commit/5ac0bf0b6806)，上游 README 明确该授权覆盖原固定提交 `514208bd40a131b5badb830bff2daf704ab97ee9` 的项目原创贡献，第三方文件保留原声明。GoLab 的许可清单记录文件哈希，`make release-check` 核验当前固定版本；分发内容与人工复核范围见[许可证据与发布门槛](docs/许可证据与发布门槛.md)。
+**许可文件门槛已具备；对外多租户生产仍受原生 gRPC 租户隔离等验收项约束。** gonacos 当前固定版本 `v0.0.0-20261006115049-b001ebd8082f` 含 [Apache-2.0 LICENSE 与 NOTICE](https://github.com/godeps/gonacos/commit/5ac0bf0b6806)，上游 README 明确该授权覆盖原固定提交 `514208bd40a131b5badb830bff2daf704ab97ee9` 的项目原创贡献，第三方文件保留原声明。GoLab 的许可清单记录文件哈希，`make release-check` 核验当前固定版本；分发内容与人工复核范围见[许可证据与发布门槛](docs/许可证据与发布门槛.md)。

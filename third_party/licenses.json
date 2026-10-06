@@ -750,7 +750,7 @@
     },
     {
       "module": "github.com/godeps/gonacos",
-      "version": "v0.0.0-20261006082753-5ac0bf0b6806",
+      "version": "v0.0.0-20261006115049-b001ebd8082f",
       "runtime": true,
       "license": "Apache-2.0",
       "evidence": [

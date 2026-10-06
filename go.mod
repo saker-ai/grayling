@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/blang/semver/v4 v4.0.0
-	github.com/godeps/gonacos v0.0.0-20261006082753-5ac0bf0b6806
+	github.com/godeps/gonacos v0.0.0-20261006115049-b001ebd8082f
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/nacos-group/nacos-sdk-go/v2 v2.3.5
 	github.com/open-feature/go-sdk v1.19.0
@@ -91,7 +91,7 @@ require (
 // gonacos is pinned to a specific upstream commit (pseudo-version) instead of
 // the former sibling-directory replace: builds are now reproducible from the
 // module cache alone (docs/技术方案.md §12.1). The commit corresponds to
-// github.com/godeps/gonacos main @ 5ac0bf0b6806 (Apache-2.0 LICENSE/NOTICE).
+// github.com/godeps/gonacos main @ b001ebd8082f (Apache-2.0 LICENSE/NOTICE; transport-isolated gRPC push).
 
 // gff core v0.7.2 requires the forked rules package; a dependency module's
 // own replace directives do not apply to the main module, so it is restated
