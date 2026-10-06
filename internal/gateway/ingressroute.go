@@ -13,10 +13,9 @@ import (
 // child IngressRoute references the parent via spec.parentRefs and binds one
 // match rule to a Kubernetes Service.
 //
-// This target is generation+validation complete but is NOT verified against
-// a live cluster in this repository (no Kubernetes in the test environment);
-// the file and KV targets are exercised against a real Traefik binary in
-// test/gateway. Backends must carry K8sService/K8sPort for this target.
+// The live-cluster acceptance test is test/gateway/k8s_e2e_test.go; the file
+// and KV targets are exercised against a real Traefik binary in test/gateway.
+// Backends must carry K8sService/K8sPort for this target.
 
 const crdAPIVersion = "traefik.io/v1alpha1"
 

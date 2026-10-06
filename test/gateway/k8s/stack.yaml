@@ -1,0 +1,237 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: golab-issue12
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: traefik
+  namespace: golab-issue12
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: traefik
+  namespace: golab-issue12
+rules:
+  - apiGroups: [""]
+    resources: [services, secrets, configmaps]
+    verbs: [get, list, watch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+  - apiGroups: [traefik.io]
+    resources: [ingressroutes, ingressroutetcps, ingressrouteudps, middlewares, middlewaretcps, traefikservices, serverstransports, serverstransporttcps, tlsoptions, tlsstores]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: traefik
+  namespace: golab-issue12
+subjects:
+  - kind: ServiceAccount
+    name: traefik
+    namespace: golab-issue12
+roleRef:
+  kind: Role
+  name: traefik
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traefik
+  namespace: golab-issue12
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: traefik}
+  template:
+    metadata:
+      labels: {app: traefik}
+    spec:
+      serviceAccountName: traefik
+      containers:
+        - name: traefik
+          image: traefik:v3.7.13
+          imagePullPolicy: IfNotPresent
+          args:
+            - --entrypoints.web.address=:8000
+            - --providers.kubernetescrd=true
+            - --providers.kubernetescrd.namespaces=golab-issue12
+            - --providers.kubernetescrd.disableclusterscoperesources=true
+            - --providers.kubernetescrd.allowemptyservices=true
+            - --log.level=DEBUG
+          ports:
+            - {name: web, containerPort: 8000}
+          readinessProbe:
+            tcpSocket: {port: web}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik
+  namespace: golab-issue12
+spec:
+  selector: {app: traefik}
+  ports:
+    - {name: web, port: 80, targetPort: web}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend
+  namespace: golab-issue12
+data:
+  server.py: |
+    import json
+    import os
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def answer(self):
+            data = {"backend": os.environ["BACKEND_NAME"],
+                    "variantHeader": self.headers.get("X-Golab-Variant", ""),
+                    "flagKeyHeader": self.headers.get("X-Golab-Flag-Key", ""),
+                    "failOpen": self.headers.get("X-Golab-Fail-Open", ""),
+                    "reason": self.headers.get("X-Golab-Reason", ""),
+                    "forgedExtra": self.headers.get("X-Golab-Forged", ""),
+                    "method": self.command}
+            body = json.dumps(data).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = answer
+        do_POST = answer
+
+    HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stable
+  namespace: golab-issue12
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: stable}
+  template:
+    metadata:
+      labels: {app: stable}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: backend
+          image: python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: [python, -u, /app/server.py]
+          env:
+            - {name: BACKEND_NAME, value: service-stable}
+          ports:
+            - {name: http, containerPort: 8080}
+          volumeMounts:
+            - {name: app, mountPath: /app, readOnly: true}
+          readinessProbe:
+            httpGet: {path: /, port: http}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: app
+          configMap: {name: backend}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: canary
+  namespace: golab-issue12
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: canary}
+  template:
+    metadata:
+      labels: {app: canary}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: backend
+          image: python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: [python, -u, /app/server.py]
+          env:
+            - {name: BACKEND_NAME, value: service-canary}
+          ports:
+            - {name: http, containerPort: 8080}
+          volumeMounts:
+            - {name: app, mountPath: /app, readOnly: true}
+          readinessProbe:
+            httpGet: {path: /, port: http}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: app
+          configMap: {name: backend}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-stable
+  namespace: golab-issue12
+spec:
+  selector: {app: stable}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-canary
+  namespace: golab-issue12
+spec:
+  selector: {app: canary}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+# kind's default CNI does not enforce NetworkPolicy. Install a policy-capable
+# CNI before using this policy as a security boundary outside this fixture.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway
+  namespace: golab-issue12
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: golab-issue12}}
+    - from:
+        - ipBlock: {cidr: 0.0.0.0/0}
+      ports:
+        - {protocol: TCP, port: 8000}
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: golab-issue12}}
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - ipBlock: {cidr: __HOST_GATEWAY__/32}
+      ports:
+        - {protocol: TCP, port: 1, endPort: 65535}
+    - to:
+        - ipBlock: {cidr: __KUBE_API__/32}
+      ports:
+        - {protocol: TCP, port: 443}

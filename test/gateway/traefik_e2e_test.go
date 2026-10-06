@@ -294,6 +294,7 @@ func newStubBackend(t *testing.T, name string) *stubBackend {
 			"flagKeyHeader": r.Header.Get(gw.FlagKeyHeader),
 			"failOpen":      r.Header.Get(gw.FailOpenHeader),
 			"reason":        r.Header.Get(gw.ReasonHeader),
+			"forgedExtra":   r.Header.Get("X-Golab-Forged"),
 		})
 	}))
 	t.Cleanup(b.srv.Close)
@@ -308,6 +309,7 @@ type backendReply struct {
 	FlagKeyHeader string `json:"flagKeyHeader"`
 	FailOpen      string `json:"failOpen"`
 	Reason        string `json:"reason"`
+	ForgedExtra   string `json:"forgedExtra"`
 }
 
 // ---------------------------------------------------------------------------
@@ -448,6 +450,10 @@ type fixture struct {
 }
 
 func setupFixture(t *testing.T) *fixture {
+	return setupFixtureOnHost(t, "127.0.0.1")
+}
+
+func setupFixtureOnHost(t *testing.T, listenHost string) *fixture {
 	t.Helper()
 	root := repoRoot(t)
 	fx := &fixture{t: t, root: root}
@@ -461,7 +467,7 @@ func setupFixture(t *testing.T) *fixture {
 	golabPort := freePort(t)
 	dataDir := t.TempDir()
 	fx.golab = startProc(t, "golab", golabBin,
-		"-addr", fmt.Sprintf("127.0.0.1:%d", golabPort),
+		"-addr", fmt.Sprintf("%s:%d", listenHost, golabPort),
 		"-data", filepath.Join(dataDir, "store.json"),
 		"-gonacos-data", filepath.Join(dataDir, "gonacos"),
 		"-gonacos-addr", fmt.Sprintf("127.0.0.1:%d", freePort(t)),
@@ -514,7 +520,7 @@ func setupFixture(t *testing.T) *fixture {
 	proxyBin := buildBinary(t, root, "./cmd/golab-proxy", "golab-proxy")
 	proxyPort := freePort(t)
 	fx.proxy = startProc(t, "golab-proxy", proxyBin,
-		"-addr", fmt.Sprintf("127.0.0.1:%d", proxyPort),
+		"-addr", fmt.Sprintf("%s:%d", listenHost, proxyPort),
 		"-upstream", fx.golabBase,
 		"-timeout", "5s",
 		"-gateway-token", fx.sdkToken,
@@ -760,9 +766,10 @@ func TestTraefikGatewayE2E(t *testing.T) {
 				gw.VariantHeader:  "canary",
 				gw.FlagKeyHeader:  "forged-flag",
 				gw.FailOpenHeader: "forged-reason",
+				"X-Golab-Forged":  "attacker",
 			}, "GET")
 		if status != 200 || reply.Backend != "service-stable" ||
-			reply.FlagKeyHeader != flagKey || reply.FailOpen != "" {
+			reply.FlagKeyHeader != flagKey || reply.FailOpen != "" || reply.ForgedExtra != "" {
 			t.Fatalf("ancillary header forgery leaked: status=%d reply=%+v", status, reply)
 		}
 		t.Logf("D PASS: %d forged X-Golab-Variant:canary requests on stable keys all stayed on service-stable; ancillary X-Golab-* forgeries stripped", len(stableKeys))
