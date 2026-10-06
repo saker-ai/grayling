@@ -220,7 +220,7 @@ type replica struct {
 }
 
 func startReplica(t *testing.T, name, bin, dsn, redisAddr, authSecret string,
-	reconcileIv time.Duration) *replica {
+	reconcileIv time.Duration, extraArgs ...string) *replica {
 	t.Helper()
 	port := freePort(t)
 	args := []string{
@@ -235,6 +235,7 @@ func startReplica(t *testing.T, name, bin, dsn, redisAddr, authSecret string,
 		"-reconcile-interval", reconcileIv.String(),
 		"-requests-per-second", "100000",
 	}
+	args = append(args, extraArgs...)
 	r := &replica{name: name, bin: bin, args: args,
 		base: fmt.Sprintf("http://127.0.0.1:%d", port), t: t}
 	r.proc = startProc(t, "golab-"+name, bin, args...)

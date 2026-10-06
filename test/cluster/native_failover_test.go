@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"testing"
 	"time"
@@ -51,11 +52,12 @@ func nacosServerConfig(t *testing.T, r *replica) constant.ServerConfig {
 	return *constant.NewServerConfig("127.0.0.1", uint64(hp), constant.WithGrpcPort(uint64(gp)))
 }
 
-func nativeClusterClient(t *testing.T, namespace string, servers ...constant.ServerConfig) config_client.IConfigClient {
+func nativeClusterClient(t *testing.T, namespace, sdkToken string, servers ...constant.ServerConfig) config_client.IConfigClient {
 	t.Helper()
 	c, err := clients.NewConfigClient(vo.NacosClientParam{
 		ClientConfig: constant.NewClientConfig(
 			constant.WithNamespaceId(namespace), constant.WithTimeoutMs(3000),
+			constant.WithUsername("golab-sdk"), constant.WithPassword(sdkToken),
 			constant.WithNotLoadCacheAtStart(true), constant.WithCacheDir(t.TempDir()), constant.WithLogDir(t.TempDir())),
 		ServerConfigs: servers,
 	})
@@ -107,7 +109,7 @@ func TestOfficialNacosClientFailsOverAcrossGolabNodes(t *testing.T) {
 	redis := redistest.Start(t)
 	bin := buildGolab(t, repoRoot(t))
 	const authSecret = "native-failover-shared-secret-0123456789abcdef"
-	a := startReplica(t, "native-A", bin, dsn, redis.Addr, authSecret, time.Second)
+	a := startReplica(t, "native-A", bin, dsn, redis.Addr, authSecret, time.Second, "-nacos-native-auth=true")
 	owner := scrapeOwnerToken(t, a.proc, 20*time.Second)
 	adminA := &client{t: t, base: a.base, token: owner}
 	if code := adminA.do(http.MethodPost, "/api/v1/admin/workspaces",
@@ -132,12 +134,33 @@ func TestOfficialNacosClientFailsOverAcrossGolabNodes(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("publish r1: HTTP %d", code)
 	}
+	var sdkToken struct {
+		Secret string
+		Token  struct{ ID string }
+	}
+	if code := adminA.do(http.MethodPost, "/api/v1/admin/workspaces/acme/tokens",
+		map[string]any{"name": "sdk", "kind": "sdk", "environment": "prod"}, &sdkToken); code != http.StatusCreated {
+		t.Fatalf("create SDK token: HTTP %d", code)
+	}
+	if code := adminA.do(http.MethodPost, "/api/v1/admin/workspaces",
+		map[string]any{"slug": "other", "name": "Other"}, nil); code != http.StatusCreated {
+		t.Fatalf("create other workspace: HTTP %d", code)
+	}
+	if code := adminA.do(http.MethodPost, "/api/v1/admin/workspaces/other/environments",
+		map[string]any{"slug": "prod", "name": "Production"}, nil); code != http.StatusCreated {
+		t.Fatalf("create other environment: HTTP %d", code)
+	}
+	var otherToken struct{ Secret string }
+	if code := adminA.do(http.MethodPost, "/api/v1/admin/workspaces/other/tokens",
+		map[string]any{"name": "other-sdk", "kind": "sdk", "environment": "prod"}, &otherToken); code != http.StatusCreated {
+		t.Fatalf("create other SDK token: HTTP %d", code)
+	}
 
-	b := startReplica(t, "native-B", bin, dsn, redis.Addr, authSecret, time.Second)
+	b := startReplica(t, "native-B", bin, dsn, redis.Addr, authSecret, time.Second, "-nacos-native-auth=true")
 	b.proc.terminate(t)
 	// The SDK's next-server rotation can choose either address first. With B
 	// offline, an initial successful query proves it connected through A.
-	native := nativeClusterClient(t, environment.NamespaceID,
+	native := nativeClusterClient(t, environment.NamespaceID, sdkToken.Secret,
 		nacosServerConfig(t, b), nacosServerConfig(t, a))
 	initial, err := nativeClusterRevision(native)
 	if err != nil || initial != r1 {
@@ -155,14 +178,15 @@ func TestOfficialNacosClientFailsOverAcrossGolabNodes(t *testing.T) {
 	}
 	b.proc = startProc(t, "golab-native-B(restarted)", b.bin, b.args...)
 	waitHealth(t, b.base, 60*time.Second)
-	var sdkToken struct{ Secret string }
-	if code := adminA.do(http.MethodPost, "/api/v1/admin/workspaces/acme/tokens",
-		map[string]any{"name": "sdk", "kind": "sdk", "environment": "prod"}, &sdkToken); code != http.StatusCreated {
-		t.Fatalf("create SDK token: HTTP %d", code)
-	}
 	sdkA := &client{t: t, base: a.base, token: sdkToken.Secret}
 	sdkB := &client{t: t, base: b.base, token: sdkToken.Secret}
 	waitRevision(t, r1, 15*time.Second, sdkA, sdkB)
+	for _, node := range []*replica{a, b} {
+		other := nativeClusterClient(t, environment.NamespaceID, otherToken.Secret, nacosServerConfig(t, node))
+		if _, err := other.GetConfig(vo.ConfigParam{DataId: configstore.ManifestDataID, Group: configstore.Group}); err == nil {
+			t.Fatalf("other tenant read acme manifest through node %s", node.name)
+		}
+	}
 	r2, code := adminA.publishFlag(splitFlag("feature", 60))
 	if code != http.StatusOK {
 		t.Fatalf("publish r2: HTTP %d", code)
@@ -185,12 +209,28 @@ func TestOfficialNacosClientFailsOverAcrossGolabNodes(t *testing.T) {
 		}
 		lastErr = err
 		if lastVerified == r3 {
-			return
+			break
 		}
 		select {
 		case <-changes: // only an invalidation hint; always re-read the manifest
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
-	t.Fatalf("native client did not fail over to B: revision=%d want=%d last error=%v", lastVerified, r3, lastErr)
+	if lastVerified != r3 {
+		t.Fatalf("native client did not fail over to B: revision=%d want=%d last error=%v", lastVerified, r3, lastErr)
+	}
+	if code := adminB.do(http.MethodDelete, "/api/v1/admin/tokens/"+sdkToken.Token.ID, nil, nil); code != http.StatusOK {
+		t.Fatalf("revoke SDK token: HTTP %d", code)
+	}
+	httpAddr := replicaOption(t, b, "-gonacos-addr")
+	resp, err := http.PostForm("http://"+httpAddr+"/nacos/v1/auth/users/login", url.Values{
+		"username": {"golab-sdk"}, "password": {sdkToken.Secret},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("revoked SDK credential login through B: HTTP %d, want 401", resp.StatusCode)
+	}
 }
