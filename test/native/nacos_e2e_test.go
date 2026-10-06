@@ -336,6 +336,32 @@ func TestOfficialNacosClientPublishSubscribeEvaluate(t *testing.T) {
 	}
 }
 
+// Polling the manifest must converge even when this same client never receives
+// a notification. In particular, intermediate revisions need not be observed.
+func TestOfficialNacosClientConvergesAfterMissedNotifications(t *testing.T) {
+	srv := nativeServer(t)
+	store := configstore.NewGonacosStore(srv.Services().Config)
+	const namespace = "native-missed-notifications"
+	client := nativeClient(t, srv, namespace)
+	publish(t, store, namespace, 1, false)
+	var consumer nativeConsumer
+	consumer.refresh(client)
+	if consumer.lastErr != nil || consumer.revision != 1 || consumer.value("checkout") != false {
+		t.Fatalf("initial state: revision=%d error=%v", consumer.revision, consumer.lastErr)
+	}
+
+	// The client is kept alive, but has no listener for either publication.
+	publish(t, store, namespace, 2, true)
+	publish(t, store, namespace, 3, false)
+	if consumer.revision != 1 || consumer.value("checkout") != false {
+		t.Fatal("unverified revision became visible before reconciliation")
+	}
+	consumer.refresh(client)
+	if consumer.lastErr != nil || consumer.revision != 3 || consumer.value("checkout") != false {
+		t.Fatalf("manifest reconciliation: revision=%d error=%v", consumer.revision, consumer.lastErr)
+	}
+}
+
 // Restart the real service on the same ports while retaining the official
 // client's subscription. The client must reconcile from the current manifest
 // after its established gRPC connection is severed.

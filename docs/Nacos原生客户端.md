@@ -2,7 +2,7 @@
 
 ## 结论与支持边界
 
-在固定的 gonacos `v0.0.0-20260706000526-514208bd40a1` 上，官方 Go 客户端 `github.com/nacos-group/nacos-sdk-go/v2 v2.3.5` 已通过真实服务测试：首次读取、`ListenConfig` 收到 manifest 更新、重新获取文档并本地求值、缺文档时保留旧值、漏通知后新客户端按当前 revision 恢复。测试入口是 `GOWORK=off go test ./test/native -count=1`。
+在固定的 gonacos `v0.0.0-20260706000526-514208bd40a1` 上，官方 Go 客户端 `github.com/nacos-group/nacos-sdk-go/v2 v2.3.5` 已通过真实服务测试：首次读取、`ListenConfig` 收到 manifest 更新、重新获取文档并本地求值、缺文档时保留旧值、漏通知后同一客户端定期复核 manifest 并跳过中间 revision 收敛，以及新客户端按当前 revision 恢复。测试入口是 `GOWORK=off go test ./test/native -count=1`。
 
 `TestNativeSnapshotAtomicityAndStatus` 还通过真实 gonacos 验证了多文档候选：一个新文档可读、另一个缺失或 hash 错误时，生效 revision 和两个求值结果都留在旧版本，错误状态可见；修复为更高的完整 revision 后两个值一起切换。测试随后将先前读取的旧候选延迟提交，确认 revision 和两个求值结果均不回退。`TestOfficialNacosClientReconnectsAfterServerRestart` 保留同一个官方客户端及其订阅，关闭真实 gonacos 服务并在原端口重启，发布新 revision 后靠 manifest 复核收敛；旧求值在收敛前不变。该测试覆盖服务重启导致的已建立 gRPC 连接断开，不覆盖网络黑洞或跨节点故障切换。
 
