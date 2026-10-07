@@ -4,6 +4,7 @@
   "backendConnectionReuse": false,
   "backendHTTP": "127.0.0.1:18848",
   "backendGRPC": "127.0.0.1:19848",
+  "backendExternalHost": "10.42.1.10",
   "tlsHTTP": "nacos.example.internal:8848",
   "tlsGRPC": "nacos.example.internal:9848",
   "caFile": "/etc/golab/nacos-ca.pem",

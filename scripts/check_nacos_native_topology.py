@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Fail closed on unsupported native Nacos deployment declarations; optionally probe TLS."""
 import argparse
+import datetime
+import hashlib
 import ipaddress
 import json
 import socket
@@ -72,13 +74,14 @@ def probe(c):
     context.set_alpn_protocols(["http/1.1"])
     host, port = split_address(c["tlsHTTP"])
     base = f"https://{host}:{port}"
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=context))
     for request, expected in (
         (urllib.request.Request(base + "/nacos/v1/cs/configs?tenant=x&group=GOLAB_FLAGS&dataId=golab.manifest"), 404),
         (urllib.request.Request(base + "/nacos/v1/auth/users/login",
                                 data=urllib.parse.urlencode({"username": "golab-sdk", "password": "invalid"}).encode()), 401),
     ):
         try:
-            with urllib.request.urlopen(request, context=context, timeout=5) as response:
+            with opener.open(request, timeout=5) as response:
                 status = response.status
         except urllib.error.HTTPError as exc:
             status = exc.code
@@ -86,11 +89,48 @@ def probe(c):
             raise ValueError(f"{request.full_url}: HTTP {status}, expected {expected}")
 
 
+def probe_denied(c):
+    """Run from a source outside allowedSources while an allowed probe passes."""
+    host = c.get("backendExternalHost")
+    if not host or ipaddress.ip_address(host).is_loopback:
+        raise ValueError("backendExternalHost must be a non-loopback IP visible from the denied source")
+    targets = [split_address(c[field]) for field in ("tlsHTTP", "tlsGRPC")]
+    targets += [(host, split_address(c[field])[1]) for field in ("backendHTTP", "backendGRPC")]
+    for target in targets:
+        # A misspelled/unresolvable hostname is not evidence of network policy.
+        addresses = socket.getaddrinfo(target[0], target[1], type=socket.SOCK_STREAM)
+        if not addresses or any(ipaddress.ip_address(address[4][0]).is_loopback for address in addresses):
+            raise ValueError(f"target {target[0]} resolves to loopback or no address")
+        try:
+            with socket.create_connection(target, timeout=3):
+                raise ValueError(f"unauthorized source connected to {target[0]}:{target[1]}")
+        except OSError:
+            pass
+
+
+def evidence(c, mode):
+    return {
+        "mode": mode,
+        "result": "PASS",
+        "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "probeHost": socket.gethostname(),
+        "configSHA256": hashlib.sha256(json.dumps(c, sort_keys=True).encode()).hexdigest(),
+        "targets": [c["tlsHTTP"], c["tlsGRPC"]] + (
+            [f"{c['backendExternalHost']}:{split_address(c[field])[1]}" for field in ("backendHTTP", "backendGRPC")]
+            if mode == "denied" else []
+        ),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", help="deployment declaration JSON")
     parser.add_argument("--probe", action="store_true", help="also check live TLS and HTTP deny paths")
+    parser.add_argument("--probe-denied", action="store_true", help="from a rejected source, verify both TLS and backend ports refuse TCP")
+    parser.add_argument("--evidence", help="write successful probe metadata as JSON; no credentials are recorded")
     args = parser.parse_args()
+    if args.probe and args.probe_denied:
+        parser.error("--probe and --probe-denied are mutually exclusive")
     with open(args.config, encoding="utf-8") as stream:
         config = json.load(stream)
     errors = validate(config)
@@ -104,7 +144,18 @@ def main():
         except (OSError, ValueError, urllib.error.URLError) as exc:
             print("ALERT: live probe failed:", exc, file=sys.stderr)
             return 1
-    print("PASS: declared TLS/L4 topology" + (" and live TLS/deny probes" if args.probe else ""))
+    if args.probe_denied:
+        try:
+            probe_denied(config)
+        except (OSError, ValueError) as exc:
+            print("ALERT: denied-source probe failed:", exc, file=sys.stderr)
+            return 1
+    mode = "denied" if args.probe_denied else "allowed" if args.probe else "declaration"
+    if args.evidence:
+        with open(args.evidence, "w", encoding="utf-8") as stream:
+            json.dump(evidence(config, mode), stream, indent=2)
+            stream.write("\n")
+    print("PASS: declared TLS/L4 topology" + (" and live TLS/HTTP probes" if args.probe else " and denied-source TCP probes" if args.probe_denied else ""))
     return 0
 
 
