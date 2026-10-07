@@ -361,11 +361,20 @@ waitPush:
 	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, environment.NamespaceID, ""); status != grpcsrv.StatusUnauthenticated {
 		t.Fatalf("anonymous direct TLS gRPC read: status %d, want 16", status)
 	}
+	if status := nativeRawTLSListenStatus(t, grpcClient, grpcAddr, environment.NamespaceID, sdkToken.Secret); status != grpcsrv.StatusOK {
+		t.Fatalf("authorized direct TLS gRPC subscription: status %d, want 0", status)
+	}
+	if status := nativeRawTLSListenStatus(t, grpcClient, grpcAddr, environment.NamespaceID, otherToken.Secret); status != grpcsrv.StatusPermissionDenied {
+		t.Fatalf("cross-tenant direct TLS gRPC subscription: status %d, want 7", status)
+	}
 	if code := adminB.do(http.MethodDelete, "/api/v1/admin/tokens/"+sdkToken.Token.ID, nil, nil); code != http.StatusOK {
 		t.Fatalf("revoke SDK token: HTTP %d", code)
 	}
 	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, environment.NamespaceID, sdkToken.Secret); status != grpcsrv.StatusUnauthenticated {
 		t.Fatalf("revoked direct TLS gRPC read on existing connection: status %d, want 16", status)
+	}
+	if status := nativeRawTLSListenStatus(t, grpcClient, grpcAddr, environment.NamespaceID, sdkToken.Secret); status != grpcsrv.StatusUnauthenticated {
+		t.Fatalf("revoked direct TLS gRPC subscription on existing connection: status %d, want 16", status)
 	}
 	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, otherEnvironment.NamespaceID, otherToken.Secret); status != grpcsrv.StatusOK {
 		t.Fatalf("other tenant read after revocation on existing connection: status %d, want 0", status)

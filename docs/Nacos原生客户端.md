@@ -33,6 +33,8 @@ gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f
 
 2026-10-07 预检增强：允许源除 `h2` 握手外，须用 `cmd/nacos-native-grpc-probe` 对每个 gRPC 入口 IP 直发无凭证配置查询及批量订阅请求，两者均须得到 gRPC status 16；否则不写 PASS 证据。配对核验要求 `anonymousGRPCDenied` 与 `anonymousGRPCSubscriptionDenied`。探针的读与订阅拒绝路径由本地真实 TLS/HTTP2 服务测试覆盖；双 GoLab 进程本机 TLS/L4 定向用例也验证无凭证订阅返回 status 16。本轮拓扑预检器 33/33、`make all` 与 `make client-compatibility` 通过。没有跨主机现场入口与代理/网络策略日志，生产支持结论不变。
 
+2026-10-07 双节点本机 TLS/L4 回归补充：真实进程测试在同一条 HTTP/2 连接上，确认 A 撤销前订阅返回 gRPC status 0、B 对 A 命名空间订阅返回 status 7；撤销 A 的 SDK token 后，A 再次订阅返回 status 16。原有测试还确认撤销后直接读取返回 status 16、旧订阅不再收到新 revision 推送。这样同时检查了既有订阅与新订阅的撤销边界；它仍不是跨主机网络策略或现场代理验收。
+
 2026-10-07 声明门禁复核：`allowedSources` 的两条 `/1` 即使合计覆盖整个 IPv4 或 IPv6 地址空间也会被拒绝；合法相邻工作负载网段仍可通过。`python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'` 32/32、示例声明检查、`make all`（vet、全量 Go 测试、构建）、`make client-compatibility`（直连 9/9、本机双节点 TLS/L4 1/1）及 `git diff --check` 通过。该门禁不能认定任意非全网 CIDR 已获批准，现场仍须核对网络策略；本次没有新增跨主机现场验收证据。
 
 | 拓扑 | 现有证据 | 正式支持 |

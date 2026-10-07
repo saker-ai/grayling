@@ -51,53 +51,16 @@ func checkNativeSharedBackendConnection(t *testing.T, backend, namespaceA, names
 	if status := nativeRawTLSQueryStatus(t, client, addr, namespaceA, tokenA); status != grpcsrv.StatusOK {
 		t.Fatalf("first tenant read after rejected requests: gRPC status %d, want 0", status)
 	}
-	listen := func(client *http.Client, namespace, token string) int {
-		t.Helper()
-		body, err := json.Marshal(map[string]any{
-			"listen": true,
-			"configListenContexts": []map[string]string{{
-				"tenant": namespace, "group": configstore.Group,
-				"dataId": configstore.ManifestDataID, "md5": "",
-			}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		payload := grpcsrv.Payload{
-			Metadata: grpcsrv.Metadata{Type: "ConfigBatchListenRequest", Headers: map[string]string{"accessToken": token}},
-			Body:     grpcsrv.Any{TypeURL: "type.googleapis.com/com.alibaba.nacos.api.config.request.ConfigBatchListenRequest", Value: body},
-		}
-		var frame bytes.Buffer
-		if err := grpcsrv.WriteFrame(&frame, grpcsrv.Frame{Payload: payload.Encode()}); err != nil {
-			t.Fatal(err)
-		}
-		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://"+addr+"/Request/request", &frame)
-		if err != nil {
-			t.Fatal(err)
-		}
-		request.Header.Set("Content-Type", "application/grpc")
-		response, err := client.Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer response.Body.Close()
-		_, _ = io.Copy(io.Discard, response.Body)
-		status, err := strconv.Atoi(response.Header.Get("grpc-status"))
-		if err != nil {
-			t.Fatal(fmt.Errorf("missing gRPC status: %w", err))
-		}
-		return status
-	}
-	if status := listen(client, namespaceA, ""); status != grpcsrv.StatusUnauthenticated {
+	if status := nativeRawTLSListenStatus(t, client, addr, namespaceA, ""); status != grpcsrv.StatusUnauthenticated {
 		t.Fatalf("anonymous direct TLS gRPC subscription: status %d, want 16", status)
 	}
-	if status := listen(client, namespaceA, tokenA); status != grpcsrv.StatusOK {
+	if status := nativeRawTLSListenStatus(t, client, addr, namespaceA, tokenA); status != grpcsrv.StatusOK {
 		t.Fatalf("first tenant subscription on shared transport: gRPC status %d", status)
 	}
-	if status := listen(client, namespaceA, tokenB); status != grpcsrv.StatusPermissionDenied {
+	if status := nativeRawTLSListenStatus(t, client, addr, namespaceA, tokenB); status != grpcsrv.StatusPermissionDenied {
 		t.Fatalf("second tenant subscription on shared transport: gRPC status %d, want 7", status)
 	}
-	if status := listen(client, namespaceB, tokenB); status != grpcsrv.StatusPermissionDenied {
+	if status := nativeRawTLSListenStatus(t, client, addr, namespaceB, tokenB); status != grpcsrv.StatusPermissionDenied {
 		t.Fatalf("second tenant own-namespace subscription on shared transport: gRPC status %d, want 7", status)
 	}
 	if count := accepted.Load(); count != 1 {
@@ -106,12 +69,50 @@ func checkNativeSharedBackendConnection(t *testing.T, backend, namespaceA, names
 	separateTransport := &http2.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
 	t.Cleanup(separateTransport.CloseIdleConnections)
 	separateClient := &http.Client{Transport: separateTransport}
-	if status := listen(separateClient, namespaceB, tokenB); status != grpcsrv.StatusOK {
+	if status := nativeRawTLSListenStatus(t, separateClient, addr, namespaceB, tokenB); status != grpcsrv.StatusOK {
 		t.Fatalf("second tenant own-namespace subscription on separate connection: gRPC status %d, want 0", status)
 	}
 	if count := accepted.Load(); count != 2 {
 		t.Fatalf("separate tenant subscription used %d backend TCP connections, want two", count)
 	}
+}
+
+func nativeRawTLSListenStatus(t *testing.T, client *http.Client, addr, namespace, token string) int {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"listen": true,
+		"configListenContexts": []map[string]string{{
+			"tenant": namespace, "group": configstore.Group,
+			"dataId": configstore.ManifestDataID, "md5": "",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := grpcsrv.Payload{
+		Metadata: grpcsrv.Metadata{Type: "ConfigBatchListenRequest", Headers: map[string]string{"accessToken": token}},
+		Body:     grpcsrv.Any{TypeURL: "type.googleapis.com/com.alibaba.nacos.api.config.request.ConfigBatchListenRequest", Value: body},
+	}
+	var frame bytes.Buffer
+	if err := grpcsrv.WriteFrame(&frame, grpcsrv.Frame{Payload: payload.Encode()}); err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://"+addr+"/Request/request", &frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/grpc")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, response.Body)
+	status, err := strconv.Atoi(response.Header.Get("grpc-status"))
+	if err != nil {
+		t.Fatal(fmt.Errorf("missing gRPC status: %w", err))
+	}
+	return status
 }
 
 // Query the server directly so an SDK last-known-good cache cannot turn a
