@@ -39,6 +39,21 @@ class NativeTopologyTest(unittest.TestCase):
     def test_supported_declaration(self):
         self.assertEqual(validate(self.config), [])
 
+    def test_allowed_sources_cannot_split_full_address_space(self):
+        for sources in (
+            ["0.0.0.0/1", "128.0.0.0/1"],
+            ["::/1", "8000::/1"],
+            ["10.42.0.0/16", "0.0.0.0/1", "128.0.0.0/1"],
+        ):
+            with self.subTest(sources=sources):
+                config = copy.deepcopy(self.config)
+                config["allowedSources"] = sources
+                self.assertTrue(any("entire IPv" in error for error in validate(config)))
+
+        config = copy.deepcopy(self.config)
+        config["allowedSources"] = ["10.42.0.0/17", "10.42.128.0/17"]
+        self.assertEqual(validate(config), [])
+
     def test_evidence_writer_never_replaces_existing_record(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "probe.json")

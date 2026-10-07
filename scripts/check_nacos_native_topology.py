@@ -70,13 +70,18 @@ def validate(c):
     if not isinstance(sources, list) or not sources:
         errors.append("allowedSources must be a nonempty explicit list")
     else:
+        networks_by_version = {4: [], 6: []}
         for source in sources:
             try:
                 network = ipaddress.ip_network(source, strict=False)
                 if network.prefixlen == 0:
                     raise ValueError("unrestricted source")
+                networks_by_version[network.version].append(network)
             except ValueError as exc:
                 errors.append(f"allowedSources {source}: {exc}")
+        for version, networks in networks_by_version.items():
+            if any(network.prefixlen == 0 for network in ipaddress.collapse_addresses(networks)):
+                errors.append(f"allowedSources collectively permit the entire IPv{version} address space")
     return errors
 
 
