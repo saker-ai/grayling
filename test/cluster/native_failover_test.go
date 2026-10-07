@@ -161,14 +161,40 @@ func TestOfficialNacosClientFailsOverAcrossGolabNodes(t *testing.T) {
 		map[string]any{"slug": "other", "name": "Other"}, nil); code != http.StatusCreated {
 		t.Fatalf("create other workspace: HTTP %d", code)
 	}
+	var otherEnvironment struct{ NamespaceID string }
 	if code := adminA.do(http.MethodPost, "/api/v1/admin/workspaces/other/environments",
-		map[string]any{"slug": "prod", "name": "Production"}, nil); code != http.StatusCreated {
+		map[string]any{"slug": "prod", "name": "Production"}, &otherEnvironment); code != http.StatusCreated {
 		t.Fatalf("create other environment: HTTP %d", code)
+	}
+	if otherEnvironment.NamespaceID == "" {
+		t.Fatal("other environment has no gonacos namespace ID")
+	}
+	var otherReviewer struct{ Secret string }
+	if code := adminA.do(http.MethodPost, "/api/v1/admin/workspaces/other/tokens",
+		map[string]any{"name": "other-reviewer", "kind": "admin", "role": "publisher"}, &otherReviewer); code != http.StatusCreated {
+		t.Fatalf("create other reviewer token: HTTP %d", code)
 	}
 	var otherToken struct{ Secret string }
 	if code := adminA.do(http.MethodPost, "/api/v1/admin/workspaces/other/tokens",
 		map[string]any{"name": "other-sdk", "kind": "sdk", "environment": "prod"}, &otherToken); code != http.StatusCreated {
 		t.Fatalf("create other SDK token: HTTP %d", code)
+	}
+	otherFlag := splitFlag("other-feature", 25)
+	otherPath := "/api/v1/admin/workspaces/other/environments/prod/flags/" + otherFlag.Key
+	for _, step := range []struct {
+		method, path string
+		body         map[string]any
+		token        string
+	}{
+		{http.MethodPut, otherPath + "/draft", map[string]any{"content": otherFlag, "risk": "normal"}, owner},
+		{http.MethodPost, otherPath + "/submit", map[string]any{"reason": "native tenant isolation"}, owner},
+		{http.MethodPost, otherPath + "/approve", map[string]any{"note": "ok"}, otherReviewer.Secret},
+		{http.MethodPost, otherPath + "/publish", map[string]any{"note": "ship"}, owner},
+	} {
+		actor := &client{t: t, base: a.base, token: step.token}
+		if code := actor.do(step.method, step.path, step.body, nil); code != http.StatusOK {
+			t.Fatalf("publish other tenant %s: HTTP %d", step.path, code)
+		}
 	}
 
 	b := startReplica(t, "native-B", bin, dsn, redis.Addr, authSecret, time.Second, "-nacos-native-auth=true")
@@ -210,8 +236,12 @@ func TestOfficialNacosClientFailsOverAcrossGolabNodes(t *testing.T) {
 	sdkA := &client{t: t, base: a.base, token: sdkToken.Secret}
 	sdkB := &client{t: t, base: b.base, token: sdkToken.Secret}
 	waitRevision(t, r1, 15*time.Second, sdkA, sdkB)
+	otherNative := nativeClusterClientWithCA(t, otherEnvironment.NamespaceID, otherToken.Secret, caFile, serverA)
+	if revision, err := nativeClusterRevision(otherNative); err != nil || revision == 0 {
+		t.Fatalf("other tenant cannot read its own manifest: revision=%d error=%v", revision, err)
+	}
 	checkNativeSharedBackendConnection(t, replicaOption(t, a, "-gonacos-grpc-addr"),
-		environment.NamespaceID, sdkToken.Secret, otherToken.Secret, cert, caFile)
+		environment.NamespaceID, otherEnvironment.NamespaceID, sdkToken.Secret, otherToken.Secret, cert, caFile)
 	foreignPushes := make(chan string, 2)
 	for _, node := range []struct {
 		name   string

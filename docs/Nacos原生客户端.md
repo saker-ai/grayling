@@ -36,10 +36,12 @@ gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f
 | 默认匿名 gonacos、仅 loopback | 原生功能测试显示知道 namespace 即可跨租户读取；启动时即使设置 `GOLAB_ALLOW_NON_LOOPBACK_GONACOS=1` 也拒绝匿名非 loopback 绑定 | 不作为租户可达接口 |
 | `-nacos-native-auth=true`、单/双节点直连 TCP | 官方 Go SDK v2.3.5 真实进程读、订阅、跨租户拒绝、撤销与双节点切换（#11） | 仅实验兼容性验证；明文连接不能跨主机部署 |
 | 双节点 TLS 终止 + 每个客户端 TCP 连接对应独立后端 TCP 连接，gonacos 后端仅 loopback | `test/cluster/TestOfficialNacosClientFailsOverAcrossGolabNodes` 使用真实 GoLab/PG/Redis 及 TLS/L4 代理，验证两个租户、故障切换、HTTP 绕过、撤销；直接向同一 TLS HTTP/2 连接发送原生配置查询，验证有效凭证成功、匿名及撤销后的凭证均被拒；代理与后端在同一测试主机 | **待跨主机入口网络策略与拒绝源验收**；目前不声明生产正式支持 |
-| L7 HTTP/2 代理多路复用不同租户到同一后端 gRPC 连接 | 同一后端 HTTP/2 连接的双凭证负向探针确认第二租户读取和订阅均返回 gRPC status 7；真实 L7 代理的推送身份隔离仍无法证明；`scripts/check_nacos_native_topology.py` 对此配置报错 | **不支持** |
+| L7 HTTP/2 代理多路复用不同租户到同一后端 gRPC 连接 | 双租户各自发布 manifest 后，共享一条后端连接：B 读取 A 的 namespace 返回 status 7，读取 B 自己的 namespace 返回 status 0，但订阅 B 自己的 namespace 返回 status 7；B 换用独立后端连接订阅返回 status 0。订阅读取行为不一致，且真实 L7 代理的推送身份隔离未证明；`scripts/check_nacos_native_topology.py` 对复用配置报错 | **不支持** |
 | 其他语言或官方 SDK 其他版本 | 未测试 | 不支持 |
 
-2026-10-07 复核：`GOWORK=off go test ./test/cluster -run '^TestOfficialNacosClientFailsOverAcrossGolabNodes$' -count=1` 通过，负向探针在一个后端 HTTP/2 TCP 连接上验证第二租户读取与订阅均被拒。`make all`、`make client-compatibility`（直连 9/9、双节点本机 TLS/L4 1/1）和拓扑检查器 25 个单元测试通过。测试使用现有 PostgreSQL、测试自管 Redis，并将已满 `/data` 上的 Go 临时构建目录改设为 `GOTMPDIR=/tmp`。此结果不包含跨主机 TLS/网络策略或真实 L7 代理验收。
+2026-10-07 先前复核：`GOWORK=off go test ./test/cluster -run '^TestOfficialNacosClientFailsOverAcrossGolabNodes$' -count=1` 通过，当时的负向探针只让 B 读取、订阅 A 的 namespace，均返回 status 7；这不能证明 B 在复用连接上访问自己的 namespace 的行为。`make all`、`make client-compatibility`（直连 9/9、双节点本机 TLS/L4 1/1）和拓扑检查器 25 个单元测试通过。测试使用现有 PostgreSQL、测试自管 Redis，并将已满 `/data` 上的 Go 临时构建目录改设为 `GOTMPDIR=/tmp`。此结果不包含跨主机 TLS/网络策略或真实 L7 代理验收。
+
+2026-10-07 本轮补充：真实双 GoLab 进程、PostgreSQL、Redis 与官方 Go SDK 的定向用例增加 B 自己发布的 manifest。共享后端 HTTP/2 连接上 B 可以读取自己的 manifest（status 0），却不能订阅自己的 manifest（status 7）；换用独立连接后 B 订阅成功（status 0）。一条连接及两条连接分别由 TLS/L4 代理的接受计数确认。由此明确：跨租户读取被拒不等于 L7 连接复用可用，更不能证明推送隔离；运维部署仍须维持一客户端 TCP 连接对应一条后端 TCP 连接。该用例的 TLS/L4 代理与后端仍在同一测试主机。
 
 ### 运维部署模板与预检
 
@@ -127,7 +129,7 @@ GOWORK=off go test ./test/native -count=1
 python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'
 ```
 
-`test/cluster` 需要可用 PostgreSQL 和 Redis；设置 `GOLAB_TEST_PG_DSN` / `GOLAB_TEST_REDIS_ADDR` 可使用现有服务，否则测试基座尝试 Docker。该测试中的 TLS 代理是 Go 实现的透明 TCP 转发，不是 HAProxy 生产配置的实测。测试验证有效登录、文档 hash、两个租户隔离、同一后端 HTTP/2 连接的双凭证拒绝、订阅收到更新、失效后的无推送、TLS 证书、HTTP 404/401、双节点切换；还在同一条 TLS HTTP/2 连接上直接发送原生配置查询，确认有效凭证 gRPC status 0、无凭证及撤销后的凭证 status 16。这个直读绕过官方 SDK 的本地缓存；官方 SDK 的 `GetConfig` 在远端读取失败时可能返回 last-known-good，不能以其返回旧值证明凭证有效。排查撤销请看原生登录是否 401、直连 gRPC 是否拒绝、服务端授权日志及新 revision 推送是否停止；排查重连请核对 gRPC 端口和 h2 ALPN、证书 SAN/CA、两节点地址、后端一对一连接以及最新 manifest revision/文档 hash。
+`test/cluster` 需要可用 PostgreSQL 和 Redis；设置 `GOLAB_TEST_PG_DSN` / `GOLAB_TEST_REDIS_ADDR` 可使用现有服务，否则测试基座尝试 Docker。该测试中的 TLS 代理是 Go 实现的透明 TCP 转发，不是 HAProxy 生产配置的实测。测试验证有效登录、文档 hash、两个租户隔离、共享连接上 B 读取自己配置成功但订阅自己配置被拒、独立连接订阅成功、订阅收到更新、失效后的无推送、TLS 证书、HTTP 404/401、双节点切换；还在同一条 TLS HTTP/2 连接上直接发送原生配置查询，确认有效凭证 gRPC status 0、无凭证及撤销后的凭证 status 16。这个直读绕过官方 SDK 的本地缓存；官方 SDK 的 `GetConfig` 在远端读取失败时可能返回 last-known-good，不能以其返回旧值证明凭证有效。排查撤销请看原生登录是否 401、直连 gRPC 是否拒绝、服务端授权日志及新 revision 推送是否停止；排查重连请核对 gRPC 端口和 h2 ALPN、证书 SAN/CA、两节点地址、后端一对一连接以及最新 manifest revision/文档 hash。
 
 ## 试验协议
 
