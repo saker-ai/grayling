@@ -400,11 +400,26 @@ waitPush:
 	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, otherEnvironment.NamespaceID, otherToken.Secret); status != grpcsrv.StatusOK {
 		t.Fatalf("other tenant read after revocation on existing connection: status %d, want 0", status)
 	}
+	if status := nativeRawTLSListenStatus(t, grpcClient, grpcAddr, otherEnvironment.NamespaceID, otherToken.Secret); status != grpcsrv.StatusPermissionDenied {
+		t.Fatalf("other tenant subscription on revoked tenant's connection: status %d, want 7", status)
+	}
 	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, environment.NamespaceID, otherToken.Secret); status != grpcsrv.StatusPermissionDenied {
 		t.Fatalf("cross-tenant read after revocation on existing connection: status %d, want 7", status)
 	}
+	if status := nativeRawTLSListenStatus(t, grpcClient, grpcAddr, environment.NamespaceID, otherToken.Secret); status != grpcsrv.StatusPermissionDenied {
+		t.Fatalf("cross-tenant subscription after revocation on existing connection: status %d, want 7", status)
+	}
 	if count := rawConnections.Load(); count != 1 {
 		t.Fatalf("direct reads used %d TLS connections, want one persistent connection", count)
+	}
+	otherTransport := &http2.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
+	t.Cleanup(otherTransport.CloseIdleConnections)
+	otherGRPCClient := &http.Client{Transport: otherTransport}
+	if status := nativeRawTLSListenStatus(t, otherGRPCClient, grpcAddr, otherEnvironment.NamespaceID, otherToken.Secret); status != grpcsrv.StatusOK {
+		t.Fatalf("other tenant subscription on separate connection after revocation: status %d, want 0", status)
+	}
+	if count := rawConnections.Load(); count != 2 {
+		t.Fatalf("separate tenant subscription used %d TLS connections, want two", count)
 	}
 	resp, err = httpClient.PostForm(baseURL+"/nacos/v1/auth/users/login", url.Values{
 		"username": {"golab-sdk"}, "password": {sdkToken.Secret},
