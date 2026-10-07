@@ -162,7 +162,7 @@ class PinnedHTTPSConnection(http.client.HTTPSConnection):
             raise
 
 
-def probe(c, resolved):
+def probe(c, resolved, login_tokens=()):
     context = ssl.create_default_context(cafile=c["caFile"])
     host, port = split_address(c["tlsGRPC"])
     context.set_alpn_protocols(["h2"])
@@ -179,7 +179,10 @@ def probe(c, resolved):
          urllib.parse.urlencode({"username": "golab-sdk", "password": "invalid"}), 401),
     )
     for address in resolved[net_address(host, port)]:
-        for method, path, body, expected in requests:
+        authorized = tuple(("POST", "/nacos/v1/auth/users/login",
+                            urllib.parse.urlencode({"username": "golab-sdk", "password": token}), 200)
+                           for token in login_tokens)
+        for method, path, body, expected in requests + authorized:
             connection = PinnedHTTPSConnection(host, port, address, context)
             try:
                 headers = {"Content-Type": "application/x-www-form-urlencoded"} if body else {}
@@ -228,11 +231,12 @@ def probe_denied(c, resolved=None):
     probe_closed_targets(targets + backend_targets(c), resolved)
 
 
-def evidence(c, mode, sources=None, resolved=None):
+def evidence(c, mode, sources=None, resolved=None, valid_login_count=0):
     return {
         "mode": mode,
         "result": "PASS",
         "backendDirectDenied": mode == "allowed",
+        "validLoginCount": valid_login_count,
         "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "probeHost": socket.gethostname(),
         "sourceIPs": sources or {},
@@ -268,6 +272,8 @@ def verify_pair(c, allowed, denied):
             raise ValueError(f"{mode} evidence uses a different deployment declaration")
         if mode == "allowed" and record.get("backendDirectDenied") is not True:
             raise ValueError("allowed evidence lacks plaintext backend denial check; rerun the live probe")
+        if mode == "allowed" and record.get("validLoginCount") != 2:
+            raise ValueError("allowed evidence lacks two valid SDK login checks; rerun the live probe")
         if record.get("targets") != evidence(c, mode)["targets"]:
             raise ValueError(f"{mode} evidence does not cover every configured target")
         if not isinstance(record.get("sourceIPs"), dict) or not record["sourceIPs"]:
@@ -342,6 +348,8 @@ def main():
     parser.add_argument("--probe", action="store_true", help="also check live TLS and HTTP deny paths")
     parser.add_argument("--probe-denied", action="store_true", help="from a rejected source, verify both TLS and backend ports refuse TCP")
     parser.add_argument("--evidence", help="write successful probe metadata as JSON; no credentials are recorded")
+    parser.add_argument("--login-token-file", action="append", default=[], metavar="FILE",
+                        help="SDK token file for a valid TLS login; --probe requires two distinct tokens")
     parser.add_argument("--verify-pair", nargs=2, metavar=("ALLOWED", "DENIED"),
                         help="require same-config, distinct-source live probes within five minutes")
     parser.add_argument("--verify-cluster", nargs=5,
@@ -350,6 +358,10 @@ def main():
     args = parser.parse_args()
     if args.probe and args.probe_denied:
         parser.error("--probe and --probe-denied are mutually exclusive")
+    if args.login_token_file and not args.probe:
+        parser.error("--login-token-file requires --probe")
+    if args.probe and len(args.login_token_file) != 2:
+        parser.error("--probe requires two --login-token-file arguments")
     if args.verify_pair and (args.probe or args.probe_denied or args.evidence):
         parser.error("--verify-pair cannot be combined with live probes or --evidence")
     if args.verify_cluster and (args.verify_pair or args.probe or args.probe_denied or args.evidence):
@@ -398,8 +410,17 @@ def main():
     resolved = {}
     if args.probe:
         try:
+            tokens = []
+            for path in args.login_token_file:
+                with open(path, encoding="utf-8") as stream:
+                    token = stream.read().rstrip("\r\n")
+                if not token or "\n" in token or "\r" in token:
+                    raise ValueError(f"{path}: expected one nonempty SDK token line")
+                tokens.append(token)
+            if tokens[0] == tokens[1]:
+                raise ValueError("two distinct SDK login tokens are required")
             sources = source_ips(config, "allowed", resolved)
-            probe(config, resolved)
+            probe(config, resolved, tokens)
             check_probe_dns(config, resolved)
             # An approved SDK source must also be unable to bypass TLS and
             # reach the plaintext GoLab backend on the sidecar host.
@@ -417,7 +438,8 @@ def main():
             return 1
     mode = "denied" if args.probe_denied else "allowed" if args.probe else "declaration"
     if args.evidence:
-        output = evidence(config, mode, sources, resolved)
+        output = evidence(config, mode, sources, resolved,
+                          valid_login_count=len(tokens) if args.probe else 0)
         try:
             write_evidence(args.evidence, output)
         except FileExistsError:

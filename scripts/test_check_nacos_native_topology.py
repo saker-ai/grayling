@@ -91,18 +91,31 @@ class NativeTopologyTest(unittest.TestCase):
         with patch("check_nacos_native_topology.ssl.create_default_context", return_value=context), \
              patch("check_nacos_native_topology.socket.create_connection") as connect, \
              patch("check_nacos_native_topology.PinnedHTTPSConnection", return_value=connection) as https:
-            connection.getresponse.side_effect = [MagicMock(status=404), MagicMock(status=401),
-                                                  MagicMock(status=404), MagicMock(status=401)]
-            probe(self.config, resolved)
+            connection.getresponse.side_effect = [MagicMock(status=status) for status in
+                                                  (404, 401, 200, 200, 404, 401, 200, 200)]
+            probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"))
             self.assertEqual([call.args[2] for call in https.call_args_list],
-                             ["10.42.1.10", "10.42.1.10", "10.42.1.11", "10.42.1.11"])
+                             ["10.42.1.10"] * 4 + ["10.42.1.11"] * 4)
             self.assertEqual([call.args[0] for call in connect.call_args_list],
                              [("10.42.1.10", 9848), ("10.42.1.11", 9848)])
 
-            connection.getresponse.side_effect = [MagicMock(status=404), MagicMock(status=401),
-                                                  MagicMock(status=302)]
+            connection.getresponse.side_effect = [MagicMock(status=status) for status in
+                                                  (404, 401, 200, 200, 404, 401, 200, 302)]
             with self.assertRaisesRegex(ValueError, "10.42.1.11:8848.*HTTP 302"):
-                probe(self.config, resolved)
+                probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"))
+
+    def test_allowed_probe_rejects_invalid_valid_login(self):
+        resolved = {"nacos.example:9848": ["10.42.1.10"],
+                    "nacos.example:8848": ["10.42.1.10"]}
+        context = MagicMock()
+        context.wrap_socket.return_value.__enter__.return_value.selected_alpn_protocol.return_value = "h2"
+        connection = MagicMock()
+        connection.getresponse.side_effect = [MagicMock(status=status) for status in (404, 401, 200, 401)]
+        with patch("check_nacos_native_topology.ssl.create_default_context", return_value=context), \
+             patch("check_nacos_native_topology.socket.create_connection"), \
+             patch("check_nacos_native_topology.PinnedHTTPSConnection", return_value=connection):
+            with self.assertRaisesRegex(ValueError, "HTTP 401, expected 200"):
+                probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"))
 
     def test_pinned_https_connection_uses_ip_and_cert_hostname(self):
         context = MagicMock()
@@ -167,7 +180,13 @@ class NativeTopologyTest(unittest.TestCase):
             path = os.path.join(directory, "deployment.json")
             with open(path, "w", encoding="utf-8") as stream:
                 json.dump(self.config, stream)
-            with patch("sys.argv", ["check_nacos_native_topology.py", path, "--probe"]), \
+            token_paths = [os.path.join(directory, f"token-{index}") for index in range(2)]
+            for index, token_path in enumerate(token_paths):
+                with open(token_path, "w", encoding="utf-8") as stream:
+                    stream.write(f"token-{index}\n")
+            with patch("sys.argv", ["check_nacos_native_topology.py", path, "--probe",
+                                    "--login-token-file", token_paths[0],
+                                    "--login-token-file", token_paths[1]]), \
                  patch("check_nacos_native_topology.source_ips", return_value={}), \
                  patch("check_nacos_native_topology.probe"), \
                  patch("check_nacos_native_topology.check_probe_dns"), \
@@ -179,6 +198,46 @@ class NativeTopologyTest(unittest.TestCase):
                                            {},
                                            label="allowed source reached plaintext backend")
             self.assertIn("ALERT: live probe failed", errors.getvalue())
+
+    def test_allowed_probe_requires_distinct_tokens_and_omits_them_from_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = os.path.join(directory, "deployment.json")
+            output_path = os.path.join(directory, "evidence.json")
+            with open(config_path, "w", encoding="utf-8") as stream:
+                json.dump(self.config, stream)
+            token_paths = [os.path.join(directory, f"token-{index}") for index in range(2)]
+            for token_path in token_paths:
+                with open(token_path, "w", encoding="utf-8") as stream:
+                    stream.write("same-secret\n")
+            arguments = ["check_nacos_native_topology.py", config_path, "--probe",
+                         "--login-token-file", token_paths[0],
+                         "--login-token-file", token_paths[1], "--evidence", output_path]
+            with patch("sys.argv", arguments), contextlib.redirect_stderr(io.StringIO()) as errors:
+                self.assertEqual(main(), 1)
+            self.assertIn("two distinct SDK login tokens", errors.getvalue())
+            self.assertFalse(os.path.exists(output_path))
+
+            with open(token_paths[1], "w", encoding="utf-8") as stream:
+                stream.write("other-secret\n")
+            targets = evidence(self.config, "allowed")["targets"]
+            sources = {target: "10.42.0.7" for target in targets}
+            resolved = {target: ["10.42.1.10"] for target in targets}
+            def routed_sources(_config, _mode, output):
+                output.update(resolved)
+                return sources
+
+            with patch("sys.argv", arguments), \
+                 patch("check_nacos_native_topology.source_ips", side_effect=routed_sources), \
+                 patch("check_nacos_native_topology.probe") as live_probe, \
+                 patch("check_nacos_native_topology.check_probe_dns"), \
+                 patch("check_nacos_native_topology.probe_closed_targets"):
+                self.assertEqual(main(), 0)
+            live_probe.assert_called_once_with(self.config, resolved, ["same-secret", "other-secret"])
+            with open(output_path, encoding="utf-8") as stream:
+                raw = stream.read()
+            self.assertNotIn("same-secret", raw)
+            self.assertNotIn("other-secret", raw)
+            self.assertEqual(json.loads(raw)["validLoginCount"], 2)
 
     def test_ipv6_backend_evidence_uses_probe_target_keys(self):
         config = copy.deepcopy(self.config)
@@ -274,6 +333,7 @@ class NativeTopologyTest(unittest.TestCase):
         targets = evidence(self.config, "allowed")["targets"]
         resolved = {target: ["10.42.1.10"] for target in targets}
         allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in targets}, resolved)
+        allowed["validLoginCount"] = 2
         denied_targets = evidence(self.config, "denied")["targets"]
         denied = evidence(self.config, "denied", {target: "10.43.0.7" for target in denied_targets},
                           {target: ["10.42.1.10"] for target in denied_targets})
@@ -327,7 +387,7 @@ class NativeTopologyTest(unittest.TestCase):
         denied_targets = evidence(self.config, "denied")["targets"]
         resolved = {target: ["10.42.1.10"] for target in denied_targets}
         allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in allowed_targets},
-                           {target: resolved[target] for target in allowed_targets})
+                           {target: resolved[target] for target in allowed_targets}, valid_login_count=2)
         denied = evidence(self.config, "denied", {target: "10.43.0.7" for target in denied_targets}, resolved)
         allowed["probeHost"] = "sdk-host"
         denied["probeHost"] = "blocked-host"
@@ -335,6 +395,10 @@ class NativeTopologyTest(unittest.TestCase):
         old_allowed = copy.deepcopy(allowed)
         del old_allowed["backendDirectDenied"]
         with self.assertRaisesRegex(ValueError, "lacks plaintext backend denial check"):
+            verify_pair(self.config, old_allowed, denied)
+        old_allowed = copy.deepcopy(allowed)
+        old_allowed["validLoginCount"] = 0
+        with self.assertRaisesRegex(ValueError, "lacks two valid SDK login checks"):
             verify_pair(self.config, old_allowed, denied)
         mapped = copy.deepcopy(allowed)
         mapped["sourceIPs"] = {target: "::ffff:10.42.0.7" for target in allowed_targets}
@@ -371,7 +435,7 @@ class NativeTopologyTest(unittest.TestCase):
         allowed_targets = evidence(self.config, "allowed")["targets"]
         denied_targets = evidence(self.config, "denied")["targets"]
         allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in allowed_targets},
-                           {target: ["10.42.1.10"] for target in allowed_targets})
+                           {target: ["10.42.1.10"] for target in allowed_targets}, valid_login_count=2)
         denied = evidence(self.config, "denied", {target: "10.43.0.7" for target in denied_targets},
                           {target: ["10.42.1.10"] for target in denied_targets})
         allowed["probeHost"] = "sdk-host"
@@ -395,7 +459,8 @@ class NativeTopologyTest(unittest.TestCase):
                          for target in evidence(config, "denied")["targets"]}
             allowed = evidence(config, "allowed", {
                 target: "10.42.0.7" for target in evidence(config, "allowed")["targets"]},
-                {target: addresses[target] for target in evidence(config, "allowed")["targets"]})
+                {target: addresses[target] for target in evidence(config, "allowed")["targets"]},
+                valid_login_count=2)
             denied = evidence(config, "denied", {
                 target: "10.43.0.7" for target in evidence(config, "denied")["targets"]}, addresses)
             allowed["probeHost"] = "sdk-host"
