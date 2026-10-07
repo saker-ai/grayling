@@ -2,7 +2,9 @@ package platform
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,6 +45,10 @@ import (
 type pgPersistence struct {
 	pool            *pgxpool.Pool
 	lastAcceptedIDs map[string]bool
+	replicaID       string
+	lastAck         time.Time
+	ackCursor       int64
+	lastPrune       time.Time
 }
 
 // pgCommitTimeout bounds one Store-operation transaction.
@@ -75,7 +81,12 @@ func newPGPersistence(ctx context.Context, dsn string) (*pgPersistence, error) {
 		pool.Close()
 		return nil, fmt.Errorf("platform: postgres unreachable: %w", err)
 	}
-	p := &pgPersistence{pool: pool}
+	var replicaBytes [16]byte
+	if _, err := rand.Read(replicaBytes[:]); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	p := &pgPersistence{pool: pool, replicaID: hex.EncodeToString(replicaBytes[:])}
 	if err := p.migrate(ctx); err != nil {
 		pool.Close()
 		return nil, err
@@ -85,6 +96,9 @@ func newPGPersistence(ctx context.Context, dsn string) (*pgPersistence, error) {
 
 func (p *pgPersistence) Close() error {
 	if p.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, _ = p.pool.Exec(ctx, `DELETE FROM control_replica_cursors WHERE replica_id=$1`, p.replicaID)
 		p.pool.Close()
 	}
 	return nil
@@ -153,6 +167,17 @@ var pgMigrations = []pgMigration{
         last_takeover_at timestamptz,
         last_error text NOT NULL DEFAULT ''
     )`},
+	{9, `CREATE TABLE control_journal_watermark (
+        id boolean PRIMARY KEY DEFAULT true CHECK (id),
+        pruned_through bigint NOT NULL DEFAULT 0
+    );
+    INSERT INTO control_journal_watermark(id,pruned_through) VALUES (true,0);
+    CREATE TABLE control_replica_cursors (
+        replica_id text PRIMARY KEY,
+        cursor bigint NOT NULL,
+        heartbeat_at timestamptz NOT NULL DEFAULT clock_timestamp()
+    );
+    CREATE INDEX control_replica_cursors_heartbeat_idx ON control_replica_cursors(heartbeat_at)`},
 }
 
 const pgSchemaV1 = `

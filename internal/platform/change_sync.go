@@ -16,32 +16,47 @@ import (
 
 // ChangeSyncMetrics is a snapshot of the cross-replica invalidation path.
 type ChangeSyncMetrics struct {
-	Applied              int64
-	Queries              int64
-	Failures             int64
-	VersionLag           int64
-	MaxNotificationDelay time.Duration
-	FullReloads          int64
-	LastFullReload       time.Duration
+	Applied                 int64
+	Queries                 int64
+	Failures                int64
+	VersionLag              int64
+	MaxNotificationDelay    time.Duration
+	FullReloads             int64
+	LastFullReload          time.Duration
+	FallbackReloads         int64
+	JournalRows             int64
+	JournalBytes            int64
+	OldestUnconfirmedCursor int64
+	PrunedThrough           int64
 }
 
 type syncMetrics struct {
-	applied      atomic.Int64
-	queries      atomic.Int64
-	failures     atomic.Int64
-	versionLag   atomic.Int64
-	maxDelayNS   atomic.Int64
-	fullReloads  atomic.Int64
-	lastReloadNS atomic.Int64
+	applied           atomic.Int64
+	queries           atomic.Int64
+	failures          atomic.Int64
+	versionLag        atomic.Int64
+	maxDelayNS        atomic.Int64
+	fullReloads       atomic.Int64
+	lastReloadNS      atomic.Int64
+	fallbackReloads   atomic.Int64
+	journalRows       atomic.Int64
+	journalBytes      atomic.Int64
+	oldestUnconfirmed atomic.Int64
+	prunedThrough     atomic.Int64
 }
 
 func (s *Store) ChangeSyncMetrics() ChangeSyncMetrics {
 	return ChangeSyncMetrics{
 		Applied: s.syncStats.applied.Load(), Queries: s.syncStats.queries.Load(), Failures: s.syncStats.failures.Load(),
-		VersionLag:           s.syncStats.versionLag.Load(),
-		MaxNotificationDelay: time.Duration(s.syncStats.maxDelayNS.Load()),
-		FullReloads:          s.syncStats.fullReloads.Load(),
-		LastFullReload:       time.Duration(s.syncStats.lastReloadNS.Load()),
+		VersionLag:              s.syncStats.versionLag.Load(),
+		MaxNotificationDelay:    time.Duration(s.syncStats.maxDelayNS.Load()),
+		FullReloads:             s.syncStats.fullReloads.Load(),
+		LastFullReload:          time.Duration(s.syncStats.lastReloadNS.Load()),
+		FallbackReloads:         s.syncStats.fallbackReloads.Load(),
+		JournalRows:             s.syncStats.journalRows.Load(),
+		JournalBytes:            s.syncStats.journalBytes.Load(),
+		OldestUnconfirmedCursor: s.syncStats.oldestUnconfirmed.Load(),
+		PrunedThrough:           s.syncStats.prunedThrough.Load(),
 	}
 }
 
@@ -68,17 +83,25 @@ func (s *Store) SyncChanges() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	var latest, nextCounter, nextAudit int64
+	var latest, nextCounter, nextAudit, prunedThrough int64
 	s.syncStats.queries.Add(1)
-	if err := p.pool.QueryRow(ctx, `SELECT control_version, next_counter, next_audit FROM meta WHERE id=1`).Scan(&latest, &nextCounter, &nextAudit); err != nil {
+	if err := p.pool.QueryRow(ctx, `SELECT m.control_version, m.next_counter, m.next_audit, w.pruned_through FROM meta m CROSS JOIN control_journal_watermark w WHERE m.id=1`).Scan(&latest, &nextCounter, &nextAudit, &prunedThrough); err != nil {
 		s.syncStats.failures.Add(1)
 		return fmt.Errorf("platform: read control version: %w", err)
 	}
+	s.syncStats.prunedThrough.Store(prunedThrough)
 	if latest <= s.data.ControlVersion {
+		if err := p.maintainJournal(ctx, s.data.ControlVersion, &s.syncStats); err != nil {
+			s.syncStats.failures.Add(1)
+			return err
+		}
 		s.syncStats.versionLag.Store(0)
 		return nil
 	}
 	s.syncStats.versionLag.Store(latest - s.data.ControlVersion)
+	if s.data.ControlVersion < prunedThrough {
+		return s.fallbackReloadLocked(ctx, p)
+	}
 	s.syncStats.queries.Add(1)
 	rows, err := p.pool.Query(ctx, `SELECT version, collection, object_id, committed_at FROM control_changes
 		WHERE version > $1 AND version <= $2 ORDER BY version, collection, object_id LIMIT 4096`, s.data.ControlVersion, latest)
@@ -110,13 +133,13 @@ func (s *Store) SyncChanges() error {
 		return err
 	}
 	if len(changes) == 0 || len(changes) == 4096 || changes[0].version != s.data.ControlVersion+1 {
-		return s.fullReloadLocked()
+		return s.fallbackReloadLocked(ctx, p)
 	}
 	// A version can contain several objects. Do not advance past an incomplete
 	// version; a journal gap falls back to a verified full load.
 	for i, change := range changes {
 		if i > 0 && change.version > changes[i-1].version+1 {
-			return s.fullReloadLocked()
+			return s.fallbackReloadLocked(ctx, p)
 		}
 		if incrementalCollection(change.coll) {
 			s.syncStats.queries.Add(1)
@@ -126,7 +149,7 @@ func (s *Store) SyncChanges() error {
 			return fmt.Errorf("platform: apply %s/%s at v%d: %w", change.coll, change.id, change.version, err)
 		}
 		if change.coll == "meta" || !incrementalCollection(change.coll) {
-			return s.fullReloadLocked()
+			return s.fallbackReloadLocked(ctx, p)
 		}
 		s.syncStats.applied.Add(1)
 		delay := time.Since(change.at).Nanoseconds()
@@ -140,17 +163,35 @@ func (s *Store) SyncChanges() error {
 	s.data.NextCounter = nextCounter
 	s.data.NextAudit = nextAudit
 	s.syncStats.versionLag.Store(max(0, latest-s.data.ControlVersion))
+	if err := p.maintainJournal(ctx, s.data.ControlVersion, &s.syncStats); err != nil {
+		s.syncStats.failures.Add(1)
+		return err
+	}
 	return nil
 }
 
 func incrementalCollection(coll collection) bool {
 	switch coll {
 	case collWorkspaces, collEnvironments, collTokens, collExperiments,
+		collFlagDrafts, collFlagRevisions, collFlagState, collSegmentDrafts,
+		collSegmentRevisions, collSegmentState, collManifestRevisions, collApprovals,
 		collQuotas, collAIResources, collAIRevocations, collPinnedVersions, collModelAllowlist, "audit":
 		return true
 	default:
 		return false
 	}
+}
+
+func (s *Store) fallbackReloadLocked(ctx context.Context, p *pgPersistence) error {
+	s.syncStats.fallbackReloads.Add(1)
+	if err := s.fullReloadLocked(); err != nil {
+		return err
+	}
+	if err := p.maintainJournal(ctx, s.data.ControlVersion, &s.syncStats); err != nil {
+		s.syncStats.failures.Add(1)
+		return err
+	}
+	return nil
 }
 
 func (s *Store) fullReloadLocked() error {
@@ -171,6 +212,23 @@ func (s *Store) fullReloadLocked() error {
 
 func (p *pgPersistence) applyControlObject(ctx context.Context, d *Data, c controlChange) error {
 	switch c.coll {
+	case collFlagDrafts, collFlagRevisions, collFlagState, collSegmentDrafts, collSegmentRevisions, collSegmentState, collManifestRevisions:
+		return p.applyScopedControlObject(ctx, d, c)
+	case collApprovals:
+		var doc []byte
+		err := p.pool.QueryRow(ctx, `SELECT doc FROM approvals WHERE id=$1`, c.id).Scan(&doc)
+		if errors.Is(err, pgx.ErrNoRows) {
+			delete(d.Approvals, c.id)
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		a := &Approval{}
+		if err := json.Unmarshal(doc, a); err != nil {
+			return err
+		}
+		d.Approvals[c.id] = a
 	case collWorkspaces:
 		w := &Workspace{}
 		err := p.pool.QueryRow(ctx, `SELECT id, slug, name, created_at FROM workspaces WHERE id=$1`, c.id).

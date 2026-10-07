@@ -94,10 +94,10 @@ func (s *Service) RunReconciler(ctx context.Context, interval time.Duration) {
 		case <-t.C:
 			stats := s.ReconcileOnce()
 			m := s.Store.ChangeSyncMetrics()
-			s.logf("reconcile: envs=%d healthy=%d docsRepaired=%d manifestsRepaired=%d errors=%v control_applied=%d control_queries=%d control_failures=%d control_version_lag=%d control_max_notification_delay=%s full_reloads=%d last_full_reload=%s",
+			s.logf("reconcile: envs=%d healthy=%d docsRepaired=%d manifestsRepaired=%d errors=%v control_applied=%d control_queries=%d control_failures=%d control_version_lag=%d control_max_notification_delay=%s full_reloads=%d last_full_reload=%s control_fallback_reloads=%d control_journal_rows=%d control_journal_bytes=%d control_oldest_unconfirmed_cursor=%d control_pruned_through=%d",
 				stats.Environments, stats.Healthy, stats.DocsRepaired,
 				stats.ManifestsRepaired, stats.Errors, m.Applied, m.Queries, m.Failures, m.VersionLag,
-				m.MaxNotificationDelay, m.FullReloads, m.LastFullReload)
+				m.MaxNotificationDelay, m.FullReloads, m.LastFullReload, m.FallbackReloads, m.JournalRows, m.JournalBytes, m.OldestUnconfirmedCursor, m.PrunedThrough)
 		}
 	}
 }

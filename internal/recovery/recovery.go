@@ -212,10 +212,13 @@ func Capture(ctx context.Context, dsn, authSecret string, store *platform.Store,
 // postgresDigest covers contents rather than only row counts. The operator
 // quiesces writes before capture; deterministic row ordering makes a dump and
 // restore of the same PostgreSQL major version reproduce the same digest.
+// Replica cursor leases are transient process state and change on reopen; the
+// durable journal and cleanup watermark remain included.
 func postgresDigest(ctx context.Context, conn *pgx.Conn) (string, error) {
 	rows, err := conn.Query(ctx, `SELECT c.relname FROM pg_class c
 JOIN pg_namespace n ON n.oid=c.relnamespace
 WHERE n.nspname='public' AND c.relkind IN ('r','p')
+AND c.relname <> 'control_replica_cursors'
 AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid=c.oid)
 ORDER BY c.relname`)
 	if err != nil {

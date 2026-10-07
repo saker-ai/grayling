@@ -133,6 +133,10 @@ func NewPGStore(ctx context.Context, dsn string) (*Store, error) {
 		_ = p.Close()
 		return nil, err
 	}
+	if err := p.ackJournal(ctx, s.data.ControlVersion); err != nil {
+		_ = p.Close()
+		return nil, err
+	}
 	return s, nil
 }
 
