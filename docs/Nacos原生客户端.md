@@ -36,8 +36,10 @@ gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f
 | 默认匿名 gonacos、仅 loopback | 原生功能测试显示知道 namespace 即可跨租户读取；启动时即使设置 `GOLAB_ALLOW_NON_LOOPBACK_GONACOS=1` 也拒绝匿名非 loopback 绑定 | 不作为租户可达接口 |
 | `-nacos-native-auth=true`、单/双节点直连 TCP | 官方 Go SDK v2.3.5 真实进程读、订阅、跨租户拒绝、撤销与双节点切换（#11） | 仅实验兼容性验证；明文连接不能跨主机部署 |
 | 双节点 TLS 终止 + 每个客户端 TCP 连接对应独立后端 TCP 连接，gonacos 后端仅 loopback | `test/cluster/TestOfficialNacosClientFailsOverAcrossGolabNodes` 使用真实 GoLab/PG/Redis 及 TLS/L4 代理，验证两个租户、故障切换、HTTP 绕过、撤销；直接向同一 TLS HTTP/2 连接发送原生配置查询，验证有效凭证成功、匿名及撤销后的凭证均被拒；代理与后端在同一测试主机 | **待跨主机入口网络策略与拒绝源验收**；目前不声明生产正式支持 |
-| L7 HTTP/2 代理多路复用不同租户到同一后端 gRPC 连接 | 同一后端 HTTP/2 连接的双凭证负向探针确认第二租户订阅返回 gRPC status 7；真实 L7 代理的推送身份隔离仍无法证明；`scripts/check_nacos_native_topology.py` 对此配置报错 | **不支持** |
+| L7 HTTP/2 代理多路复用不同租户到同一后端 gRPC 连接 | 同一后端 HTTP/2 连接的双凭证负向探针确认第二租户读取和订阅均返回 gRPC status 7；真实 L7 代理的推送身份隔离仍无法证明；`scripts/check_nacos_native_topology.py` 对此配置报错 | **不支持** |
 | 其他语言或官方 SDK 其他版本 | 未测试 | 不支持 |
+
+2026-10-07 复核：`GOWORK=off go test ./test/cluster -run '^TestOfficialNacosClientFailsOverAcrossGolabNodes$' -count=1` 通过，负向探针在一个后端 HTTP/2 TCP 连接上验证第二租户读取与订阅均被拒。`make all`、`make client-compatibility`（直连 9/9、双节点本机 TLS/L4 1/1）和拓扑检查器 25 个单元测试通过。测试使用现有 PostgreSQL、测试自管 Redis，并将已满 `/data` 上的 Go 临时构建目录改设为 `GOTMPDIR=/tmp`。此结果不包含跨主机 TLS/网络策略或真实 L7 代理验收。
 
 ### 运维部署模板与预检
 

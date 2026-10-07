@@ -20,7 +20,7 @@ import (
 
 // Exercise two credentials over exactly one backend HTTP/2 TCP connection.
 // This is a negative probe for L7 pooling, not support for an L7 proxy: a
-// second tenant cannot attach a subscription to the first tenant's transport.
+// second tenant cannot read or attach a subscription to the first tenant's transport.
 func checkNativeSharedBackendConnection(t *testing.T, backend, namespaceA, tokenA, tokenB string, cert tls.Certificate, caFile string) {
 	t.Helper()
 	var accepted atomic.Int64
@@ -36,6 +36,12 @@ func checkNativeSharedBackendConnection(t *testing.T, backend, namespaceA, token
 	transport := &http2.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
 	t.Cleanup(transport.CloseIdleConnections)
 	client := &http.Client{Transport: transport}
+	if status := nativeRawTLSQueryStatus(t, client, addr, namespaceA, tokenA); status != grpcsrv.StatusOK {
+		t.Fatalf("first tenant read on shared transport: gRPC status %d", status)
+	}
+	if status := nativeRawTLSQueryStatus(t, client, addr, namespaceA, tokenB); status != grpcsrv.StatusPermissionDenied {
+		t.Fatalf("second tenant read on shared transport: gRPC status %d, want 7", status)
+	}
 	listen := func(token string) int {
 		t.Helper()
 		body, err := json.Marshal(map[string]any{
