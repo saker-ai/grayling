@@ -9,7 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -346,6 +349,24 @@ waitPush:
 	}
 	var rawConnections atomic.Int64
 	grpcAddr := startNativeTLSL4Count(t, replicaOption(t, b, "-gonacos-grpc-addr"), cert, true, &rawConnections)
+	probeAddr := startNativeTLSL4(t, replicaOption(t, b, "-gonacos-grpc-addr"), cert, true)
+	probeTokens := []string{sdkToken.Secret, otherToken.Secret}
+	probeFiles := make([]string, len(probeTokens))
+	for i, secret := range probeTokens {
+		probeFiles[i] = filepath.Join(t.TempDir(), fmt.Sprintf("tenant-%d-token", i))
+		if err := os.WriteFile(probeFiles[i], []byte(secret+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	probeCmd := exec.CommandContext(t.Context(), "go", "run", "./cmd/nacos-native-grpc-probe",
+		"-address", probeAddr, "-server-name", "127.0.0.1", "-ca-file", caFile,
+		"-tenant-a-namespace", environment.NamespaceID, "-tenant-b-namespace", otherEnvironment.NamespaceID,
+		"-tenant-a-token-file", probeFiles[0], "-tenant-b-token-file", probeFiles[1])
+	probeCmd.Dir = repoRoot(t)
+	probeCmd.Env = append(os.Environ(), "GOWORK=off")
+	if out, err := probeCmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "PASS: anonymous gRPC denied; two tenant reads and subscriptions allowed; cross-tenant reads and subscriptions denied") {
+		t.Fatalf("two-tenant native deployment probe failed: %v\n%s", err, out)
+	}
 	grpcTransport := &http2.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
 	t.Cleanup(grpcTransport.CloseIdleConnections)
 	grpcClient := &http.Client{Transport: grpcTransport}

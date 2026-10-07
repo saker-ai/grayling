@@ -39,6 +39,25 @@ class NativeTopologyTest(unittest.TestCase):
     def test_supported_declaration(self):
         self.assertEqual(validate(self.config), [])
 
+    def test_live_probe_requires_two_distinct_tenant_namespaces(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = os.path.join(directory, "deployment.json")
+            with open(config_path, "w", encoding="utf-8") as stream:
+                json.dump(self.config, stream)
+            for namespaces in ([], ["namespace-a"], ["namespace-a", "namespace-a"]):
+                with self.subTest(namespaces=namespaces):
+                    args = ["check_nacos_native_topology.py", config_path, "--probe",
+                            "--grpc-probe-bin", "/unused/probe",
+                            "--login-token-file", "/unused/token-a",
+                            "--login-token-file", "/unused/token-b"]
+                    for namespace in namespaces:
+                        args.extend(("--tenant-namespace", namespace))
+                    with patch("sys.argv", args), contextlib.redirect_stderr(io.StringIO()) as errors:
+                        with self.assertRaises(SystemExit) as result:
+                            main()
+                    self.assertEqual(result.exception.code, 2)
+                    self.assertIn("two distinct --tenant-namespace", errors.getvalue())
+
     def test_allowed_sources_cannot_split_full_address_space(self):
         for sources in (
             ["0.0.0.0/1", "128.0.0.0/1"],
@@ -275,13 +294,14 @@ class NativeTopologyTest(unittest.TestCase):
                     stream.write(f"token-{index}\n")
             with patch("sys.argv", ["check_nacos_native_topology.py", path, "--probe",
                                     "--grpc-probe-bin", "/tmp/nacos-native-grpc-probe",
+                                    "--tenant-namespace", "namespace-a", "--tenant-namespace", "namespace-b",
                                     "--login-token-file", token_paths[0],
                                     "--login-token-file", token_paths[1]]), \
                  patch("check_nacos_native_topology.source_ips",
                        side_effect=lambda _c, _m, output: output.update({self.config["tlsGRPC"]: ["10.42.1.10"]}) or {}), \
                  patch("check_nacos_native_topology.probe"), \
                  patch("check_nacos_native_topology.subprocess.run",
-                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous native gRPC read and subscription rejected with status 16")), \
+                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous gRPC denied; two tenant reads and subscriptions allowed; cross-tenant reads and subscriptions denied")), \
                  patch("check_nacos_native_topology.check_probe_dns"), \
                  patch("check_nacos_native_topology.probe_closed_targets",
                        side_effect=ValueError("allowed source reached plaintext backend")) as closed:
@@ -304,6 +324,7 @@ class NativeTopologyTest(unittest.TestCase):
                     stream.write("same-secret\n")
             arguments = ["check_nacos_native_topology.py", config_path, "--probe",
                          "--grpc-probe-bin", "/tmp/nacos-native-grpc-probe",
+                         "--tenant-namespace", "namespace-a", "--tenant-namespace", "namespace-b",
                          "--login-token-file", token_paths[0],
                          "--login-token-file", token_paths[1], "--evidence", output_path]
             with patch("sys.argv", arguments), contextlib.redirect_stderr(io.StringIO()) as errors:
@@ -325,13 +346,16 @@ class NativeTopologyTest(unittest.TestCase):
                  patch("check_nacos_native_topology.probe",
                        return_value=self.certificates(self.config, "10.42.1.10")) as live_probe, \
                  patch("check_nacos_native_topology.subprocess.run",
-                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous native gRPC read and subscription rejected with status 16")) as grpc_probe, \
+                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous gRPC denied; two tenant reads and subscriptions allowed; cross-tenant reads and subscriptions denied")) as grpc_probe, \
                  patch("check_nacos_native_topology.check_probe_dns"), \
                  patch("check_nacos_native_topology.probe_closed_targets"):
                 self.assertEqual(main(), 0)
             live_probe.assert_called_once_with(self.config, resolved, ["same-secret", "other-secret"])
             grpc_probe.assert_called_once()
             self.assertEqual(grpc_probe.call_args.args[0][2], "10.42.1.10:9848")
+            self.assertEqual(grpc_probe.call_args.args[0][-8:],
+                             ["-tenant-a-namespace", "namespace-a", "-tenant-b-namespace", "namespace-b",
+                              "-tenant-a-token-file", token_paths[0], "-tenant-b-token-file", token_paths[1]])
             with open(output_path, encoding="utf-8") as stream:
                 raw = stream.read()
             self.assertNotIn("same-secret", raw)
@@ -339,6 +363,8 @@ class NativeTopologyTest(unittest.TestCase):
             self.assertEqual(json.loads(raw)["validLoginCount"], 2)
             self.assertTrue(json.loads(raw)["anonymousGRPCDenied"])
             self.assertTrue(json.loads(raw)["anonymousGRPCSubscriptionDenied"])
+            self.assertTrue(json.loads(raw)["tenantGRPCIsolation"])
+            self.assertEqual(json.loads(raw)["tenantNamespaces"], ["namespace-a", "namespace-b"])
             self.assertEqual(len(json.loads(raw)["caSHA256"]), 64)
             self.assertEqual(json.loads(raw)["tlsCertSHA256"],
                              self.certificates(self.config, "10.42.1.10"))
@@ -361,6 +387,7 @@ class NativeTopologyTest(unittest.TestCase):
 
             with patch("sys.argv", ["check_nacos_native_topology.py", config_path, "--probe",
                                     "--grpc-probe-bin", "/tmp/nacos-native-grpc-probe",
+                                    "--tenant-namespace", "namespace-a", "--tenant-namespace", "namespace-b",
                                     "--login-token-file", tokens[0], "--login-token-file", tokens[1],
                                     "--evidence", output_path]), \
                  patch("check_nacos_native_topology.source_ips", side_effect=routed_sources), \
@@ -369,7 +396,7 @@ class NativeTopologyTest(unittest.TestCase):
                        return_value=MagicMock(returncode=1, stdout="")), \
                  contextlib.redirect_stderr(io.StringIO()) as errors:
                 self.assertEqual(main(), 1)
-            self.assertIn("anonymous gRPC read/subscription denial failed", errors.getvalue())
+            self.assertIn("two-tenant gRPC isolation failed", errors.getvalue())
             self.assertFalse(os.path.exists(output_path))
 
     def test_probe_rejects_ca_change_during_checks(self):
@@ -388,13 +415,14 @@ class NativeTopologyTest(unittest.TestCase):
 
             with patch("sys.argv", ["check_nacos_native_topology.py", config_path, "--probe",
                                     "--grpc-probe-bin", "/tmp/nacos-native-grpc-probe",
+                                    "--tenant-namespace", "namespace-a", "--tenant-namespace", "namespace-b",
                                     "--login-token-file", token_paths[0],
                                     "--login-token-file", token_paths[1]]), \
                  patch("check_nacos_native_topology.source_ips",
                        side_effect=lambda _c, _m, output: output.update({self.config["tlsGRPC"]: ["10.42.1.10"]}) or {}), \
                  patch("check_nacos_native_topology.probe", side_effect=change_ca), \
                  patch("check_nacos_native_topology.subprocess.run",
-                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous native gRPC read and subscription rejected with status 16")), \
+                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous gRPC denied; two tenant reads and subscriptions allowed; cross-tenant reads and subscriptions denied")), \
                  patch("check_nacos_native_topology.check_probe_dns"), \
                  patch("check_nacos_native_topology.probe_closed_targets"), \
                  contextlib.redirect_stderr(io.StringIO()) as errors:
@@ -494,7 +522,8 @@ class NativeTopologyTest(unittest.TestCase):
     def test_evidence_rejects_non_routable_dns_answer(self):
         targets = evidence(self.config, "allowed")["targets"]
         resolved = {target: ["10.42.1.10"] for target in targets}
-        allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in targets}, resolved)
+        allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in targets}, resolved,
+                           tenant_namespaces=("namespace-a", "namespace-b"))
         allowed["validLoginCount"] = 2
         allowed["tlsCertSHA256"] = self.certificates(self.config, "10.42.1.10")
         denied_targets = evidence(self.config, "denied")["targets"]
@@ -552,7 +581,8 @@ class NativeTopologyTest(unittest.TestCase):
         resolved = {target: ["10.42.1.10"] for target in denied_targets}
         allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in allowed_targets},
                            {target: resolved[target] for target in allowed_targets}, valid_login_count=2,
-                           certificates=self.certificates(self.config, "10.42.1.10"))
+                           certificates=self.certificates(self.config, "10.42.1.10"),
+                           tenant_namespaces=("namespace-a", "namespace-b"))
         denied = evidence(self.config, "denied", {target: "10.43.0.7" for target in denied_targets}, resolved)
         allowed["probeHost"] = "sdk-host"
         denied["probeHost"] = "blocked-host"
@@ -568,6 +598,14 @@ class NativeTopologyTest(unittest.TestCase):
         old_allowed = copy.deepcopy(allowed)
         del old_allowed["anonymousGRPCSubscriptionDenied"]
         with self.assertRaisesRegex(ValueError, "lacks anonymous gRPC subscription denial check"):
+            verify_pair(self.config, old_allowed, denied)
+        old_allowed = copy.deepcopy(allowed)
+        del old_allowed["tenantGRPCIsolation"]
+        with self.assertRaisesRegex(ValueError, "lacks two-tenant gRPC isolation check"):
+            verify_pair(self.config, old_allowed, denied)
+        old_allowed = copy.deepcopy(allowed)
+        del old_allowed["tenantNamespaces"]
+        with self.assertRaisesRegex(ValueError, "lacks two distinct tenant namespace IDs"):
             verify_pair(self.config, old_allowed, denied)
         old_allowed = copy.deepcopy(allowed)
         old_allowed["validLoginCount"] = 0
@@ -631,7 +669,8 @@ class NativeTopologyTest(unittest.TestCase):
         denied_targets = evidence(self.config, "denied")["targets"]
         allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in allowed_targets},
                            {target: ["10.42.1.10"] for target in allowed_targets}, valid_login_count=2,
-                           certificates=self.certificates(self.config, "10.42.1.10"))
+                           certificates=self.certificates(self.config, "10.42.1.10"),
+                           tenant_namespaces=("namespace-a", "namespace-b"))
         denied = evidence(self.config, "denied", {target: "10.43.0.7" for target in denied_targets},
                           {target: ["10.42.1.10"] for target in denied_targets})
         allowed["probeHost"] = "sdk-host"
@@ -657,7 +696,8 @@ class NativeTopologyTest(unittest.TestCase):
                 target: "10.42.0.7" for target in evidence(config, "allowed")["targets"]},
                 {target: addresses[target] for target in evidence(config, "allowed")["targets"]},
                 valid_login_count=2,
-                certificates=self.certificates(config, config["backendExternalHost"]))
+                certificates=self.certificates(config, config["backendExternalHost"]),
+                tenant_namespaces=("namespace-a", "namespace-b"))
             denied = evidence(config, "denied", {
                 target: "10.43.0.7" for target in evidence(config, "denied")["targets"]}, addresses)
             allowed["probeHost"] = "sdk-host"
@@ -666,6 +706,10 @@ class NativeTopologyTest(unittest.TestCase):
 
         records = [pair(self.config), pair(other_config)]
         verify_cluster([self.config, other_config], records)
+        different_tenants = copy.deepcopy(records)
+        different_tenants[1][0]["tenantNamespaces"] = ["namespace-c", "namespace-d"]
+        with self.assertRaisesRegex(ValueError, "different tenant namespaces"):
+            verify_cluster([self.config, other_config], different_tenants)
         with self.assertRaisesRegex(ValueError, "distinct network endpoints"):
             verify_cluster([self.config, self.config], [records[0], records[0]])
         stale = copy.deepcopy(records)

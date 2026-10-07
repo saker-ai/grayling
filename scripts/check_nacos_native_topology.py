@@ -269,13 +269,16 @@ def evidence_targets(c):
     ]
 
 
-def evidence(c, mode, sources=None, resolved=None, valid_login_count=0, ca_digest=None, certificates=None):
+def evidence(c, mode, sources=None, resolved=None, valid_login_count=0, ca_digest=None,
+             certificates=None, tenant_namespaces=()):
     return {
         "mode": mode,
         "result": "PASS",
         "backendDirectDenied": mode == "allowed",
         "anonymousGRPCDenied": mode == "allowed",
         "anonymousGRPCSubscriptionDenied": mode == "allowed",
+        "tenantGRPCIsolation": mode == "allowed",
+        "tenantNamespaces": list(tenant_namespaces),
         "validLoginCount": valid_login_count,
         "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "probeHost": socket.gethostname(),
@@ -324,6 +327,13 @@ def verify_pair(c, allowed, denied):
             raise ValueError("allowed evidence lacks anonymous gRPC read denial check; rerun the live probe")
         if mode == "allowed" and record.get("anonymousGRPCSubscriptionDenied") is not True:
             raise ValueError("allowed evidence lacks anonymous gRPC subscription denial check; rerun the live probe")
+        if mode == "allowed" and record.get("tenantGRPCIsolation") is not True:
+            raise ValueError("allowed evidence lacks two-tenant gRPC isolation check; rerun the live probe")
+        namespaces = record.get("tenantNamespaces")
+        if mode == "allowed" and (not isinstance(namespaces, list) or len(namespaces) != 2
+                                  or any(not isinstance(value, str) or not value for value in namespaces)
+                                  or namespaces[0] == namespaces[1]):
+            raise ValueError("allowed evidence lacks two distinct tenant namespace IDs; rerun the live probe")
         if mode == "allowed" and record.get("validLoginCount") != 2:
             raise ValueError("allowed evidence lacks two valid SDK login checks; rerun the live probe")
         if mode == "allowed":
@@ -395,6 +405,8 @@ def verify_cluster(configs, records):
         raise ValueError("both node declarations must pass topology validation")
     for config, (allowed, denied) in zip(configs, records):
         verify_pair(config, allowed, denied)
+    if set(records[0][0]["tenantNamespaces"]) != set(records[1][0]["tenantNamespaces"]):
+        raise ValueError("two nodes were probed with different tenant namespaces")
     for field in ("tlsHTTP", "tlsGRPC", "backendExternalHost"):
         if configs[0].get(field) == configs[1].get(field):
             raise ValueError(f"two nodes share {field}; distinct network endpoints are required")
@@ -422,6 +434,8 @@ def main():
                         help="SDK token file for a valid TLS login; --probe requires two distinct tokens")
     parser.add_argument("--grpc-probe-bin", metavar="PATH",
                         help="built nacos-native-grpc-probe binary; required with --probe")
+    parser.add_argument("--tenant-namespace", action="append", default=[], metavar="ID",
+                        help="namespace ID paired by order with --login-token-file; --probe requires two distinct IDs")
     parser.add_argument("--verify-pair", nargs=2, metavar=("ALLOWED", "DENIED"),
                         help="require same-config, distinct-source live probes within five minutes")
     parser.add_argument("--verify-cluster", nargs=5,
@@ -434,6 +448,11 @@ def main():
         parser.error("--login-token-file requires --probe")
     if args.probe and len(args.login_token_file) != 2:
         parser.error("--probe requires two --login-token-file arguments")
+    if args.probe and (len(args.tenant_namespace) != 2 or not all(args.tenant_namespace)
+                       or args.tenant_namespace[0] == args.tenant_namespace[1]):
+        parser.error("--probe requires two distinct --tenant-namespace arguments")
+    if args.tenant_namespace and not args.probe:
+        parser.error("--tenant-namespace requires --probe")
     if args.probe and not args.grpc_probe_bin:
         parser.error("--probe requires --grpc-probe-bin")
     if args.grpc_probe_bin and not args.probe:
@@ -504,11 +523,17 @@ def main():
                 target = net_address(address, port)
                 completed = subprocess.run(
                     [args.grpc_probe_bin, "-address", target, "-server-name", host,
-                     "-ca-file", config["caFile"]], capture_output=True, text=True,
+                     "-ca-file", config["caFile"],
+                     "-tenant-a-namespace", args.tenant_namespace[0],
+                     "-tenant-b-namespace", args.tenant_namespace[1],
+                     "-tenant-a-token-file", args.login_token_file[0],
+                     "-tenant-b-token-file", args.login_token_file[1]], capture_output=True, text=True,
                     timeout=12, check=False,
                 )
-                if completed.returncode != 0 or completed.stdout.strip() != "PASS: anonymous native gRPC read and subscription rejected with status 16":
-                    raise ValueError(f"anonymous gRPC read/subscription denial failed for {target}: probe exit {completed.returncode}")
+                expected = ("PASS: anonymous gRPC denied; two tenant reads and subscriptions allowed; "
+                            "cross-tenant reads and subscriptions denied")
+                if completed.returncode != 0 or completed.stdout.strip() != expected:
+                    raise ValueError(f"two-tenant gRPC isolation failed for {target}: probe exit {completed.returncode}")
             check_probe_dns(config, resolved)
             # An approved SDK source must also be unable to bypass TLS and
             # reach the plaintext GoLab backend on the sidecar host.
@@ -534,7 +559,8 @@ def main():
         output = evidence(config, mode, sources, resolved,
                           valid_login_count=len(tokens) if args.probe else 0,
                           ca_digest=ca_before if args.probe or args.probe_denied else None,
-                          certificates=certificates)
+                          certificates=certificates,
+                          tenant_namespaces=args.tenant_namespace)
         try:
             write_evidence(args.evidence, output)
         except FileExistsError:
