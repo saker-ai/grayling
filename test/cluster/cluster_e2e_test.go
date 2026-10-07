@@ -53,6 +53,7 @@ package cluster
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,11 +69,69 @@ import (
 	"testing"
 	"time"
 
+	"github.com/godeps/golab/internal/platform"
 	"github.com/godeps/golab/pkg/bucketing"
 	"github.com/godeps/golab/pkg/model"
 	"github.com/godeps/golab/test/pgtest"
 	"github.com/godeps/golab/test/redistest"
 )
+
+func TestRolloutLeaderProcessFailover(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires real PostgreSQL, Redis and two golab processes")
+	}
+	dsn := pgtest.DSN(t)
+	rdb := redistest.Start(t)
+	bin := buildGolab(t, repoRoot(t))
+	store, err := platform.NewPGStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	args := []string{"-rollout-interval", "100ms", "-rollout-lease-duration", "500ms"}
+	A := startReplica(t, "rollout-A", bin, dsn, rdb.Addr, "rollout-failover-secret-0123456789", time.Second, args...)
+	waitLeader := func(exclude string) platform.RolloutLeadership {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			status, err := store.RolloutLeadership(ctx)
+			cancel()
+			if err == nil && status.Holder != "" && status.Holder != exclude && status.LastRunAt != nil {
+				return status
+			}
+			time.Sleep(30 * time.Millisecond)
+		}
+		t.Fatal("rollout process takeover did not occur")
+		return platform.RolloutLeadership{}
+	}
+	first := waitLeader("")
+	if !strings.Contains(first.Holder, fmt.Sprintf(":%d:", A.proc.cmd.Process.Pid)) {
+		t.Fatalf("A not elected first: %+v", first)
+	}
+	B := startReplica(t, "rollout-B", bin, dsn, rdb.Addr, "rollout-failover-secret-0123456789", time.Second, args...)
+	time.Sleep(150 * time.Millisecond)
+	status, err := store.RolloutLeadership(t.Context())
+	if err != nil || status.Holder != first.Holder || status.Generation != first.Generation {
+		t.Fatalf("second process preempted live leader: %+v %v", status, err)
+	}
+	A.proc.terminate(t)
+	second := waitLeader(first.Holder)
+	if !strings.Contains(second.Holder, fmt.Sprintf(":%d:", B.proc.cmd.Process.Pid)) || second.Generation <= first.Generation {
+		t.Fatalf("B did not take over: %+v", second)
+	}
+	A.proc = startProc(t, "golab-rollout-A(restarted)", A.bin, A.args...)
+	waitHealth(t, A.base, 60*time.Second)
+	status, err = store.RolloutLeadership(t.Context())
+	if err != nil || status.Holder != second.Holder {
+		t.Fatalf("restarted A preempted B: %+v %v", status, err)
+	}
+	B.proc.terminate(t)
+	third := waitLeader(second.Holder)
+	if !strings.Contains(third.Holder, fmt.Sprintf(":%d:", A.proc.cmd.Process.Pid)) || third.Generation <= second.Generation {
+		t.Fatalf("restarted A did not take over: %+v", third)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Process helpers

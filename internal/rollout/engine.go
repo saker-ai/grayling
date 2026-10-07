@@ -35,10 +35,12 @@ package rollout
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -69,7 +71,9 @@ type Engine struct {
 	Admin  *admin.Service
 	Now    func() time.Time
 	Logger *log.Logger
-	mu     sync.Mutex
+	// LeaseDuration overrides the default lease TTL when explicitly configured.
+	LeaseDuration time.Duration
+	mu            sync.Mutex
 }
 
 // NewEngine assembles an engine. now may be nil (wall clock).
@@ -104,9 +108,19 @@ type TickSummary struct {
 // Tick runs one pass over every experiment with an engine-attention plan.
 // Deterministic order (store returns ID-sorted); every action is idempotent.
 func (e *Engine) Tick() TickSummary {
+	return e.tick(nil)
+}
+
+func (e *Engine) tick(check func() error) TickSummary {
 	now := e.now()
 	var sum TickSummary
 	for _, candidate := range e.Store.ExperimentsWithActivePlans() {
+		if check != nil {
+			if err := check(); err != nil {
+				sum.Errors = append(sum.Errors, err.Error())
+				return sum
+			}
+		}
 		sum.Inspected++
 		release, err := e.lockPlan(candidate.ID)
 		if err != nil {
@@ -115,15 +129,27 @@ func (e *Engine) Tick() TickSummary {
 		}
 		func() {
 			defer release()
+			if check != nil {
+				if err := check(); err != nil {
+					sum.Errors = append(sum.Errors, err.Error())
+					return
+				}
+			}
 			exp, err := e.Store.GetExperiment(candidate.ID)
 			if err != nil {
 				sum.Errors = append(sum.Errors, candidate.ID+": "+err.Error())
 				return
 			}
-			e.tickPlan(now, exp, &sum)
+			e.tickPlan(now, exp, &sum, check)
 		}()
 	}
 	for _, candidate := range e.Store.ExperimentsWithBandit() {
+		if check != nil {
+			if err := check(); err != nil {
+				sum.Errors = append(sum.Errors, err.Error())
+				return sum
+			}
+		}
 		sum.Inspected++
 		release, err := e.lockPlan(candidate.ID)
 		if err != nil {
@@ -147,6 +173,12 @@ func (e *Engine) Tick() TickSummary {
 				state.Frozen, state.FreezeReason = true, "feedback ledger unhealthy: "+err.Error()
 			} else {
 				state = experiment.PublishedBanditState(exp, rep.Bandit)
+			}
+			if check != nil {
+				if err := check(); err != nil {
+					sum.Errors = append(sum.Errors, err.Error())
+					return
+				}
 			}
 			changed, publishErr := e.Admin.ApplyBanditState(EngineActor, exp.ID, state)
 			if publishErr != nil {
@@ -191,6 +223,18 @@ func (e *Engine) Run(ctx context.Context, interval time.Duration) {
 		return
 	}
 	e.Logger.Printf("rollout: auto-advance engine started (interval %s)", interval)
+	identity := make([]byte, 16)
+	if _, err := rand.Read(identity); err != nil {
+		e.Logger.Printf("rollout: identity unavailable: %v", err)
+		return
+	}
+	host, _ := os.Hostname()
+	holder := fmt.Sprintf("%s:%d:%x", host, os.Getpid(), identity)
+	ttl := max(3*interval, 30*time.Second)
+	if e.LeaseDuration > 0 {
+		ttl = e.LeaseDuration
+	}
+	var lastGeneration int64
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -199,7 +243,35 @@ func (e *Engine) Run(ctx context.Context, interval time.Duration) {
 			e.Logger.Printf("rollout: engine stopped")
 			return
 		case <-t.C:
-			sum := e.Tick()
+			leaseCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			generation, acquired, err := e.Store.AcquireRolloutLease(leaseCtx, holder, ttl)
+			cancel()
+			if err != nil {
+				e.Logger.Printf("rollout: election failed: %v", err)
+				continue
+			}
+			if !acquired {
+				continue
+			}
+			if generation != lastGeneration {
+				e.Logger.Printf("rollout: leadership acquired holder=%s generation=%d ttl=%s", holder, generation, ttl)
+				lastGeneration = generation
+			}
+			check := func() error {
+				checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				defer cancel()
+				return e.Store.CheckRolloutLease(checkCtx, holder, generation)
+			}
+			sum := e.tick(check)
+			finishCtx, finishCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			failure := ""
+			if len(sum.Errors) > 0 {
+				failure = sum.Errors[0]
+			}
+			if err := e.Store.FinishRolloutLease(finishCtx, holder, generation, failure); err != nil {
+				e.Logger.Printf("rollout: finish leadership: %v", err)
+			}
+			finishCancel()
 			if len(sum.Started)+len(sum.Advanced)+len(sum.Paused)+len(sum.BanditUpdated)+len(sum.BanditFrozen)+
 				len(sum.RolledBack)+len(sum.Completed)+len(sum.Errors) > 0 {
 				e.Logger.Printf("rollout: tick started=%v advanced=%v repaired=%v paused=%v rolledBack=%v completed=%v banditUpdated=%v banditFrozen=%v errors=%v",
@@ -211,7 +283,7 @@ func (e *Engine) Run(ctx context.Context, interval time.Duration) {
 
 // tickPlan advances ONE plan. Errors never abort the pass; they are logged,
 // counted and retried on the next tick (all actions are idempotent).
-func (e *Engine) tickPlan(now time.Time, exp *platform.Experiment, sum *TickSummary) {
+func (e *Engine) tickPlan(now time.Time, exp *platform.Experiment, sum *TickSummary, check func() error) {
 	plan := exp.ReleasePlan
 	if plan == nil {
 		return
@@ -221,17 +293,31 @@ func (e *Engine) tickPlan(now time.Time, exp *platform.Experiment, sum *TickSumm
 	}
 	switch plan.State {
 	case platform.ReleasePlanArmed:
-		e.tickArmed(now, exp, sum)
+		e.tickArmed(now, exp, sum, check)
 	case platform.ReleasePlanRunning:
-		e.tickRunning(now, exp, sum)
+		e.tickRunning(now, exp, sum, check)
 	case platform.ReleasePlanPaused:
 		// Paused plans wait for an operator (§5.3: 暂停后人工恢复).
 	}
 }
 
-func (e *Engine) tickArmed(now time.Time, exp *platform.Experiment, sum *TickSummary) {
+func checkLease(check func() error, sum *TickSummary, experimentID string) bool {
+	if check == nil {
+		return true
+	}
+	if err := check(); err != nil {
+		sum.Errors = append(sum.Errors, experimentID+": "+err.Error())
+		return false
+	}
+	return true
+}
+
+func (e *Engine) tickArmed(now time.Time, exp *platform.Experiment, sum *TickSummary, check func() error) {
 	if exp.State != model.ExperimentRunning {
 		return // waits for the human/scheduled start of the experiment
+	}
+	if !checkLease(check, sum, exp.ID) {
+		return
 	}
 	// Record-then-publish: mark the plan running first; if the republish
 	// fails the next tick's repair path converges (idempotent).
@@ -258,18 +344,21 @@ func (e *Engine) tickArmed(now time.Time, exp *platform.Experiment, sum *TickSum
 	sum.Started = append(sum.Started, exp.ID)
 }
 
-func (e *Engine) tickRunning(now time.Time, exp *platform.Experiment, sum *TickSummary) {
+func (e *Engine) tickRunning(now time.Time, exp *platform.Experiment, sum *TickSummary, check func() error) {
 	plan := exp.ReleasePlan
 	if exp.State != model.ExperimentRunning {
 		switch exp.State {
 		case model.ExperimentPaused, model.ExperimentScheduled:
 			return // operator-paused experiment: engine holds position
 		default: // stopped / analyzed / archived
-			e.pause(exp, now, fmt.Sprintf("experiment entered terminal-ish state %s", exp.State), sum)
+			e.pause(exp, now, fmt.Sprintf("experiment entered terminal-ish state %s", exp.State), sum, check)
 		}
 		return
 	}
 	step := plan.Steps[plan.CurrentStep]
+	if !checkLease(check, sum, exp.ID) {
+		return
+	}
 
 	// Repair/convergence: the published ratio must equal the current step's
 	// ratio (a crashed pass between record and publish lands here).
@@ -288,6 +377,9 @@ func (e *Engine) tickRunning(now time.Time, exp *platform.Experiment, sum *TickS
 
 	if plan.StepStartedAt == nil {
 		// Defensive: running without a step clock — stamp and wait.
+		if !checkLease(check, sum, exp.ID) {
+			return
+		}
 		_ = e.mutate(exp.ID, func(p *platform.ReleasePlan) error {
 			started := now
 			p.StepStartedAt = &started
@@ -302,9 +394,15 @@ func (e *Engine) tickRunning(now time.Time, exp *platform.Experiment, sum *TickS
 
 	// Observation window elapsed: consult the pre-registered decision gate.
 	report, err := experiment.BuildReport(e.Store, exp.ID, now)
+	if check != nil {
+		if leaseErr := check(); leaseErr != nil {
+			sum.Errors = append(sum.Errors, exp.ID+": "+leaseErr.Error())
+			return
+		}
+	}
 	if err != nil {
 		// 统计不可用 → 暂停 (§5.3).
-		e.pause(exp, now, "report unavailable: "+err.Error(), sum)
+		e.pause(exp, now, "report unavailable: "+err.Error(), sum, check)
 		return
 	}
 	if !report.Healthy {
@@ -312,13 +410,13 @@ func (e *Engine) tickRunning(now time.Time, exp *platform.Experiment, sum *TickS
 		if len(report.HealthIssues) > 0 {
 			issues = report.HealthIssues[0]
 		}
-		e.pause(exp, now, "data health gate: "+issues, sum)
+		e.pause(exp, now, "data health gate: "+issues, sum, check)
 		return
 	}
 
 	switch report.Decision.Verdict {
 	case stats.VerdictRollback:
-		e.rollback(exp, now, report, sum)
+		e.rollback(exp, now, report, sum, check)
 	case stats.VerdictHold:
 		return // insufficient sample / experiment min-runtime: normal waiting
 	case stats.VerdictShip, stats.VerdictContinue:
@@ -327,17 +425,20 @@ func (e *Engine) tickRunning(now time.Time, exp *platform.Experiment, sum *TickS
 		}
 		if plan.CurrentStep == len(plan.Steps)-1 {
 			if report.Decision.Verdict == stats.VerdictShip {
-				e.complete(exp, now, report, sum)
+				e.complete(exp, now, report, sum, check)
 			}
 			// continue on the final step: keep running to the planned
 			// sample; concluding is a human decision (§10.3).
 			return
 		}
-		e.advance(exp, now, report, sum)
+		e.advance(exp, now, report, sum, check)
 	}
 }
 
-func (e *Engine) advance(exp *platform.Experiment, now time.Time, report *experiment.Report, sum *TickSummary) {
+func (e *Engine) advance(exp *platform.Experiment, now time.Time, report *experiment.Report, sum *TickSummary, check func() error) {
+	if !checkLease(check, sum, exp.ID) {
+		return
+	}
 	next := exp.ReleasePlan.CurrentStep + 1
 	nextStep := exp.ReleasePlan.Steps[next]
 	// Record-then-publish (idempotent convergence on crash).
@@ -364,7 +465,10 @@ func (e *Engine) advance(exp *platform.Experiment, now time.Time, report *experi
 	sum.Advanced = append(sum.Advanced, fmt.Sprintf("%s→%s", exp.ID, nextStep.Name))
 }
 
-func (e *Engine) complete(exp *platform.Experiment, now time.Time, report *experiment.Report, sum *TickSummary) {
+func (e *Engine) complete(exp *platform.Experiment, now time.Time, report *experiment.Report, sum *TickSummary, check func() error) {
+	if !checkLease(check, sum, exp.ID) {
+		return
+	}
 	err := e.mutate(exp.ID, func(p *platform.ReleasePlan) error {
 		p.State = platform.ReleasePlanCompleted
 		p.AppendHistory(platform.PlanEvent{At: now, Actor: EngineActor.Name,
@@ -388,7 +492,10 @@ func (e *Engine) complete(exp *platform.Experiment, now time.Time, report *exper
 // republish) succeeded; any error retries the whole action next tick — the
 // verdict is stable, and admin.TransitionExperiment is itself idempotent
 // (state no-op + republish until the binding agrees).
-func (e *Engine) rollback(exp *platform.Experiment, now time.Time, report *experiment.Report, sum *TickSummary) {
+func (e *Engine) rollback(exp *platform.Experiment, now time.Time, report *experiment.Report, sum *TickSummary, check func() error) {
+	if !checkLease(check, sum, exp.ID) {
+		return
+	}
 	reason := "release plan rollback: " + firstReason(report)
 	if _, err := e.Admin.TransitionExperiment(EngineActor, exp.ID, model.ExperimentStopped, reason); err != nil {
 		e.Logger.Printf("rollout: %s rollback transition failed (next tick retries): %v", exp.ID, err)
@@ -412,7 +519,10 @@ func (e *Engine) rollback(exp *platform.Experiment, now time.Time, report *exper
 	sum.RolledBack = append(sum.RolledBack, exp.ID)
 }
 
-func (e *Engine) pause(exp *platform.Experiment, now time.Time, reason string, sum *TickSummary) {
+func (e *Engine) pause(exp *platform.Experiment, now time.Time, reason string, sum *TickSummary, check func() error) {
+	if !checkLease(check, sum, exp.ID) {
+		return
+	}
 	if exp.ReleasePlan.State == platform.ReleasePlanPaused && exp.ReleasePlan.PausedReason == reason {
 		return // already paused for exactly this reason — idempotent
 	}

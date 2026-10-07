@@ -144,6 +144,15 @@ var pgMigrations = []pgMigration{
         allocation_probability double precision NOT NULL,
         PRIMARY KEY (experiment_id, epoch, unit_hash)
     )`},
+	{8, `CREATE TABLE rollout_leader (
+        id boolean PRIMARY KEY DEFAULT true CHECK (id),
+        holder text NOT NULL,
+        generation bigint NOT NULL,
+        expires_at timestamptz NOT NULL,
+        last_run_at timestamptz,
+        last_takeover_at timestamptz,
+        last_error text NOT NULL DEFAULT ''
+    )`},
 }
 
 const pgSchemaV1 = `

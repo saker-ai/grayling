@@ -7,6 +7,7 @@ package rollout_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,6 +49,363 @@ type harness struct {
 
 	fakeNow  time.Time
 	eventSeq int
+}
+
+func TestMultiReplicaRunFailover(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	a, err := platform.NewPGStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	b, err := platform.NewPGStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+
+	makeEngine := func(store *platform.Store) *rollout.Engine {
+		e := rollout.NewEngine(store, admin.NewService(store, nil, nil), nil)
+		e.LeaseDuration = 180 * time.Millisecond
+		return e
+	}
+	var runs sync.WaitGroup
+	start := func(ctx context.Context, store *platform.Store) {
+		runs.Go(func() { makeEngine(store).Run(ctx, 40*time.Millisecond) })
+	}
+	ctxA, cancelA := context.WithCancel(t.Context())
+	defer cancelA()
+	start(ctxA, a)
+	waitHolder := func(wantDifferent string) platform.RolloutLeadership {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			status, err := a.RolloutLeadership(t.Context())
+			if err == nil && status.Holder != "" && status.Holder != wantDifferent && status.LastRunAt != nil {
+				return status
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatal("rollout holder did not change")
+		return platform.RolloutLeadership{}
+	}
+	first := waitHolder("")
+	ctxB, cancelB := context.WithCancel(t.Context())
+	defer cancelB()
+	start(ctxB, b)
+	time.Sleep(80 * time.Millisecond)
+	before, err := b.RolloutLeadership(t.Context())
+	if err != nil || before.Holder != first.Holder || before.Generation != first.Generation {
+		t.Fatalf("dual replica changed live holder: %+v, %v", before, err)
+	}
+	cancelA()
+	second := waitHolder(first.Holder)
+	if second.Generation <= first.Generation || !second.LastTakeoverAt.After(*first.LastTakeoverAt) {
+		t.Fatalf("takeover not recorded: first=%+v second=%+v", first, second)
+	}
+	cancelB()
+	ctxRestart, stopRestart := context.WithCancel(t.Context())
+	defer func() { cancelA(); cancelB(); stopRestart(); runs.Wait() }()
+	start(ctxRestart, a)
+	third := waitHolder(second.Holder)
+	if third.Generation <= second.Generation {
+		t.Fatalf("restart did not obtain new generation: %+v", third)
+	}
+}
+
+func TestMultiReplicaPlanStartTakeoverAndManualAdvance(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	a, err := platform.NewPGStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	h := newHarnessOnStore(t, a)
+	expID := h.runningExperiment(t, "cluster-rollout", nil)
+	h.createPlan(t, expID,
+		step{Name: "canary", Ratio: 20, MinRuntime: int64(time.Hour), AutoAdvance: true},
+		step{Name: "half", Ratio: 50, MinRuntime: int64(time.Hour), AutoAdvance: true})
+	b, err := platform.NewPGStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	second := rollout.NewEngine(b, admin.NewService(b, h.api.Config, nil), nil)
+	for _, engine := range []*rollout.Engine{h.api.Rollout, second} {
+		engine.LeaseDuration = 250 * time.Millisecond
+	}
+	ctxA, cancelA := context.WithCancel(t.Context())
+	ctxB, cancelB := context.WithCancel(t.Context())
+	var runs sync.WaitGroup
+	runs.Go(func() { h.api.Rollout.Run(ctxA, 40*time.Millisecond) })
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := a.ReloadFromBackend(); err != nil {
+			t.Fatal(err)
+		}
+		plan := h.getPlan(t, expID)
+		if plan.State == platform.ReleasePlanRunning {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	first, err := a.RolloutLeadership(t.Context())
+	if err != nil || first.Holder == "" {
+		t.Fatalf("initial leader: %+v %v", first, err)
+	}
+	var observed platform.RolloutLeadership
+	if code := h.do("GET", "/api/v1/admin/rollout/leadership", h.owner, nil, &observed); code != http.StatusOK || observed.Generation != first.Generation {
+		t.Fatalf("leadership API: %d %+v", code, observed)
+	}
+	runs.Go(func() { second.Run(ctxB, 40*time.Millisecond) })
+	time.Sleep(100 * time.Millisecond)
+	plan := h.getPlan(t, expID)
+	starts := 0
+	for _, event := range plan.History {
+		if event.Action == "plan.start" {
+			starts++
+		}
+	}
+	if starts != 1 || plan.CurrentStep != 0 || h.publishedEligibility(t, "cluster-rollout") != 20 {
+		t.Fatalf("duplicate or missing start: %+v", plan)
+	}
+	cancelA()
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		status, err := b.RolloutLeadership(t.Context())
+		if err == nil && status.Holder != "" && status.Holder != first.Holder {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	status, err := b.RolloutLeadership(t.Context())
+	if err != nil || status.Holder == first.Holder || status.Holder == "" {
+		t.Fatalf("no takeover: %+v %v", status, err)
+	}
+	if code := h.do("POST", "/api/v1/admin/experiments/"+expID+"/release-plan/takeover",
+		h.owner, map[string]any{"enabled": true, "reason": "incident freeze"}, nil); code != http.StatusOK {
+		t.Fatalf("takeover: %d", code)
+	}
+	if code := h.do("POST", "/api/v1/admin/experiments/"+expID+"/release-plan/advance",
+		h.owner, map[string]any{"reason": "operator decided"}, nil); code != http.StatusOK {
+		t.Fatalf("manual advance: %d", code)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if err := a.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	plan = h.getPlan(t, expID)
+	starts, manual := 0, 0
+	for _, event := range plan.History {
+		if event.Action == "plan.start" {
+			starts++
+		}
+		if event.Action == "manual.advance" {
+			manual++
+		}
+	}
+	if starts != 1 || manual != 1 || plan.CurrentStep != 1 || !plan.ManualOverride {
+		t.Fatalf("switch duplicated plan history: %+v", plan)
+	}
+	for _, audit := range a.AuditList(h.ws.ID, 100) {
+		if audit.Action == "release_plan.manual_advance" && audit.Object == expID {
+			manual--
+		}
+	}
+	if manual != 0 {
+		t.Fatalf("manual advance audit count mismatch: %d", manual)
+	}
+	cancelB()
+	runs.Wait()
+}
+
+func TestMultiReplicaDecisionGateAfterFailover(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	a, err := platform.NewPGStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	h := newHarnessOnStore(t, a)
+	expID := h.runningExperiment(t, "gate-failover", nil)
+	h.createPlan(t, expID,
+		step{Name: "canary", Ratio: 20, MinRuntime: int64(time.Hour), AutoAdvance: true},
+		step{Name: "half", Ratio: 50, MinRuntime: int64(time.Hour), AutoAdvance: true})
+	b, err := platform.NewPGStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	second := rollout.NewEngine(b, admin.NewService(b, h.api.Config, nil), nil)
+	var clock atomic.Int64
+	clock.Store(h.fakeNow.UnixNano())
+	for _, engine := range []*rollout.Engine{h.api.Rollout, second} {
+		engine.LeaseDuration = time.Second
+		engine.Now = func() time.Time { return time.Unix(0, clock.Load()).UTC() }
+	}
+	ctxA, cancelA := context.WithCancel(t.Context())
+	ctxB, cancelB := context.WithCancel(t.Context())
+	var runs sync.WaitGroup
+	defer func() { cancelA(); cancelB(); runs.Wait() }()
+	runs.Go(func() { h.api.Rollout.Run(ctxA, 40*time.Millisecond) })
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := a.ReloadFromBackend(); err != nil {
+			t.Fatal(err)
+		}
+		if h.getPlan(t, expID).State == platform.ReleasePlanRunning {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if h.getPlan(t, expID).State != platform.ReleasePlanRunning {
+		t.Fatal("step 0 did not start")
+	}
+	if n := h.feedTraffic(t, expID, 0, 600, 0.3, 0.1, nil); n < 60 {
+		t.Fatalf("enrollments: %d", n)
+	}
+	cancelA()
+	clock.Store(h.fakeNow.Add(11 * 24 * time.Hour).UnixNano())
+	runs.Go(func() { second.Run(ctxB, 40*time.Millisecond) })
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := a.ReloadFromBackend(); err != nil {
+			t.Fatal(err)
+		}
+		if h.getPlan(t, expID).CurrentStep == 1 {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	plan := h.getPlan(t, expID)
+	if plan.CurrentStep != 1 {
+		t.Fatalf("new leader did not advance healthy gate: %+v", plan)
+	}
+	for time.Now().Before(deadline) {
+		if err := a.ReloadFromBackend(); err != nil {
+			t.Fatal(err)
+		}
+		if h.publishedEligibility(t, "gate-failover") == 50 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	starts, advances := 0, 0
+	for _, event := range plan.History {
+		if event.Action == "plan.start" {
+			starts++
+		}
+		if event.Action == "step.advance" {
+			advances++
+		}
+	}
+	if starts != 1 || advances != 1 || h.publishedEligibility(t, "gate-failover") != 50 {
+		t.Fatalf("duplicate/missing step after failover: starts=%d advances=%d plan=%+v", starts, advances, plan)
+	}
+}
+
+func TestMultiReplicaBlockedGatesAfterFailover(t *testing.T) {
+	for _, scenario := range []string{"srm", "guardrail"} {
+		t.Run(scenario, func(t *testing.T) {
+			dsn := pgtest.DSN(t)
+			a, err := platform.NewPGStore(t.Context(), dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = a.Close() })
+			h := newHarnessOnStore(t, a)
+			var mutate func(map[string]any)
+			if scenario == "guardrail" {
+				mutate = func(m map[string]any) {
+					m["guardrails"] = []map[string]any{{"metricKey": "latency", "type": "mean", "direction": "decrease", "maxRelativeRegression": 0.05, "minSample": 10}}
+				}
+			}
+			expID := h.runningExperiment(t, "blocked-"+scenario, mutate)
+			h.createPlan(t, expID,
+				step{Name: "canary", Ratio: 50, MinRuntime: int64(time.Hour), AutoAdvance: true},
+				step{Name: "full", Ratio: 100, MinRuntime: int64(time.Hour), AutoAdvance: true})
+			b, err := platform.NewPGStore(t.Context(), dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = b.Close() })
+			second := rollout.NewEngine(b, admin.NewService(b, h.api.Config, nil), nil)
+			var clock atomic.Int64
+			clock.Store(h.fakeNow.UnixNano())
+			for _, engine := range []*rollout.Engine{h.api.Rollout, second} {
+				engine.LeaseDuration = time.Second
+				engine.Now = func() time.Time { return time.Unix(0, clock.Load()).UTC() }
+			}
+			ctxA, cancelA := context.WithCancel(t.Context())
+			ctxB, cancelB := context.WithCancel(t.Context())
+			var runs sync.WaitGroup
+			defer func() { cancelA(); cancelB(); runs.Wait() }()
+			runs.Go(func() { h.api.Rollout.Run(ctxA, 40*time.Millisecond) })
+			deadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(deadline) {
+				if err := a.ReloadFromBackend(); err != nil {
+					t.Fatal(err)
+				}
+				if h.getPlan(t, expID).State == platform.ReleasePlanRunning {
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			if h.getPlan(t, expID).State != platform.ReleasePlanRunning {
+				t.Fatal("step 0 did not start")
+			}
+			if scenario == "srm" {
+				h.feedSkewedExposures(t, expID, 120, 20)
+			} else {
+				h.feedTraffic(t, expID, 0, 400, 0.1, 0.1,
+					&extraMetricSpec{Key: "latency", ControlValue: 100, TreatmentValue: 200})
+			}
+			cancelA()
+			clock.Store(h.fakeNow.Add(11 * 24 * time.Hour).UnixNano())
+			runs.Go(func() { second.Run(ctxB, 40*time.Millisecond) })
+			want := platform.ReleasePlanPaused
+			if scenario == "guardrail" {
+				want = platform.ReleasePlanRolledBack
+			}
+			deadline = time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				if err := a.ReloadFromBackend(); err != nil {
+					t.Fatal(err)
+				}
+				if h.getPlan(t, expID).State == want {
+					break
+				}
+				time.Sleep(30 * time.Millisecond)
+			}
+			plan := h.getPlan(t, expID)
+			if plan.State != want || plan.CurrentStep != 0 {
+				t.Fatalf("blocked gate: %+v", plan)
+			}
+			starts, terminal := 0, 0
+			for _, event := range plan.History {
+				if event.Action == "plan.start" {
+					starts++
+				}
+				if event.Action == "plan.pause" || event.Action == "plan.rollback" {
+					terminal++
+				}
+			}
+			if starts != 1 || terminal != 1 {
+				t.Fatalf("duplicate history: %+v", plan.History)
+			}
+			if scenario == "guardrail" {
+				auditCount := 0
+				for _, audit := range a.AuditList(h.ws.ID, 100) {
+					if audit.Action == "release_plan.rollback" && audit.Object == expID {
+						auditCount++
+					}
+				}
+				if auditCount != 1 {
+					t.Fatalf("rollback audit count = %d", auditCount)
+				}
+			}
+		})
+	}
 }
 
 func TestMultiReplicaManualPauseSerialized(t *testing.T) {
@@ -131,6 +490,11 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
+	return newHarnessOnStore(t, store)
+}
+
+func newHarnessOnStore(t *testing.T, store *platform.Store) *harness {
+	t.Helper()
 	cfg := configstore.NewGonacosStore(gconfig.NewService())
 	apiSrv := api.NewServer(store, cfg, api.Options{})
 	srv := httptest.NewServer(apiSrv.Handler())

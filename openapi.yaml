@@ -108,6 +108,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+  "/api/v1/admin/rollout/leadership":
+    get:
+      tags: [experiments]
+      summary: 查看自动推进引擎当前持有者与最近执行状态
+      operationId: getRolloutLeadership
+      responses:
+        "200":
+          description: 持有者、generation、租约过期时间、最近执行与接管时间及错误。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  holder: {type: string}
+                  generation: {type: integer, format: int64}
+                  expiresAt: {type: string, format: date-time}
+                  lastRunAt: {type: string, format: date-time}
+                  lastTakeoverAt: {type: string, format: date-time}
+                  lastError: {type: string}
+        "503":
+          description: PostgreSQL 不可用，无法确认选主状态。
   "/api/v1/admin/workspaces":
     post:
       tags: [workspaces]

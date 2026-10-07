@@ -132,6 +132,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
+	mux.HandleFunc("GET /api/v1/admin/rollout/leadership", s.adminOnly(s.handleRolloutLeadership))
 
 	// Admin (admin tokens only).
 	mux.HandleFunc("POST /api/v1/admin/workspaces", s.adminOnly(s.handleCreateWorkspace))
@@ -407,6 +408,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok", "service": "golab", "schemaVersion": model.SchemaVersion,
 	})
+}
+
+func (s *Server) handleRolloutLeadership(w http.ResponseWriter, r *http.Request) {
+	status, err := s.Store.RolloutLeadership(r.Context())
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "rollout_leadership_unavailable", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
 }
 
 // ---------------------------------------------------------------------------

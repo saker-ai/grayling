@@ -54,6 +54,7 @@ func main() {
 		authSecret           = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
 		authSecretFile       = flag.String("auth-secret-file", "", "owner-only file containing the gonacos HMAC/auth secret")
 		rolloutIv            = flag.Duration("rollout-interval", 30*time.Second, "auto-advance engine tick interval for staged release plans (0 disables automation; manual plan operations stay available)")
+		rolloutLease         = flag.Duration("rollout-lease-duration", 0, "PostgreSQL rollout leader lease (0 = max(3 x rollout-interval, 30s); set longer than worst expected decision pass)")
 		reconcileIv          = flag.Duration("reconcile-interval", 30*time.Second, "publish reconciliation tick interval: re-verifies the gonacos substrate against the platform store and idempotently republishes drift (0 disables); PostgreSQL control changes sync separately every 500ms")
 		requestsPerSec       = flag.Float64("requests-per-second", 0, "per-token request rate limit on sdk/collect endpoints (0 = default 200)")
 		evaluationSampleRate = flag.Float64("evaluation-sample-rate", 0, "fraction [0,1] of safe feature-flag evaluation events to write as structured logs")
@@ -66,6 +67,9 @@ func main() {
 	flag.Parse()
 	if *evaluationSampleRate < 0 || *evaluationSampleRate > 1 {
 		log.Fatal("-evaluation-sample-rate must be within [0,1]")
+	}
+	if *rolloutLease < 0 || (*rolloutLease > 0 && *rolloutLease <= *rolloutIv) {
+		log.Fatal("-rollout-lease-duration must exceed -rollout-interval or be 0 for automatic sizing")
 	}
 
 	logger := log.New(os.Stderr, "golab ", log.LstdFlags|log.Lmsgprefix)
@@ -301,6 +305,7 @@ func main() {
 	apiSrv.SetAI(aisvc.NewService(store, bundle.AI))
 
 	// ---- staged-release auto-advance engine (§5.3 P4) ----
+	apiSrv.Rollout.LeaseDuration = *rolloutLease
 	go apiSrv.Rollout.Run(ctx, *rolloutIv)
 	// ---- publish reconciliation background task (§3/§11) ----
 	go apiSrv.Admin.RunReconciler(ctx, *reconcileIv)
