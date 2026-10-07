@@ -35,7 +35,7 @@ gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f
 | --- | --- | --- |
 | 默认匿名 gonacos、仅 loopback | 原生功能测试显示知道 namespace 即可跨租户读取；启动时即使设置 `GOLAB_ALLOW_NON_LOOPBACK_GONACOS=1` 也拒绝匿名非 loopback 绑定 | 不作为租户可达接口 |
 | `-nacos-native-auth=true`、单/双节点直连 TCP | 官方 Go SDK v2.3.5 真实进程读、订阅、跨租户拒绝、撤销与双节点切换（#11） | 仅实验兼容性验证；明文连接不能跨主机部署 |
-| 双节点 TLS 终止 + 每个客户端 TCP 连接对应独立后端 TCP 连接，gonacos 后端仅 loopback | `test/cluster/TestOfficialNacosClientFailsOverAcrossGolabNodes` 使用真实 GoLab/PG/Redis 及 TLS/L4 代理，验证两个租户、故障切换、HTTP 绕过、撤销；代理与后端在同一测试主机 | **待跨主机入口网络策略与拒绝源验收**；目前不声明生产正式支持 |
+| 双节点 TLS 终止 + 每个客户端 TCP 连接对应独立后端 TCP 连接，gonacos 后端仅 loopback | `test/cluster/TestOfficialNacosClientFailsOverAcrossGolabNodes` 使用真实 GoLab/PG/Redis 及 TLS/L4 代理，验证两个租户、故障切换、HTTP 绕过、撤销；直接向同一 TLS HTTP/2 连接发送原生配置查询，验证有效凭证成功、匿名及撤销后的凭证均被拒；代理与后端在同一测试主机 | **待跨主机入口网络策略与拒绝源验收**；目前不声明生产正式支持 |
 | L7 HTTP/2 代理多路复用不同租户到同一后端 gRPC 连接 | 同一后端 HTTP/2 连接的双凭证负向探针确认第二租户订阅返回 gRPC status 7；真实 L7 代理的推送身份隔离仍无法证明；`scripts/check_nacos_native_topology.py` 对此配置报错 | **不支持** |
 | 其他语言或官方 SDK 其他版本 | 未测试 | 不支持 |
 
@@ -106,7 +106,7 @@ GOWORK=off go test ./test/native -count=1
 python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'
 ```
 
-`test/cluster` 需要可用 PostgreSQL 和 Redis；设置 `GOLAB_TEST_PG_DSN` / `GOLAB_TEST_REDIS_ADDR` 可使用现有服务，否则测试基座尝试 Docker。该测试中的 TLS 代理是 Go 实现的透明 TCP 转发，不是 HAProxy 生产配置的实测。测试验证有效登录、文档 hash、两个租户隔离、同一后端 HTTP/2 连接的双凭证拒绝、订阅收到更新、失效后的无推送、TLS 证书、HTTP 404/401、双节点切换；官方 SDK 的 `GetConfig` 在远端读取失败时可能返回 last-known-good 本地缓存，不能以其返回旧值证明凭证有效。排查撤销请看原生登录是否 401、服务端授权日志及新 revision 推送是否停止；排查重连请核对 gRPC 端口和 h2 ALPN、证书 SAN/CA、两节点地址、后端一对一连接以及最新 manifest revision/文档 hash。
+`test/cluster` 需要可用 PostgreSQL 和 Redis；设置 `GOLAB_TEST_PG_DSN` / `GOLAB_TEST_REDIS_ADDR` 可使用现有服务，否则测试基座尝试 Docker。该测试中的 TLS 代理是 Go 实现的透明 TCP 转发，不是 HAProxy 生产配置的实测。测试验证有效登录、文档 hash、两个租户隔离、同一后端 HTTP/2 连接的双凭证拒绝、订阅收到更新、失效后的无推送、TLS 证书、HTTP 404/401、双节点切换；还在同一条 TLS HTTP/2 连接上直接发送原生配置查询，确认有效凭证 gRPC status 0、无凭证及撤销后的凭证 status 16。这个直读绕过官方 SDK 的本地缓存；官方 SDK 的 `GetConfig` 在远端读取失败时可能返回 last-known-good，不能以其返回旧值证明凭证有效。排查撤销请看原生登录是否 401、直连 gRPC 是否拒绝、服务端授权日志及新 revision 推送是否停止；排查重连请核对 gRPC 端口和 h2 ALPN、证书 SAN/CA、两节点地址、后端一对一连接以及最新 manifest revision/文档 hash。
 
 ## 试验协议
 

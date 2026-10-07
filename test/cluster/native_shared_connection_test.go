@@ -83,3 +83,40 @@ func checkNativeSharedBackendConnection(t *testing.T, backend, namespaceA, token
 		t.Fatalf("expected one shared backend TCP connection, got %d", count)
 	}
 }
+
+// Query the server directly so an SDK last-known-good cache cannot turn a
+// rejected read into an apparent success. Reusing this client also reuses its
+// HTTP/2 connection across the credential revocation.
+func nativeRawTLSQueryStatus(t *testing.T, client *http.Client, addr, namespace, token string) int {
+	t.Helper()
+	body, err := json.Marshal(map[string]string{
+		"tenant": namespace, "group": configstore.Group, "dataId": configstore.ManifestDataID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := grpcsrv.Payload{
+		Metadata: grpcsrv.Metadata{Type: "ConfigQueryRequest", Headers: map[string]string{"accessToken": token}},
+		Body:     grpcsrv.Any{TypeURL: "type.googleapis.com/com.alibaba.nacos.api.config.request.ConfigQueryRequest", Value: body},
+	}
+	var frame bytes.Buffer
+	if err := grpcsrv.WriteFrame(&frame, grpcsrv.Frame{Payload: payload.Encode()}); err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://"+addr+"/Request/request", &frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/grpc")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, response.Body)
+	status, err := strconv.Atoi(response.Header.Get("grpc-status"))
+	if err != nil {
+		t.Fatalf("missing gRPC status: %v", err)
+	}
+	return status
+}

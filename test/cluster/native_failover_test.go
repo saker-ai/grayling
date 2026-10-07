@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,10 +18,12 @@ import (
 	"github.com/godeps/golab/pkg/model"
 	"github.com/godeps/golab/test/pgtest"
 	"github.com/godeps/golab/test/redistest"
+	grpcsrv "github.com/godeps/gonacos/pkg/protocol/grpc"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients/config_client"
 	"github.com/nacos-group/nacos-sdk-go/v2/common/constant"
 	"github.com/nacos-group/nacos-sdk-go/v2/vo"
+	"golang.org/x/net/http2"
 )
 
 func replicaOption(t *testing.T, r *replica, name string) string {
@@ -311,8 +314,25 @@ waitPush:
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("authorized TLS login: HTTP %d, want 200", resp.StatusCode)
 	}
+	var rawConnections atomic.Int64
+	grpcAddr := startNativeTLSL4Count(t, replicaOption(t, b, "-gonacos-grpc-addr"), cert, true, &rawConnections)
+	grpcTransport := &http2.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
+	t.Cleanup(grpcTransport.CloseIdleConnections)
+	grpcClient := &http.Client{Transport: grpcTransport}
+	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, environment.NamespaceID, sdkToken.Secret); status != grpcsrv.StatusOK {
+		t.Fatalf("authorized direct TLS gRPC read: status %d, want 0", status)
+	}
+	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, environment.NamespaceID, ""); status != grpcsrv.StatusUnauthenticated {
+		t.Fatalf("anonymous direct TLS gRPC read: status %d, want 16", status)
+	}
 	if code := adminB.do(http.MethodDelete, "/api/v1/admin/tokens/"+sdkToken.Token.ID, nil, nil); code != http.StatusOK {
 		t.Fatalf("revoke SDK token: HTTP %d", code)
+	}
+	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, environment.NamespaceID, sdkToken.Secret); status != grpcsrv.StatusUnauthenticated {
+		t.Fatalf("revoked direct TLS gRPC read on existing connection: status %d, want 16", status)
+	}
+	if count := rawConnections.Load(); count != 1 {
+		t.Fatalf("direct reads used %d TLS connections, want one persistent connection", count)
 	}
 	resp, err = httpClient.PostForm(baseURL+"/nacos/v1/auth/users/login", url.Values{
 		"username": {"golab-sdk"}, "password": {sdkToken.Secret},
