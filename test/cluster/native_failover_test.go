@@ -347,6 +347,20 @@ waitPush:
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("authorized TLS login: HTTP %d, want 200", resp.StatusCode)
 	}
+	request, err := http.NewRequest(http.MethodGet,
+		baseURL+"/nacos/v1/cs/configs?tenant="+environment.NamespaceID+"&group=GOLAB_FLAGS&dataId=golab.manifest", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("accessToken", sdkToken.Secret)
+	resp, err = httpClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("authenticated HTTP config bypass: HTTP %d, want 404", resp.StatusCode)
+	}
 	var rawConnections atomic.Int64
 	grpcAddr := startNativeTLSL4Count(t, replicaOption(t, b, "-gonacos-grpc-addr"), cert, true, &rawConnections)
 	probeAddr := startNativeTLSL4(t, replicaOption(t, b, "-gonacos-grpc-addr"), cert, true)

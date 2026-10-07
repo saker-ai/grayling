@@ -173,7 +173,9 @@ class PinnedHTTPSConnection(http.client.HTTPSConnection):
             raise
 
 
-def probe(c, resolved, login_tokens=()):
+def probe(c, resolved, login_tokens, tenant_namespaces):
+    if len(login_tokens) != 2 or len(tenant_namespaces) != 2:
+        raise ValueError("two login tokens and matching tenant namespaces are required")
     context = ssl.create_default_context(cafile=c["caFile"])
     certificates = {}
     host, port = split_address(c["tlsGRPC"])
@@ -191,19 +193,25 @@ def probe(c, resolved, login_tokens=()):
     host, port = split_address(c["tlsHTTP"])
     http_target = net_address(host, port)
     certificates[http_target] = {}
+    config_path = "/nacos/v1/cs/configs?tenant=x&group=GOLAB_FLAGS&dataId=golab.manifest"
     requests = (
-        ("GET", "/nacos/v1/cs/configs?tenant=x&group=GOLAB_FLAGS&dataId=golab.manifest", None, 404, None),
+        ("GET", config_path, None, 404, None, {}),
         ("POST", "/nacos/v1/auth/users/login",
-         urllib.parse.urlencode({"username": "golab-sdk", "password": "invalid"}), 401, None),
+         urllib.parse.urlencode({"username": "golab-sdk", "password": "invalid"}), 401, None, {}),
     )
     for address in resolved[http_target]:
-        authorized = tuple(("POST", "/nacos/v1/auth/users/login",
-                            urllib.parse.urlencode({"username": "golab-sdk", "password": token}), 200, token)
-                           for token in login_tokens)
-        for method, path, body, expected, token in requests + authorized:
+        authorized = tuple(request for token, namespace in zip(login_tokens, tenant_namespaces) for request in (
+            ("POST", "/nacos/v1/auth/users/login",
+             urllib.parse.urlencode({"username": "golab-sdk", "password": token}), 200, token, {}),
+            ("GET", "/nacos/v1/cs/configs?" + urllib.parse.urlencode({
+                "tenant": namespace, "group": "GOLAB_FLAGS", "dataId": "golab.manifest"}),
+             None, 404, None, {"accessToken": token}),
+        ))
+        for method, path, body, expected, token, extra_headers in requests + authorized:
             connection = PinnedHTTPSConnection(host, port, address, context)
             try:
                 headers = {"Content-Type": "application/x-www-form-urlencoded"} if body else {}
+                headers.update(extra_headers)
                 connection.request(method, path, body=body, headers=headers)
                 fingerprint = hashlib.sha256(connection.sock.getpeercert(binary_form=True)).hexdigest()
                 previous = certificates[http_target].setdefault(address, fingerprint)
@@ -275,6 +283,7 @@ def evidence(c, mode, sources=None, resolved=None, valid_login_count=0, ca_diges
         "mode": mode,
         "result": "PASS",
         "backendDirectDenied": mode == "allowed",
+        "authenticatedHTTPDenied": mode == "allowed",
         "anonymousGRPCDenied": mode == "allowed",
         "anonymousGRPCSubscriptionDenied": mode == "allowed",
         "tenantGRPCIsolation": mode == "allowed",
@@ -323,6 +332,8 @@ def verify_pair(c, allowed, denied):
             raise ValueError(f"{mode} evidence lacks a CA file SHA-256; rerun the live probe")
         if mode == "allowed" and record.get("backendDirectDenied") is not True:
             raise ValueError("allowed evidence lacks plaintext backend denial check; rerun the live probe")
+        if mode == "allowed" and record.get("authenticatedHTTPDenied") is not True:
+            raise ValueError("allowed evidence lacks authenticated HTTP config denial check; rerun the live probe")
         if mode == "allowed" and record.get("anonymousGRPCDenied") is not True:
             raise ValueError("allowed evidence lacks anonymous gRPC read denial check; rerun the live probe")
         if mode == "allowed" and record.get("anonymousGRPCSubscriptionDenied") is not True:
@@ -523,7 +534,7 @@ def main():
             if tokens[0] == tokens[1]:
                 raise ValueError("two distinct SDK login tokens are required")
             sources = source_ips(config, "allowed", resolved)
-            certificates = probe(config, resolved, tokens)
+            certificates = probe(config, resolved, tokens, args.tenant_namespace)
             host, port = split_address(config["tlsGRPC"])
             for address in resolved[config["tlsGRPC"]]:
                 target = net_address(address, port)

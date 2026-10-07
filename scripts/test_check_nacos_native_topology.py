@@ -147,16 +147,40 @@ class NativeTopologyTest(unittest.TestCase):
                     result.append(reply)
                 return result
 
-            connection.getresponse.side_effect = replies((404, 401, 200, 200, 404, 401, 200, 200))
-            probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"))
+            connection.getresponse.side_effect = replies((404, 401, 200, 404, 200, 404) * 2)
+            probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"), ("namespace-a", "namespace-b"))
             self.assertEqual([call.args[2] for call in https.call_args_list],
-                             ["10.42.1.10"] * 4 + ["10.42.1.11"] * 4)
+                             ["10.42.1.10"] * 6 + ["10.42.1.11"] * 6)
+            self.assertEqual([call.kwargs["headers"].get("accessToken") for call in connection.request.call_args_list],
+                             [None, None, None, "tenant-a-token", None, "tenant-b-token"] * 2)
+            self.assertEqual([connection.request.call_args_list[index].args[1] for index in (3, 5, 9, 11)],
+                             ["/nacos/v1/cs/configs?tenant=namespace-a&group=GOLAB_FLAGS&dataId=golab.manifest",
+                              "/nacos/v1/cs/configs?tenant=namespace-b&group=GOLAB_FLAGS&dataId=golab.manifest"] * 2)
             self.assertEqual([call.args[0] for call in connect.call_args_list],
                              [("10.42.1.10", 9848), ("10.42.1.11", 9848)])
 
-            connection.getresponse.side_effect = replies((404, 401, 200, 200, 404, 401, 200, 302))
+            connection.getresponse.side_effect = replies((404, 401, 200, 404, 200, 404,
+                                                          404, 401, 200, 404, 200, 302))
             with self.assertRaisesRegex(ValueError, "10.42.1.11:8848.*HTTP 302"):
-                probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"))
+                probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"), ("namespace-a", "namespace-b"))
+
+    def test_allowed_probe_rejects_authenticated_http_config_bypass(self):
+        resolved = {"nacos.example:9848": ["10.42.1.10"],
+                    "nacos.example:8848": ["10.42.1.10"]}
+        context = MagicMock()
+        grpc = context.wrap_socket.return_value.__enter__.return_value
+        grpc.selected_alpn_protocol.return_value = "h2"
+        grpc.getpeercert.return_value = b"grpc certificate"
+        connection = MagicMock()
+        connection.sock.getpeercert.return_value = b"http certificate"
+        replies = [MagicMock(status=status) for status in (404, 401, 200, 200)]
+        replies[2].read.return_value = b'{"accessToken":"tenant-a-token","tokenTtl":3600}'
+        connection.getresponse.side_effect = replies
+        with patch("check_nacos_native_topology.ssl.create_default_context", return_value=context), \
+             patch("check_nacos_native_topology.socket.create_connection"), \
+             patch("check_nacos_native_topology.PinnedHTTPSConnection", return_value=connection):
+            with self.assertRaisesRegex(ValueError, "HTTP 200, expected 404"):
+                probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"), ("namespace-a", "namespace-b"))
 
     def test_allowed_probe_rejects_false_success_login_body(self):
         resolved = {"nacos.example:9848": ["10.42.1.10"],
@@ -178,7 +202,7 @@ class NativeTopologyTest(unittest.TestCase):
                      patch("check_nacos_native_topology.socket.create_connection"), \
                      patch("check_nacos_native_topology.PinnedHTTPSConnection", return_value=connection):
                     with self.assertRaisesRegex(ValueError, "invalid SDK login response"):
-                        probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"))
+                        probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"), ("namespace-a", "namespace-b"))
 
     def test_allowed_probe_rejects_invalid_valid_login(self):
         resolved = {"nacos.example:9848": ["10.42.1.10"],
@@ -188,14 +212,14 @@ class NativeTopologyTest(unittest.TestCase):
         context.wrap_socket.return_value.__enter__.return_value.getpeercert.return_value = b"grpc certificate"
         connection = MagicMock()
         connection.sock.getpeercert.return_value = b"http certificate"
-        replies = [MagicMock(status=status) for status in (404, 401, 200, 401)]
+        replies = [MagicMock(status=status) for status in (404, 401, 200, 404, 401)]
         replies[2].read.return_value = b'{"accessToken":"tenant-a-token","tokenTtl":3600}'
         connection.getresponse.side_effect = replies
         with patch("check_nacos_native_topology.ssl.create_default_context", return_value=context), \
              patch("check_nacos_native_topology.socket.create_connection"), \
              patch("check_nacos_native_topology.PinnedHTTPSConnection", return_value=connection):
             with self.assertRaisesRegex(ValueError, "HTTP 401, expected 200"):
-                probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"))
+                probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"), ("namespace-a", "namespace-b"))
 
     def test_allowed_probe_rejects_http_certificate_rotation(self):
         resolved = {"nacos.example:9848": ["10.42.1.10"],
@@ -211,7 +235,7 @@ class NativeTopologyTest(unittest.TestCase):
              patch("check_nacos_native_topology.socket.create_connection"), \
              patch("check_nacos_native_topology.PinnedHTTPSConnection", return_value=connection):
             with self.assertRaisesRegex(ValueError, "certificate changed during probe"):
-                probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"))
+                probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"), ("namespace-a", "namespace-b"))
 
     def test_pinned_https_connection_uses_ip_and_cert_hostname(self):
         context = MagicMock()
@@ -350,7 +374,8 @@ class NativeTopologyTest(unittest.TestCase):
                  patch("check_nacos_native_topology.check_probe_dns"), \
                  patch("check_nacos_native_topology.probe_closed_targets"):
                 self.assertEqual(main(), 0)
-            live_probe.assert_called_once_with(self.config, resolved, ["same-secret", "other-secret"])
+            live_probe.assert_called_once_with(self.config, resolved, ["same-secret", "other-secret"],
+                                               ["namespace-a", "namespace-b"])
             grpc_probe.assert_called_once()
             self.assertEqual(grpc_probe.call_args.args[0][2], "10.42.1.10:9848")
             self.assertEqual(grpc_probe.call_args.args[0][-8:],
@@ -594,6 +619,10 @@ class NativeTopologyTest(unittest.TestCase):
         old_allowed = copy.deepcopy(allowed)
         del old_allowed["backendDirectDenied"]
         with self.assertRaisesRegex(ValueError, "lacks plaintext backend denial check"):
+            verify_pair(self.config, old_allowed, denied)
+        old_allowed = copy.deepcopy(allowed)
+        del old_allowed["authenticatedHTTPDenied"]
+        with self.assertRaisesRegex(ValueError, "lacks authenticated HTTP config denial check"):
             verify_pair(self.config, old_allowed, denied)
         old_allowed = copy.deepcopy(allowed)
         del old_allowed["anonymousGRPCDenied"]
