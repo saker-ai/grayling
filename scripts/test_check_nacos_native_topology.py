@@ -1,11 +1,14 @@
 import copy
 import datetime
 import errno
+import http.server
 import socket
+import threading
 import unittest
+import urllib.request
 from unittest.mock import patch
 
-from check_nacos_native_topology import evidence, probe_denied, source_ips, validate, verify_cluster, verify_pair
+from check_nacos_native_topology import RejectRedirect, evidence, probe_denied, source_ips, validate, verify_cluster, verify_pair
 
 
 class NativeTopologyTest(unittest.TestCase):
@@ -26,6 +29,7 @@ class NativeTopologyTest(unittest.TestCase):
         for field, value in (
             ("mode", "l7-http2"), ("nativeAuth", False),
             ("backendConnectionReuse", True), ("backendGRPC", "0.0.0.0:19848"),
+            ("backendGRPC", "127.0.0.2:18848"),
             ("allowedSources", ["0.0.0.0/0"]), ("caFile", ""),
             ("backendExternalHost", "0.0.0.0"),
             ("backendExternalHost", "127.0.0.1"),
@@ -37,11 +41,34 @@ class NativeTopologyTest(unittest.TestCase):
             ("tlsGRPC", "0.0.0.0:9848"),
             ("tlsGRPC", "[::1]:9848"),
             ("tlsGRPC", "[fe80::1]:9848"),
+            ("tlsGRPC", "nacos-grpc.example:8848"),
         ):
             with self.subTest(field=field):
                 config = copy.deepcopy(self.config)
                 config[field] = value
                 self.assertTrue(validate(config))
+
+    def test_http_probe_rejects_redirects(self):
+        class RedirectServer(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", "http://127.0.0.1/false-success")
+                self.end_headers()
+
+            def log_message(self, *_):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), RedirectServer)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), RejectRedirect())
+            with self.assertRaisesRegex(ValueError, "redirected away from configured endpoint"):
+                opener.open(f"http://127.0.0.1:{server.server_port}/probe", timeout=1)
+        finally:
+            server.shutdown()
+            thread.join()
+            server.server_close()
 
     def test_denied_source_checks_both_entry_and_backend_ports(self):
         targets = []

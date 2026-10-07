@@ -31,6 +31,11 @@ def validate(c):
         except (KeyError, ValueError) as exc:
             errors.append(f"{field}: {exc}")
     try:
+        if split_address(c["backendHTTP"])[1] == split_address(c["backendGRPC"])[1]:
+            errors.append("HTTP login and gRPC need distinct backend ports")
+    except (KeyError, ValueError):
+        pass  # The field-specific checks above report malformed addresses.
+    try:
         external_ip = ipaddress.ip_address(c["backendExternalHost"])
         if (external_ip.is_loopback or external_ip.is_unspecified or external_ip.is_multicast
                 or external_ip.is_link_local):
@@ -56,8 +61,11 @@ def validate(c):
                     raise ValueError("TLS endpoint must be a routable unicast address")
         except (KeyError, ValueError) as exc:
             errors.append(f"{field}: {exc}")
-    if c.get("tlsHTTP") == c.get("tlsGRPC"):
-        errors.append("HTTP login and gRPC need distinct TLS ports")
+    try:
+        if split_address(c["tlsHTTP"])[1] == split_address(c["tlsGRPC"])[1]:
+            errors.append("HTTP login and gRPC need distinct TLS ports")
+    except (KeyError, ValueError):
+        pass  # The field-specific checks above report malformed addresses.
     if not c.get("caFile"):
         errors.append("caFile is required for verified TLS")
     sources = c.get("allowedSources")
@@ -117,6 +125,11 @@ def net_address(host, port):
     return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
 
 
+class RejectRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        raise ValueError(f"HTTP probe redirected away from configured endpoint: {code} {newurl}")
+
+
 def probe(c):
     context = ssl.create_default_context(cafile=c["caFile"])
     host, port = split_address(c["tlsGRPC"])
@@ -128,7 +141,8 @@ def probe(c):
     context.set_alpn_protocols(["http/1.1"])
     host, port = split_address(c["tlsHTTP"])
     base = f"https://{host}:{port}"
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=context))
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                         urllib.request.HTTPSHandler(context=context), RejectRedirect())
     for request, expected in (
         (urllib.request.Request(base + "/nacos/v1/cs/configs?tenant=x&group=GOLAB_FLAGS&dataId=golab.manifest"), 404),
         (urllib.request.Request(base + "/nacos/v1/auth/users/login",
