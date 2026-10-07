@@ -133,7 +133,7 @@ GOWORK=off go test ./test/native -count=1
 python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'
 ```
 
-`test/cluster` 需要可用 PostgreSQL 和 Redis；设置 `GOLAB_TEST_PG_DSN` / `GOLAB_TEST_REDIS_ADDR` 可使用现有服务，否则测试基座尝试 Docker。该测试中的 TLS 代理是 Go 实现的透明 TCP 转发，不是 HAProxy 生产配置的实测。测试验证有效登录、文档 hash、两个租户隔离、共享连接上 B 读取自己配置成功但订阅自己配置被拒、独立连接订阅成功、订阅收到更新、失效后的无推送、TLS 证书、HTTP 404/401、双节点切换；还在同一条 TLS HTTP/2 连接上直接发送原生配置查询，确认有效凭证 gRPC status 0、无凭证及撤销后的凭证 status 16。这个直读绕过官方 SDK 的本地缓存；官方 SDK 的 `GetConfig` 在远端读取失败时可能返回 last-known-good，不能以其返回旧值证明凭证有效。排查撤销请看原生登录是否 401、直连 gRPC 是否拒绝、服务端授权日志及新 revision 推送是否停止；排查重连请核对 gRPC 端口和 h2 ALPN、证书 SAN/CA、两节点地址、后端一对一连接以及最新 manifest revision/文档 hash。
+`test/cluster` 需要可用 PostgreSQL 和 Redis；设置 `GOLAB_TEST_PG_DSN` / `GOLAB_TEST_REDIS_ADDR` 可使用现有服务，否则测试基座尝试 Docker。该测试中的 TLS 代理是 Go 实现的透明 TCP 转发，不是 HAProxy 生产配置的实测。测试验证有效登录、文档 hash、两个租户隔离、共享连接上 B 读取自己配置成功但订阅自己配置被拒、独立连接订阅成功、订阅收到更新、失效后的无推送、TLS 证书、HTTP 404/401、双节点切换；还在同一条 TLS HTTP/2 连接上直接发送原生配置查询，确认两个租户各自的有效凭证 gRPC status 0、跨租户凭证 status 7、无凭证及撤销后的凭证 status 16，并确认撤销一个租户后另一个租户仍可读取自己的配置且不能读取被撤销租户的配置。这个直读绕过官方 SDK 的本地缓存；官方 SDK 的 `GetConfig` 在远端读取失败时可能返回 last-known-good，不能以其返回旧值证明凭证有效。排查撤销请看原生登录是否 401、直连 gRPC 是否拒绝、服务端授权日志及新 revision 推送是否停止；排查重连请核对 gRPC 端口和 h2 ALPN、证书 SAN/CA、两节点地址、后端一对一连接以及最新 manifest revision/文档 hash。
 
 ## 试验协议
 

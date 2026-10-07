@@ -352,6 +352,12 @@ waitPush:
 	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, environment.NamespaceID, sdkToken.Secret); status != grpcsrv.StatusOK {
 		t.Fatalf("authorized direct TLS gRPC read: status %d, want 0", status)
 	}
+	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, otherEnvironment.NamespaceID, otherToken.Secret); status != grpcsrv.StatusOK {
+		t.Fatalf("other tenant direct TLS gRPC read: status %d, want 0", status)
+	}
+	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, environment.NamespaceID, otherToken.Secret); status != grpcsrv.StatusPermissionDenied {
+		t.Fatalf("cross-tenant direct TLS gRPC read: status %d, want 7", status)
+	}
 	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, environment.NamespaceID, ""); status != grpcsrv.StatusUnauthenticated {
 		t.Fatalf("anonymous direct TLS gRPC read: status %d, want 16", status)
 	}
@@ -360,6 +366,12 @@ waitPush:
 	}
 	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, environment.NamespaceID, sdkToken.Secret); status != grpcsrv.StatusUnauthenticated {
 		t.Fatalf("revoked direct TLS gRPC read on existing connection: status %d, want 16", status)
+	}
+	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, otherEnvironment.NamespaceID, otherToken.Secret); status != grpcsrv.StatusOK {
+		t.Fatalf("other tenant read after revocation on existing connection: status %d, want 0", status)
+	}
+	if status := nativeRawTLSQueryStatus(t, grpcClient, grpcAddr, environment.NamespaceID, otherToken.Secret); status != grpcsrv.StatusPermissionDenied {
+		t.Fatalf("cross-tenant read after revocation on existing connection: status %d, want 7", status)
 	}
 	if count := rawConnections.Load(); count != 1 {
 		t.Fatalf("direct reads used %d TLS connections, want one persistent connection", count)
