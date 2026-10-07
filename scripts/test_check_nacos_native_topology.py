@@ -585,6 +585,12 @@ class NativeTopologyTest(unittest.TestCase):
         rotated_ca["caSHA256"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "different CA file contents"):
             verify_pair(self.config, allowed, rotated_ca)
+        with open(self.config["caFile"], "wb") as stream:
+            stream.write(b"rotated CA bundle")
+        with self.assertRaisesRegex(ValueError, "local CA file differs"):
+            verify_pair(self.config, allowed, denied)
+        with open(self.config["caFile"], "wb") as stream:
+            stream.write(b"test CA bundle")
         mapped = copy.deepcopy(allowed)
         mapped["sourceIPs"] = {target: "::ffff:10.42.0.7" for target in allowed_targets}
         mapped["resolvedIPs"] = {target: ["::ffff:10.42.1.10"] for target in allowed_targets}

@@ -365,6 +365,10 @@ def verify_pair(c, allowed, denied):
             raise ValueError(f"allowed and denied probes resolved different IPs for {target}")
     if allowed["caSHA256"] != denied["caSHA256"]:
         raise ValueError("allowed and denied probes used different CA file contents")
+    # Offline verification may have only the declaration and evidence files.
+    # If the declared CA file is present, reject evidence for a rotated bundle.
+    if os.path.isfile(c["caFile"]) and ca_sha256(c) != allowed["caSHA256"]:
+        raise ValueError("local CA file differs from live probe evidence; rerun both probes")
     times = [datetime.datetime.fromisoformat(record["utc"]) for record in (allowed, denied)]
     if any(value.tzinfo is None for value in times) or abs((times[0] - times[1]).total_seconds()) > 300:
         raise ValueError("live probes must be within five minutes")
