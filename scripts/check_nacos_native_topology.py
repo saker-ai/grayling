@@ -157,8 +157,13 @@ class PinnedHTTPSConnection(http.client.HTTPSConnection):
         sock = socket.create_connection((self.address, self.port), timeout=self.timeout)
         try:
             self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+            if self.sock.selected_alpn_protocol() != "http/1.1":
+                raise ValueError(f"HTTP TLS listener {self.address}:{self.port} did not negotiate http/1.1")
         except BaseException:
-            sock.close()
+            if self.sock is not None:
+                self.sock.close()
+            else:
+                sock.close()
             raise
 
 

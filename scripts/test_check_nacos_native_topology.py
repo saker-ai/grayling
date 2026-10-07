@@ -154,11 +154,23 @@ class NativeTopologyTest(unittest.TestCase):
 
     def test_pinned_https_connection_uses_ip_and_cert_hostname(self):
         context = MagicMock()
+        context.wrap_socket.return_value.selected_alpn_protocol.return_value = "http/1.1"
         with patch("check_nacos_native_topology.socket.create_connection") as connect:
             connection = PinnedHTTPSConnection("nacos.example", 8848, "10.42.1.11", context)
             connection.connect()
         connect.assert_called_once_with(("10.42.1.11", 8848), timeout=5)
         context.wrap_socket.assert_called_once_with(connect.return_value, server_hostname="nacos.example")
+
+    def test_pinned_https_connection_requires_http11_alpn(self):
+        for negotiated in (None, "h2"):
+            with self.subTest(negotiated=negotiated):
+                context = MagicMock()
+                context.wrap_socket.return_value.selected_alpn_protocol.return_value = negotiated
+                with patch("check_nacos_native_topology.socket.create_connection"):
+                    connection = PinnedHTTPSConnection("nacos.example", 8848, "10.42.1.11", context)
+                    with self.assertRaisesRegex(ValueError, "did not negotiate http/1.1"):
+                        connection.connect()
+                context.wrap_socket.return_value.close.assert_called_once()
 
     def test_denied_source_checks_both_entry_and_backend_ports(self):
         targets = []
