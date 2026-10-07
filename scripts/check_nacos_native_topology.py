@@ -275,6 +275,7 @@ def evidence(c, mode, sources=None, resolved=None, valid_login_count=0, ca_diges
         "result": "PASS",
         "backendDirectDenied": mode == "allowed",
         "anonymousGRPCDenied": mode == "allowed",
+        "anonymousGRPCSubscriptionDenied": mode == "allowed",
         "validLoginCount": valid_login_count,
         "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "probeHost": socket.gethostname(),
@@ -321,6 +322,8 @@ def verify_pair(c, allowed, denied):
             raise ValueError("allowed evidence lacks plaintext backend denial check; rerun the live probe")
         if mode == "allowed" and record.get("anonymousGRPCDenied") is not True:
             raise ValueError("allowed evidence lacks anonymous gRPC read denial check; rerun the live probe")
+        if mode == "allowed" and record.get("anonymousGRPCSubscriptionDenied") is not True:
+            raise ValueError("allowed evidence lacks anonymous gRPC subscription denial check; rerun the live probe")
         if mode == "allowed" and record.get("validLoginCount") != 2:
             raise ValueError("allowed evidence lacks two valid SDK login checks; rerun the live probe")
         if mode == "allowed":
@@ -500,8 +503,8 @@ def main():
                      "-ca-file", config["caFile"]], capture_output=True, text=True,
                     timeout=12, check=False,
                 )
-                if completed.returncode != 0 or "PASS: anonymous native gRPC configuration read rejected" not in completed.stdout:
-                    raise ValueError(f"anonymous gRPC read denial failed for {target}: probe exit {completed.returncode}")
+                if completed.returncode != 0 or completed.stdout.strip() != "PASS: anonymous native gRPC read and subscription rejected with status 16":
+                    raise ValueError(f"anonymous gRPC read/subscription denial failed for {target}: probe exit {completed.returncode}")
             check_probe_dns(config, resolved)
             # An approved SDK source must also be unable to bypass TLS and
             # reach the plaintext GoLab backend on the sidecar host.

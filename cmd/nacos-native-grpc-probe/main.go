@@ -1,5 +1,5 @@
 // Command nacos-native-grpc-probe checks that an anonymous native Nacos
-// configuration read is rejected by a specific TLS/gRPC entrance IP.
+// configuration read and subscription are rejected by a specific TLS/gRPC entrance IP.
 package main
 
 import (
@@ -38,7 +38,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "ALERT:", err)
 		os.Exit(1)
 	}
-	fmt.Println("PASS: anonymous native gRPC configuration read rejected with status 16")
+	fmt.Println("PASS: anonymous native gRPC read and subscription rejected with status 16")
 }
 
 func probe(ctx context.Context, address, serverName, caFile string) error {
@@ -56,23 +56,6 @@ func probe(ctx context.Context, address, serverName, caFile string) error {
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(ca) {
 		return errors.New("CA file contains no trusted certificates")
-	}
-	body, err := json.Marshal(map[string]string{
-		"tenant": "golab-unauthorized-probe", "group": "GOLAB_FLAGS", "dataId": "golab.manifest",
-	})
-	if err != nil {
-		return fmt.Errorf("encode query: %w", err)
-	}
-	payload := grpcsrv.Payload{
-		Metadata: grpcsrv.Metadata{Type: "ConfigQueryRequest"},
-		Body: grpcsrv.Any{
-			TypeURL: "type.googleapis.com/com.alibaba.nacos.api.config.request.ConfigQueryRequest",
-			Value:   body,
-		},
-	}
-	var frame bytes.Buffer
-	if err := grpcsrv.WriteFrame(&frame, grpcsrv.Frame{Payload: payload.Encode()}); err != nil {
-		return fmt.Errorf("encode gRPC frame: %w", err)
 	}
 	transport := &http2.Transport{
 		DialTLSContext: func(ctx context.Context, _, _ string, _ *tls.Config) (net.Conn, error) {
@@ -97,32 +80,70 @@ func probe(ctx context.Context, address, serverName, caFile string) error {
 		},
 	}
 	defer transport.CloseIdleConnections()
+	for _, check := range []struct {
+		name, requestType string
+		body              any
+	}{
+		{"query", "ConfigQueryRequest", map[string]string{
+			"tenant": "golab-unauthorized-probe", "group": "GOLAB_FLAGS", "dataId": "golab.manifest",
+		}},
+		{"subscription", "ConfigBatchListenRequest", map[string]any{
+			"listen": true,
+			"configListenContexts": []map[string]string{{
+				"tenant": "golab-unauthorized-probe", "group": "GOLAB_FLAGS",
+				"dataId": "golab.manifest", "md5": "",
+			}},
+		}},
+	} {
+		if err := probeRequest(ctx, transport, serverName, port, check.name, check.requestType, check.body); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func probeRequest(ctx context.Context, transport *http2.Transport, serverName, port, name, requestType string, body any) error {
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", name, err)
+	}
+	payload := grpcsrv.Payload{
+		Metadata: grpcsrv.Metadata{Type: requestType},
+		Body: grpcsrv.Any{
+			TypeURL: "type.googleapis.com/com.alibaba.nacos.api.config.request." + requestType,
+			Value:   encoded,
+		},
+	}
+	var frame bytes.Buffer
+	if err := grpcsrv.WriteFrame(&frame, grpcsrv.Frame{Payload: payload.Encode()}); err != nil {
+		return fmt.Errorf("encode %s gRPC frame: %w", name, err)
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://"+net.JoinHostPort(serverName, port)+"/Request/request", &frame)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("create %s request: %w", name, err)
 	}
 	request.Header.Set("Content-Type", "application/grpc")
 	response, err := transport.RoundTrip(request)
 	if err != nil {
-		return fmt.Errorf("anonymous gRPC query: %w", err)
+		return fmt.Errorf("anonymous gRPC %s: %w", name, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("anonymous gRPC query returned HTTP %d, expected 200", response.StatusCode)
+		return fmt.Errorf("anonymous gRPC %s returned HTTP %d, expected 200", name, response.StatusCode)
 	}
 	if !strings.HasPrefix(response.Header.Get("Content-Type"), "application/grpc") {
-		return errors.New("anonymous query did not receive a gRPC response")
+		return fmt.Errorf("anonymous %s did not receive a gRPC response", name)
 	}
 	if _, err := io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20)); err != nil {
-		return fmt.Errorf("read gRPC response: %w", err)
+		return fmt.Errorf("read %s gRPC response: %w", name, err)
 	}
 	status := response.Header.Get("grpc-status")
 	if status == "" {
 		status = response.Trailer.Get("grpc-status")
 	}
 	if status != strconv.Itoa(grpcsrv.StatusUnauthenticated) {
-		return fmt.Errorf("anonymous gRPC query returned status %q, expected 16", status)
+		return fmt.Errorf("anonymous gRPC %s returned status %q, expected 16", name, status)
 	}
 	return nil
 }

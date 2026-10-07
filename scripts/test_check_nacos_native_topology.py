@@ -281,7 +281,7 @@ class NativeTopologyTest(unittest.TestCase):
                        side_effect=lambda _c, _m, output: output.update({self.config["tlsGRPC"]: ["10.42.1.10"]}) or {}), \
                  patch("check_nacos_native_topology.probe"), \
                  patch("check_nacos_native_topology.subprocess.run",
-                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous native gRPC configuration read rejected")), \
+                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous native gRPC read and subscription rejected with status 16")), \
                  patch("check_nacos_native_topology.check_probe_dns"), \
                  patch("check_nacos_native_topology.probe_closed_targets",
                        side_effect=ValueError("allowed source reached plaintext backend")) as closed:
@@ -325,7 +325,7 @@ class NativeTopologyTest(unittest.TestCase):
                  patch("check_nacos_native_topology.probe",
                        return_value=self.certificates(self.config, "10.42.1.10")) as live_probe, \
                  patch("check_nacos_native_topology.subprocess.run",
-                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous native gRPC configuration read rejected")) as grpc_probe, \
+                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous native gRPC read and subscription rejected with status 16")) as grpc_probe, \
                  patch("check_nacos_native_topology.check_probe_dns"), \
                  patch("check_nacos_native_topology.probe_closed_targets"):
                 self.assertEqual(main(), 0)
@@ -338,6 +338,7 @@ class NativeTopologyTest(unittest.TestCase):
             self.assertNotIn("other-secret", raw)
             self.assertEqual(json.loads(raw)["validLoginCount"], 2)
             self.assertTrue(json.loads(raw)["anonymousGRPCDenied"])
+            self.assertTrue(json.loads(raw)["anonymousGRPCSubscriptionDenied"])
             self.assertEqual(len(json.loads(raw)["caSHA256"]), 64)
             self.assertEqual(json.loads(raw)["tlsCertSHA256"],
                              self.certificates(self.config, "10.42.1.10"))
@@ -368,7 +369,7 @@ class NativeTopologyTest(unittest.TestCase):
                        return_value=MagicMock(returncode=1, stdout="")), \
                  contextlib.redirect_stderr(io.StringIO()) as errors:
                 self.assertEqual(main(), 1)
-            self.assertIn("anonymous gRPC read denial failed", errors.getvalue())
+            self.assertIn("anonymous gRPC read/subscription denial failed", errors.getvalue())
             self.assertFalse(os.path.exists(output_path))
 
     def test_probe_rejects_ca_change_during_checks(self):
@@ -393,7 +394,7 @@ class NativeTopologyTest(unittest.TestCase):
                        side_effect=lambda _c, _m, output: output.update({self.config["tlsGRPC"]: ["10.42.1.10"]}) or {}), \
                  patch("check_nacos_native_topology.probe", side_effect=change_ca), \
                  patch("check_nacos_native_topology.subprocess.run",
-                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous native gRPC configuration read rejected")), \
+                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous native gRPC read and subscription rejected with status 16")), \
                  patch("check_nacos_native_topology.check_probe_dns"), \
                  patch("check_nacos_native_topology.probe_closed_targets"), \
                  contextlib.redirect_stderr(io.StringIO()) as errors:
@@ -563,6 +564,10 @@ class NativeTopologyTest(unittest.TestCase):
         old_allowed = copy.deepcopy(allowed)
         del old_allowed["anonymousGRPCDenied"]
         with self.assertRaisesRegex(ValueError, "lacks anonymous gRPC read denial check"):
+            verify_pair(self.config, old_allowed, denied)
+        old_allowed = copy.deepcopy(allowed)
+        del old_allowed["anonymousGRPCSubscriptionDenied"]
+        with self.assertRaisesRegex(ValueError, "lacks anonymous gRPC subscription denial check"):
             verify_pair(self.config, old_allowed, denied)
         old_allowed = copy.deepcopy(allowed)
         old_allowed["validLoginCount"] = 0

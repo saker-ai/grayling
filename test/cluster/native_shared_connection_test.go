@@ -88,6 +88,9 @@ func checkNativeSharedBackendConnection(t *testing.T, backend, namespaceA, names
 		}
 		return status
 	}
+	if status := listen(client, namespaceA, ""); status != grpcsrv.StatusUnauthenticated {
+		t.Fatalf("anonymous direct TLS gRPC subscription: status %d, want 16", status)
+	}
 	if status := listen(client, namespaceA, tokenA); status != grpcsrv.StatusOK {
 		t.Fatalf("first tenant subscription on shared transport: gRPC status %d", status)
 	}

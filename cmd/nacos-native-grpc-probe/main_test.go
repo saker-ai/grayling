@@ -14,17 +14,16 @@ import (
 	grpcsrv "github.com/godeps/gonacos/pkg/protocol/grpc"
 )
 
-func TestProbeRequiresAnonymousReadDenial(t *testing.T) {
+func TestProbeRequiresAnonymousReadAndSubscriptionDenial(t *testing.T) {
 	for _, test := range []struct {
-		name        string
-		status      string
-		contentType string
-		wantOK      bool
+		name, queryStatus, listenStatus, contentType string
+		wantOK                                       bool
 	}{
-		{name: "unauthenticated", status: "16", contentType: "application/grpc", wantOK: true},
-		{name: "configuration exposed", status: "0", contentType: "application/grpc"},
+		{name: "unauthenticated", queryStatus: "16", listenStatus: "16", contentType: "application/grpc", wantOK: true},
+		{name: "configuration exposed", queryStatus: "0", listenStatus: "16", contentType: "application/grpc"},
+		{name: "subscription exposed", queryStatus: "16", listenStatus: "0", contentType: "application/grpc"},
 		{name: "missing grpc status"},
-		{name: "false response", status: "16", contentType: "text/plain"},
+		{name: "false response", queryStatus: "16", listenStatus: "16", contentType: "text/plain"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -37,12 +36,20 @@ func TestProbeRequiresAnonymousReadDenial(t *testing.T) {
 					t.Errorf("read frame: %v", err)
 				}
 				payload, err := grpcsrv.DecodePayload(frame.Payload)
-				if err != nil || payload.Metadata.Type != "ConfigQueryRequest" || payload.Metadata.Headers["accessToken"] != "" {
-					t.Errorf("unexpected anonymous query: payload=%+v err=%v", payload.Metadata, err)
+				if err != nil || payload.Metadata.Headers["accessToken"] != "" {
+					t.Errorf("unexpected anonymous request: payload=%+v err=%v", payload.Metadata, err)
+				}
+				status := test.queryStatus
+				switch payload.Metadata.Type {
+				case "ConfigQueryRequest":
+				case "ConfigBatchListenRequest":
+					status = test.listenStatus
+				default:
+					t.Errorf("unexpected request type: %q", payload.Metadata.Type)
 				}
 				w.Header().Set("Content-Type", test.contentType)
-				if test.status != "" {
-					w.Header().Set("grpc-status", test.status)
+				if status != "" {
+					w.Header().Set("grpc-status", status)
 				}
 			}))
 			server.EnableHTTP2 = true
