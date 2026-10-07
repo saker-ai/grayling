@@ -1,6 +1,8 @@
 import copy
+import contextlib
 import datetime
 import errno
+import io
 import json
 import os
 import socket
@@ -8,7 +10,8 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from check_nacos_native_topology import (PinnedHTTPSConnection, check_probe_dns, evidence, probe, probe_denied,
+from check_nacos_native_topology import (PinnedHTTPSConnection, backend_targets, check_probe_dns, evidence, main, probe,
+                                         probe_closed_targets, probe_denied,
                                          source_ips, validate, verify_cluster, verify_pair, write_evidence)
 
 
@@ -127,6 +130,45 @@ class NativeTopologyTest(unittest.TestCase):
             "nacos.example:8848", "nacos.example:9848",
             "10.42.1.10:18848", "10.42.1.10:19848",
         ])
+
+    def test_allowed_source_must_not_reach_plaintext_backend(self):
+        targets = backend_targets(self.config)
+        self.assertEqual(targets, [("10.42.1.10", 18848), ("10.42.1.10", 19848)])
+        addresses = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.42.1.10", 0))]
+
+        class Connected:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+        def connect(target, timeout):
+            if target[1] == 19848:
+                return Connected()
+            raise ConnectionRefusedError()
+
+        with patch("check_nacos_native_topology.socket.getaddrinfo", return_value=addresses):
+            with patch("check_nacos_native_topology.socket.create_connection", side_effect=connect):
+                with self.assertRaisesRegex(ValueError, "10.42.1.10:19848"):
+                    probe_closed_targets(targets)
+
+    def test_allowed_probe_fails_when_plaintext_backend_is_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "deployment.json")
+            with open(path, "w", encoding="utf-8") as stream:
+                json.dump(self.config, stream)
+            with patch("sys.argv", ["check_nacos_native_topology.py", path, "--probe"]), \
+                 patch("check_nacos_native_topology.source_ips", return_value={}), \
+                 patch("check_nacos_native_topology.probe"), \
+                 patch("check_nacos_native_topology.check_probe_dns"), \
+                 patch("check_nacos_native_topology.probe_closed_targets",
+                       side_effect=ValueError("allowed source reached plaintext backend")) as closed:
+                with contextlib.redirect_stderr(io.StringIO()) as errors:
+                    self.assertEqual(main(), 1)
+            closed.assert_called_once_with(backend_targets(self.config),
+                                           label="allowed source reached plaintext backend")
+            self.assertIn("ALERT: live probe failed", errors.getvalue())
 
     def test_ipv6_backend_evidence_uses_probe_target_keys(self):
         config = copy.deepcopy(self.config)
@@ -277,6 +319,10 @@ class NativeTopologyTest(unittest.TestCase):
         allowed["probeHost"] = "sdk-host"
         denied["probeHost"] = "blocked-host"
         verify_pair(self.config, allowed, denied)
+        old_allowed = copy.deepcopy(allowed)
+        del old_allowed["backendDirectDenied"]
+        with self.assertRaisesRegex(ValueError, "lacks plaintext backend denial check"):
+            verify_pair(self.config, old_allowed, denied)
         mapped = copy.deepcopy(allowed)
         mapped["sourceIPs"] = {target: "::ffff:10.42.0.7" for target in allowed_targets}
         mapped["resolvedIPs"] = {target: ["::ffff:10.42.1.10"] for target in allowed_targets}

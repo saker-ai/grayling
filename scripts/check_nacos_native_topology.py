@@ -194,13 +194,8 @@ def probe(c, resolved):
                 raise ValueError(f"{address}:{port}{path}: HTTP {status}, expected {expected}")
 
 
-def probe_denied(c, resolved=None):
-    """Run from a source outside allowedSources while an allowed probe passes."""
-    host = c.get("backendExternalHost")
-    if not host or not routable_unicast(host):
-        raise ValueError("backendExternalHost must be a routable unicast IP visible from the denied source")
-    targets = [split_address(c[field]) for field in ("tlsHTTP", "tlsGRPC")]
-    targets += [(host, split_address(c[field])[1]) for field in ("backendHTTP", "backendGRPC")]
+def probe_closed_targets(targets, resolved=None, label="unauthorized source"):
+    """Require every address of each target to reject TCP connections."""
     for target in targets:
         # A misspelled/unresolvable hostname is not evidence of network policy.
         addresses = socket.getaddrinfo(target[0], target[1], type=socket.SOCK_STREAM)
@@ -215,17 +210,31 @@ def probe_denied(c, resolved=None):
             endpoint = (address[4][0], target[1])
             try:
                 with socket.create_connection(endpoint, timeout=3):
-                    raise ValueError(f"unauthorized source connected to {endpoint[0]}:{endpoint[1]}")
+                    raise ValueError(f"{label} connected to {endpoint[0]}:{endpoint[1]}")
             except OSError as exc:
                 if isinstance(exc, (socket.timeout, ConnectionRefusedError)) or exc.errno == errno.ECONNREFUSED:
                     continue
                 raise ValueError(f"inconclusive denied-source connection to {endpoint[0]}:{endpoint[1]}: {exc}") from exc
 
 
+def backend_targets(c):
+    host = c.get("backendExternalHost")
+    if not host or not routable_unicast(host):
+        raise ValueError("backendExternalHost must be a routable unicast IP visible from both probe sources")
+    return [(host, split_address(c[field])[1]) for field in ("backendHTTP", "backendGRPC")]
+
+
+def probe_denied(c, resolved=None):
+    """Run from a source outside allowedSources while an allowed probe passes."""
+    targets = [split_address(c[field]) for field in ("tlsHTTP", "tlsGRPC")]
+    probe_closed_targets(targets + backend_targets(c), resolved)
+
+
 def evidence(c, mode, sources=None, resolved=None):
     return {
         "mode": mode,
         "result": "PASS",
+        "backendDirectDenied": mode == "allowed",
         "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "probeHost": socket.gethostname(),
         "sourceIPs": sources or {},
@@ -261,6 +270,8 @@ def verify_pair(c, allowed, denied):
             raise ValueError(f"missing successful {mode} live probe")
         if record.get("configSHA256") != expected:
             raise ValueError(f"{mode} evidence uses a different deployment declaration")
+        if mode == "allowed" and record.get("backendDirectDenied") is not True:
+            raise ValueError("allowed evidence lacks plaintext backend denial check; rerun the live probe")
         if record.get("targets") != evidence(c, mode)["targets"]:
             raise ValueError(f"{mode} evidence does not cover every configured target")
         if not isinstance(record.get("sourceIPs"), dict) or not record["sourceIPs"]:
@@ -387,6 +398,9 @@ def main():
             sources = source_ips(config, "allowed", resolved)
             probe(config, resolved)
             check_probe_dns(config, resolved)
+            # An approved SDK source must also be unable to bypass TLS and
+            # reach the plaintext GoLab backend on the sidecar host.
+            probe_closed_targets(backend_targets(config), label="allowed source reached plaintext backend")
         except (OSError, ValueError) as exc:
             print("ALERT: live probe failed:", exc, file=sys.stderr)
             return 1
