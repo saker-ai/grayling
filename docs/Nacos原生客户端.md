@@ -51,7 +51,7 @@ gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f
 
 ### 运维部署模板与预检
 
-允许源登录探针要求 HTTP TLS 入口协商 `http/1.1` ALPN，再核对 HTTP 200 并解析 Nacos 登录 JSON：`accessToken` 必须等于本次提交的 SDK token，`tokenTtl` 必须为正整数。未协商 `http/1.1`、通用 200 页面、空令牌或错误 TTL 均报 `ALERT`，不会写入 PASS 证据。响应体上限为 16 KiB；令牌值只在进程内比较，不写入错误输出或证据文件。允许源还须提交两个不同 namespace ID；原生 gRPC 探针对每个入口解析 IP 用两个独立 TLS/HTTP2 连接，分别检查两租户在自己 namespace 的 manifest 读取和订阅 status 0，以及对方 namespace 的读取和订阅 status 7，并检查匿名读取、订阅 status 16。namespace ID 必须对应 token 所属环境，两个环境都应已有 manifest；探针只读和注册监听，不发布配置。`tenantGRPCIsolation` 标记这些状态检查通过。此门禁仍不证明后续推送、凭证撤销或双节点故障切换，现场须完成这些生命周期验收。
+允许源登录探针要求 HTTP TLS 入口协商 `http/1.1` ALPN，再核对 HTTP 200 并解析 Nacos 登录 JSON：`accessToken` 必须等于本次提交的 SDK token，`tokenTtl` 必须为正整数。未协商 `http/1.1`、通用 200 页面、空令牌或错误 TTL 均报 `ALERT`，不会写入 PASS 证据。响应体上限为 16 KiB；令牌值只在进程内比较，不写入错误输出或证据文件。允许源还须提交两个不同 namespace ID；原生 gRPC 探针对每个入口解析 IP 用两个独立 TLS/HTTP2 连接，分别检查两租户在自己 namespace 的 manifest 读取和订阅 status 0，以及对方 namespace 的读取和订阅 status 7，并检查匿名读取、订阅 status 16。对于自身读取与订阅，探针还验证实际 gRPC 响应帧、响应类型、`resultCode: 200` 和 `success: true`；自身读取必须有可解析的 manifest，且包含正 revision 与工作空间、环境 ID。仅返回 HTTP 200/gRPC status 0 的空响应不能通过。namespace ID 必须对应 token 所属环境，两个环境都应已有 manifest；探针只读和注册监听，不发布配置。`tenantGRPCIsolation` 标记这些检查通过。此门禁仍不证明后续推送、凭证撤销或双节点故障切换，现场须完成这些生命周期验收。
 
 允许源证据还记录每个入口解析 IP 上实际验证过的服务端叶证书 SHA-256（`tlsCertSHA256`）；HTTP 登录探针的多次 TLS 连接若在一次运行中看到证书变化，会报 `ALERT`。`--verify-pair` 拒绝缺少这些指纹的旧证据，因此需要重新采集允许源记录。指纹是探针时的快照，须与现场代理证书部署记录核对；它不能单独证明后续连接继续使用同一证书，也不能代替代理连接日志与网络策略验收。
 

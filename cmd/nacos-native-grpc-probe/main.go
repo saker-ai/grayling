@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/godeps/golab/pkg/model"
 	grpcsrv "github.com/godeps/gonacos/pkg/protocol/grpc"
 	"golang.org/x/net/http2"
 )
@@ -213,8 +214,12 @@ func probeRequest(ctx context.Context, transport *http2.Transport, serverName, p
 	if !strings.HasPrefix(response.Header.Get("Content-Type"), "application/grpc") {
 		return fmt.Errorf("%s did not receive a gRPC response", name)
 	}
-	if _, err := io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20)); err != nil {
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 1<<20+1))
+	if err != nil {
 		return fmt.Errorf("read %s gRPC response: %w", name, err)
+	}
+	if len(responseBody) > 1<<20 {
+		return fmt.Errorf("%s gRPC response exceeds 1 MiB", name)
 	}
 	status := response.Header.Get("grpc-status")
 	if status == "" {
@@ -222,6 +227,46 @@ func probeRequest(ctx context.Context, transport *http2.Transport, serverName, p
 	}
 	if status != strconv.Itoa(expected) {
 		return fmt.Errorf("gRPC %s returned status %q, expected %d", name, status, expected)
+	}
+	if expected == grpcsrv.StatusOK {
+		if err := checkSuccessfulResponse(name, responseBody); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkSuccessfulResponse(name string, body []byte) error {
+	reader := bytes.NewReader(body)
+	frame, err := grpcsrv.ReadFrameWithLimit(reader, 1<<20)
+	if err != nil || frame.Compressed || reader.Len() != 0 {
+		return fmt.Errorf("gRPC %s returned an invalid response frame", name)
+	}
+	payload, err := grpcsrv.DecodePayload(frame.Payload)
+	if err != nil {
+		return fmt.Errorf("gRPC %s returned an invalid response payload", name)
+	}
+	wantType := "ConfigQueryResponse"
+	if name == "subscription" {
+		wantType = "ConfigChangeBatchListenResponse"
+	}
+	if payload.Metadata.Type != wantType {
+		return fmt.Errorf("gRPC %s returned unexpected response type %q", name, payload.Metadata.Type)
+	}
+	var result struct {
+		ResultCode int    `json:"resultCode"`
+		Success    bool   `json:"success"`
+		Content    string `json:"content"`
+	}
+	if err := json.Unmarshal(payload.Body.Value, &result); err != nil || result.ResultCode != 200 || !result.Success {
+		return fmt.Errorf("gRPC %s returned an unsuccessful response payload", name)
+	}
+	if name == "query" {
+		var manifest model.Manifest
+		if err := json.Unmarshal([]byte(result.Content), &manifest); err != nil || manifest.Revision <= 0 ||
+			manifest.Workspace == "" || manifest.Environment == "" {
+			return errors.New("gRPC query returned an invalid manifest")
+		}
 	}
 	return nil
 }

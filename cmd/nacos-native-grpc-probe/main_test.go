@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	json "encoding/json/v2"
 	"encoding/pem"
@@ -88,11 +89,14 @@ func TestProbeChecksTwoTenantIsolation(t *testing.T) {
 		name      string
 		crossCode int
 		ownCode   int
+		ownBody   string
 		wantOK    bool
 	}{
 		{name: "isolated", crossCode: grpcsrv.StatusPermissionDenied, ownCode: grpcsrv.StatusOK, wantOK: true},
 		{name: "cross tenant exposed", crossCode: grpcsrv.StatusOK, ownCode: grpcsrv.StatusOK},
 		{name: "own tenant denied", crossCode: grpcsrv.StatusPermissionDenied, ownCode: grpcsrv.StatusPermissionDenied},
+		{name: "empty successful response", crossCode: grpcsrv.StatusPermissionDenied, ownCode: grpcsrv.StatusOK, ownBody: "empty"},
+		{name: "missing manifest", crossCode: grpcsrv.StatusPermissionDenied, ownCode: grpcsrv.StatusOK, ownBody: "missing"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -134,6 +138,25 @@ func TestProbeChecksTwoTenantIsolation(t *testing.T) {
 				}
 				w.Header().Set("Content-Type", "application/grpc")
 				w.Header().Set("grpc-status", strconv.Itoa(status))
+				if status == grpcsrv.StatusOK && test.ownBody != "empty" {
+					responseType := "ConfigQueryResponse"
+					value := []byte(`{"resultCode":200,"success":true,"content":"{\"workspace\":\"w\",\"environment\":\"e\",\"revision\":1}"}`)
+					if payload.Metadata.Type == "ConfigBatchListenRequest" {
+						responseType = "ConfigChangeBatchListenResponse"
+						value = []byte(`{"resultCode":200,"success":true,"changedConfigs":[]}`)
+					} else if test.ownBody == "missing" {
+						value = []byte(`{"resultCode":500,"success":false,"content":""}`)
+					}
+					response := grpcsrv.Payload{
+						Metadata: grpcsrv.Metadata{Type: responseType},
+						Body:     grpcsrv.Any{TypeURL: "type.googleapis.com/" + responseType, Value: value},
+					}
+					var frame bytes.Buffer
+					if err := grpcsrv.WriteFrame(&frame, grpcsrv.Frame{Payload: response.Encode()}); err != nil {
+						t.Errorf("write frame: %v", err)
+					}
+					_, _ = w.Write(frame.Bytes())
+				}
 			}))
 			server.EnableHTTP2 = true
 			server.StartTLS()
