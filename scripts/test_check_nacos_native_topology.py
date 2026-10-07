@@ -34,6 +34,7 @@ class NativeTopologyTest(unittest.TestCase):
             ("allowedSources", ["0.0.0.0/0"]), ("caFile", ""),
             ("backendExternalHost", "0.0.0.0"),
             ("backendExternalHost", "127.0.0.1"),
+            ("backendExternalHost", "::ffff:127.0.0.1"),
             ("backendExternalHost", "not-an-ip"),
             ("tlsHTTP", "127.0.0.1:8848"),
             ("tlsHTTP", "localhost:8848"),
@@ -41,6 +42,7 @@ class NativeTopologyTest(unittest.TestCase):
             ("tlsHTTP", "*:8848"),
             ("tlsGRPC", "0.0.0.0:9848"),
             ("tlsGRPC", "[::1]:9848"),
+            ("tlsGRPC", "[::ffff:127.0.0.1]:9848"),
             ("tlsGRPC", "[fe80::1]:9848"),
             ("tlsGRPC", "nacos-grpc.example:8848"),
         ):
@@ -158,8 +160,33 @@ class NativeTopologyTest(unittest.TestCase):
 
     def test_denied_source_fails_on_loopback_resolution(self):
         with patch("check_nacos_native_topology.socket.getaddrinfo", return_value=[(None, None, None, None, ("127.0.0.1", 8848))]):
-            with self.assertRaisesRegex(ValueError, "resolves to loopback"):
+            with self.assertRaisesRegex(ValueError, "non-routable unicast"):
                 probe_denied(self.config)
+
+    def test_live_probes_reject_non_routable_dns_answers(self):
+        for address in ("0.0.0.0", "224.0.0.1", "169.254.1.1", "::ffff:127.0.0.1"):
+            with self.subTest(address=address):
+                family = socket.AF_INET6 if ":" in address else socket.AF_INET
+                answers = [(family, socket.SOCK_DGRAM, 0, "", (address, 8848))]
+                with patch("check_nacos_native_topology.socket.getaddrinfo", return_value=answers):
+                    with self.assertRaisesRegex(ValueError, "non-routable unicast"):
+                        source_ips(self.config, "allowed")
+                with patch("check_nacos_native_topology.socket.getaddrinfo", return_value=answers):
+                    with self.assertRaisesRegex(ValueError, "non-routable unicast"):
+                        probe_denied(self.config)
+
+    def test_evidence_rejects_non_routable_dns_answer(self):
+        targets = evidence(self.config, "allowed")["targets"]
+        resolved = {target: ["10.42.1.10"] for target in targets}
+        allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in targets}, resolved)
+        denied_targets = evidence(self.config, "denied")["targets"]
+        denied = evidence(self.config, "denied", {target: "10.43.0.7" for target in denied_targets},
+                          {target: ["10.42.1.10"] for target in denied_targets})
+        allowed["probeHost"] = "sdk-host"
+        denied["probeHost"] = "blocked-host"
+        allowed["resolvedIPs"][targets[0]] = ["0.0.0.0"]
+        with self.assertRaisesRegex(ValueError, "non-routable unicast"):
+            verify_pair(self.config, allowed, denied)
 
     def test_denied_source_requires_external_backend_ip(self):
         for host in (None, "127.0.0.1", "invalid-host"):

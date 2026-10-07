@@ -37,8 +37,7 @@ def validate(c):
         pass  # The field-specific checks above report malformed addresses.
     try:
         external_ip = ipaddress.ip_address(c["backendExternalHost"])
-        if (external_ip.is_loopback or external_ip.is_unspecified or external_ip.is_multicast
-                or external_ip.is_link_local):
+        if not routable_unicast(str(external_ip)):
             raise ValueError("must be a routable unicast IP reachable from the denied source")
     except (KeyError, ValueError) as exc:
         errors.append(f"backendExternalHost: {exc}")
@@ -56,8 +55,7 @@ def validate(c):
             except ValueError:
                 pass  # A DNS name is checked again by the live probe.
             else:
-                if (address.is_loopback or address.is_unspecified or address.is_multicast
-                        or address.is_link_local):
+                if not routable_unicast(str(address)):
                     raise ValueError("TLS endpoint must be a routable unicast address")
         except (KeyError, ValueError) as exc:
             errors.append(f"{field}: {exc}")
@@ -92,6 +90,14 @@ def split_address(value):
     return host, int(port)
 
 
+def routable_unicast(value):
+    address = ipaddress.ip_address(value)
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    return not (address.is_loopback or address.is_unspecified
+                or address.is_multicast or address.is_link_local)
+
+
 def source_ips(c, mode, resolved=None):
     """Record the local routed address; NAT may change it after this host."""
     targets = [split_address(c[field]) for field in ("tlsHTTP", "tlsGRPC")]
@@ -102,8 +108,8 @@ def source_ips(c, mode, resolved=None):
     result = {}
     for host, port in targets:
         addresses = socket.getaddrinfo(host, port, type=socket.SOCK_DGRAM)
-        if not addresses or any(ipaddress.ip_address(addr[4][0]).is_loopback for addr in addresses):
-            raise ValueError(f"target {host} resolves to loopback or no address")
+        if not addresses or any(not routable_unicast(addr[4][0]) for addr in addresses):
+            raise ValueError(f"target {host} resolves to a non-routable unicast address or no address")
         if resolved is not None:
             resolved[net_address(host, port)] = sorted({addr[4][0] for addr in addresses})
         routed = set()
@@ -132,7 +138,7 @@ def check_probe_dns(c, resolved):
         target = net_address(host, port)
         addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
         actual = sorted({address[4][0] for address in addresses})
-        if not actual or actual != resolved[target]:
+        if not actual or any(not routable_unicast(address) for address in actual) or actual != resolved[target]:
             raise ValueError(f"DNS addresses changed during allowed probe for {target}")
 
 
@@ -171,15 +177,15 @@ def probe(c):
 def probe_denied(c, resolved=None):
     """Run from a source outside allowedSources while an allowed probe passes."""
     host = c.get("backendExternalHost")
-    if not host or ipaddress.ip_address(host).is_loopback:
-        raise ValueError("backendExternalHost must be a non-loopback IP visible from the denied source")
+    if not host or not routable_unicast(host):
+        raise ValueError("backendExternalHost must be a routable unicast IP visible from the denied source")
     targets = [split_address(c[field]) for field in ("tlsHTTP", "tlsGRPC")]
     targets += [(host, split_address(c[field])[1]) for field in ("backendHTTP", "backendGRPC")]
     for target in targets:
         # A misspelled/unresolvable hostname is not evidence of network policy.
         addresses = socket.getaddrinfo(target[0], target[1], type=socket.SOCK_STREAM)
-        if not addresses or any(ipaddress.ip_address(address[4][0]).is_loopback for address in addresses):
-            raise ValueError(f"target {target[0]} resolves to loopback or no address")
+        if not addresses or any(not routable_unicast(address[4][0]) for address in addresses):
+            raise ValueError(f"target {target[0]} resolves to a non-routable unicast address or no address")
         if resolved is not None:
             name = net_address(*target)
             actual = sorted({address[4][0] for address in addresses})
@@ -231,8 +237,8 @@ def verify_pair(c, allowed, denied):
         for target, addresses in resolved.items():
             if not isinstance(addresses, list) or not addresses:
                 raise ValueError(f"{mode} evidence has no resolved IPs for {target}")
-            if any(ipaddress.ip_address(address).is_loopback for address in addresses):
-                raise ValueError(f"{mode} evidence resolves {target} to loopback")
+            if any(not routable_unicast(address) for address in addresses):
+                raise ValueError(f"{mode} evidence resolves {target} to a non-routable unicast address")
     for target in allowed["targets"]:
         if allowed["resolvedIPs"][target] != denied["resolvedIPs"][target]:
             raise ValueError(f"allowed and denied probes resolved different IPs for {target}")
