@@ -282,6 +282,13 @@ def verify_pair(c, allowed, denied):
                 raise ValueError(f"{mode} evidence has no resolved IPs for {target}")
             if any(not routable_unicast(address) for address in addresses):
                 raise ValueError(f"{mode} evidence resolves {target} to a non-routable unicast address")
+            host, _ = split_address(target)
+            try:
+                literal = canonical_ip(host)
+            except ValueError:
+                continue
+            if {canonical_ip(address) for address in addresses} != {literal}:
+                raise ValueError(f"{mode} evidence resolves literal target {target} to another IP")
     for target in allowed["targets"]:
         if {canonical_ip(ip) for ip in allowed["resolvedIPs"][target]} != {
                 canonical_ip(ip) for ip in denied["resolvedIPs"][target]}:

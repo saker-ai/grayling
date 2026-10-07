@@ -342,8 +342,12 @@ class NativeTopologyTest(unittest.TestCase):
         verify_pair(self.config, mapped, denied)
         changed_backend = copy.deepcopy(allowed)
         changed_backend["resolvedIPs"]["10.42.1.10:18848"] = ["10.42.1.11"]
-        with self.assertRaisesRegex(ValueError, "resolved different IPs"):
+        with self.assertRaisesRegex(ValueError, "literal target.*another IP"):
             verify_pair(self.config, changed_backend, denied)
+        both_changed_backend = copy.deepcopy(denied)
+        both_changed_backend["resolvedIPs"]["10.42.1.10:18848"] = ["10.42.1.11"]
+        with self.assertRaisesRegex(ValueError, "literal target.*another IP"):
+            verify_pair(self.config, changed_backend, both_changed_backend)
         for field, value, message in (
             ("probeHost", "sdk-host", "distinct hosts"),
             ("sourceIPs", {}, "lacks routed source"),
