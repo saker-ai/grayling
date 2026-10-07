@@ -109,7 +109,7 @@ function makeSandbox({ storedLang, navLang } = {}) {
   sandbox.window = sandbox;
   vm.createContext(sandbox);
   vm.runInNewContext(code + BRIDGE, sandbox);
-  return { x: sandbox.__x, store, warns, chrome, fetchCalls };
+  return { x: sandbox.__x, store, warns, chrome, fetchCalls, sandbox };
 }
 
 const tick = () => new Promise(r => setTimeout(r, 5));
@@ -171,12 +171,16 @@ const aiResources = {
   revocations: { 'prompt\u0000old-one': 'digest drift' },
 };
 const allowlist = [{ provider: 'openai', model: 'gpt-4o', enabled: true }];
+const quotas = { maxFlags: 500, maxFlagBytes: 65536, maxSegments: 200,
+  maxExperiments: 100, maxEventBytes: 16384, maxEventsPerBatch: 500,
+  eventRetention: 2592000000000000 };
 
 function mockResponse(url) {
   const json = v => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(v)) });
   if (url.includes('/debug/eval')) return json({ result: { value: true, variationType: 'treatment', reason: 'targeting', bucket: 42 }, manifestRevision: 7, note: '' });
   if (url.includes('/ai/resources')) return json(aiResources);
   if (url.includes('/model-allowlist')) return json(allowlist);
+  if (url.endsWith('/quotas')) return json(quotas);
   if (url.endsWith('/tokens')) return json(tokens);
   if (url.includes('/audit')) return json(audit);
   if (url.includes('/experiments/exp-1/report')) return json(report);
@@ -257,6 +261,10 @@ const SWEEPS = [
     en: ['<h2>Tokens</h2>', 'Create token', '2 token(s)', 'Revoke', 'Status'],
     zh: ['<h2>令牌</h2>', '创建令牌', '2 个令牌', '撤销', '状态'],
     ids: ['t-create', 'tok-secret'] },
+  { name: 'quotas', view: 'quotas',
+    en: ['Workspace quotas', 'Maximum flags', 'Event retention (nanoseconds)', 'Save quotas', '500'],
+    zh: ['工作空间配额', '开关数量上限', '事件保留时间（纳秒）', '保存配额', '500'],
+    ids: ['quota-form', 'quota-save', 'quota-refresh', 'quota-feedback', 'quota-maxFlags', 'quota-eventRetention'] },
   { name: 'audit', view: 'audit',
     en: ['<h2>Audit log</h2>', 'limit', 'Actor', 'Object'],
     zh: ['<h2>审计日志</h2>', '条数上限', '操作者', '对象'],
@@ -337,6 +345,44 @@ for (const s of SWEEPS) {
   assert.deepStrictEqual(idsOf(htmlZh[s.name]), idList,
     'layout node IDs must not change across languages: ' + s.name);
   for (const id of s.ids) assert(idList.includes(id), s.name + ' missing layout id: ' + id);
+}
+
+// Quota editor uses the GET values as its complete PUT body; validation and
+// permission/conflict/rate-limit feedback remain in the view.
+{
+  const cs = makeSandbox({ navLang: 'en-US' });
+  cs.x.S.ws = 'acme';
+  const root = viewRoot();
+  await cs.x.VIEWS.quotas(root);
+  for (const [key, value] of Object.entries(quotas)) root.querySelector('#quota-' + key).value = String(value);
+  const submit = root.querySelector('#quota-form').onsubmit;
+  root.querySelector('#quota-maxFlags').value = '0';
+  await submit({ preventDefault() {} });
+  assert(root.querySelector('#quota-feedback').textContent.includes('positive safe integer'));
+  assert.strictEqual(cs.fetchCalls.length, 1, 'invalid quota must not PUT');
+  root.querySelector('#quota-maxFlags').value = '501';
+  cs.sandbox.confirm = () => false;
+  await submit({ preventDefault() {} });
+  assert.strictEqual(cs.fetchCalls.length, 1, 'cancelled quota save must not PUT');
+  cs.sandbox.confirm = () => true;
+  await submit({ preventDefault() {} });
+  const put = cs.fetchCalls.at(-1);
+  assert.strictEqual(put.opts.method, 'PUT');
+  assert.strictEqual(put.url, '/api/v1/admin/workspaces/acme/quotas');
+  assert.deepStrictEqual(JSON.parse(put.opts.body), { ...quotas, maxFlags: 501 });
+  assert(root.querySelector('#quota-feedback').textContent.includes('saved'));
+  cs.sandbox.fetch = () => Promise.resolve({ ok: true, status: 200,
+    text: () => Promise.resolve(JSON.stringify({ ...quotas, maxFlags: 501 })) });
+  const refreshed = viewRoot();
+  await cs.x.VIEWS.quotas(refreshed);
+  assert(refreshed.innerHTML.includes('name="maxFlags" type="number" min="1" step="1" required value="501"'),
+    'refresh must display the persisted quota value');
+  for (const [status, sample] of [[403, 'Owner permission'], [409, 'Refresh current values'], [429, 'rate limit']]) {
+    cs.sandbox.fetch = () => Promise.resolve({ ok: false, status, statusText: 'error',
+      text: () => Promise.resolve(JSON.stringify({ error: { code: 'test', message: 'test' } })) });
+    await submit({ preventDefault() {} });
+    assert(root.querySelector('#quota-feedback').textContent.includes(sample), `quota ${status} feedback`);
+  }
 }
 
 // report fixed labels — including the "separate view / not the decision gate"

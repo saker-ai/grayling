@@ -28,7 +28,7 @@
 | `POST/GET /api/v1/admin/workspaces/{ws}/tokens` | 铸造（secret 仅返回一次）/列出凭证 |
 | `DELETE /api/v1/admin/tokens/{id}` | 吊销（作用域 owner 只能吊销本工作空间；全局凭证仅全局 owner） |
 | `GET /api/v1/admin/workspaces/{ws}/audit?limit=` | 审计（新→旧） |
-| `PUT /api/v1/admin/workspaces/{ws}/quotas` | 配额（owner） |
+| `GET/PUT /api/v1/admin/workspaces/{ws}/quotas` | 读取当前生效配额（未设置时返回默认值）/设置配额（均仅 owner） |
 
 ### Flag 生命周期
 

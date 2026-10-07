@@ -356,6 +356,29 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
   "/api/v1/admin/workspaces/{ws}/quotas":
+    get:
+      tags: [workspaces]
+      summary: 读取工作空间当前配额（owner；未设置时返回默认值）
+      operationId: getQuotas
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+      responses:
+        "200":
+          description: 当前生效的配额。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quotas"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
     put:
       tags: [workspaces]
       summary: 设置工作空间配额（owner）
@@ -383,6 +406,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/RateLimited"
         "500":

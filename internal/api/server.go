@@ -147,6 +147,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/approvals/{id}/approve", s.adminOnly(s.handleApproveChange))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/approvals", s.adminOnly(s.handleRequestApproval))
 	mux.HandleFunc("PUT /api/v1/admin/workspaces/{ws}/quotas", s.adminOnly(s.handleSetQuotas))
+	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/quotas", s.adminOnly(s.handleGetQuotas))
 
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/flags", s.adminOnly(s.handleListFlags))
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}", s.adminOnly(s.handleGetFlag))

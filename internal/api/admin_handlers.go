@@ -224,11 +224,29 @@ func (s *Server) handleSetQuotas(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	if q.MaxFlags <= 0 || q.MaxFlagBytes <= 0 || q.MaxSegments <= 0 ||
+		q.MaxExperiments <= 0 || q.MaxEventBytes <= 0 || q.MaxEventsPerBatch <= 0 || q.EventRetention <= 0 {
+		writeStoreError(w, fmt.Errorf("%w: all quota limits must be positive", platform.ErrValidation))
+		return
+	}
 	if err := s.Store.SetQuotas(resolved.ID, q); err != nil {
 		writeStoreError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, q)
+}
+
+func (s *Server) handleGetQuotas(w http.ResponseWriter, r *http.Request) {
+	resolved, err := s.Store.GetWorkspace(r.PathValue("ws"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := admin.Authorize(actorFrom(r), resolved.ID, admin.PermQuotaManage); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.Store.GetQuotas(resolved.ID))
 }
 
 // wsID resolves a workspace path value to its surrogate ID for

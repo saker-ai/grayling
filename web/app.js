@@ -266,7 +266,20 @@ async function boot() {
   const tok = localStorage.getItem('golab_token') || '';
   $('#conn-info').textContent = (baseUrl() || location.origin) + ' · ' + tok.slice(0, 10) + '…';
   await route();
+  probeQuotas();
   probeAI();
+}
+
+async function probeQuotas() {
+  const ws = S.ws;
+  let allowed = false;
+  if (ws) {
+    try { await api(wsPath() + '/quotas'); allowed = true; }
+    catch (e) { if (e.status !== 403 && e.status !== 404) toast(errMsg(e), false); }
+  }
+  if (ws !== S.ws) return;
+  $('#nav-quotas').classList.toggle('hidden', !allowed);
+  if (!allowed && S.view === 'quotas') { S.view = 'flags'; route(); }
 }
 
 async function probeAI() {
@@ -1298,6 +1311,67 @@ async function viewDebug(m) {
 }
 
 // ---------------------------------------------------------------------------
+// View: workspace quotas (owner only)
+const QUOTA_FIELDS = [
+  ['maxFlags', 'quotas.maxFlags'],
+  ['maxFlagBytes', 'quotas.maxFlagBytes'],
+  ['maxSegments', 'quotas.maxSegments'],
+  ['maxExperiments', 'quotas.maxExperiments'],
+  ['maxEventBytes', 'quotas.maxEventBytes'],
+  ['maxEventsPerBatch', 'quotas.maxEventsPerBatch'],
+  ['eventRetention', 'quotas.eventRetention'],
+];
+
+function quotaError(e) {
+  if (e.status === 403) return t('quotas.denied403');
+  if (e.status === 409) return t('quotas.conflict409');
+  if (e.status === 429) return t('quotas.limited429');
+  return errMsg(e);
+}
+
+async function viewQuotas(m) {
+  if (!needWs(m)) return;
+  const ws = S.ws;
+  const path = wsPath() + '/quotas';
+  const q = await api(path);
+  if (ws !== S.ws) return;
+  m.innerHTML = '<div class="view-head"><h2>' + esc(t('quotas.title')) + '</h2></div>' +
+    '<section class="card"><p class="muted">' + esc(t('quotas.hint')) + '</p>' +
+    '<form id="quota-form"><div class="form-grid">' + QUOTA_FIELDS.map(([key, label]) =>
+      '<label class="field">' + esc(t(label)) +
+      '<input id="quota-' + key + '" name="' + key + '" type="number" min="1" step="1" required value="' + esc(q[key]) + '"></label>').join('') +
+    '</div><div id="quota-feedback" role="alert"></div>' +
+    '<button class="btn primary" id="quota-save" type="submit">' + esc(t('quotas.save')) + '</button> ' +
+    '<button class="btn" id="quota-refresh" type="button">' + esc(t('btn.refresh')) + '</button></form></section>';
+  $('#quota-refresh', m).onclick = () => route();
+  $('#quota-form', m).onsubmit = async ev => {
+    ev.preventDefault();
+    const body = {};
+    for (const [key] of QUOTA_FIELDS) {
+      const raw = $('#quota-' + key, m).value.trim();
+      const n = Number(raw);
+      if (!raw || !Number.isSafeInteger(n) || n <= 0) {
+        $('#quota-feedback', m).textContent = t('quotas.invalid');
+        return;
+      }
+      body[key] = n;
+    }
+    if (!confirm(t('quotas.confirm'))) return;
+    const save = $('#quota-save', m);
+    save.disabled = true;
+    try {
+      if (ws !== S.ws) return;
+      const saved = await api(path, { method: 'PUT', body });
+      if (ws !== S.ws) return;
+      for (const [key] of QUOTA_FIELDS) $('#quota-' + key, m).value = String(saved[key]);
+      $('#quota-feedback', m).textContent = t('quotas.saved');
+    } catch (e) {
+      $('#quota-feedback', m).textContent = quotaError(e);
+      if (e.status === 403) { $('#nav-quotas').classList.add('hidden'); }
+    } finally { save.disabled = false; }
+  };
+}
+
 // View: Tokens
 // ---------------------------------------------------------------------------
 function tokenRows(tokens) {
@@ -1595,6 +1669,7 @@ Object.assign(VIEWS, {
   experiments: viewExperiments,
   debug: viewDebug,
   tokens: viewTokens,
+  quotas: viewQuotas,
   audit: viewAudit,
   ai: viewAI,
 });
@@ -1662,6 +1737,7 @@ function init() {
     try { await loadEnvs(); } catch (e) { toast(errMsg(e), false); }
     route();
     probeAI();
+    probeQuotas();
   };
   $('#sel-env').onchange = ev => {
     S.env = ev.target.value;
@@ -1683,6 +1759,7 @@ function init() {
     await loadWorkspaces();
     route();
     probeAI();
+    probeQuotas();
   });
   $('#btn-new-env').onclick = () => {
     if (!S.ws) { toast(t('toast.needWs'), false); return; }
