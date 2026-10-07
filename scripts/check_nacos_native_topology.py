@@ -4,6 +4,7 @@ import argparse
 import datetime
 import errno
 import hashlib
+import http.client
 import ipaddress
 import json
 import os
@@ -11,9 +12,7 @@ import socket
 import ssl
 import sys
 import tempfile
-import urllib.error
 import urllib.parse
-import urllib.request
 
 
 def validate(c):
@@ -149,36 +148,50 @@ def check_probe_dns(c, resolved):
             raise ValueError(f"DNS addresses changed during allowed probe for {target}")
 
 
-class RejectRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, request, fp, code, msg, headers, newurl):
-        raise ValueError(f"HTTP probe redirected away from configured endpoint: {code} {newurl}")
+class PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Connect to a probed IP while retaining the configured TLS name and Host."""
+
+    def __init__(self, host, port, address, context):
+        super().__init__(host, port, timeout=5, context=context)
+        self.address = address
+
+    def connect(self):
+        sock = socket.create_connection((self.address, self.port), timeout=self.timeout)
+        try:
+            self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+        except BaseException:
+            sock.close()
+            raise
 
 
-def probe(c):
+def probe(c, resolved):
     context = ssl.create_default_context(cafile=c["caFile"])
     host, port = split_address(c["tlsGRPC"])
     context.set_alpn_protocols(["h2"])
-    with socket.create_connection((host, port), timeout=5) as sock:
-        with context.wrap_socket(sock, server_hostname=host) as tls_sock:
-            if tls_sock.selected_alpn_protocol() != "h2":
-                raise ValueError("gRPC TLS listener did not negotiate h2")
+    for address in resolved[net_address(host, port)]:
+        with socket.create_connection((address, port), timeout=5) as sock:
+            with context.wrap_socket(sock, server_hostname=host) as tls_sock:
+                if tls_sock.selected_alpn_protocol() != "h2":
+                    raise ValueError(f"gRPC TLS listener {address} did not negotiate h2")
     context.set_alpn_protocols(["http/1.1"])
     host, port = split_address(c["tlsHTTP"])
-    base = f"https://{host}:{port}"
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
-                                         urllib.request.HTTPSHandler(context=context), RejectRedirect())
-    for request, expected in (
-        (urllib.request.Request(base + "/nacos/v1/cs/configs?tenant=x&group=GOLAB_FLAGS&dataId=golab.manifest"), 404),
-        (urllib.request.Request(base + "/nacos/v1/auth/users/login",
-                                data=urllib.parse.urlencode({"username": "golab-sdk", "password": "invalid"}).encode()), 401),
-    ):
-        try:
-            with opener.open(request, timeout=5) as response:
+    requests = (
+        ("GET", "/nacos/v1/cs/configs?tenant=x&group=GOLAB_FLAGS&dataId=golab.manifest", None, 404),
+        ("POST", "/nacos/v1/auth/users/login",
+         urllib.parse.urlencode({"username": "golab-sdk", "password": "invalid"}), 401),
+    )
+    for address in resolved[net_address(host, port)]:
+        for method, path, body, expected in requests:
+            connection = PinnedHTTPSConnection(host, port, address, context)
+            try:
+                headers = {"Content-Type": "application/x-www-form-urlencoded"} if body else {}
+                connection.request(method, path, body=body, headers=headers)
+                response = connection.getresponse()
                 status = response.status
-        except urllib.error.HTTPError as exc:
-            status = exc.code
-        if status != expected:
-            raise ValueError(f"{request.full_url}: HTTP {status}, expected {expected}")
+            finally:
+                connection.close()
+            if status != expected:
+                raise ValueError(f"{address}:{port}{path}: HTTP {status}, expected {expected}")
 
 
 def probe_denied(c, resolved=None):
@@ -372,9 +385,9 @@ def main():
     if args.probe:
         try:
             sources = source_ips(config, "allowed", resolved)
-            probe(config)
+            probe(config, resolved)
             check_probe_dns(config, resolved)
-        except (OSError, ValueError, urllib.error.URLError) as exc:
+        except (OSError, ValueError) as exc:
             print("ALERT: live probe failed:", exc, file=sys.stderr)
             return 1
     if args.probe_denied:

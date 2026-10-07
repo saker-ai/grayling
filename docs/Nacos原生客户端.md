@@ -75,7 +75,7 @@ python3 scripts/check_nacos_native_topology.py deployment-nacos.json --verify-pa
 python3 scripts/check_nacos_native_topology.py deployment-node-a.json --verify-cluster deployment-node-b.json node-a-allowed.json node-a-denied.json node-b-allowed.json node-b-denied.json
 ```
 
-第一个命令检查声明中鉴权、loopback 后端、彼此独立的 HTTP/gRPC 后端端口及 TLS 端口、显式允许源与连接不复用；TLS 入口填 loopback、`localhost`、通配地址、链路本地或多播地址也会在声明阶段被拒绝。DNS 名称仍需通过在线探针验证其解析地址；探针及证据配对拒绝解析成 loopback、通配、链路本地、多播或映射到这些 IPv4 地址的 IPv6 地址。L7/HTTP2 多租户复用会输出 `ALERT` 并以非零状态退出，适合部署门禁或告警。第二个命令从允许源完成证书验证、gRPC `h2` TLS 握手、匿名 HTTP 配置读取 404 与无效登录 401；该探针禁用环境中的 HTTP 代理变量并拒绝 HTTP 重定向，确保状态码来自配置的入口。第三个命令从拒绝源检查两个 TLS 入口和两个后端端口都无法建立 TCP，并逐个检查 DNS 返回的地址，不能因其中一个地址拒绝而漏过另一个开放地址；`backendExternalHost` 必须是拒绝源可路由的侧车宿主机或 Pod **单播 IP**，不可填写 loopback、通配地址或主机名。探针记录路由选择的本机源 IP 与每个目标的 DNS 解析 IP，并按 `allowedSources` 检查允许源属于、拒绝源不属于允许网段；无路由、DNS 错误等探针故障不能计作网络策略拒绝。拒绝源实际 TCP 探针使用的地址还必须与本次路由检查解析出的地址一致；允许源完成 TLS/HTTP 探针后也会重新解析入口，若地址集合漂移则报警。第四个命令要求同一配置 SHA-256、不同执行主机、目标端口完整、源 IP 分类正确、两侧解析 IP 相同，且两份成功记录相差不超过五分钟。最后一个命令要求两个节点的 TLS 入口及可路由后端主机不同，两节点 TLS 入口的解析 IP 不重叠，四份证据处于同一五分钟窗口。旧版没有 `resolvedIPs` 的证据 JSON 需重新采集。
+第一个命令检查声明中鉴权、loopback 后端、彼此独立的 HTTP/gRPC 后端端口及 TLS 端口、显式允许源与连接不复用；TLS 入口填 loopback、`localhost`、通配地址、链路本地或多播地址也会在声明阶段被拒绝。DNS 名称仍需通过在线探针验证其解析地址；探针及证据配对拒绝解析成 loopback、通配、链路本地、多播或映射到这些 IPv4 地址的 IPv6 地址。L7/HTTP2 多租户复用会输出 `ALERT` 并以非零状态退出，适合部署门禁或告警。第二个命令从允许源对两个 TLS 入口的**每个 DNS 地址**分别完成证书验证、gRPC `h2` TLS 握手、匿名 HTTP 配置读取 404 与无效登录 401；连接固定到所检查的 IP，证书校验和 HTTP Host 仍使用声明中的入口主机名。该探针不使用环境中的 HTTP 代理，并将 HTTP 重定向视为失败。第三个命令从拒绝源检查两个 TLS 入口和两个后端端口都无法建立 TCP，并逐个检查 DNS 返回的地址，不能因其中一个地址拒绝而漏过另一个开放地址；`backendExternalHost` 必须是拒绝源可路由的侧车宿主机或 Pod **单播 IP**，不可填写 loopback、通配地址或主机名。探针记录路由选择的本机源 IP 与每个目标的 DNS 解析 IP，并按 `allowedSources` 检查允许源属于、拒绝源不属于允许网段；无路由、DNS 错误等探针故障不能计作网络策略拒绝。拒绝源实际 TCP 探针使用的地址还必须与本次路由检查解析出的地址一致；允许源完成 TLS/HTTP 探针后也会重新解析入口，若地址集合漂移则报警。第四个命令要求同一配置 SHA-256、不同执行主机、目标端口完整、源 IP 分类正确、两侧解析 IP 相同，且两份成功记录相差不超过五分钟。最后一个命令要求两个节点的 TLS 入口及可路由后端主机不同，两节点 TLS 入口的解析 IP 不重叠，四份证据处于同一五分钟窗口。旧版没有 `resolvedIPs` 的证据 JSON 需重新采集。
 
 `--verify-pair` 与 `--verify-cluster` 只接受采集于最近十分钟内、且不比核验主机时钟快超过一分钟的记录；两侧记录仍须处于同一五分钟窗口。请在探针结束后立即核验，并确认各执行主机时钟同步。旧记录可归档，但不能重复作为当前部署验收结果。
 
@@ -107,6 +107,8 @@ curl --cacert /etc/golab/nacos-ca.pem -sS -o /dev/null -w '%{http_code}\n' 'http
 本次预检补强入口 DNS 答案：通配、链路本地、多播和 IPv4 映射 IPv6 的本机地址在探针及证据配对时均报 `ALERT`。回归测试 17/17、示例声明检查、`make all`（使用现有 PostgreSQL 与测试自管 Redis）和 `make client-compatibility`（直连 9/9、本机 TLS/L4 双节点 1/1）通过。构建时将 Go 临时目录移至有空间的 `/home`；`/data` 仍满。本次未取得生产跨主机允许源/拒绝源、网络策略或代理实际连接日志，正式支持状态不变。
 
 复现本机 TLS/L4 实测：
+
+2026-10-07 探针复核：允许源探针现在对入口 DNS 返回的每个 IP 逐个固定地址连接，同时以声明中的主机名执行 TLS SNI/SAN 校验及 HTTP Host 检查；任一地址未协商 `h2`、HTTP 绕过不是 404 或无效登录不是 401 都失败。Python 单元测试覆盖第二个地址返回重定向的失败路径；另用临时自签 CA、真实本机 TLS HTTP 与 gRPC 握手验证固定地址连接下的 SNI/SAN、Host、404/401 与 `h2`。这仍是本机探针自检，不提供跨主机 NetworkPolicy 或生产代理连接日志。
 
 ```sh
 GOWORK=off go test ./test/cluster -run '^TestOfficialNacosClientFailsOverAcrossGolabNodes$' -count=1 -v

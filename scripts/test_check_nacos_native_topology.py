@@ -1,17 +1,14 @@
 import copy
 import datetime
 import errno
-import http.server
 import json
 import os
 import socket
 import tempfile
-import threading
 import unittest
-import urllib.request
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from check_nacos_native_topology import (RejectRedirect, check_probe_dns, evidence, probe_denied,
+from check_nacos_native_topology import (PinnedHTTPSConnection, check_probe_dns, evidence, probe, probe_denied,
                                          source_ips, validate, verify_cluster, verify_pair, write_evidence)
 
 
@@ -82,27 +79,35 @@ class NativeTopologyTest(unittest.TestCase):
                 config[field] = value
                 self.assertTrue(validate(config))
 
-    def test_http_probe_rejects_redirects(self):
-        class RedirectServer(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
-                self.send_response(302)
-                self.send_header("Location", "http://127.0.0.1/false-success")
-                self.end_headers()
+    def test_allowed_probe_checks_every_resolved_ip_and_rejects_redirect(self):
+        resolved = {"nacos.example:9848": ["10.42.1.10", "10.42.1.11"],
+                    "nacos.example:8848": ["10.42.1.10", "10.42.1.11"]}
+        context = MagicMock()
+        context.wrap_socket.return_value.__enter__.return_value.selected_alpn_protocol.return_value = "h2"
+        connection = MagicMock()
+        with patch("check_nacos_native_topology.ssl.create_default_context", return_value=context), \
+             patch("check_nacos_native_topology.socket.create_connection") as connect, \
+             patch("check_nacos_native_topology.PinnedHTTPSConnection", return_value=connection) as https:
+            connection.getresponse.side_effect = [MagicMock(status=404), MagicMock(status=401),
+                                                  MagicMock(status=404), MagicMock(status=401)]
+            probe(self.config, resolved)
+            self.assertEqual([call.args[2] for call in https.call_args_list],
+                             ["10.42.1.10", "10.42.1.10", "10.42.1.11", "10.42.1.11"])
+            self.assertEqual([call.args[0] for call in connect.call_args_list],
+                             [("10.42.1.10", 9848), ("10.42.1.11", 9848)])
 
-            def log_message(self, *_):
-                pass
+            connection.getresponse.side_effect = [MagicMock(status=404), MagicMock(status=401),
+                                                  MagicMock(status=302)]
+            with self.assertRaisesRegex(ValueError, "10.42.1.11:8848.*HTTP 302"):
+                probe(self.config, resolved)
 
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), RedirectServer)
-        thread = threading.Thread(target=server.serve_forever)
-        thread.start()
-        try:
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), RejectRedirect())
-            with self.assertRaisesRegex(ValueError, "redirected away from configured endpoint"):
-                opener.open(f"http://127.0.0.1:{server.server_port}/probe", timeout=1)
-        finally:
-            server.shutdown()
-            thread.join()
-            server.server_close()
+    def test_pinned_https_connection_uses_ip_and_cert_hostname(self):
+        context = MagicMock()
+        with patch("check_nacos_native_topology.socket.create_connection") as connect:
+            connection = PinnedHTTPSConnection("nacos.example", 8848, "10.42.1.11", context)
+            connection.connect()
+        connect.assert_called_once_with(("10.42.1.11", 8848), timeout=5)
+        context.wrap_socket.assert_called_once_with(connect.return_value, server_hostname="nacos.example")
 
     def test_denied_source_checks_both_entry_and_backend_ports(self):
         targets = []
