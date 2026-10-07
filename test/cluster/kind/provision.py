@@ -60,6 +60,7 @@ def main():
     workdir = Path(os.environ["ISSUE13_WORKDIR"])
     workdir.mkdir(mode=0o700, parents=True, exist_ok=True)
     owner = owner_token()
+    write_secret(workdir / "owner-token", owner)
     for slug in ("tenant-a", "tenant-b"):
         request("POST", "/api/v1/admin/workspaces", owner,
                 {"slug": slug, "name": slug}, 201)

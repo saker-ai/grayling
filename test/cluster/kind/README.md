@@ -29,7 +29,16 @@ python3 test/cluster/kind/provision.py
 python3 test/cluster/kind/verify_sdk.py
 ```
 
-`provision.py` is for a fresh namespace and creates two disposable workspaces, one published flag each, and SDK tokens. It stores tokens, namespaces, and the local test certificate in `ISSUE13_WORKDIR`; restrict that directory to the test operator and never commit its contents. `verify_sdk.py` copies the official Go SDK and direct gRPC probes plus fixture credentials into the allowed client Pods. It checks HTTP config bypass/invalid login, anonymous and cross-tenant gRPC read/subscribe refusal, each tenant's SDK read, and an update pushed to subscriptions on both replicas. The Go SDK probe uses a fresh cache per invocation so an old local SDK response cannot pass a read check.
+Stop the manual port-forward before the failover check; it starts its own forwarding to the surviving replica. The revocation check uses another local port and can be run afterwards:
+
+```sh
+python3 test/cluster/kind/verify_failover.py
+python3 test/cluster/kind/verify_revocation.py
+```
+
+`provision.py` is for a fresh namespace and creates two disposable workspaces, one published flag each, and SDK tokens. It stores the disposable owner/SDK tokens, namespaces, and the local test certificate in `ISSUE13_WORKDIR`; restrict that directory to the test operator and never commit its contents. The owner token is retained locally because replacing a Pod removes its one-time bootstrap log. `verify_sdk.py` copies the official Go SDK and direct gRPC probes plus fixture credentials into the allowed client Pods. It checks HTTP config bypass/invalid login, anonymous and cross-tenant gRPC read/subscribe refusal, each tenant's SDK read, and an update pushed to subscriptions on both replicas. The Go SDK probe uses a fresh cache per invocation so an old local SDK response cannot pass a read check.
+
+`verify_failover.py` keeps one official SDK subscription while B is stopped, restores B, stops A, publishes through B, and checks that the original subscription receives the new revision. It restores both Pods even after a failed check. `verify_revocation.py` waits for both replicas to serve the same revision, creates a disposable SDK token, subscribes, revokes it, then checks HTTP 401, gRPC read/subscribe status 16, and no new push after publishing. The existing non-revoked tenant tokens remain available for later checks.
 
 `verify_policy.sh` checks both native ports from allowed and denied clients on the opposite worker, and checks that the loopback backend ports are unreachable. Removing the policy makes denied clients connect; restoring it blocks them again. Run only in this disposable namespace. To inspect actual source IP and backend connection mapping:
 

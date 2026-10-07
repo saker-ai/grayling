@@ -69,7 +69,7 @@ func TestProbeRequiresAnonymousReadAndSubscriptionDenial(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
-			err := probe(ctx, server.Listener.Addr().String(), "127.0.0.1", caFile, nil)
+			err := probe(ctx, server.Listener.Addr().String(), "127.0.0.1", caFile, nil, nil)
 			if (err == nil) != test.wantOK {
 				t.Fatalf("probe error = %v, want success %v", err, test.wantOK)
 			}
@@ -78,9 +78,58 @@ func TestProbeRequiresAnonymousReadAndSubscriptionDenial(t *testing.T) {
 }
 
 func TestProbeRequiresPinnedIPAddress(t *testing.T) {
-	err := probe(t.Context(), "nacos.example:9848", "nacos.example", "/unused/ca.pem", nil)
+	err := probe(t.Context(), "nacos.example:9848", "nacos.example", "/unused/ca.pem", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "resolved IP literal") {
 		t.Fatalf("probe accepted DNS endpoint: %v", err)
+	}
+}
+
+func TestProbeRejectsRevokedTokenReadAndSubscription(t *testing.T) {
+	for _, test := range []struct {
+		name, queryStatus, listenStatus string
+		wantOK                          bool
+	}{
+		{name: "both denied", queryStatus: "16", listenStatus: "16", wantOK: true},
+		{name: "read exposed", queryStatus: "0", listenStatus: "16"},
+		{name: "subscription exposed", queryStatus: "16", listenStatus: "0"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				frame, err := grpcsrv.ReadFrame(r.Body)
+				if err != nil {
+					t.Errorf("read frame: %v", err)
+					return
+				}
+				payload, err := grpcsrv.DecodePayload(frame.Payload)
+				if err != nil {
+					t.Errorf("decode payload: %v", err)
+					return
+				}
+				status := "16"
+				if payload.Metadata.Headers["accessToken"] == "revoked-token" {
+					status = test.queryStatus
+					if payload.Metadata.Type == "ConfigBatchListenRequest" {
+						status = test.listenStatus
+					}
+				}
+				w.Header().Set("Content-Type", "application/grpc")
+				w.Header().Set("grpc-status", status)
+			}))
+			server.EnableHTTP2 = true
+			server.StartTLS()
+			t.Cleanup(server.Close)
+			caFile := filepath.Join(t.TempDir(), "ca.pem")
+			certificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+			if err := os.WriteFile(caFile, certificate, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := probe(t.Context(), server.Listener.Addr().String(), "127.0.0.1", caFile,
+				nil, &tenant{namespace: "namespace-a", token: "revoked-token"})
+			if (err == nil) != test.wantOK {
+				t.Fatalf("probe error = %v, want success %v", err, test.wantOK)
+			}
+		})
 	}
 }
 
@@ -169,7 +218,7 @@ func TestProbeChecksTwoTenantIsolation(t *testing.T) {
 			err := probe(t.Context(), server.Listener.Addr().String(), "127.0.0.1", caFile, []tenant{
 				{namespace: "namespace-a", token: "token-a"},
 				{namespace: "namespace-b", token: "token-b"},
-			})
+			}, nil)
 			if (err == nil) != test.wantOK {
 				t.Fatalf("probe error = %v, want success %v", err, test.wantOK)
 			}

@@ -26,18 +26,38 @@ func main() {
 	tokenFile := flag.String("token-file", "", "SDK token file")
 	caFile := flag.String("ca-file", "", "trusted CA certificate")
 	denied := flag.Bool("expect-denied", false, "expect the native read to be denied")
+	revokedLogin := flag.Bool("expect-revoked-login", false, "expect native login with this token to return 401")
 	watch := flag.Bool("watch", false, "wait for a newer manifest notification")
+	watchTimeout := flag.Duration("watch-timeout", 35*time.Second, "maximum time to wait for a newer revision")
 	flag.Parse()
-	if *namespaceFile == "" || *tokenFile == "" || *caFile == "" || (*denied && *watch) {
+	if *namespaceFile == "" || *tokenFile == "" || *caFile == "" || (*denied && *watch) ||
+		(*revokedLogin && (*watch || *denied)) || *watchTimeout <= 0 {
 		fmt.Fprintln(os.Stderr, "namespace-file, token-file, and ca-file are required; denied and watch are exclusive")
 		os.Exit(2)
 	}
 	namespace := readFile(*namespaceFile)
 	token := readFile(*tokenFile)
-	if err := verifyHTTP(*server, namespace, *caFile); err != nil {
+	serverNames := strings.Split(*server, ",")
+	serverConfigs := make([]constant.ServerConfig, 0, len(serverNames))
+	for _, name := range serverNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			fail("empty server name", nil)
+		}
+		serverConfigs = append(serverConfigs, *constant.NewServerConfig(name, 8848,
+			constant.WithScheme("https"), constant.WithGrpcPort(9848)))
+	}
+	if err := verifyHTTP(strings.TrimSpace(serverNames[0]), namespace, *caFile); err != nil {
 		fail("native HTTP boundary", err)
 	}
 	fmt.Printf("PASS native HTTP bypass and invalid login denied through %s\n", *server)
+	if *revokedLogin {
+		if err := verifyRevokedLogin(strings.TrimSpace(serverNames[0]), token, *caFile); err != nil {
+			fail("revoked native login", err)
+		}
+		fmt.Println("PASS revoked native login denied with HTTP 401")
+		return
+	}
 	cache, err := os.MkdirTemp("", "golab-kind-sdk-")
 	if err != nil {
 		fail("create SDK cache", err)
@@ -52,9 +72,7 @@ func main() {
 			constant.WithLogDir(cache),
 			constant.WithTLS(*constant.NewTLSConfig(constant.WithCA(*caFile, ""))),
 		),
-		ServerConfigs: []constant.ServerConfig{
-			*constant.NewServerConfig(*server, 8848, constant.WithScheme("https"), constant.WithGrpcPort(9848)),
-		},
+		ServerConfigs: serverConfigs,
 	})
 	if err != nil {
 		fail("create official SDK client", err)
@@ -96,7 +114,7 @@ func main() {
 		fail("subscribe manifest", err)
 	}
 	fmt.Println("SUBSCRIBED")
-	timer := time.NewTimer(35 * time.Second)
+	timer := time.NewTimer(*watchTimeout)
 	defer timer.Stop()
 	for {
 		select {
@@ -112,19 +130,9 @@ func main() {
 }
 
 func verifyHTTP(server, namespace, caFile string) error {
-	certificate, err := os.ReadFile(caFile)
+	client, err := newHTTPClient(caFile)
 	if err != nil {
 		return err
-	}
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(certificate) {
-		return fmt.Errorf("invalid CA certificate")
-	}
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{
-			RootCAs: roots, MinVersion: tls.VersionTLS12,
-		}},
 	}
 	query := url.Values{"tenant": {namespace}, "group": {"GOLAB_FLAGS"}, "dataId": {"golab.manifest"}}
 	endpoint := "https://" + server + ":8848"
@@ -149,6 +157,41 @@ func verifyHTTP(server, namespace, caFile string) error {
 		}
 	}
 	return nil
+}
+
+func verifyRevokedLogin(server, token, caFile string) error {
+	client, err := newHTTPClient(caFile)
+	if err != nil {
+		return err
+	}
+	response, err := client.PostForm("https://"+server+":8848/nacos/v1/auth/users/login",
+		url.Values{"username": {"golab-sdk"}, "password": {token}})
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 16<<10))
+	if response.StatusCode != http.StatusUnauthorized {
+		return fmt.Errorf("native login returned HTTP %d, want 401", response.StatusCode)
+	}
+	return nil
+}
+
+func newHTTPClient(caFile string) (*http.Client, error) {
+	certificate, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, err
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(certificate) {
+		return nil, fmt.Errorf("invalid CA certificate")
+	}
+	return &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{
+			RootCAs: roots, MinVersion: tls.VersionTLS12,
+		}},
+	}, nil
 }
 
 func mustRequest(method, endpoint string) *http.Request {

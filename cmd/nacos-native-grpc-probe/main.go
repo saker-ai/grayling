@@ -32,15 +32,31 @@ func main() {
 	tenantB := flag.String("tenant-b-namespace", "", "second tenant namespace ID")
 	tokenA := flag.String("tenant-a-token-file", "", "first tenant SDK token file")
 	tokenB := flag.String("tenant-b-token-file", "", "second tenant SDK token file")
+	revokedNamespace := flag.String("revoked-namespace", "", "namespace for a revoked SDK token")
+	revokedTokenFile := flag.String("revoked-token-file", "", "revoked SDK token file")
 	flag.Parse()
 	if *address == "" || *serverName == "" || *caFile == "" || flag.NArg() != 0 ||
 		(*tenantA == "") != (*tenantB == "") || (*tenantA == "") != (*tokenA == "") ||
-		(*tenantB == "") != (*tokenB == "") {
-		fmt.Fprintln(os.Stderr, "usage: nacos-native-grpc-probe -address IP:port -server-name DNS_NAME -ca-file CA.pem [-tenant-a-namespace ID -tenant-b-namespace ID -tenant-a-token-file FILE -tenant-b-token-file FILE]")
+		(*tenantB == "") != (*tokenB == "") ||
+		(*revokedNamespace == "") != (*revokedTokenFile == "") {
+		fmt.Fprintln(os.Stderr, "usage: nacos-native-grpc-probe -address IP:port -server-name DNS_NAME -ca-file CA.pem [-tenant-a-namespace ID -tenant-b-namespace ID -tenant-a-token-file FILE -tenant-b-token-file FILE | -revoked-namespace ID -revoked-token-file FILE]")
 		os.Exit(2)
+	}
+	var revoked *tenant
+	if *revokedNamespace != "" {
+		secret, err := readToken(*revokedTokenFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ALERT: invalid revoked SDK token file:", err)
+			os.Exit(2)
+		}
+		revoked = &tenant{namespace: *revokedNamespace, token: secret}
 	}
 	var tenants []tenant
 	if *tenantA != "" {
+		if revoked != nil {
+			fmt.Fprintln(os.Stderr, "ALERT: revoked-token mode cannot be combined with two-tenant mode")
+			os.Exit(2)
+		}
 		if *tenantA == *tenantB {
 			fmt.Fprintln(os.Stderr, "ALERT: tenant namespace IDs must differ")
 			os.Exit(2)
@@ -60,11 +76,13 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	if err := probe(ctx, *address, *serverName, *caFile, tenants); err != nil {
+	if err := probe(ctx, *address, *serverName, *caFile, tenants, revoked); err != nil {
 		fmt.Fprintln(os.Stderr, "ALERT:", err)
 		os.Exit(1)
 	}
-	if len(tenants) == 0 {
+	if revoked != nil && len(tenants) == 0 {
+		fmt.Println("PASS: anonymous and revoked native gRPC reads and subscriptions rejected with status 16")
+	} else if len(tenants) == 0 {
 		fmt.Println("PASS: anonymous native gRPC read and subscription rejected with status 16")
 	} else {
 		fmt.Println("PASS: anonymous gRPC denied; two tenant reads and subscriptions allowed; cross-tenant reads and subscriptions denied")
@@ -88,7 +106,7 @@ func readToken(path string) (string, error) {
 	return token, nil
 }
 
-func probe(ctx context.Context, address, serverName, caFile string, tenants []tenant) error {
+func probe(ctx context.Context, address, serverName, caFile string, tenants []tenant, revoked *tenant) error {
 	ip, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return fmt.Errorf("invalid entrance address: %w", err)
@@ -147,6 +165,28 @@ func probe(ctx context.Context, address, serverName, caFile string, tenants []te
 	} {
 		if err := probeRequest(ctx, transport, serverName, port, check.name, check.requestType, check.body, "", grpcsrv.StatusUnauthenticated); err != nil {
 			return err
+		}
+	}
+	if revoked != nil {
+		for _, check := range []struct {
+			name, requestType string
+			body              any
+		}{
+			{"revoked query", "ConfigQueryRequest", map[string]string{
+				"tenant": revoked.namespace, "group": "GOLAB_FLAGS", "dataId": "golab.manifest",
+			}},
+			{"revoked subscription", "ConfigBatchListenRequest", map[string]any{
+				"listen": true,
+				"configListenContexts": []map[string]string{{
+					"tenant": revoked.namespace, "group": "GOLAB_FLAGS",
+					"dataId": "golab.manifest", "md5": "",
+				}},
+			}},
+		} {
+			if err := probeRequest(ctx, transport, serverName, port, check.name, check.requestType,
+				check.body, revoked.token, grpcsrv.StatusUnauthenticated); err != nil {
+				return err
+			}
 		}
 	}
 	for _, current := range tenants {

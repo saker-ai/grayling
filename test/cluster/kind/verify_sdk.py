@@ -58,6 +58,17 @@ def expect(command, fragment):
     print(result.stdout.strip())
 
 
+def eventually(check, timeout=20):
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return check()
+        except RuntimeError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(1)
+
+
 def verify_grpc(pod, server, workdir):
     service_ip = run("get", "svc", server, "-o", "jsonpath={.spec.clusterIP}")
     namespace_a = (workdir / "tenant-a-namespace").read_text().strip()
@@ -88,11 +99,16 @@ def subscribed(process):
     raise RuntimeError("SDK subscription did not start")
 
 
-def publish_next_revision():
+def publish_next_revision(api=None, owner=None):
     spec = importlib.util.spec_from_file_location("provision", SCRIPT_DIR / "provision.py")
     provision = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(provision)
-    owner = provision.owner_token()
+    if api is not None:
+        provision.API = api
+    if owner is None:
+        owner_path = os.environ.get("ISSUE13_WORKDIR")
+        saved = Path(owner_path) / "owner-token" if owner_path else None
+        owner = saved.read_text().strip() if saved and saved.is_file() else provision.owner_token()
     base = "/api/v1/admin/workspaces/tenant-a/environments/prod/flags/sample"
     reviewer = provision.request(
         "POST", "/api/v1/admin/workspaces/tenant-a/tokens", owner,
@@ -118,10 +134,10 @@ def main():
         raise RuntimeError("set KUBECONFIG and ISSUE13_WORKDIR")
     workdir = Path(os.environ["ISSUE13_WORKDIR"])
     prepare(workdir)
-    verify_grpc("allowed-a", "golab-a", workdir)
-    verify_grpc("allowed-b", "golab-b", workdir)
-    expect(probe("allowed-a", "golab-a", "a", "a"), "PASS official SDK read")
-    expect(probe("allowed-b", "golab-b", "b", "b"), "PASS official SDK read")
+    eventually(lambda: verify_grpc("allowed-a", "golab-a", workdir))
+    eventually(lambda: verify_grpc("allowed-b", "golab-b", workdir))
+    eventually(lambda: expect(probe("allowed-a", "golab-a", "a", "a"), "PASS official SDK read"))
+    eventually(lambda: expect(probe("allowed-b", "golab-b", "b", "b"), "PASS official SDK read"))
     expect(probe("allowed-a", "golab-a", "b", "a", "-expect-denied"),
            "PASS official SDK cross-tenant read denied")
     expect(probe("allowed-b", "golab-b", "a", "b", "-expect-denied"),
