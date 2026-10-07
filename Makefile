@@ -15,6 +15,7 @@ build:
 	$(GO) build ./...
 	$(GO) build -o bin/golab ./cmd/golab
 	$(GO) build -o bin/golab-proxy ./cmd/golab-proxy
+	$(GO) build -o bin/golab-native-proxy ./cmd/golab-native-proxy
 	$(GO) build -o bin/nacos-native-grpc-probe ./cmd/nacos-native-grpc-probe
 
 test:

@@ -1,6 +1,6 @@
 # Issue #13: isolated Kind network and native SDK fixture
 
-This fixture runs two GoLab replicas on different Kind workers with shared PostgreSQL/Redis, Cilium NetworkPolicy, and a TLS/L4 sidecar on each replica. The sidecar logs the client Pod IP and opens one backend TCP connection per client connection. It is a **local simulation**, not proof of production cross-host routing or production ingress configuration.
+This fixture runs two GoLab replicas on different Kind workers with shared PostgreSQL/Redis, Cilium NetworkPolicy, and the `cmd/golab-native-proxy` TLS/L4 sidecar on each replica. The same executable is described in `deploy/kubernetes/native`; it logs the client Pod IP and opens one backend TCP connection per client connection. This is a **local simulation**, not proof of production cross-host routing or production ingress configuration.
 
 Requirements: Linux Docker with enough free space, Kind v0.33.0, Helm v3.19.0, Go matching `go.mod`, `kubectl`, Python 3, and OpenSSL. Use a dedicated Docker daemon if the default Docker data root is full. The commands below use whichever daemon `DOCKER_HOST` selects. Do not use a shared cluster: `verify_policy.sh` briefly removes and restores the test namespace's NetworkPolicy to prove that it causes the denial.
 
@@ -40,7 +40,15 @@ python3 test/cluster/kind/verify_revocation.py
 
 `verify_failover.py` keeps one official SDK subscription while B is stopped, restores B, stops A, publishes through B, and checks that the original subscription receives the new revision. It restores both Pods even after a failed check. `verify_revocation.py` waits for both replicas to serve the same revision, creates a disposable SDK token, subscribes, revokes it, then checks HTTP 401, gRPC read/subscribe status 16, and no new push after publishing. The existing non-revoked tenant tokens remain available for later checks.
 
-`verify_policy.sh` checks both native ports from allowed and denied clients on the opposite worker, and checks that the loopback backend ports are unreachable. Removing the policy makes denied clients connect; restoring it blocks them again. Run only in this disposable namespace. To inspect actual source IP and backend connection mapping:
+`verify_policy.sh` checks both native ports from allowed and denied clients on the opposite worker, and checks that the loopback backend ports are unreachable. Removing the policy makes denied clients connect; restoring it blocks them again. Run only in this disposable namespace.
+
+After provisioning tenants, `verify_deploy_manifest.sh` also applies the deployable `deploy/kubernetes/native/manifest.yaml` in separate disposable namespaces. It verifies both stable StatefulSet addresses, the actual manifest's allowed/denied NetworkPolicy behavior, unreachable loopback backends, and official SDK reads for both tenants through both replicas. It uses local fixture images and short-lived test secrets; the manifest itself keeps placeholder image references for production operators.
+
+```sh
+test/cluster/kind/verify_deploy_manifest.sh
+```
+
+To inspect actual source IP and backend connection mapping:
 
 ```sh
 kubectl -n golab-issue13 get pods -o wide
@@ -48,7 +56,7 @@ kubectl -n golab-issue13 logs golab-a -c tls-l4-proxy
 kubectl -n golab-issue13 logs golab-b -c tls-l4-proxy
 ```
 
-The fixed addresses in `kind.yaml` are for the isolated test cluster; change them if they overlap the host network. `setup_cluster.sh` expects the pinned base images to be pullable from the selected Docker daemon. If registry access is unavailable, load those pinned images into that daemon before running the script and skip its `docker pull` lines. The test-only sidecar is not a production proxy configuration. Before production support can be declared, run the deployment evidence gate in `scripts/check_nacos_native_topology.py` against the real TLS/L4 ingress from separate allowed and denied physical hosts, inspect ingress connection logs, and repeat the lifecycle checks there.
+The fixed addresses in `kind.yaml` are for the isolated test cluster; change them if they overlap the host network. `setup_cluster.sh` reuses locally cached pinned base images; if registry access is unavailable, load them into the selected Docker daemon first. Before enabling the topology in another cluster, run the deployment evidence gate in `scripts/check_nacos_native_topology.py` against its TLS/L4 ingress from separate allowed and denied sources, inspect ingress connection logs, and repeat the lifecycle checks there. The deployable in-cluster example is in `deploy/kubernetes/native`.
 
 Cleanup after retaining sanitized evidence:
 
