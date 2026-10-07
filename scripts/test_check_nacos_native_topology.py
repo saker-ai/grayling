@@ -30,6 +30,13 @@ class NativeTopologyTest(unittest.TestCase):
             ("backendExternalHost", "0.0.0.0"),
             ("backendExternalHost", "127.0.0.1"),
             ("backendExternalHost", "not-an-ip"),
+            ("tlsHTTP", "127.0.0.1:8848"),
+            ("tlsHTTP", "localhost:8848"),
+            ("tlsHTTP", "api.localhost.:8848"),
+            ("tlsHTTP", "*:8848"),
+            ("tlsGRPC", "0.0.0.0:9848"),
+            ("tlsGRPC", "[::1]:9848"),
+            ("tlsGRPC", "[fe80::1]:9848"),
         ):
             with self.subTest(field=field):
                 config = copy.deepcopy(self.config)

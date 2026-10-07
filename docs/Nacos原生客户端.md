@@ -75,7 +75,7 @@ python3 scripts/check_nacos_native_topology.py deployment-nacos.json --verify-pa
 python3 scripts/check_nacos_native_topology.py deployment-node-a.json --verify-cluster deployment-node-b.json node-a-allowed.json node-a-denied.json node-b-allowed.json node-b-denied.json
 ```
 
-第一个命令检查声明中鉴权、loopback 后端、独立 TLS 端口、显式允许源与连接不复用；L7/HTTP2 多租户复用会输出 `ALERT` 并以非零状态退出，适合部署门禁或告警。第二个命令从允许源完成证书验证、gRPC `h2` TLS 握手、匿名 HTTP 配置读取 404 与无效登录 401；该探针禁用环境中的 HTTP 代理变量，确保直接连接入口。第三个命令从拒绝源检查两个 TLS 入口和两个后端端口都无法建立 TCP，并逐个检查 DNS 返回的地址，不能因其中一个地址拒绝而漏过另一个开放地址；`backendExternalHost` 必须是拒绝源可路由的侧车宿主机或 Pod **单播 IP**，不可填写 loopback、通配地址或主机名。探针记录路由选择的本机源 IP 与每个目标的 DNS 解析 IP，并按 `allowedSources` 检查允许源属于、拒绝源不属于允许网段；无路由、DNS 错误等探针故障不能计作网络策略拒绝。拒绝源实际 TCP 探针使用的地址还必须与本次路由检查解析出的地址一致。第四个命令要求同一配置 SHA-256、不同执行主机、目标端口完整、源 IP 分类正确、两侧解析 IP 相同，且两份成功记录相差不超过五分钟。最后一个命令要求两个节点的 TLS 入口及可路由后端主机不同，两节点 TLS 入口的解析 IP 不重叠，四份证据处于同一五分钟窗口。旧版没有 `resolvedIPs` 的证据 JSON 需重新采集。
+第一个命令检查声明中鉴权、loopback 后端、独立 TLS 端口、显式允许源与连接不复用；TLS 入口填 loopback、`localhost`、通配地址、链路本地或多播地址也会在声明阶段被拒绝。DNS 名称仍需通过在线探针验证其解析地址。L7/HTTP2 多租户复用会输出 `ALERT` 并以非零状态退出，适合部署门禁或告警。第二个命令从允许源完成证书验证、gRPC `h2` TLS 握手、匿名 HTTP 配置读取 404 与无效登录 401；该探针禁用环境中的 HTTP 代理变量，确保直接连接入口。第三个命令从拒绝源检查两个 TLS 入口和两个后端端口都无法建立 TCP，并逐个检查 DNS 返回的地址，不能因其中一个地址拒绝而漏过另一个开放地址；`backendExternalHost` 必须是拒绝源可路由的侧车宿主机或 Pod **单播 IP**，不可填写 loopback、通配地址或主机名。探针记录路由选择的本机源 IP 与每个目标的 DNS 解析 IP，并按 `allowedSources` 检查允许源属于、拒绝源不属于允许网段；无路由、DNS 错误等探针故障不能计作网络策略拒绝。拒绝源实际 TCP 探针使用的地址还必须与本次路由检查解析出的地址一致。第四个命令要求同一配置 SHA-256、不同执行主机、目标端口完整、源 IP 分类正确、两侧解析 IP 相同，且两份成功记录相差不超过五分钟。最后一个命令要求两个节点的 TLS 入口及可路由后端主机不同，两节点 TLS 入口的解析 IP 不重叠，四份证据处于同一五分钟窗口。旧版没有 `resolvedIPs` 的证据 JSON 需重新采集。
 
 `--evidence` 不记录凭证，已有证据文件不会被覆盖；每次运行使用唯一文件名，避免失败后误用旧的 PASS 文件。路由源 IP 可能在 NAT 后改变，需另从防火墙/代理连接日志核对实际看到的源 IP。`resolvedIPs` 是探针时的 DNS 解析快照，允许源的 TLS/HTTP 客户端可能在随后连接时重新解析；需从代理连接日志核对实际目标 IP。**证据配对也不能单独证明代理配置或网络策略生效；服务停机时拒绝源探针会通过。** 必须在服务运行期间从允许源通过 `--probe` 并完成有效 SDK 登录、读和订阅；同一时间窗口从拒绝源运行 `--probe-denied`。记录两台执行主机、原始输出、退出码、策略与代理配置版本，以及代理实际观察到的源地址。应通过受控客户端实际发布/撤销验证推送停止和重连。两节点分别执行这些检查并保留证据后才可扩大正式支持声明。
 
@@ -95,6 +95,8 @@ curl --cacert /etc/golab/nacos-ca.pem -sS -o /dev/null -w '%{http_code}\n' 'http
 本轮复核：部署预检新增双节点四份证据同窗口门禁，并将拒绝源的“无路由”结果判为探针失败，12 个 Python 单元测试通过，声明文件检查通过。`go vet ./...` 通过。此共享环境的 Docker 根目录 `/data` 无可用空间；`make all` 中新起的 PostgreSQL 容器无法完成初始化，`TestQuotaAdminReplicaRead` 与 `TestPostgresJourneyReportReplaysAcceptedEvents` 均在 90 秒后因 TCP 连接拒绝失败，故本轮**没有**全量测试通过的结论。`ip netns add golab-issue13-probe` 返回 `mkdir /run/netns failed: Permission denied`。既有本机 TLS/L4 双节点测试记录仍有效，但本轮没有新增跨主机双节点、真实入口网络策略与代理源 IP 日志，因此 Issue #13 继续开放。
 
 同日新增预检复核：证据现在记录每个目标的 DNS 解析 IP；配对要求允许源与拒绝源解析一致，双节点要求两个 TLS 入口解析 IP 集合不重叠，拒绝源在路由检查与 TCP 探针之间的 DNS 变化会报错。`python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'` 13/13 通过，`GOWORK=off go test ./test/native -count=1` 通过（43.5 秒），`go vet ./...` 与 `go build ./...` 通过。`make all` 在当前主机仍因 `/data` Docker 根目录无可用空间导致新 PostgreSQL 容器未就绪，不能报告全量测试通过。`unshare -Urn true` 返回 `Operation not permitted`，`ip netns add` 返回 `/run/netns` 权限不足；没有新增跨主机、真实网络策略或代理日志证据，正式支持声明仍未扩大。
+
+本轮部署预检加固：声明中的 TLS 入口若为 loopback、`localhost`、通配、链路本地或多播地址，预检立即失败；对应 Python 回归用例 13/13 通过，示例声明通过。`GOWORK=off go test ./test/native -count=1`、`make all` 与 `make client-compatibility` 均通过；兼容性矩阵为直连 9/9、本机 TLS/L4 双节点 1/1，通过时仍保留官方 SDK 竞态与跨主机部署未验收的 LIMIT。全量检查使用已有 PostgreSQL 管理 DSN，Redis 由测试自行管理。该结果仍只是本机验证，不补足跨主机网络策略、代理连接日志和真实多租户生命周期验收。
 
 复现本机 TLS/L4 实测：
 

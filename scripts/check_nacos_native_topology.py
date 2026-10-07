@@ -42,6 +42,18 @@ def validate(c):
             host, port = split_address(c[field])
             if not host or not 0 < port < 65536:
                 raise ValueError("invalid TLS endpoint")
+            normalized_host = host.lower().rstrip(".")
+            if (host == "*" or normalized_host in ("localhost", "ip6-localhost")
+                    or normalized_host.endswith(".localhost")):
+                raise ValueError("TLS endpoint must be reachable from a separate client host")
+            try:
+                address = ipaddress.ip_address(host)
+            except ValueError:
+                pass  # A DNS name is checked again by the live probe.
+            else:
+                if (address.is_loopback or address.is_unspecified or address.is_multicast
+                        or address.is_link_local):
+                    raise ValueError("TLS endpoint must be a routable unicast address")
         except (KeyError, ValueError) as exc:
             errors.append(f"{field}: {exc}")
     if c.get("tlsHTTP") == c.get("tlsGRPC"):
