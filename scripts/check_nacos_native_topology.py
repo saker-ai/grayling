@@ -30,6 +30,13 @@ def validate(c):
                 raise ValueError("backend must bind loopback")
         except (KeyError, ValueError) as exc:
             errors.append(f"{field}: {exc}")
+    try:
+        external_ip = ipaddress.ip_address(c["backendExternalHost"])
+        if (external_ip.is_loopback or external_ip.is_unspecified or external_ip.is_multicast
+                or external_ip.is_link_local):
+            raise ValueError("must be a routable unicast IP reachable from the denied source")
+    except (KeyError, ValueError) as exc:
+        errors.append(f"backendExternalHost: {exc}")
     for field in ("tlsHTTP", "tlsGRPC"):
         try:
             host, port = split_address(c[field])
@@ -65,7 +72,7 @@ def split_address(value):
     return host, int(port)
 
 
-def source_ips(c, mode):
+def source_ips(c, mode, resolved=None):
     """Record the local routed address; NAT may change it after this host."""
     targets = [split_address(c[field]) for field in ("tlsHTTP", "tlsGRPC")]
     if mode == "denied":
@@ -77,6 +84,8 @@ def source_ips(c, mode):
         addresses = socket.getaddrinfo(host, port, type=socket.SOCK_DGRAM)
         if not addresses or any(ipaddress.ip_address(addr[4][0]).is_loopback for addr in addresses):
             raise ValueError(f"target {host} resolves to loopback or no address")
+        if resolved is not None:
+            resolved[net_address(host, port)] = sorted({addr[4][0] for addr in addresses})
         routed = set()
         for family, kind, proto, _, address in addresses:
             with socket.socket(family, kind, proto) as sock:
@@ -122,7 +131,7 @@ def probe(c):
             raise ValueError(f"{request.full_url}: HTTP {status}, expected {expected}")
 
 
-def probe_denied(c):
+def probe_denied(c, resolved=None):
     """Run from a source outside allowedSources while an allowed probe passes."""
     host = c.get("backendExternalHost")
     if not host or ipaddress.ip_address(host).is_loopback:
@@ -134,6 +143,11 @@ def probe_denied(c):
         addresses = socket.getaddrinfo(target[0], target[1], type=socket.SOCK_STREAM)
         if not addresses or any(ipaddress.ip_address(address[4][0]).is_loopback for address in addresses):
             raise ValueError(f"target {target[0]} resolves to loopback or no address")
+        if resolved is not None:
+            name = net_address(*target)
+            actual = sorted({address[4][0] for address in addresses})
+            if resolved.get(name) != actual:
+                raise ValueError(f"DNS addresses changed during denied probe for {name}")
         for address in addresses:
             endpoint = (address[4][0], target[1])
             try:
@@ -145,13 +159,14 @@ def probe_denied(c):
                 raise ValueError(f"inconclusive denied-source connection to {endpoint[0]}:{endpoint[1]}: {exc}") from exc
 
 
-def evidence(c, mode, sources=None):
+def evidence(c, mode, sources=None, resolved=None):
     return {
         "mode": mode,
         "result": "PASS",
         "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "probeHost": socket.gethostname(),
         "sourceIPs": sources or {},
+        "resolvedIPs": resolved or {},
         "configSHA256": hashlib.sha256(json.dumps(c, sort_keys=True).encode()).hexdigest(),
         "targets": [c["tlsHTTP"], c["tlsGRPC"]] + (
             [f"{c['backendExternalHost']}:{split_address(c[field])[1]}" for field in ("backendHTTP", "backendGRPC")]
@@ -173,6 +188,17 @@ def verify_pair(c, allowed, denied):
             raise ValueError(f"{mode} evidence lacks routed source IPs")
         if set(record["sourceIPs"]) != set(record["targets"]):
             raise ValueError(f"{mode} evidence source IPs do not cover every target")
+        resolved = record.get("resolvedIPs")
+        if not isinstance(resolved, dict) or set(resolved) != set(record["targets"]):
+            raise ValueError(f"{mode} evidence lacks resolved IPs for every target")
+        for target, addresses in resolved.items():
+            if not isinstance(addresses, list) or not addresses:
+                raise ValueError(f"{mode} evidence has no resolved IPs for {target}")
+            if any(ipaddress.ip_address(address).is_loopback for address in addresses):
+                raise ValueError(f"{mode} evidence resolves {target} to loopback")
+    for target in allowed["targets"]:
+        if allowed["resolvedIPs"][target] != denied["resolvedIPs"][target]:
+            raise ValueError(f"allowed and denied probes resolved different IPs for {target}")
     times = [datetime.datetime.fromisoformat(record["utc"]) for record in (allowed, denied)]
     if any(value.tzinfo is None for value in times) or abs((times[0] - times[1]).total_seconds()) > 300:
         raise ValueError("live probes must be within five minutes")
@@ -195,6 +221,12 @@ def verify_cluster(configs, records):
     for field in ("tlsHTTP", "tlsGRPC", "backendExternalHost"):
         if configs[0].get(field) == configs[1].get(field):
             raise ValueError(f"two nodes share {field}; distinct network endpoints are required")
+    entrance_ips = [set(), set()]
+    for index in range(2):
+        for field in ("tlsHTTP", "tlsGRPC"):
+            entrance_ips[index].update(records[index][0]["resolvedIPs"][configs[index][field]])
+    if entrance_ips[0] & entrance_ips[1]:
+        raise ValueError("two nodes' TLS entrances resolve to a shared IP address")
     times = [datetime.datetime.fromisoformat(record["utc"])
              for pair in records for record in pair]
     if max(times) - min(times) > datetime.timedelta(minutes=5):
@@ -260,23 +292,24 @@ def main():
         print("PASS: paired live probes from distinct classified sources")
         return 0
     sources = None
+    resolved = {}
     if args.probe:
         try:
-            sources = source_ips(config, "allowed")
+            sources = source_ips(config, "allowed", resolved)
             probe(config)
         except (OSError, ValueError, urllib.error.URLError) as exc:
             print("ALERT: live probe failed:", exc, file=sys.stderr)
             return 1
     if args.probe_denied:
         try:
-            sources = source_ips(config, "denied")
-            probe_denied(config)
+            sources = source_ips(config, "denied", resolved)
+            probe_denied(config, resolved)
         except (OSError, ValueError) as exc:
             print("ALERT: denied-source probe failed:", exc, file=sys.stderr)
             return 1
     mode = "denied" if args.probe_denied else "allowed" if args.probe else "declaration"
     if args.evidence:
-        output = evidence(config, mode, sources)
+        output = evidence(config, mode, sources, resolved)
         temporary = f"{args.evidence}.tmp.{os.getpid()}"
         try:
             with open(temporary, "w", encoding="utf-8") as stream:

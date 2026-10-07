@@ -27,6 +27,9 @@ class NativeTopologyTest(unittest.TestCase):
             ("mode", "l7-http2"), ("nativeAuth", False),
             ("backendConnectionReuse", True), ("backendGRPC", "0.0.0.0:19848"),
             ("allowedSources", ["0.0.0.0/0"]), ("caFile", ""),
+            ("backendExternalHost", "0.0.0.0"),
+            ("backendExternalHost", "127.0.0.1"),
+            ("backendExternalHost", "not-an-ip"),
         ):
             with self.subTest(field=field):
                 config = copy.deepcopy(self.config)
@@ -87,6 +90,13 @@ class NativeTopologyTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "10.42.1.11"):
                     probe_denied(self.config)
 
+    def test_denied_source_rejects_dns_change_after_route_check(self):
+        target = self.config["tlsHTTP"]
+        addresses = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.42.1.11", 8848))]
+        with patch("check_nacos_native_topology.socket.getaddrinfo", return_value=addresses):
+            with self.assertRaisesRegex(ValueError, "DNS addresses changed"):
+                probe_denied(self.config, {target: ["10.42.1.10"]})
+
     def test_denied_source_fails_on_unknown_host(self):
         with patch("check_nacos_native_topology.socket.getaddrinfo", side_effect=socket.gaierror("unknown")):
             with self.assertRaises(socket.gaierror):
@@ -144,14 +154,17 @@ class NativeTopologyTest(unittest.TestCase):
     def test_pair_requires_live_distinct_classified_sources(self):
         allowed_targets = evidence(self.config, "allowed")["targets"]
         denied_targets = evidence(self.config, "denied")["targets"]
-        allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in allowed_targets})
-        denied = evidence(self.config, "denied", {target: "10.43.0.7" for target in denied_targets})
+        resolved = {target: ["10.42.1.10"] for target in denied_targets}
+        allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in allowed_targets},
+                           {target: resolved[target] for target in allowed_targets})
+        denied = evidence(self.config, "denied", {target: "10.43.0.7" for target in denied_targets}, resolved)
         allowed["probeHost"] = "sdk-host"
         denied["probeHost"] = "blocked-host"
         verify_pair(self.config, allowed, denied)
         for field, value, message in (
             ("probeHost", "sdk-host", "distinct hosts"),
             ("sourceIPs", {}, "lacks routed source"),
+            ("resolvedIPs", {}, "lacks resolved IPs"),
             ("targets", [], "every configured target"),
             ("configSHA256", "wrong", "different deployment"),
             ("utc", (datetime.datetime.now(datetime.timezone.utc)
@@ -162,6 +175,10 @@ class NativeTopologyTest(unittest.TestCase):
                 changed[field] = value
                 with self.assertRaisesRegex(ValueError, message):
                     verify_pair(self.config, allowed, changed)
+        changed = copy.deepcopy(denied)
+        changed["resolvedIPs"][self.config["tlsHTTP"]] = ["10.42.1.12"]
+        with self.assertRaisesRegex(ValueError, "resolved different IPs"):
+            verify_pair(self.config, allowed, changed)
 
     def test_cluster_requires_two_distinct_nodes_in_same_window(self):
         other_config = copy.deepcopy(self.config)
@@ -169,10 +186,13 @@ class NativeTopologyTest(unittest.TestCase):
                             backendExternalHost="10.42.1.11")
 
         def pair(config):
+            addresses = {target: [config["backendExternalHost"]]
+                         for target in evidence(config, "denied")["targets"]}
             allowed = evidence(config, "allowed", {
-                target: "10.42.0.7" for target in evidence(config, "allowed")["targets"]})
+                target: "10.42.0.7" for target in evidence(config, "allowed")["targets"]},
+                {target: addresses[target] for target in evidence(config, "allowed")["targets"]})
             denied = evidence(config, "denied", {
-                target: "10.43.0.7" for target in evidence(config, "denied")["targets"]})
+                target: "10.43.0.7" for target in evidence(config, "denied")["targets"]}, addresses)
             allowed["probeHost"] = "sdk-host"
             denied["probeHost"] = "blocked-host"
             return allowed, denied
@@ -189,6 +209,11 @@ class NativeTopologyTest(unittest.TestCase):
             verify_cluster([self.config, other_config], stale)
         with self.assertRaisesRegex(ValueError, "different deployment"):
             verify_cluster([self.config, other_config], [records[0], records[0]])
+        alias = copy.deepcopy(records)
+        for record in alias[1]:
+            record["resolvedIPs"][other_config["tlsHTTP"]] = ["10.42.1.10"]
+        with self.assertRaisesRegex(ValueError, "shared IP address"):
+            verify_cluster([self.config, other_config], alias)
 
 
 if __name__ == "__main__":
