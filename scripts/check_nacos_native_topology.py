@@ -2,6 +2,7 @@
 """Fail closed on unsupported native Nacos deployment declarations; optionally probe TLS."""
 import argparse
 import datetime
+import errno
 import hashlib
 import ipaddress
 import json
@@ -138,8 +139,10 @@ def probe_denied(c):
             try:
                 with socket.create_connection(endpoint, timeout=3):
                     raise ValueError(f"unauthorized source connected to {endpoint[0]}:{endpoint[1]}")
-            except OSError:
-                pass
+            except OSError as exc:
+                if isinstance(exc, (socket.timeout, ConnectionRefusedError)) or exc.errno == errno.ECONNREFUSED:
+                    continue
+                raise ValueError(f"inconclusive denied-source connection to {endpoint[0]}:{endpoint[1]}: {exc}") from exc
 
 
 def evidence(c, mode, sources=None):
@@ -182,6 +185,22 @@ def verify_pair(c, allowed, denied):
                 raise ValueError(f"{record['mode']} source {source} has wrong allowedSources classification")
 
 
+def verify_cluster(configs, records):
+    if len(configs) != 2 or len(records) != 2:
+        raise ValueError("exactly two nodes and their allowed/denied evidence are required")
+    if any(validate(config) for config in configs):
+        raise ValueError("both node declarations must pass topology validation")
+    for config, (allowed, denied) in zip(configs, records):
+        verify_pair(config, allowed, denied)
+    for field in ("tlsHTTP", "tlsGRPC", "backendExternalHost"):
+        if configs[0].get(field) == configs[1].get(field):
+            raise ValueError(f"two nodes share {field}; distinct network endpoints are required")
+    times = [datetime.datetime.fromisoformat(record["utc"])
+             for pair in records for record in pair]
+    if max(times) - min(times) > datetime.timedelta(minutes=5):
+        raise ValueError("both nodes' live probes must be within five minutes")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", help="deployment declaration JSON")
@@ -190,11 +209,16 @@ def main():
     parser.add_argument("--evidence", help="write successful probe metadata as JSON; no credentials are recorded")
     parser.add_argument("--verify-pair", nargs=2, metavar=("ALLOWED", "DENIED"),
                         help="require same-config, distinct-source live probes within five minutes")
+    parser.add_argument("--verify-cluster", nargs=5,
+                        metavar=("NODE_B_CONFIG", "A_ALLOWED", "A_DENIED", "B_ALLOWED", "B_DENIED"),
+                        help="require paired live evidence for two distinct nodes within five minutes")
     args = parser.parse_args()
     if args.probe and args.probe_denied:
         parser.error("--probe and --probe-denied are mutually exclusive")
     if args.verify_pair and (args.probe or args.probe_denied or args.evidence):
         parser.error("--verify-pair cannot be combined with live probes or --evidence")
+    if args.verify_cluster and (args.verify_pair or args.probe or args.probe_denied or args.evidence):
+        parser.error("--verify-cluster cannot be combined with other checks")
     if args.evidence and os.path.lexists(args.evidence):
         print("ALERT: evidence path already exists; use a new filename for each run", file=sys.stderr)
         return 1
@@ -205,6 +229,24 @@ def main():
         for error in errors:
             print("ALERT:", error, file=sys.stderr)
         return 1
+    if args.verify_cluster:
+        try:
+            paths = args.verify_cluster
+            with open(paths[0], encoding="utf-8") as stream:
+                other_config = json.load(stream)
+            records = []
+            for allowed_path, denied_path in ((paths[1], paths[2]), (paths[3], paths[4])):
+                with open(allowed_path, encoding="utf-8") as stream:
+                    allowed = json.load(stream)
+                with open(denied_path, encoding="utf-8") as stream:
+                    denied = json.load(stream)
+                records.append((allowed, denied))
+            verify_cluster((config, other_config), records)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print("ALERT: two-node evidence failed:", exc, file=sys.stderr)
+            return 1
+        print("PASS: paired live probes for two distinct TLS/L4 nodes")
+        return 0
     if args.verify_pair:
         try:
             with open(args.verify_pair[0], encoding="utf-8") as stream:

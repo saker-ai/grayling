@@ -1,10 +1,11 @@
 import copy
 import datetime
+import errno
 import socket
 import unittest
 from unittest.mock import patch
 
-from check_nacos_native_topology import evidence, probe_denied, source_ips, validate, verify_pair
+from check_nacos_native_topology import evidence, probe_denied, source_ips, validate, verify_cluster, verify_pair
 
 
 class NativeTopologyTest(unittest.TestCase):
@@ -91,6 +92,14 @@ class NativeTopologyTest(unittest.TestCase):
             with self.assertRaises(socket.gaierror):
                 probe_denied(self.config)
 
+    def test_denied_source_does_not_count_missing_route_as_policy(self):
+        with patch("check_nacos_native_topology.socket.getaddrinfo", return_value=[
+                (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.42.1.10", 8848))]):
+            with patch("check_nacos_native_topology.socket.create_connection",
+                       side_effect=OSError(errno.ENETUNREACH, "Network is unreachable")):
+                with self.assertRaisesRegex(ValueError, "inconclusive denied-source connection"):
+                    probe_denied(self.config)
+
     def test_denied_source_fails_on_loopback_resolution(self):
         with patch("check_nacos_native_topology.socket.getaddrinfo", return_value=[(None, None, None, None, ("127.0.0.1", 8848))]):
             with self.assertRaisesRegex(ValueError, "resolves to loopback"):
@@ -153,6 +162,33 @@ class NativeTopologyTest(unittest.TestCase):
                 changed[field] = value
                 with self.assertRaisesRegex(ValueError, message):
                     verify_pair(self.config, allowed, changed)
+
+    def test_cluster_requires_two_distinct_nodes_in_same_window(self):
+        other_config = copy.deepcopy(self.config)
+        other_config.update(tlsHTTP="nacos-b.example:8848", tlsGRPC="nacos-b.example:9848",
+                            backendExternalHost="10.42.1.11")
+
+        def pair(config):
+            allowed = evidence(config, "allowed", {
+                target: "10.42.0.7" for target in evidence(config, "allowed")["targets"]})
+            denied = evidence(config, "denied", {
+                target: "10.43.0.7" for target in evidence(config, "denied")["targets"]})
+            allowed["probeHost"] = "sdk-host"
+            denied["probeHost"] = "blocked-host"
+            return allowed, denied
+
+        records = [pair(self.config), pair(other_config)]
+        verify_cluster([self.config, other_config], records)
+        with self.assertRaisesRegex(ValueError, "distinct network endpoints"):
+            verify_cluster([self.config, self.config], [records[0], records[0]])
+        stale = copy.deepcopy(records)
+        for record in stale[1]:
+            record["utc"] = (datetime.datetime.now(datetime.timezone.utc)
+                             - datetime.timedelta(minutes=6)).isoformat()
+        with self.assertRaisesRegex(ValueError, "both nodes.*five minutes"):
+            verify_cluster([self.config, other_config], stale)
+        with self.assertRaisesRegex(ValueError, "different deployment"):
+            verify_cluster([self.config, other_config], [records[0], records[0]])
 
 
 if __name__ == "__main__":
