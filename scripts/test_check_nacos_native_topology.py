@@ -92,6 +92,13 @@ class NativeTopologyTest(unittest.TestCase):
             "10.42.1.10:18848", "10.42.1.10:19848",
         ])
 
+    def test_ipv6_backend_evidence_uses_probe_target_keys(self):
+        config = copy.deepcopy(self.config)
+        config["backendExternalHost"] = "2001:db8::10"
+        self.assertEqual(evidence(config, "denied")["targets"][-2:], [
+            "[2001:db8::10]:18848", "[2001:db8::10]:19848",
+        ])
+
     def test_denied_source_fails_if_any_port_accepts_tcp(self):
         class Connected:
             def __enter__(self):
@@ -234,6 +241,10 @@ class NativeTopologyTest(unittest.TestCase):
         allowed["probeHost"] = "sdk-host"
         denied["probeHost"] = "blocked-host"
         verify_pair(self.config, allowed, denied)
+        mapped = copy.deepcopy(allowed)
+        mapped["sourceIPs"] = {target: "::ffff:10.42.0.7" for target in allowed_targets}
+        mapped["resolvedIPs"] = {target: ["::ffff:10.42.1.10"] for target in allowed_targets}
+        verify_pair(self.config, mapped, denied)
         for field, value, message in (
             ("probeHost", "sdk-host", "distinct hosts"),
             ("sourceIPs", {}, "lacks routed source"),
@@ -287,6 +298,15 @@ class NativeTopologyTest(unittest.TestCase):
             record["resolvedIPs"][other_config["tlsHTTP"]] = ["10.42.1.10"]
         with self.assertRaisesRegex(ValueError, "shared IP address"):
             verify_cluster([self.config, other_config], alias)
+        mapped_backend = copy.deepcopy(other_config)
+        mapped_backend["backendExternalHost"] = "::ffff:10.42.1.10"
+        with self.assertRaisesRegex(ValueError, "share backendExternalHost"):
+            verify_cluster([self.config, mapped_backend], [records[0], pair(mapped_backend)])
+        mapped_tls = copy.deepcopy(records)
+        for record in mapped_tls[1]:
+            record["resolvedIPs"][other_config["tlsHTTP"]] = ["::ffff:10.42.1.10"]
+        with self.assertRaisesRegex(ValueError, "shared IP address"):
+            verify_cluster([self.config, other_config], mapped_tls)
 
 
 if __name__ == "__main__":

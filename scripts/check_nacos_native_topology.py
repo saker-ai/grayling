@@ -91,11 +91,17 @@ def split_address(value):
 
 
 def routable_unicast(value):
-    address = ipaddress.ip_address(value)
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
-        address = address.ipv4_mapped
+    address = canonical_ip(value)
     return not (address.is_loopback or address.is_unspecified
                 or address.is_multicast or address.is_link_local)
+
+
+def canonical_ip(value):
+    """Treat an IPv4 address and its IPv4-mapped IPv6 form as one endpoint."""
+    address = ipaddress.ip_address(value)
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        return address.ipv4_mapped
+    return address
 
 
 def source_ips(c, mode, resolved=None):
@@ -116,7 +122,7 @@ def source_ips(c, mode, resolved=None):
         for family, kind, proto, _, address in addresses:
             with socket.socket(family, kind, proto) as sock:
                 sock.connect(address)
-                source = ipaddress.ip_address(sock.getsockname()[0])
+                source = canonical_ip(sock.getsockname()[0])
             permitted = any(source in network for network in networks)
             if permitted != (mode == "allowed"):
                 raise ValueError(f"{mode} source {source} has wrong allowedSources classification for {host}:{port}")
@@ -212,7 +218,8 @@ def evidence(c, mode, sources=None, resolved=None):
         "resolvedIPs": resolved or {},
         "configSHA256": hashlib.sha256(json.dumps(c, sort_keys=True).encode()).hexdigest(),
         "targets": [c["tlsHTTP"], c["tlsGRPC"]] + (
-            [f"{c['backendExternalHost']}:{split_address(c[field])[1]}" for field in ("backendHTTP", "backendGRPC")]
+            [net_address(c["backendExternalHost"], split_address(c[field])[1])
+             for field in ("backendHTTP", "backendGRPC")]
             if mode == "denied" else []
         ),
     }
@@ -240,7 +247,8 @@ def verify_pair(c, allowed, denied):
             if any(not routable_unicast(address) for address in addresses):
                 raise ValueError(f"{mode} evidence resolves {target} to a non-routable unicast address")
     for target in allowed["targets"]:
-        if allowed["resolvedIPs"][target] != denied["resolvedIPs"][target]:
+        if {canonical_ip(ip) for ip in allowed["resolvedIPs"][target]} != {
+                canonical_ip(ip) for ip in denied["resolvedIPs"][target]}:
             raise ValueError(f"allowed and denied probes resolved different IPs for {target}")
     times = [datetime.datetime.fromisoformat(record["utc"]) for record in (allowed, denied)]
     if any(value.tzinfo is None for value in times) or abs((times[0] - times[1]).total_seconds()) > 300:
@@ -250,7 +258,7 @@ def verify_pair(c, allowed, denied):
     networks = [ipaddress.ip_network(value, strict=False) for value in c["allowedSources"]]
     for record, permitted in ((allowed, True), (denied, False)):
         for source in record["sourceIPs"].values():
-            if any(ipaddress.ip_address(source) in network for network in networks) != permitted:
+            if any(canonical_ip(source) in network for network in networks) != permitted:
                 raise ValueError(f"{record['mode']} source {source} has wrong allowedSources classification")
 
 
@@ -264,10 +272,12 @@ def verify_cluster(configs, records):
     for field in ("tlsHTTP", "tlsGRPC", "backendExternalHost"):
         if configs[0].get(field) == configs[1].get(field):
             raise ValueError(f"two nodes share {field}; distinct network endpoints are required")
+    if canonical_ip(configs[0]["backendExternalHost"]) == canonical_ip(configs[1]["backendExternalHost"]):
+        raise ValueError("two nodes share backendExternalHost; distinct network endpoints are required")
     entrance_ips = [set(), set()]
     for index in range(2):
         for field in ("tlsHTTP", "tlsGRPC"):
-            entrance_ips[index].update(records[index][0]["resolvedIPs"][configs[index][field]])
+            entrance_ips[index].update(canonical_ip(ip) for ip in records[index][0]["resolvedIPs"][configs[index][field]])
     if entrance_ips[0] & entrance_ips[1]:
         raise ValueError("two nodes' TLS entrances resolve to a shared IP address")
     times = [datetime.datetime.fromisoformat(record["utc"])
