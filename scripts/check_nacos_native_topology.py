@@ -10,6 +10,7 @@ import os
 import socket
 import ssl
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -225,6 +226,21 @@ def evidence(c, mode, sources=None, resolved=None):
     }
 
 
+def write_evidence(path, output):
+    """Publish a complete evidence file without replacing a concurrent writer."""
+    fd, temporary = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.",
+                                     dir=os.path.dirname(path) or ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(output, stream, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, path)
+    finally:
+        os.unlink(temporary)
+
+
 def verify_pair(c, allowed, denied):
     expected = hashlib.sha256(json.dumps(c, sort_keys=True).encode()).hexdigest()
     for record, mode in ((allowed, "allowed"), (denied, "denied")):
@@ -371,15 +387,11 @@ def main():
     mode = "denied" if args.probe_denied else "allowed" if args.probe else "declaration"
     if args.evidence:
         output = evidence(config, mode, sources, resolved)
-        temporary = f"{args.evidence}.tmp.{os.getpid()}"
         try:
-            with open(temporary, "w", encoding="utf-8") as stream:
-                json.dump(output, stream, indent=2)
-                stream.write("\n")
-            os.replace(temporary, args.evidence)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+            write_evidence(args.evidence, output)
+        except FileExistsError:
+            print("ALERT: evidence path already exists; use a new filename for each run", file=sys.stderr)
+            return 1
     print("PASS: declared TLS/L4 topology" + (" and live TLS/HTTP probes" if args.probe else " and denied-source TCP probes" if args.probe_denied else ""))
     return 0
 

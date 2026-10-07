@@ -2,14 +2,17 @@ import copy
 import datetime
 import errno
 import http.server
+import json
+import os
 import socket
+import tempfile
 import threading
 import unittest
 import urllib.request
 from unittest.mock import patch
 
 from check_nacos_native_topology import (RejectRedirect, check_probe_dns, evidence, probe_denied,
-                                         source_ips, validate, verify_cluster, verify_pair)
+                                         source_ips, validate, verify_cluster, verify_pair, write_evidence)
 
 
 class NativeTopologyTest(unittest.TestCase):
@@ -25,6 +28,34 @@ class NativeTopologyTest(unittest.TestCase):
 
     def test_supported_declaration(self):
         self.assertEqual(validate(self.config), [])
+
+    def test_evidence_writer_never_replaces_existing_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "probe.json")
+            first = {"probeHost": "first"}
+            write_evidence(path, first)
+            with self.assertRaises(FileExistsError):
+                write_evidence(path, {"probeHost": "second"})
+            with open(path, encoding="utf-8") as stream:
+                self.assertEqual(json.load(stream), first)
+            self.assertEqual(os.listdir(directory), ["probe.json"])
+
+    def test_evidence_writer_rejects_file_created_during_publish(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "probe.json")
+            real_link = os.link
+
+            def competing_writer(source, target):
+                with open(target, "x", encoding="utf-8") as stream:
+                    stream.write("other probe\n")
+                return real_link(source, target)
+
+            with patch("check_nacos_native_topology.os.link", side_effect=competing_writer):
+                with self.assertRaises(FileExistsError):
+                    write_evidence(path, {"probeHost": "late"})
+            with open(path, encoding="utf-8") as stream:
+                self.assertEqual(stream.read(), "other probe\n")
+            self.assertEqual(os.listdir(directory), ["probe.json"])
 
     def test_unsafe_topologies_fail_closed(self):
         for field, value in (
