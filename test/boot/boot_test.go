@@ -5,6 +5,7 @@ package boot
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,6 +31,21 @@ func freePort(t *testing.T) int {
 	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
 	return port
+}
+
+func TestAnonymousNativeListenerRejectsNonLoopbackEvenWithOverride(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the GoLab binary")
+	}
+	bin := buildBin(t, "./cmd/golab", "golab-native-bind-check")
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "-gonacos-addr", "0.0.0.0:0", "-gonacos-grpc-addr", "127.0.0.1:0")
+	cmd.Env = append(os.Environ(), "GOLAB_ALLOW_NON_LOOPBACK_GONACOS=1")
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "without -nacos-native-auth=true") {
+		t.Fatalf("anonymous native non-loopback listener was not rejected: err=%v output=%s", err, out)
+	}
 }
 
 func TestBinaryBootsAndServes(t *testing.T) {

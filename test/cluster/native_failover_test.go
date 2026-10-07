@@ -1,11 +1,14 @@
 package cluster
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	json "encoding/json/v2"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -53,12 +56,21 @@ func nacosServerConfig(t *testing.T, r *replica) constant.ServerConfig {
 }
 
 func nativeClusterClient(t *testing.T, namespace, sdkToken string, servers ...constant.ServerConfig) config_client.IConfigClient {
+	return nativeClusterClientWithCA(t, namespace, sdkToken, "", servers...)
+}
+
+func nativeClusterClientWithCA(t *testing.T, namespace, sdkToken, caFile string, servers ...constant.ServerConfig) config_client.IConfigClient {
 	t.Helper()
+	opts := []constant.ClientOption{
+		constant.WithNamespaceId(namespace), constant.WithTimeoutMs(3000),
+		constant.WithUsername("golab-sdk"), constant.WithPassword(sdkToken),
+		constant.WithNotLoadCacheAtStart(true), constant.WithCacheDir(t.TempDir()), constant.WithLogDir(t.TempDir()),
+	}
+	if caFile != "" {
+		opts = append(opts, constant.WithTLS(*constant.NewTLSConfig(constant.WithCA(caFile, ""))))
+	}
 	c, err := clients.NewConfigClient(vo.NacosClientParam{
-		ClientConfig: constant.NewClientConfig(
-			constant.WithNamespaceId(namespace), constant.WithTimeoutMs(3000),
-			constant.WithUsername("golab-sdk"), constant.WithPassword(sdkToken),
-			constant.WithNotLoadCacheAtStart(true), constant.WithCacheDir(t.TempDir()), constant.WithLogDir(t.TempDir())),
+		ClientConfig:  constant.NewClientConfig(opts...),
 		ServerConfigs: servers,
 	})
 	if err != nil {
@@ -157,20 +169,34 @@ func TestOfficialNacosClientFailsOverAcrossGolabNodes(t *testing.T) {
 	}
 
 	b := startReplica(t, "native-B", bin, dsn, redis.Addr, authSecret, time.Second, "-nacos-native-auth=true")
+	cert, caFile := tlsL4Fixture(t)
+	server := func(node *replica) constant.ServerConfig {
+		httpAddr := startNativeTLSL4(t, replicaOption(t, node, "-gonacos-addr"), cert, false)
+		grpcAddr := startNativeTLSL4(t, replicaOption(t, node, "-gonacos-grpc-addr"), cert, true)
+		_, hp, _ := net.SplitHostPort(httpAddr)
+		_, gp, _ := net.SplitHostPort(grpcAddr)
+		httpPort, _ := strconv.Atoi(hp)
+		grpcPort, _ := strconv.Atoi(gp)
+		return *constant.NewServerConfig("127.0.0.1", uint64(httpPort), constant.WithScheme("https"), constant.WithGrpcPort(uint64(grpcPort)))
+	}
+	serverA, serverB := server(a), server(b)
 	b.proc.terminate(t)
 	// The SDK's next-server rotation can choose either address first. With B
 	// offline, an initial successful query proves it connected through A.
-	native := nativeClusterClient(t, environment.NamespaceID, sdkToken.Secret,
-		nacosServerConfig(t, b), nacosServerConfig(t, a))
+	native := nativeClusterClientWithCA(t, environment.NamespaceID, sdkToken.Secret, caFile, serverB, serverA)
 	initial, err := nativeClusterRevision(native)
 	if err != nil || initial != r1 {
 		t.Fatalf("initial native revision=%d want=%d error=%v", initial, r1, err)
 	}
-	changes := make(chan struct{}, 8)
+	changes := make(chan int64, 8)
 	if err := native.ListenConfig(vo.ConfigParam{DataId: configstore.ManifestDataID, Group: configstore.Group,
-		OnChange: func(_, _, _, _ string) {
+		OnChange: func(_, _, _, content string) {
+			var manifest model.Manifest
+			if json.Unmarshal([]byte(content), &manifest) != nil {
+				return
+			}
 			select {
-			case changes <- struct{}{}:
+			case changes <- manifest.Revision:
 			default:
 			}
 		}}); err != nil {
@@ -181,17 +207,42 @@ func TestOfficialNacosClientFailsOverAcrossGolabNodes(t *testing.T) {
 	sdkA := &client{t: t, base: a.base, token: sdkToken.Secret}
 	sdkB := &client{t: t, base: b.base, token: sdkToken.Secret}
 	waitRevision(t, r1, 15*time.Second, sdkA, sdkB)
-	for _, node := range []*replica{a, b} {
-		other := nativeClusterClient(t, environment.NamespaceID, otherToken.Secret, nacosServerConfig(t, node))
+	checkNativeSharedBackendConnection(t, replicaOption(t, a, "-gonacos-grpc-addr"),
+		environment.NamespaceID, sdkToken.Secret, otherToken.Secret, cert, caFile)
+	foreignPushes := make(chan string, 2)
+	for _, node := range []struct {
+		name   string
+		server constant.ServerConfig
+	}{{a.name, serverA}, {b.name, serverB}} {
+		other := nativeClusterClientWithCA(t, environment.NamespaceID, otherToken.Secret, caFile, node.server)
 		if _, err := other.GetConfig(vo.ConfigParam{DataId: configstore.ManifestDataID, Group: configstore.Group}); err == nil {
 			t.Fatalf("other tenant read acme manifest through node %s", node.name)
 		}
+		_ = other.ListenConfig(vo.ConfigParam{DataId: configstore.ManifestDataID, Group: configstore.Group,
+			OnChange: func(_, _, _, _ string) { foreignPushes <- node.name }})
 	}
 	r2, code := adminA.publishFlag(splitFlag("feature", 60))
 	if code != http.StatusOK {
 		t.Fatalf("publish r2: HTTP %d", code)
 	}
 	waitRevision(t, r2, 15*time.Second, sdkA, sdkB)
+	pushDeadline := time.After(10 * time.Second)
+waitPush:
+	for {
+		select {
+		case revision := <-changes:
+			if revision == r2 {
+				break waitPush
+			}
+		case <-pushDeadline:
+			t.Fatal("authorized TLS subscription did not receive r2 manifest push")
+		}
+	}
+	select {
+	case node := <-foreignPushes:
+		t.Fatalf("other tenant received acme push through %s", node)
+	case <-time.After(time.Second):
+	}
 	a.proc.terminate(t)
 	adminB := &client{t: t, base: b.base, token: owner, reviewer: reviewer.Secret}
 	r3, code := adminB.publishFlag(splitFlag("feature", 70))
@@ -219,18 +270,73 @@ func TestOfficialNacosClientFailsOverAcrossGolabNodes(t *testing.T) {
 	if lastVerified != r3 {
 		t.Fatalf("native client did not fail over to B: revision=%d want=%d last error=%v", lastVerified, r3, lastErr)
 	}
-	if code := adminB.do(http.MethodDelete, "/api/v1/admin/tokens/"+sdkToken.Token.ID, nil, nil); code != http.StatusOK {
-		t.Fatalf("revoke SDK token: HTTP %d", code)
+	// The TLS HTTP listener must expose only login; it cannot bypass gRPC
+	// authorization, including for callers with no credential at all.
+	httpAddr := net.JoinHostPort(serverB.IpAddr, strconv.FormatUint(serverB.Port, 10))
+	pool := x509.NewCertPool()
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		t.Fatal(err)
 	}
-	httpAddr := replicaOption(t, b, "-gonacos-addr")
-	resp, err := http.PostForm("http://"+httpAddr+"/nacos/v1/auth/users/login", url.Values{
+	if !pool.AppendCertsFromPEM(caPEM) {
+		t.Fatal("invalid test CA")
+	}
+	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}}
+	baseURL := "https://" + httpAddr
+	resp, err := httpClient.Get(baseURL + "/nacos/v1/cs/configs?tenant=" + environment.NamespaceID + "&group=GOLAB_FLAGS&dataId=golab.manifest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("HTTP config bypass: HTTP %d, want 404", resp.StatusCode)
+	}
+	resp, err = httpClient.PostForm(baseURL+"/nacos/v1/auth/users/login", url.Values{
+		"username": {"golab-sdk"}, "password": {"invalid"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthorized TLS login: HTTP %d, want 401", resp.StatusCode)
+	}
+	resp, err = httpClient.PostForm(baseURL+"/nacos/v1/auth/users/login", url.Values{
 		"username": {"golab-sdk"}, "password": {sdkToken.Secret},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("authorized TLS login: HTTP %d, want 200", resp.StatusCode)
+	}
+	if code := adminB.do(http.MethodDelete, "/api/v1/admin/tokens/"+sdkToken.Token.ID, nil, nil); code != http.StatusOK {
+		t.Fatalf("revoke SDK token: HTTP %d", code)
+	}
+	resp, err = httpClient.PostForm(baseURL+"/nacos/v1/auth/users/login", url.Values{
+		"username": {"golab-sdk"}, "password": {sdkToken.Secret},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("revoked SDK credential login through B: HTTP %d, want 401", resp.StatusCode)
+	}
+	r4, code := adminB.publishFlag(splitFlag("feature", 80))
+	if code != http.StatusOK {
+		t.Fatalf("publish after revoke: HTTP %d", code)
+	}
+	quiet := time.After(time.Second)
+	for {
+		select {
+		case revision := <-changes:
+			if revision == r4 {
+				t.Fatal("revoked SDK credential received r4 manifest push")
+			}
+		case <-quiet:
+			return
+		}
 	}
 }

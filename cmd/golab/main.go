@@ -4,9 +4,9 @@
 //     embedded web console;
 //   - an in-process gonacos server providing the Config substrate (flag
 //     revisions + manifest distribution) and the AI resource store. The
-//     gonacos listeners are bound to LOOPBACK by default and must never be
-//     exposed to tenants (§9); all tenant traffic flows through the GoLab
-//     API, which enforces authorization gonacos does not.
+//     gonacos listeners are bound to LOOPBACK by default. Anonymous native
+//     access must never be exposed to tenants; the explicit native-auth mode
+//     scopes SDK-token reads and subscriptions (docs/Nacos原生客户端.md).
 //
 // Storage topology (docs/技术方案.md §3): GoLab server + same-process
 // gonacos + platform store. The dev/default platform store is the
@@ -112,13 +112,16 @@ func main() {
 		logger.Fatal("admin password must contain at least 12 bytes and non-whitespace characters")
 	}
 
-	// Fail loudly on non-loopback gonacos binds without an explicit opt-in:
-	// the substrate has no tenant authorization (§9).
+	// Anonymous gonacos has no tenant authorization. Any non-loopback bind
+	// requires native SDK-token auth as well as an explicit deployment opt-in.
 	if !isLoopback(*gonacosAddr) || !isLoopback(*gonacosGRPC) {
-		if os.Getenv("GOLAB_ALLOW_NON_LOOPBACK_GONACOS") != "1" {
-			logger.Fatalf("refusing to bind gonacos to non-loopback address (%s / %s): the substrate performs no tenant authorization. Set GOLAB_ALLOW_NON_LOOPBACK_GONACOS=1 ONLY behind a verified network policy.", *gonacosAddr, *gonacosGRPC)
+		if !*nativeConfigAuth {
+			logger.Fatal("refusing non-loopback gonacos listeners without -nacos-native-auth=true: anonymous native access cannot be exposed to a tenant-reachable network")
 		}
-		logger.Printf("WARNING: gonacos bound to non-loopback addresses %s / %s — network policy MUST deny tenant access", *gonacosAddr, *gonacosGRPC)
+		if os.Getenv("GOLAB_ALLOW_NON_LOOPBACK_GONACOS") != "1" {
+			logger.Fatalf("refusing to bind gonacos to non-loopback address (%s / %s): set GOLAB_ALLOW_NON_LOOPBACK_GONACOS=1 only behind verified TLS termination and network policy", *gonacosAddr, *gonacosGRPC)
+		}
+		logger.Printf("WARNING: native Nacos bound to non-loopback addresses %s / %s — TLS termination and network policy MUST be verified", *gonacosAddr, *gonacosGRPC)
 	}
 
 	if *dataFile != "" && *gonacosData == "" {

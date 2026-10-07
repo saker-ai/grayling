@@ -1,4 +1,4 @@
-# Nacos 原生客户端兼容性验证（Issue #11）
+# Nacos 原生客户端兼容性与部署验收（Issue #11 / #13）
 
 ## 结论与支持边界
 
@@ -12,14 +12,77 @@
 
 **原生订阅尚不是 GoLab 的正式支持接口。** 默认 gonacos 仍仅绑定 loopback，默认模式没有原生客户端租户鉴权；`TestNativeClientCanReadOtherTenantWithoutAuthorization` 保留为默认模式的安全边界用例。GoLab 新增显式 `-nacos-native-auth` 模式：官方客户端使用用户名 `golab-sdk`、密码为 GoLab SDK token，经原生 HTTP 登录；该模式的 HTTP 端口只提供登录，其他 gonacos HTTP 路由一律 404。gRPC 只允许连接维护、配置查询和批量订阅；每次配置读/订阅以服务端 `ResolveToken` 的 SDK audience 与 `(workspace, environment)` 推导唯一 namespace，Group 限定 `GOLAB_FLAGS`，dataId 限定 manifest/不可变文档；推送前再次核验凭证，撤销后不再发送通知。官方 Go SDK 的真实客户端测试已验证 A 凭证读取 A、B 凭证不能读取 A 的 manifest/文档或订阅 A 更新，以及撤销已建立订阅后的推送停止。SDK 在网络读取失败时可能返回本地 last-known-good 缓存，因此调用方不能仅用 `GetConfig` 的成功返回推断凭证仍有效。
 
-gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f) 将推送订阅从客户端 IP 改为服务端连接 ID 并串行化双向流写入；[`dee1d72`](https://github.com/godeps/gonacos/commit/dee1d72) 增加逐帧鉴权钩子，[`3836219`](https://github.com/godeps/gonacos/commit/3836219) 增加原生配置限定模式及推送时复核，[`ea39c83`](https://github.com/godeps/gonacos/commit/ea39c83) 消除了嵌入式实例之间共享 gRPC Server 导致的鉴权状态污染。相关 gonacos 包的 `go test -race` 通过。完整原生客户端 `-race` 仍报告官方 `nacos-sdk-go/v2 v2.3.5` 内部竞态：`CloseClient` 与其全局 client map 访问并发，以及断线重连时连接状态的并发读写；这不是 GoLab 或 gonacos 服务端栈。原生订阅的订阅关联依赖服务端连接 ID，仅验证了直连 TCP；L7 HTTP/2 代理若复用不同租户到同一后端连接，当前不属于支持拓扑。默认保持 loopback，外部访问必须另行验证网络隔离与 TLS 终止边界。
+gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f) 将推送订阅从客户端 IP 改为服务端连接 ID 并串行化双向流写入；[`dee1d72`](https://github.com/godeps/gonacos/commit/dee1d72) 增加逐帧鉴权钩子，[`3836219`](https://github.com/godeps/gonacos/commit/3836219) 增加原生配置限定模式及推送时复核，[`ea39c83`](https://github.com/godeps/gonacos/commit/ea39c83) 消除了嵌入式实例之间共享 gRPC Server 导致的鉴权状态污染。相关 gonacos 包的 `go test -race` 通过。完整原生客户端 `-race` 仍报告官方 `nacos-sdk-go/v2 v2.3.5` 内部竞态：`CloseClient` 与其全局 client map 访问并发，以及断线重连时连接状态的并发读写；这不是 GoLab 或 gonacos 服务端栈。原生订阅的订阅关联依赖服务端连接 ID，已验证直连 TCP 与本机 TLS/L4 一对一转发；L7 HTTP/2 代理若复用不同租户到同一后端连接，当前不属于支持拓扑。默认保持 loopback，外部访问必须另行验证网络隔离与 TLS 终止边界。
+
+## Issue #13：支持矩阵与当前验收范围
+
+截至 2026-10-07，**原生 Nacos 订阅仍未列为生产正式支持接口**。下表将真实进程测试与待完成的部署验收分开；本机 TLS/L4 测试证明协议路径和租户约束，不能代替跨主机网络策略的实测。
+
+| 拓扑 | 现有证据 | 正式支持 |
+| --- | --- | --- |
+| 默认匿名 gonacos、仅 loopback | 原生功能测试显示知道 namespace 即可跨租户读取；启动时即使设置 `GOLAB_ALLOW_NON_LOOPBACK_GONACOS=1` 也拒绝匿名非 loopback 绑定 | 不作为租户可达接口 |
+| `-nacos-native-auth=true`、单/双节点直连 TCP | 官方 Go SDK v2.3.5 真实进程读、订阅、跨租户拒绝、撤销与双节点切换（#11） | 仅实验兼容性验证；明文连接不能跨主机部署 |
+| 双节点 TLS 终止 + 每个客户端 TCP 连接对应独立后端 TCP 连接，gonacos 后端仅 loopback | `test/cluster/TestOfficialNacosClientFailsOverAcrossGolabNodes` 使用真实 GoLab/PG/Redis 及 TLS/L4 代理，验证两个租户、故障切换、HTTP 绕过、撤销；代理与后端在同一测试主机 | **待跨主机入口网络策略与拒绝源验收**；目前不声明生产正式支持 |
+| L7 HTTP/2 代理多路复用不同租户到同一后端 gRPC 连接 | 同一后端 HTTP/2 连接的双凭证负向探针确认第二租户订阅返回 gRPC status 7；真实 L7 代理的推送身份隔离仍无法证明；`scripts/check_nacos_native_topology.py` 对此配置报错 | **不支持** |
+| 其他语言或官方 SDK 其他版本 | 未测试 | 不支持 |
+
+### 运维部署模板与预检
+
+一个 GoLab 节点需提供两个独立的原生端口：HTTP 只用于 `/nacos/v1/auth/users/login`，gRPC 用于配置读取和订阅。以下是**待环境验证**的 TLS/L4 侧车示例，HAProxy 与 GoLab 在同一主机或同一网络命名空间；每个节点分别配置一份，负载均衡客户端持有两个节点的地址。`mode tcp` 保留客户端到后端的一对一 TCP 连接，禁止改成汇聚多租户后端连接的 L7 HTTP/2 路由。
+
+```haproxy
+frontend nacos_login
+    mode tcp
+    bind 10.42.1.10:8848 ssl crt /etc/haproxy/nacos.pem alpn http/1.1
+    default_backend golab_nacos_http
+backend golab_nacos_http
+    mode tcp
+    server local 127.0.0.1:18848
+frontend nacos_grpc
+    mode tcp
+    bind 10.42.1.10:9848 ssl crt /etc/haproxy/nacos.pem alpn h2
+    default_backend golab_nacos_grpc
+backend golab_nacos_grpc
+    mode tcp
+    server local 127.0.0.1:19848
+```
+
+GoLab 使用 `-nacos-native-auth=true -gonacos-addr 127.0.0.1:18848 -gonacos-grpc-addr 127.0.0.1:19848`。TLS 证书必须由客户端信任的 CA 签发并匹配入口主机名；官方 SDK 同时设置 HTTP `https` scheme、显式 gRPC 端口和 `WithTLS(NewTLSConfig(WithCA(...)))`。入口防火墙/NetworkPolicy 只允许获批 SDK 工作负载源访问 8848/9848，拒绝其他源；后端 18848/19848 不得从容器或主机外部路由。不要对公众暴露默认匿名模式，不要把 SDK token 写进 URL、日志或探针参数。
+
+复制并填写 [`nacos-native-topology.example.json`](nacos-native-topology.example.json)，然后在**每个节点**运行：
+
+```sh
+python3 scripts/check_nacos_native_topology.py deployment-nacos.json
+python3 scripts/check_nacos_native_topology.py deployment-nacos.json --probe
+```
+
+第一个命令检查声明中鉴权、loopback 后端、独立 TLS 端口、显式允许源与连接不复用；L7/HTTP2 多租户复用会输出 `ALERT` 并以非零状态退出，适合部署门禁或告警。第二个命令额外完成证书验证、gRPC `h2` TLS 握手、匿名 HTTP 配置读取 404 与无效登录 401。**声明检查无法证明实际代理配置或网络策略生效。** 部署验收还须从一个允许源完成有效 SDK 登录、读和订阅，从一个拒绝源分别连接 TLS 入口的两个端口并确认 TCP/TLS 失败，从侧车外部连接后端两个端口并确认失败；记录执行主机/源 IP、命令、退出码及策略版本。应通过受控客户端实际发布/撤销验证推送停止和重连。两节点分别执行这些检查并保留证据后才可扩大正式支持声明。
+
+在允许源和拒绝源各自执行相同的连通性探针，保留原始输出；将主机名和 CA 路径替换为部署值：
+
+```sh
+openssl s_client -connect nacos.example.internal:9848 -servername nacos.example.internal -CAfile /etc/golab/nacos-ca.pem -alpn h2 </dev/null
+curl --cacert /etc/golab/nacos-ca.pem -sS -o /dev/null -w '%{http_code}\n' 'https://nacos.example.internal:8848/nacos/v1/cs/configs?tenant=x&group=GOLAB_FLAGS&dataId=golab.manifest'
+```
+
+允许源应通过证书校验并协商 `h2`，HTTP 绕过返回 404；拒绝源应无法建立 TLS/TCP 连接。还要从侧车外部对 18848/19848 做 TCP 连接测试，必须失败。由于本工作环境不能创建网络命名空间（`ip netns add` 返回 `Permission denied`），这些跨主机拒绝源检查本轮**没有实测证据**。
+
+复现本机 TLS/L4 实测：
+
+```sh
+GOWORK=off go test ./test/cluster -run '^TestOfficialNacosClientFailsOverAcrossGolabNodes$' -count=1 -v
+GOWORK=off go test ./test/native -count=1
+python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'
+```
+
+`test/cluster` 需要可用 PostgreSQL 和 Redis；设置 `GOLAB_TEST_PG_DSN` / `GOLAB_TEST_REDIS_ADDR` 可使用现有服务，否则测试基座尝试 Docker。该测试中的 TLS 代理是 Go 实现的透明 TCP 转发，不是 HAProxy 生产配置的实测。测试验证有效登录、文档 hash、两个租户隔离、同一后端 HTTP/2 连接的双凭证拒绝、订阅收到更新、失效后的无推送、TLS 证书、HTTP 404/401、双节点切换；官方 SDK 的 `GetConfig` 在远端读取失败时可能返回 last-known-good 本地缓存，不能以其返回旧值证明凭证有效。排查撤销请看原生登录是否 401、服务端授权日志及新 revision 推送是否停止；排查重连请核对 gRPC 端口和 h2 ALPN、证书 SAN/CA、两节点地址、后端一对一连接以及最新 manifest revision/文档 hash。
 
 ## 试验协议
 
 | 项目 | 当前映射 |
 | --- | --- |
 | 客户端 | 官方 `nacos-sdk-go/v2 v2.3.5`；其他版本、Java/Python 客户端未验证 |
-| 连接 | gonacos HTTP 端口及其独立 gRPC 端口；默认仅 loopback；鉴权模式已在直连 TCP 双节点实测，L7 HTTP/2 后端连接复用不在支持范围 |
+| 连接 | gonacos HTTP 端口及其独立 gRPC 端口；默认仅 loopback；鉴权模式已在直连 TCP 与本机 TLS/L4 双节点实测，L7 HTTP/2 后端连接复用不在支持范围 |
 | 认证 | `-nacos-native-auth` 模式用 `golab-sdk` + GoLab SDK token 登录；每次读/订阅/推送复核 workspace/environment，默认模式不启用此接口 |
 | 命名空间 | 每个 `(workspace, environment)` 使用平台生成的独立 namespace ID，不能用用户输入的名字推导 |
 | Group | 固定 `GOLAB_FLAGS` |
@@ -34,4 +97,4 @@ gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f
 
 GoLab Go SDK 使用受 GoLab token 约束的 `/api/v1/sdk/config` 全量快照、ETag/304、SSE 失效提示及定期轮询；服务端从凭证导出 scope，客户端不能任意指定 namespace。它已提供原子换入、last-known-good、`Status()`（revision、陈旧状态、错误）与最大陈旧期处理，并支持曝光上报。原生 Nacos 客户端只提供配置读取和通知；原生协议本身不提供这些 GoLab 语义，租户授权仅在显式 `-nacos-native-auth` 模式由 GoLab 附加。浏览器、Python/TypeScript SDK 继续走 GoLab 远程求值接口。
 
-当前兼容验证覆盖直连 TCP 的单节点与双节点、跨租户拒绝和撤销；网络黑洞、乱序、缺文档及无部分快照分别由对应原生用例验证。`test/native` 的默认模式越权特征用例继续约束未授权底座的边界，安全模式负向用例约束可支持路径。若要扩大到 L7 代理或将原生订阅列为通用正式接口，还需验证后端连接不跨客户端复用、TLS 与网络策略，并处理官方 SDK 的竞态限制。
+当前兼容验证覆盖直连 TCP 与本机 TLS/L4 的单节点或双节点、跨租户拒绝和撤销；网络黑洞、乱序、缺文档及无部分快照分别由对应原生用例验证。`test/native` 的默认模式越权特征用例继续约束未授权底座的边界，安全模式负向用例约束可支持路径。若要扩大到 L7 代理或将原生订阅列为通用正式接口，还需验证后端连接不跨客户端复用、TLS 与网络策略，并处理官方 SDK 的竞态限制。
