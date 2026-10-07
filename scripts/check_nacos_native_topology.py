@@ -5,6 +5,7 @@ import datetime
 import hashlib
 import ipaddress
 import json
+import os
 import socket
 import ssl
 import sys
@@ -63,6 +64,37 @@ def split_address(value):
     return host, int(port)
 
 
+def source_ips(c, mode):
+    """Record the local routed address; NAT may change it after this host."""
+    targets = [split_address(c[field]) for field in ("tlsHTTP", "tlsGRPC")]
+    if mode == "denied":
+        targets += [(c["backendExternalHost"], split_address(c[field])[1])
+                    for field in ("backendHTTP", "backendGRPC")]
+    networks = [ipaddress.ip_network(value, strict=False) for value in c["allowedSources"]]
+    result = {}
+    for host, port in targets:
+        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_DGRAM)
+        if not addresses or any(ipaddress.ip_address(addr[4][0]).is_loopback for addr in addresses):
+            raise ValueError(f"target {host} resolves to loopback or no address")
+        routed = set()
+        for family, kind, proto, _, address in addresses:
+            with socket.socket(family, kind, proto) as sock:
+                sock.connect(address)
+                source = ipaddress.ip_address(sock.getsockname()[0])
+            permitted = any(source in network for network in networks)
+            if permitted != (mode == "allowed"):
+                raise ValueError(f"{mode} source {source} has wrong allowedSources classification for {host}:{port}")
+            routed.add(str(source))
+        if len(routed) != 1:
+            raise ValueError(f"target {host}:{port} uses different routed source IPs: {sorted(routed)}")
+        result[net_address(host, port)] = routed.pop()
+    return result
+
+
+def net_address(host, port):
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+
+
 def probe(c):
     context = ssl.create_default_context(cafile=c["caFile"])
     host, port = split_address(c["tlsGRPC"])
@@ -101,19 +133,22 @@ def probe_denied(c):
         addresses = socket.getaddrinfo(target[0], target[1], type=socket.SOCK_STREAM)
         if not addresses or any(ipaddress.ip_address(address[4][0]).is_loopback for address in addresses):
             raise ValueError(f"target {target[0]} resolves to loopback or no address")
-        try:
-            with socket.create_connection(target, timeout=3):
-                raise ValueError(f"unauthorized source connected to {target[0]}:{target[1]}")
-        except OSError:
-            pass
+        for address in addresses:
+            endpoint = (address[4][0], target[1])
+            try:
+                with socket.create_connection(endpoint, timeout=3):
+                    raise ValueError(f"unauthorized source connected to {endpoint[0]}:{endpoint[1]}")
+            except OSError:
+                pass
 
 
-def evidence(c, mode):
+def evidence(c, mode, sources=None):
     return {
         "mode": mode,
         "result": "PASS",
         "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "probeHost": socket.gethostname(),
+        "sourceIPs": sources or {},
         "configSHA256": hashlib.sha256(json.dumps(c, sort_keys=True).encode()).hexdigest(),
         "targets": [c["tlsHTTP"], c["tlsGRPC"]] + (
             [f"{c['backendExternalHost']}:{split_address(c[field])[1]}" for field in ("backendHTTP", "backendGRPC")]
@@ -122,15 +157,47 @@ def evidence(c, mode):
     }
 
 
+def verify_pair(c, allowed, denied):
+    expected = hashlib.sha256(json.dumps(c, sort_keys=True).encode()).hexdigest()
+    for record, mode in ((allowed, "allowed"), (denied, "denied")):
+        if record.get("mode") != mode or record.get("result") != "PASS":
+            raise ValueError(f"missing successful {mode} live probe")
+        if record.get("configSHA256") != expected:
+            raise ValueError(f"{mode} evidence uses a different deployment declaration")
+        if record.get("targets") != evidence(c, mode)["targets"]:
+            raise ValueError(f"{mode} evidence does not cover every configured target")
+        if not isinstance(record.get("sourceIPs"), dict) or not record["sourceIPs"]:
+            raise ValueError(f"{mode} evidence lacks routed source IPs")
+        if set(record["sourceIPs"]) != set(record["targets"]):
+            raise ValueError(f"{mode} evidence source IPs do not cover every target")
+    times = [datetime.datetime.fromisoformat(record["utc"]) for record in (allowed, denied)]
+    if any(value.tzinfo is None for value in times) or abs((times[0] - times[1]).total_seconds()) > 300:
+        raise ValueError("live probes must be within five minutes")
+    if allowed["probeHost"] == denied["probeHost"]:
+        raise ValueError("allowed and denied probes must run on distinct hosts")
+    networks = [ipaddress.ip_network(value, strict=False) for value in c["allowedSources"]]
+    for record, permitted in ((allowed, True), (denied, False)):
+        for source in record["sourceIPs"].values():
+            if any(ipaddress.ip_address(source) in network for network in networks) != permitted:
+                raise ValueError(f"{record['mode']} source {source} has wrong allowedSources classification")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", help="deployment declaration JSON")
     parser.add_argument("--probe", action="store_true", help="also check live TLS and HTTP deny paths")
     parser.add_argument("--probe-denied", action="store_true", help="from a rejected source, verify both TLS and backend ports refuse TCP")
     parser.add_argument("--evidence", help="write successful probe metadata as JSON; no credentials are recorded")
+    parser.add_argument("--verify-pair", nargs=2, metavar=("ALLOWED", "DENIED"),
+                        help="require same-config, distinct-source live probes within five minutes")
     args = parser.parse_args()
     if args.probe and args.probe_denied:
         parser.error("--probe and --probe-denied are mutually exclusive")
+    if args.verify_pair and (args.probe or args.probe_denied or args.evidence):
+        parser.error("--verify-pair cannot be combined with live probes or --evidence")
+    if args.evidence and os.path.lexists(args.evidence):
+        print("ALERT: evidence path already exists; use a new filename for each run", file=sys.stderr)
+        return 1
     with open(args.config, encoding="utf-8") as stream:
         config = json.load(stream)
     errors = validate(config)
@@ -138,23 +205,45 @@ def main():
         for error in errors:
             print("ALERT:", error, file=sys.stderr)
         return 1
+    if args.verify_pair:
+        try:
+            with open(args.verify_pair[0], encoding="utf-8") as stream:
+                allowed = json.load(stream)
+            with open(args.verify_pair[1], encoding="utf-8") as stream:
+                denied = json.load(stream)
+            verify_pair(config, allowed, denied)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print("ALERT: evidence pair failed:", exc, file=sys.stderr)
+            return 1
+        print("PASS: paired live probes from distinct classified sources")
+        return 0
+    sources = None
     if args.probe:
         try:
+            sources = source_ips(config, "allowed")
             probe(config)
         except (OSError, ValueError, urllib.error.URLError) as exc:
             print("ALERT: live probe failed:", exc, file=sys.stderr)
             return 1
     if args.probe_denied:
         try:
+            sources = source_ips(config, "denied")
             probe_denied(config)
         except (OSError, ValueError) as exc:
             print("ALERT: denied-source probe failed:", exc, file=sys.stderr)
             return 1
     mode = "denied" if args.probe_denied else "allowed" if args.probe else "declaration"
     if args.evidence:
-        with open(args.evidence, "w", encoding="utf-8") as stream:
-            json.dump(evidence(config, mode), stream, indent=2)
-            stream.write("\n")
+        output = evidence(config, mode, sources)
+        temporary = f"{args.evidence}.tmp.{os.getpid()}"
+        try:
+            with open(temporary, "w", encoding="utf-8") as stream:
+                json.dump(output, stream, indent=2)
+                stream.write("\n")
+            os.replace(temporary, args.evidence)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
     print("PASS: declared TLS/L4 topology" + (" and live TLS/HTTP probes" if args.probe else " and denied-source TCP probes" if args.probe_denied else ""))
     return 0
 

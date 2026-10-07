@@ -69,9 +69,13 @@ python3 scripts/check_nacos_native_topology.py deployment-nacos.json
 python3 scripts/check_nacos_native_topology.py deployment-nacos.json --probe --evidence node-a-allowed.json
 # 在拒绝源机器/Pod 上执行，使用同一份部署配置
 python3 scripts/check_nacos_native_topology.py deployment-nacos.json --probe-denied --evidence node-a-denied.json
+# 收集同一节点的两份 JSON 后，在任一验收主机运行
+python3 scripts/check_nacos_native_topology.py deployment-nacos.json --verify-pair node-a-allowed.json node-a-denied.json
 ```
 
-第一个命令检查声明中鉴权、loopback 后端、独立 TLS 端口、显式允许源与连接不复用；L7/HTTP2 多租户复用会输出 `ALERT` 并以非零状态退出，适合部署门禁或告警。第二个命令从允许源完成证书验证、gRPC `h2` TLS 握手、匿名 HTTP 配置读取 404 与无效登录 401；该探针禁用环境中的 HTTP 代理变量，确保直接连接入口。第三个命令从拒绝源检查两个 TLS 入口和两个后端端口都无法建立 TCP；`backendExternalHost` 必须是侧车宿主机或 Pod 可路由的**非 loopback IP**，供外部探测后端绑定。`--evidence` 仅写入探针模式、UTC 时间、执行主机名、目标地址和配置 SHA-256，不记录凭证。**声明检查和单次拒绝探针无法证明代理配置或网络策略生效；服务停机时四个拒绝探针也会通过。** 必须在服务运行期间从允许源通过 `--probe` 并完成有效 SDK 登录、读和订阅；同一时间窗口从拒绝源运行 `--probe-denied`。记录两台执行主机/源 IP、原始输出、退出码、策略与代理配置版本，并核对两份证据的配置 SHA-256 相同。应通过受控客户端实际发布/撤销验证推送停止和重连。两节点分别执行这些检查并保留证据后才可扩大正式支持声明。
+第一个命令检查声明中鉴权、loopback 后端、独立 TLS 端口、显式允许源与连接不复用；L7/HTTP2 多租户复用会输出 `ALERT` 并以非零状态退出，适合部署门禁或告警。第二个命令从允许源完成证书验证、gRPC `h2` TLS 握手、匿名 HTTP 配置读取 404 与无效登录 401；该探针禁用环境中的 HTTP 代理变量，确保直接连接入口。第三个命令从拒绝源检查两个 TLS 入口和两个后端端口都无法建立 TCP，并逐个检查 DNS 返回的地址，不能因其中一个地址拒绝而漏过另一个开放地址；`backendExternalHost` 必须是侧车宿主机或 Pod 可路由的**非 loopback IP**。探针记录路由选择的本机源 IP，并按 `allowedSources` 检查允许源属于、拒绝源不属于允许网段。第四个命令要求同一配置 SHA-256、不同执行主机、目标端口完整、源 IP 分类正确，且两份成功记录相差不超过五分钟。
+
+`--evidence` 不记录凭证，已有证据文件不会被覆盖；每次运行使用唯一文件名，避免失败后误用旧的 PASS 文件。路由源 IP 可能在 NAT 后改变，需另从防火墙/代理连接日志核对实际看到的源 IP。**证据配对也不能单独证明代理配置或网络策略生效；服务停机时拒绝源探针会通过。** 必须在服务运行期间从允许源通过 `--probe` 并完成有效 SDK 登录、读和订阅；同一时间窗口从拒绝源运行 `--probe-denied`。记录两台执行主机、原始输出、退出码、策略与代理配置版本，以及代理实际观察到的源地址。应通过受控客户端实际发布/撤销验证推送停止和重连。两节点分别执行这些检查并保留证据后才可扩大正式支持声明。
 
 在允许源和拒绝源各自执行相同的连通性探针，保留原始输出；将主机名和 CA 路径替换为部署值：
 
@@ -83,6 +87,8 @@ curl --cacert /etc/golab/nacos-ca.pem -sS -o /dev/null -w '%{http_code}\n' 'http
 允许源应通过证书校验并协商 `h2`，HTTP 绕过返回 404；拒绝源应无法建立 TLS/TCP 连接。还要从侧车外部对 18848/19848 做 TCP 连接测试，必须失败。由于本工作环境不能创建网络命名空间（`ip netns add` 返回 `Permission denied`），这些跨主机拒绝源检查本轮**没有实测证据**。
 
 2026-10-07 复核：使用现有 PostgreSQL、独立 Redis Docker 测试实例、真实 GoLab 双进程和官方 Go SDK 运行上述定向用例，通过（28.30s）；同一环境的 `make all`（`go vet ./...`、`go test ./... -count=1`、`go build ./...` 及两个命令二进制构建）通过。部署预检的 7 个 Python 单元测试通过；示例域名未配置 DNS 时运行 `--probe-denied` 得到 `ALERT: ... Name or service not known`，按预期拒绝记录伪证据。Docker 可创建两个独立 bridge 网络：同网络 Alpine 客户端连接测试 TCP 服务成功，异网络客户端连接同一容器 IP 失败；这只确认隔离试验可搭建，**没有**让两个 GoLab 节点、TLS/L4 代理及 SDK 客户端在该拓扑上完成端到端验收。本机 `/data`（Docker 根目录）已满；该试验未拉取或构建新镜像。待部署环境按上文分别保存两节点的允许源和拒绝源原始输出、证书/代理/策略配置及有效凭证生命周期证据，才具备正式支持审查条件。
+
+后续同日复核：部署预检新增路由源 IP 分类、DNS 所有地址的拒绝测试与五分钟证据配对门禁，10 个单元测试通过；真实双 GoLab 进程官方 SDK TLS/L4 定向用例通过（26.65s）。`make all` 使用现有 PostgreSQL 与测试自管 Redis Docker 容器完整通过；`make client-compatibility` 直连 9/9、本机 TLS/L4 双节点 1/1 通过，并保留 SDK 竞态及生产跨主机网络策略未验收的 LIMIT。若改用外部 Redis 地址，`TestClusterMultiReplica/ConvergenceRedisDown` 因无法执行 Redis 停机操作而跳过，其后续子测试会以未设置的 revision 0 失败；因此全量检查必须让测试管理 Redis 生命周期。新增预检尚未取得真实跨主机允许源/拒绝源记录，不能改变上表的正式支持结论。
 
 复现本机 TLS/L4 实测：
 
