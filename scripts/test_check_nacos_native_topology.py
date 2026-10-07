@@ -587,6 +587,10 @@ class NativeTopologyTest(unittest.TestCase):
         allowed["probeHost"] = "sdk-host"
         denied["probeHost"] = "blocked-host"
         verify_pair(self.config, allowed, denied)
+        missing_host = copy.deepcopy(allowed)
+        missing_host["probeHost"] = ""
+        with self.assertRaisesRegex(ValueError, "lacks a probe host name"):
+            verify_pair(self.config, missing_host, denied)
         old_allowed = copy.deepcopy(allowed)
         del old_allowed["backendDirectDenied"]
         with self.assertRaisesRegex(ValueError, "lacks plaintext backend denial check"):
@@ -706,6 +710,11 @@ class NativeTopologyTest(unittest.TestCase):
 
         records = [pair(self.config), pair(other_config)]
         verify_cluster([self.config, other_config], records)
+        for index, mode in ((0, "allowed"), (1, "denied")):
+            different_host = copy.deepcopy(records)
+            different_host[1][index]["probeHost"] = f"other-{mode}-host"
+            with self.assertRaisesRegex(ValueError, f"same {mode} host"):
+                verify_cluster([self.config, other_config], different_host)
         different_tenants = copy.deepcopy(records)
         different_tenants[1][0]["tenantNamespaces"] = ["namespace-c", "namespace-d"]
         with self.assertRaisesRegex(ValueError, "different tenant namespaces"):

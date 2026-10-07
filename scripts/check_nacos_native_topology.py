@@ -389,6 +389,9 @@ def verify_pair(c, allowed, denied):
             raise ValueError("live probe evidence is older than ten minutes; rerun both probes")
         if age < -datetime.timedelta(minutes=1):
             raise ValueError("live probe evidence is more than one minute in the future; check host clocks")
+    if any(not isinstance(record.get("probeHost"), str) or not record["probeHost"]
+           for record in (allowed, denied)):
+        raise ValueError("live probe evidence lacks a probe host name")
     if allowed["probeHost"] == denied["probeHost"]:
         raise ValueError("allowed and denied probes must run on distinct hosts")
     networks = [ipaddress.ip_network(value, strict=False) for value in c["allowedSources"]]
@@ -405,6 +408,9 @@ def verify_cluster(configs, records):
         raise ValueError("both node declarations must pass topology validation")
     for config, (allowed, denied) in zip(configs, records):
         verify_pair(config, allowed, denied)
+    for index, mode in ((0, "allowed"), (1, "denied")):
+        if records[0][index]["probeHost"] != records[1][index]["probeHost"]:
+            raise ValueError(f"both nodes must be probed from the same {mode} host")
     if set(records[0][0]["tenantNamespaces"]) != set(records[1][0]["tenantNamespaces"]):
         raise ValueError("two nodes were probed with different tenant namespaces")
     for field in ("tlsHTTP", "tlsGRPC", "backendExternalHost"):
