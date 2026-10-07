@@ -96,6 +96,20 @@ func TestI18NDOMContract(t *testing.T) {
 	t.Logf("%s", out)
 }
 
+func TestCapabilityDOMContract(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not available; capability DOM contract requires node")
+	}
+	cmd := exec.Command(node, "capability_contract.mjs")
+	cmd.Dir = wd(t)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("capability DOM contract failed: %v\n%s", err, out)
+	}
+	t.Logf("%s", out)
+}
+
 // wd returns the directory of this test file (the web/ package dir), so the
 // contract runs regardless of the caller's working directory.
 func wd(t *testing.T) string {

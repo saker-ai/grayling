@@ -301,6 +301,7 @@ const main = makeSandbox({ navLang: 'en-US' });
 const x = main.x;
 assert.strictEqual(x.I18N.lang, 'en');
 x.S.ws = 'acme'; x.S.env = 'prod';
+x.S.capabilities = { workspaceId: 'acme', permissions: Object.fromEntries(['workspace.admin', 'token.manage', 'flag.read', 'flag.write', 'flag.approve', 'flag.publish', 'experiment.write', 'report.read', 'ai.write', 'ai.content.read', 'quota.manage'].map(p => [p, true])) };
 x.S.envs = [{ slug: 'prod', name: 'Production' }];
 
 const reportHtml = () => { const box = {}; x.renderReport(box, report); return box.innerHTML; };
@@ -377,7 +378,7 @@ for (const s of SWEEPS) {
   await cs.x.VIEWS.quotas(refreshed);
   assert(refreshed.innerHTML.includes('name="maxFlags" type="number" min="1" step="1" required value="501"'),
     'refresh must display the persisted quota value');
-  for (const [status, sample] of [[403, 'Owner permission'], [409, 'Refresh current values'], [429, 'rate limit']]) {
+  for (const [status, sample] of [[403, 'Access denied (403)'], [409, 'Conflict (409)'], [429, 'Request limited (429)']]) {
     cs.sandbox.fetch = () => Promise.resolve({ ok: false, status, statusText: 'error',
       text: () => Promise.resolve(JSON.stringify({ error: { code: 'test', message: 'test' } })) });
     await submit({ preventDefault() {} });

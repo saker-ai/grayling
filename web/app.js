@@ -94,18 +94,23 @@ async function api(path, opts = {}) {
 }
 
 function errMsg(e) {
+  if (e.status === 403) return t('err.denied403');
+  if (e.status === 409) return t('err.conflict409');
+  if (e.status === 429) return t('err.limited429');
   let m = '[' + (e.code || 'error') + '] ' + (e.message || e);
-  if (e.status === 409) m += t('err.conflict409');
   if (e.status === 423) m += t('err.revoked423');
   if (e.status === 501) m += t('err.notEnabled501');
   return m;
 }
 function errBanner(e) {
-  let h = '<div class="banner err"><b>' + esc(e.code || 'error') + '</b> — ' + esc(e.message || String(e));
-  if (e.status === 409) h += '<div class="muted">' + esc(t('banner.conflict409')) + '</div>';
+  let h = '<div class="banner err">' + esc(errMsg(e));
   if (e.status === 501) h += '<div class="muted">' + esc(t('banner.notEnabled501')) + '</div>';
   if (e.status === 403) h += ' <button class="btn sm" id="btn-reauth2">' + esc(t('btn.reenterToken')) + '</button>';
   return h + '</div>';
+}
+function reportError(e) {
+  toast(errMsg(e), false);
+  if (e.status === 403) refreshCapabilities().then(route);
 }
 // Runs a mutation: success → toast + re-route; failure → toast with code+message.
 async function run(fn, okMsg) {
@@ -116,6 +121,7 @@ async function run(fn, okMsg) {
     return r;
   } catch (e) {
     toast(e.code === 'self_approval_denied' ? t('toast.selfApproval') : errMsg(e), false);
+    if (e.status === 403) { await refreshCapabilities(); await route(); }
     return undefined;
   }
 }
@@ -128,6 +134,8 @@ const S = {
   ws: localStorage.getItem('golab_ws') || '',
   env: localStorage.getItem('golab_env') || '',
   workspaces: [], envs: [],
+  capabilities: null,
+  globalCapabilities: null,
   flagKey: null, flagNew: false,
   segKey: null, segDrafts: [],
   expId: null, expCreate: false,
@@ -138,6 +146,54 @@ const S = {
 };
 const wsPath = () => '/api/v1/admin/workspaces/' + encodeURIComponent(S.ws);
 const scopePath = () => wsPath() + '/environments/' + encodeURIComponent(S.env);
+const can = permission => permission === 'workspace.admin'
+  ? !!(S.globalCapabilities && S.globalCapabilities[permission])
+  : !!(S.capabilities && S.capabilities.permissions[permission]);
+
+async function refreshCapabilities() {
+  const ws = S.ws;
+  S.capabilities = null;
+  S.globalCapabilities = null;
+  updateCapabilities();
+  try { S.globalCapabilities = await api('/api/v1/admin/capabilities'); }
+  catch (e) { if (e.status !== 403 && e.status !== 404) reportError(e); }
+  if (ws !== S.ws) return;
+  if (ws) {
+    try {
+      const data = await api(wsPath() + '/capabilities');
+      if (ws !== S.ws) return;
+      S.capabilities = data;
+    } catch (e) {
+      if (e.status !== 403 && e.status !== 404) reportError(e);
+    }
+  }
+  updateCapabilities();
+  if (!can('token.manage') && S.view === 'tokens') S.view = 'flags';
+  if (!can('quota.manage') && S.view === 'quotas') S.view = 'flags';
+}
+
+function updateCapabilities() {
+  $('#nav-quotas').classList.toggle('hidden', !can('quota.manage'));
+  $('[data-view="tokens"]').classList.toggle('hidden', !can('token.manage'));
+  $('#btn-new-ws').classList.toggle('hidden', !can('workspace.admin'));
+  $('#btn-new-env').classList.toggle('hidden', !S.ws || !can('workspace.admin'));
+}
+
+// Hide controls after each render. The server still checks every request.
+function gateActions(root) {
+  const groups = {
+    'flag.write': ['#flag-new', '#flag-save', '#flag-submit', '#flag-delete', '#gff-run', '#seg-new', '#seg-save', '#seg-submit'],
+    'flag.approve': ['#flag-approve', '#flag-reject', '#seg-approve', '[data-appr]'],
+    'flag.publish': ['#flag-publish', '#flag-emergency-disable', '[data-rb]', '[data-er]', '#seg-publish', '#exp-bind', '#exp-transition', '#ro-create', '#ro-pause', '#ro-resume', '#ro-advance', '#ro-takeover-on', '#ro-takeover-off', '[data-pin]', '[data-exec]'],
+    'experiment.write': ['#exp-new', '#x-create', '#exp-review'],
+    'ai.write': ['#ai-reg', '[data-revoke]', '[data-reinstate]'],
+    'ai.content.read': ['#ai-resolve', '#ai-allow-add', '#ai-allow-save'],
+  };
+  for (const [permission, selectors] of Object.entries(groups)) {
+    if (can(permission)) continue;
+    for (const selector of selectors) $$(selector, root).forEach(el => el.classList.add('hidden'));
+  }
+}
 
 function needWs(m) {
   if (!S.ws) { m.innerHTML = '<div class="banner warn">' + t('banner.noWs') + '</div>'; return false; }
@@ -184,7 +240,7 @@ function promptForm(title, fields, submitLabel, onSubmit) {
   $('[data-x="ok"]', ov).onclick = async () => {
     const vals = {};
     for (const f of fields) vals[f.name] = body.querySelector('[name="' + f.name + '"]').value;
-    try { await onSubmit(vals); close(); } catch (e) { toast(errMsg(e), false); }
+    try { await onSubmit(vals); close(); } catch (e) { reportError(e); }
   };
 }
 
@@ -200,6 +256,7 @@ async function route() {
   m.innerHTML = '<p class="muted">' + esc(t('misc.loading')) + '</p>';
   try {
     await VIEWS[S.view](m);
+    gateActions(m);
   } catch (e) {
     if (e.status === 401) return; // showAuth already triggered by api()
     m.innerHTML = errBanner(e);
@@ -245,6 +302,7 @@ async function loadWorkspaces() {
   localStorage.setItem('golab_ws', S.ws);
   sel.value = S.ws;
   await loadEnvs();
+  await refreshCapabilities();
 }
 
 async function loadEnvs() {
@@ -266,28 +324,18 @@ async function boot() {
   const tok = localStorage.getItem('golab_token') || '';
   $('#conn-info').textContent = (baseUrl() || location.origin) + ' · ' + tok.slice(0, 10) + '…';
   await route();
-  probeQuotas();
   probeAI();
-}
-
-async function probeQuotas() {
-  const ws = S.ws;
-  let allowed = false;
-  if (ws) {
-    try { await api(wsPath() + '/quotas'); allowed = true; }
-    catch (e) { if (e.status !== 403 && e.status !== 404) toast(errMsg(e), false); }
-  }
-  if (ws !== S.ws) return;
-  $('#nav-quotas').classList.toggle('hidden', !allowed);
-  if (!allowed && S.view === 'quotas') { S.view = 'flags'; route(); }
 }
 
 async function probeAI() {
   if (!S.ws || !S.env) return;
+  const ws = S.ws, env = S.env;
   try {
     await api(scopePath() + '/ai/resources');
+    if (ws !== S.ws || env !== S.env) return;
     S.aiAvailable = true;
   } catch (e) {
+    if (ws !== S.ws || env !== S.env) return;
     if (e.status === 501) {
       S.aiAvailable = false;
       if (S.view === 'ai') { S.view = 'flags'; route(); }
@@ -502,7 +550,7 @@ function bindFlagDetail(m, key, kp) {
     const rev = Number(emergency ? b.dataset.er : b.dataset.rb);
     if (!confirm(t('confirm.rollback', { rev }))) return;
     if (!emergency) {
-      requestChange('flag.rollback', key, { revision: rev }).catch(e => toast(errMsg(e), false));
+      requestChange('flag.rollback', key, { revision: rev }).catch(e => reportError(e));
       return;
     }
     const reason = prompt(t('prompt.rollbackReason'), '');
@@ -526,7 +574,7 @@ function bindFlagDetail(m, key, kp) {
       const nf = await api(kp); // refresh editor with the imported draft, keep warnings visible
       if (nf && nf.draft) $('#flag-json', m).value = JSON.stringify(nf.draft.content, null, 2);
       $('#flag-revs', m).innerHTML = revisionsTable(nf);
-    } catch (e) { toast(errMsg(e), false); }
+    } catch (e) { reportError(e); }
   };
 }
 
@@ -813,7 +861,7 @@ function viewExpCreate(m) {
       const exp = await api(scopePath() + '/experiments', { method: 'POST', body });
       toast(t('toast.expCreated', { id: exp.id }));
       S.expCreate = false; S.expId = exp.id; route();
-    } catch (e) { toast(errMsg(e), false); }
+    } catch (e) { reportError(e); }
   };
   return Promise.resolve();
 }
@@ -1262,7 +1310,7 @@ function bindRollout(m, expId) {
       if (steps[i].ratio <= steps[i - 1].ratio) { toast(t('toast.ratioIncrease', { i: i + 1 }), false); return; }
     }
     if (steps.some(s => !(s.minRuntime > 0))) { toast(t('toast.minRuntimePositive'), false); return; }
-    requestChange('release_plan.create', expId, { steps }).catch(e => toast(errMsg(e), false));
+    requestChange('release_plan.create', expId, { steps }).catch(e => reportError(e));
   };
 }
 
@@ -1306,7 +1354,7 @@ async function viewDebug(m) {
         ' <span class="muted">' + esc(t('debug.manifest', { n: res.manifestRevision ?? '—' })) +
         (res.note ? ' · ' + esc(res.note) : '') + '</span>';
       $('#d-json', m).textContent = JSON.stringify(res, null, 2);
-    } catch (e) { toast(errMsg(e), false); }
+    } catch (e) { reportError(e); }
   };
 }
 
@@ -1323,9 +1371,6 @@ const QUOTA_FIELDS = [
 ];
 
 function quotaError(e) {
-  if (e.status === 403) return t('quotas.denied403');
-  if (e.status === 409) return t('quotas.conflict409');
-  if (e.status === 429) return t('quotas.limited429');
   return errMsg(e);
 }
 
@@ -1367,7 +1412,7 @@ async function viewQuotas(m) {
       $('#quota-feedback', m).textContent = t('quotas.saved');
     } catch (e) {
       $('#quota-feedback', m).textContent = quotaError(e);
-      if (e.status === 403) { $('#nav-quotas').classList.add('hidden'); }
+      if (e.status === 403) refreshCapabilities();
     } finally { save.disabled = false; }
   };
 }
@@ -1386,6 +1431,12 @@ function tokenRows(tokens) {
 
 async function viewTokens(m) {
   if (!needWs(m)) return;
+  if (!can('token.manage')) {
+    m.innerHTML = errBanner(new ApiError(403, 'forbidden', ''));
+    const reauth = $('#btn-reauth2', m);
+    if (reauth) reauth.onclick = () => showAuth();
+    return;
+  }
   const tokens = (await api(wsPath() + '/tokens')) || [];
   m.innerHTML =
     '<div class="view-head"><h2>' + esc(t('tokens.title')) + '</h2><span class="muted">' + esc(t('tokens.count', { n: tokens.length })) + '</span></div>' +
@@ -1424,13 +1475,16 @@ async function viewTokens(m) {
       };
       toast(t('toast.tokenCreated'));
       $('tbody', m).innerHTML = tokenRows((await api(wsPath() + '/tokens')) || []);
-    } catch (e) { toast(errMsg(e), false); }
+    } catch (e) { reportError(e); }
   };
   $('table.grid', m).addEventListener('click', ev => {
     const b = ev.target.closest('[data-rev]');
     if (!b) return;
     if (!confirm(t('confirm.revokeToken', { name: b.dataset.name }))) return;
-    run(() => api('/api/v1/admin/tokens/' + encodeURIComponent(b.dataset.rev), { method: 'DELETE' }), t('toast.tokenRevoked'));
+    const reason = (prompt(t('prompt.tokenRevokeReason', { name: b.dataset.name }), '') || '').trim();
+    if (!reason) { toast(t('toast.reasonRequired'), false); return; }
+    run(() => api('/api/v1/admin/tokens/' + encodeURIComponent(b.dataset.rev),
+      { method: 'DELETE', body: { reason } }), t('toast.tokenRevoked'));
   });
 }
 
@@ -1456,8 +1510,8 @@ async function viewAudit(m) {
         '<td>' + chip(a.state, DRAFT_CHIP[a.state] || 'gray') + '<div>' + esc(a.submittedBy) + ' → ' + esc(a.approvedBy || '—') + '</div>' +
         '<div class="muted">' + esc(fmtTime(a.expiresAt)) + '</div></td><td>' + esc(a.impact) + '</td><td>' + esc(a.rollbackTarget) +
         '</td><td>' + esc(a.guardrails) + '</td><td>' +
-        (a.state === 'submitted' ? '<button class="btn sm" data-appr="' + esc(a.id) + '">' + esc(t('btn.approve')) + '</button>' : '') +
-        (a.state === 'approved' && a.action !== 'breakglass.review' ? '<button class="btn sm primary" data-exec="' + esc(a.id) + '">' + esc(t('approval.execute')) + '</button>' : '') +
+        (can('flag.approve') && a.state === 'submitted' ? '<button class="btn sm" data-appr="' + esc(a.id) + '">' + esc(t('btn.approve')) + '</button>' : '') +
+        (can('flag.publish') && a.state === 'approved' && a.action !== 'breakglass.review' ? '<button class="btn sm primary" data-exec="' + esc(a.id) + '">' + esc(t('approval.execute')) + '</button>' : '') +
         '</td></tr>').join('') || '<tr><td colspan="8" class="muted">' + esc(t('approval.none')) + '</td></tr>') + '</tbody></table>';
     $('#approval-box', m).onclick = ev => {
       const btn = ev.target.closest('[data-appr], [data-exec]');
@@ -1465,10 +1519,15 @@ async function viewAudit(m) {
       const a = approvals.find(x => x.id === (btn.dataset.appr || btn.dataset.exec));
       if (!a) return;
       if (btn.dataset.appr) {
-        const note = prompt(t('prompt.approveNote'), '') || '';
+        if (!can('flag.approve')) return;
+        const note = prompt(t('prompt.approvalReason'), '') || '';
+        if (!note.trim()) { toast(t('toast.reasonRequired'), false); return; }
+        if (!confirm(t('approval.confirmReview', { action: a.action, object: a.object }))) return;
         run(() => api(wsPath() + '/approvals/' + encodeURIComponent(a.id) + '/approve',
           { method: 'POST', body: { note } }), t('approval.reviewed'));
       } else {
+        if (!can('flag.publish')) return;
+        if (!confirm(t('approval.confirmExecute', { action: a.action, object: a.object }))) return;
         run(() => executeApproval(a), t('approval.executed'));
       }
     };
@@ -1483,6 +1542,7 @@ async function viewAudit(m) {
           '<td class="detail" title="' + esc(detail) + '">' + esc(detail) + '</td></tr>';
       }).join('') || '<tr><td colspan="6" class="muted">' + esc(t('audit.empty')) + '</td></tr>') +
       '</tbody></table>';
+    gateActions(m);
   };
   $('#a-limit', m).onchange = ev => {
     S.auditLimit = Number(ev.target.value);
@@ -1610,7 +1670,9 @@ async function viewAI(m) {
       const b = ev.target.closest('[data-reinstate]');
       if (!b) return;
       const [ty, lid] = split(b.dataset.reinstate);
-      const reason = prompt(t('prompt.reinstateReason', { type: ty, id: lid }), '') || '';
+      const reason = (prompt(t('prompt.reinstateReason', { type: ty, id: lid }), '') || '').trim();
+      if (!reason) { toast(t('toast.reasonRequired'), false); return; }
+      if (!confirm(t('confirm.reinstateResource', { type: ty, id: lid }))) return;
       run(() => api(aiPath + '/' + encodeURIComponent(ty) + '/' + encodeURIComponent(lid) + '/reinstate',
         { method: 'POST', body: { reason } }), t('toast.resourceReinstated'));
     });
@@ -1731,13 +1793,15 @@ function init() {
   });
   $('#sel-ws').onchange = async ev => {
     S.ws = ev.target.value;
+    S.capabilities = null;
+    S.globalCapabilities = null;
+    updateCapabilities();
     S.env = '';
     S.flagKey = S.segKey = S.expId = null;
     localStorage.setItem('golab_ws', S.ws);
-    try { await loadEnvs(); } catch (e) { toast(errMsg(e), false); }
+    try { await loadEnvs(); await refreshCapabilities(); } catch (e) { reportError(e); }
     route();
     probeAI();
-    probeQuotas();
   };
   $('#sel-env').onchange = ev => {
     S.env = ev.target.value;
@@ -1759,7 +1823,6 @@ function init() {
     await loadWorkspaces();
     route();
     probeAI();
-    probeQuotas();
   });
   $('#btn-new-env').onclick = () => {
     if (!S.ws) { toast(t('toast.needWs'), false); return; }

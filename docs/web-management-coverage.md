@@ -7,6 +7,8 @@
 | `GET` | `/api/v1/admin/rollout/leadership` | 仅 API | 运维诊断；无租户管理动作 | OpenAPI ↔ 路由契约 |
 | `POST` | `/api/v1/admin/workspaces` | 已覆盖 | 顶栏：工作空间/环境选择与创建 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces` | 已覆盖 | 顶栏：工作空间/环境选择与创建 | i18n DOM；API 路由契约 |
+| `GET` | `/api/v1/admin/capabilities` | 已覆盖 | 顶栏：无工作空间时的全局创建权限 | 能力 API/RBAC；空工作空间契约 |
+| `GET` | `/api/v1/admin/workspaces/{ws}/capabilities` | 已覆盖 | 顶栏及按钮：服务端解析当前 admin 能力 | 能力 API/RBAC；角色及跨工作空间契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/environments` | 已覆盖 | 顶栏：工作空间/环境选择与创建 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments` | 已覆盖 | 顶栏：工作空间/环境选择与创建 | i18n DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/tokens` | 已覆盖 | 令牌页：列表/创建/撤销 | i18n DOM；API 路由契约 |
@@ -60,12 +62,8 @@
 
 ## 横向核对
 
-- **权限**：管理路由先验证 admin 凭证，服务端再按工作空间与操作授权。配额 GET/PUT 均使用 `quota.manage`，只有 owner 可用。Web 通过配额 GET 成功与否控制入口；其他管理页若显示无权限动作，服务端仍返回 403，后续改进见下方 issue。
-- **错误**：API 统一映射 400/401/403/404/409/429/500；配额页对 403、409、429 有专门反馈，409 提示刷新后重试，表单保留编辑值。API 契约与路由由 `TestOpenAPISpecMatchesRouteTable` 核对。
-- **危险动作**：配额保存、flag 回滚/紧急禁用/删除、令牌撤销、放量控制、AI 撤销使用确认或理由提示。高影响计划与 AI pin 经审批流执行；自批由服务端拒绝。
-- **中英文本**：`web/i18n_contract.mjs` 的双语视图与字典完整性检查覆盖主要视图及配额页；固定 UI 文案位于 `web/i18n.js`。
-- **测试列含义**：列出的 DOM 契约是入口和主要行为证据，不能解释成每个端点都有独立端到端测试；配额另有 API 权限/默认值/持久化测试。
-
-## 后续缺口
-
-- **P2 [#19](https://github.com/godeps/golab/issues/19)：角色感知管理 UI**：现有令牌、审批、AI 等页可能向非 owner 显示不可执行按钮，依赖服务端 403。补充服务端能力读模型与按钮门控，并测试角色切换、403、409、429 与双语提示。
+- **权限**：全局能力 GET 支持空工作空间冷启动；工作空间能力 GET 解析目标工作空间并用已认证 admin actor 逐项调用 `Authorize`；作用域外返回 403。Web 在连接和切换工作空间时加载能力，按 `workspace.admin`、`token.manage`、`quota.manage`、`flag.write/approve/publish`、`experiment.write`、`ai.write/content.read` 门控入口与动作。服务端保留每个写请求的 RBAC 和对象状态校验。
+- **错误**：403、409、429 共用中英反馈。403 重新加载能力；409 指示重新读取当前状态并应用修改；429 指示限流后重试。能力请求失败时动作默认不可用。
+- **危险动作**：令牌撤销、flag 删除/回滚/紧急禁用、放量控制、AI 撤销已有确认或理由；审批队列批准需理由和确认，执行需逐项确认并展示目标、状态、影响、回滚和护栏。审批自批仍由服务端拒绝。
+- **中英文本**：`web/i18n_contract.mjs` 和能力 DOM 契约覆盖双语文本、权限动作与语言切换。
+- **测试列含义**：DOM 契约验证页面入口和行为，API 契约验证服务端工作空间权限；不代表外部部署的现场验收。

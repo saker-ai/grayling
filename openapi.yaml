@@ -180,6 +180,60 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/Internal"
+  "/api/v1/admin/capabilities":
+    get:
+      tags: [workspaces]
+      summary: 查询当前 admin 的全局工作空间创建权限
+      description: 无工作空间时也可调用；权限只由已认证凭证推导。
+      operationId: getGlobalCapabilities
+      responses:
+        "200":
+          description: workspace.admin 布尔权限。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workspace.admin]
+                properties:
+                  workspace.admin:
+                    type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  "/api/v1/admin/workspaces/{ws}/capabilities":
+    get:
+      tags: [workspaces]
+      summary: 查询当前 admin 在服务端解析工作空间内的能力
+      description: 从已认证的 admin 凭证推导，忽略客户端自报角色。作用域外返回 403。
+      operationId: getWorkspaceCapabilities
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+      responses:
+        "200":
+          description: 当前工作空间权限映射（每项布尔值）。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workspaceId, permissions]
+                properties:
+                  workspaceId:
+                    type: string
+                  permissions:
+                    type: object
+                    additionalProperties:
+                      type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   "/api/v1/admin/workspaces/{ws}/environments":
     post:
       tags: [workspaces]
@@ -309,6 +363,16 @@ paths:
         对象级校验：作用域 owner 只能吊销本工作空间的凭证；全局凭证
         （workspaceId 为空）只能由全局 owner 吊销（否则 403 access_denied）。
       operationId: revokeToken
+      requestBody:
+        required: false
+        description: 可选吊销理由，写入审计详情；旧客户端可省略。
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
       parameters:
         - $ref: "#/components/parameters/TokenIdPath"
       responses:

@@ -136,8 +136,10 @@ func (s *Server) Handler() http.Handler {
 
 	// Admin (admin tokens only).
 	mux.HandleFunc("POST /api/v1/admin/workspaces", s.adminOnly(s.handleCreateWorkspace))
+	mux.HandleFunc("GET /api/v1/admin/capabilities", s.adminOnly(s.handleGlobalCapabilities))
 	mux.HandleFunc("GET /api/v1/admin/workspaces", s.adminOnly(s.handleListWorkspaces))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments", s.adminOnly(s.handleCreateEnvironment))
+	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/capabilities", s.adminOnly(s.handleWorkspaceCapabilities))
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments", s.adminOnly(s.handleListEnvironments))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/tokens", s.adminOnly(s.handleCreateToken))
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/tokens", s.adminOnly(s.handleListTokens))

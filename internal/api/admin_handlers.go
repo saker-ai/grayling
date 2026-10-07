@@ -56,6 +56,42 @@ func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleGlobalCapabilities supports workspace creation before any workspace exists.
+func (s *Server) handleGlobalCapabilities(w http.ResponseWriter, r *http.Request) {
+	actor := actorFrom(r)
+	writeJSON(w, http.StatusOK, map[string]bool{
+		string(admin.PermWorkspaceAdmin): admin.Authorize(actor, "", admin.PermWorkspaceAdmin) == nil,
+	})
+}
+
+// handleWorkspaceCapabilities derives the console read model from the authenticated
+// actor and resolved workspace. It never accepts a client-provided role.
+func (s *Server) handleWorkspaceCapabilities(w http.ResponseWriter, r *http.Request) {
+	actor := actorFrom(r)
+	ws, err := s.Store.GetWorkspace(r.PathValue("ws"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := admin.Authorize(actor, ws.ID, admin.PermFlagRead); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	permissions := make(map[admin.Permission]bool)
+	for _, perm := range []admin.Permission{
+		admin.PermWorkspaceAdmin, admin.PermTokenManage, admin.PermFlagRead,
+		admin.PermFlagWrite, admin.PermFlagApprove, admin.PermFlagPublish,
+		admin.PermExperimentWrite, admin.PermReportRead, admin.PermAIWrite,
+		admin.PermAIContentRead, admin.PermQuotaManage,
+	} {
+		permissions[perm] = admin.Authorize(actor, ws.ID, perm) == nil
+	}
+	writeJSON(w, http.StatusOK, struct {
+		WorkspaceID string                    `json:"workspaceId"`
+		Permissions map[admin.Permission]bool `json:"permissions"`
+	}{ws.ID, permissions})
+}
+
 func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request) {
 	actor := actorFrom(r)
 	ws := r.PathValue("ws")
@@ -156,6 +192,15 @@ func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 	actor := actorFrom(r)
+	var request struct {
+		Reason string `json:"reason"`
+	}
+	if r.ContentLength != 0 {
+		if err := decodeJSON(r, &request, maxAdminBodyBytes); err != nil {
+			writeStoreError(w, err)
+			return
+		}
+	}
 	// Object-level check: a workspace-scoped owner may only revoke tokens
 	// of their own workspace; global owners may revoke any.
 	tokens := s.Store.ListTokens("")
@@ -184,7 +229,7 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	_ = s.Store.Audit(actor.Name, actor.Role, "token.revoke", target.WorkspaceID, "", target.ID, "")
+	_ = s.Store.Audit(actor.Name, actor.Role, "token.revoke", target.WorkspaceID, "", target.ID, request.Reason)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
@@ -407,11 +452,19 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleEmergencyDisable(w http.ResponseWriter, r *http.Request) {
-	var req struct { Reason string `json:"reason"` }
-	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil { writeStoreError(w, err); return }
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	result, err := s.Admin.EmergencyDisableFlag(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
 		r.PathValue("key"), req.Reason)
-	if err != nil { writeStoreError(w, err); return }
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
