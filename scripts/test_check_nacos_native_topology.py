@@ -264,6 +264,24 @@ class NativeTopologyTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "resolved different IPs"):
             verify_pair(self.config, allowed, changed)
 
+    def test_pair_rejects_stale_and_future_records_even_when_probes_match(self):
+        allowed_targets = evidence(self.config, "allowed")["targets"]
+        denied_targets = evidence(self.config, "denied")["targets"]
+        allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in allowed_targets},
+                           {target: ["10.42.1.10"] for target in allowed_targets})
+        denied = evidence(self.config, "denied", {target: "10.43.0.7" for target in denied_targets},
+                          {target: ["10.42.1.10"] for target in denied_targets})
+        allowed["probeHost"] = "sdk-host"
+        denied["probeHost"] = "blocked-host"
+        for age, message in ((datetime.timedelta(minutes=11), "older than ten minutes"),
+                             (-datetime.timedelta(minutes=2), "future")):
+            with self.subTest(age=age):
+                timestamp = (datetime.datetime.now(datetime.timezone.utc) - age).isoformat()
+                allowed["utc"] = timestamp
+                denied["utc"] = timestamp
+                with self.assertRaisesRegex(ValueError, message):
+                    verify_pair(self.config, allowed, denied)
+
     def test_cluster_requires_two_distinct_nodes_in_same_window(self):
         other_config = copy.deepcopy(self.config)
         other_config.update(tlsHTTP="nacos-b.example:8848", tlsGRPC="nacos-b.example:9848",

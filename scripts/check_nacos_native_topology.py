@@ -253,6 +253,13 @@ def verify_pair(c, allowed, denied):
     times = [datetime.datetime.fromisoformat(record["utc"]) for record in (allowed, denied)]
     if any(value.tzinfo is None for value in times) or abs((times[0] - times[1]).total_seconds()) > 300:
         raise ValueError("live probes must be within five minutes")
+    now = datetime.datetime.now(datetime.timezone.utc)
+    for value in times:
+        age = now - value
+        if age > datetime.timedelta(minutes=10):
+            raise ValueError("live probe evidence is older than ten minutes; rerun both probes")
+        if age < -datetime.timedelta(minutes=1):
+            raise ValueError("live probe evidence is more than one minute in the future; check host clocks")
     if allowed["probeHost"] == denied["probeHost"]:
         raise ValueError("allowed and denied probes must run on distinct hosts")
     networks = [ipaddress.ip_network(value, strict=False) for value in c["allowedSources"]]
