@@ -42,27 +42,32 @@ import (
 
 func main() {
 	var (
-		listenAddr           = flag.String("addr", "127.0.0.1:8688", "GoLab HTTP listen address")
-		dataFile             = flag.String("data", filepath.Join("data", "golab-store.json"), "platform store file ('' = memory-only; ignored when -pg is set)")
-		pgDSN                = flag.String("pg", "", "PostgreSQL DSN for the production platform store (e.g. postgres://golab:secret@127.0.0.1:5432/golab); overrides -data")
-		gonacosRoot          = flag.String("gonacos-root", "", "gonacos contract root (repo with api/openapi/upstream); empty disables 501-stub registration")
-		gonacosData          = flag.String("gonacos-data", "", "gonacos embedded-redis dump dir (default <data dir>/gonacos)")
-		gonacosAddr          = flag.String("gonacos-addr", "127.0.0.1:18848", "gonacos HTTP bind — KEEP LOOPBACK/PRIVATE (§9)")
-		gonacosGRPC          = flag.String("gonacos-grpc-addr", "127.0.0.1:19848", "gonacos gRPC bind — KEEP LOOPBACK/PRIVATE (§9)")
-		nativeConfigAuth     = flag.Bool("nacos-native-auth", false, "enable SDK-token-scoped native Nacos config reads; HTTP exposes only SDK login")
-		redisAddr            = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
-		authSecret           = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
-		authSecretFile       = flag.String("auth-secret-file", "", "owner-only file containing the gonacos HMAC/auth secret")
-		rolloutIv            = flag.Duration("rollout-interval", 30*time.Second, "auto-advance engine tick interval for staged release plans (0 disables automation; manual plan operations stay available)")
-		rolloutLease         = flag.Duration("rollout-lease-duration", 0, "PostgreSQL rollout leader lease (0 = max(3 x rollout-interval, 30s); set longer than worst expected decision pass)")
-		reconcileIv          = flag.Duration("reconcile-interval", 30*time.Second, "publish reconciliation tick interval: re-verifies the gonacos substrate against the platform store and idempotently republishes drift (0 disables); PostgreSQL control changes sync separately every 500ms")
-		requestsPerSec       = flag.Float64("requests-per-second", 0, "per-token request rate limit on sdk/collect endpoints (0 = default 200)")
-		evaluationSampleRate = flag.Float64("evaluation-sample-rate", 0, "fraction [0,1] of safe feature-flag evaluation events to write as structured logs")
-		bootstrapName        = flag.String("bootstrap-owner-name", "bootstrap-owner", "display name of the auto-created global owner token")
-		printVersion         = flag.Bool("version", false, "print version and exit")
-		recoveryPoint        = flag.String("recovery-point", "", "checkpoint to verify before opening the API after a restore")
-		writePoint           = flag.String("write-recovery-point", "", "write a checkpoint from quiesced PostgreSQL and gonacos state, then exit")
-		verifyPoint          = flag.String("verify-recovery-point", "", "verify restored components against a checkpoint, then exit without opening listeners")
+		listenAddr            = flag.String("addr", "127.0.0.1:8688", "GoLab HTTP listen address")
+		dataFile              = flag.String("data", filepath.Join("data", "golab-store.json"), "platform store file ('' = memory-only; ignored when -pg is set)")
+		pgDSN                 = flag.String("pg", "", "PostgreSQL DSN for the production platform store (e.g. postgres://golab:secret@127.0.0.1:5432/golab); overrides -data")
+		gonacosRoot           = flag.String("gonacos-root", "", "gonacos contract root (repo with api/openapi/upstream); empty disables 501-stub registration")
+		gonacosData           = flag.String("gonacos-data", "", "gonacos embedded-redis dump dir (default <data dir>/gonacos)")
+		gonacosAddr           = flag.String("gonacos-addr", "127.0.0.1:18848", "gonacos HTTP bind — KEEP LOOPBACK/PRIVATE (§9)")
+		gonacosGRPC           = flag.String("gonacos-grpc-addr", "127.0.0.1:19848", "gonacos gRPC bind — KEEP LOOPBACK/PRIVATE (§9)")
+		nativeConfigAuth      = flag.Bool("nacos-native-auth", false, "enable SDK-token-scoped native Nacos config reads; HTTP exposes only SDK login")
+		redisAddr             = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
+		authSecret            = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
+		authSecretFile        = flag.String("auth-secret-file", "", "owner-only file containing the gonacos HMAC/auth secret")
+		rolloutIv             = flag.Duration("rollout-interval", 30*time.Second, "auto-advance engine tick interval for staged release plans (0 disables automation; manual plan operations stay available)")
+		rolloutLease          = flag.Duration("rollout-lease-duration", 0, "PostgreSQL rollout leader lease (0 = max(3 x rollout-interval, 30s); set longer than worst expected decision pass)")
+		reconcileIv           = flag.Duration("reconcile-interval", 30*time.Second, "publish reconciliation tick interval: re-verifies the gonacos substrate against the platform store and idempotently republishes drift (0 disables); PostgreSQL control changes sync separately every 500ms")
+		requestsPerSec        = flag.Float64("requests-per-second", 0, "per-token request rate limit on sdk/collect endpoints (0 = default 200)")
+		evaluationSampleRate  = flag.Float64("evaluation-sample-rate", 0, "fraction [0,1] of safe feature-flag evaluation events to write as structured logs")
+		bootstrapName         = flag.String("bootstrap-owner-name", "bootstrap-owner", "display name of the auto-created global owner token")
+		printVersion          = flag.Bool("version", false, "print version and exit")
+		recoveryPoint         = flag.String("recovery-point", "", "checkpoint to verify before opening the API after a restore")
+		writePoint            = flag.String("write-recovery-point", "", "write a checkpoint from quiesced PostgreSQL and gonacos state, then exit")
+		verifyPoint           = flag.String("verify-recovery-point", "", "verify restored components against a checkpoint, then exit without opening listeners")
+		rotationKeyFile       = flag.String("rotate-hmac-key-file", "", "offline HMAC rotation key file (requires a verified backup and two owner tokens)")
+		rotationOperatorFile  = flag.String("rotation-operator-token-file", "", "owner token file for offline HMAC rotation")
+		rotationApproverFile  = flag.String("rotation-approver-token-file", "", "distinct owner token file approving offline HMAC rotation")
+		rotationBackupPoint   = flag.String("rotation-backup-point", "", "checkpoint from the completed joint backup, verified before rotation")
+		rotationProvisionFile = flag.String("provision-rotation-approver-file", "", "offline issue a second global owner token into a new owner-only file")
 	)
 	flag.Parse()
 	if *evaluationSampleRate < 0 || *evaluationSampleRate > 1 {
@@ -132,7 +137,7 @@ func main() {
 		*gonacosData = filepath.Join(filepath.Dir(*dataFile), "gonacos")
 	}
 	var diskSnapshotHash string
-	if (*recoveryPoint != "" || *verifyPoint != "") && *redisAddr == "" {
+	if (*recoveryPoint != "" || *verifyPoint != "" || *rotationKeyFile != "" || *rotationProvisionFile != "") && *redisAddr == "" {
 		if *gonacosData == "" {
 			logger.Fatal("recovery verification requires -gonacos-data in embedded mode")
 		}
@@ -146,7 +151,7 @@ func main() {
 		if err != nil {
 			logger.Fatalf("recovery verification: %v", err)
 		}
-	} else if (*recoveryPoint != "" || *verifyPoint != "") && *redisAddr != "" {
+	} else if (*recoveryPoint != "" || *verifyPoint != "" || *rotationKeyFile != "" || *rotationProvisionFile != "") && *redisAddr != "" {
 		var err error
 		diskSnapshotHash, err = recovery.DigestRedisSnapshot(context.Background(), *redisAddr)
 		if err != nil {
@@ -177,7 +182,7 @@ func main() {
 	if *authSecret != "" {
 		gopts = append(gopts, server.WithAuthSecret(*authSecret))
 	}
-	if *recoveryPoint != "" || *verifyPoint != "" {
+	if *recoveryPoint != "" || *verifyPoint != "" || *rotationKeyFile != "" || *rotationProvisionFile != "" {
 		gopts = append(gopts, server.WithStrictSnapshot(true))
 	}
 	gsrv, err := server.New(gopts...)
@@ -212,6 +217,28 @@ func main() {
 		}
 	}
 	defer func() { _ = store.Close() }()
+	if *rotationProvisionFile != "" {
+		if *pgDSN == "" || *redisAddr == "" || *authSecretFile == "" || *rotationBackupPoint == "" || *rotationOperatorFile == "" || *rotationKeyFile != "" || *rotationApproverFile != "" || *recoveryPoint != "" || *writePoint != "" || *verifyPoint != "" {
+			logger.Fatal("approver provisioning requires -pg, -redis, auth secret file, backup point, operator token file, and a new output path")
+		}
+		if err := provisionRotationApprover(ctx, store, *pgDSN, *authSecret, *redisAddr, diskSnapshotHash,
+			configstore.NewGonacosStore(bundle.Config), *rotationBackupPoint, *rotationOperatorFile, *rotationProvisionFile); err != nil {
+			logger.Fatalf("provision rotation approver: %v", err)
+		}
+		logger.Print("rotation approver token issued with audit; escrow the output and take a new joint backup")
+		return
+	}
+	if *rotationKeyFile != "" {
+		if *pgDSN == "" || *redisAddr == "" || *authSecretFile == "" || *rotationBackupPoint == "" || *rotationOperatorFile == "" || *rotationApproverFile == "" || *recoveryPoint != "" || *writePoint != "" || *verifyPoint != "" {
+			logger.Fatal("rotation requires -pg, backup checkpoint, key and two owner token files; recovery modes are exclusive")
+		}
+		if err := runHMACRotation(ctx, store, *pgDSN, *authSecret, *redisAddr, diskSnapshotHash, configstore.NewGonacosStore(bundle.Config),
+			*rotationBackupPoint, *rotationKeyFile, *rotationOperatorFile, *rotationApproverFile); err != nil {
+			logger.Fatalf("HMAC rotation: %v", err)
+		}
+		logger.Print("HMAC rotation committed with audit; keep the pre-rotation backup until post-checks pass")
+		return
+	}
 	if *recoveryPoint != "" || *writePoint != "" || *verifyPoint != "" {
 		if *pgDSN == "" {
 			logger.Fatal("recovery checkpoint requires -pg")

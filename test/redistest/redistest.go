@@ -159,8 +159,13 @@ func dockerRedis(t *testing.T) *Redis {
 	}
 	port := freePort(t)
 	name := fmt.Sprintf("golab-redis-%d-%d", os.Getpid(), redisCounter.Add(1))
+	// Give each test its own writable persistence directory. Docker's overlay
+	// store may be on a different (or full) filesystem from the test workspace.
+	dataDir := t.TempDir()
 	run := exec.Command("docker", "run", "-d",
 		"--name", name,
+		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
+		"-v", dataDir+":/data",
 		"-p", fmt.Sprintf("127.0.0.1:%d:6379", port),
 		image)
 	if out, err := run.CombinedOutput(); err != nil {

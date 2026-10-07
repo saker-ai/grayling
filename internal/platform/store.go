@@ -422,6 +422,52 @@ type CreatedToken struct {
 	Secret string
 }
 
+// ProvisionRotationApprover creates a second global owner credential while
+// all writers are stopped. Issuance and its audit record commit atomically.
+// The caller must verify the joint backup before calling this method.
+func (s *Store) ProvisionRotationApprover(operatorID, checkpointSHA256 string) (*CreatedToken, error) {
+	if len(checkpointSHA256) != 64 {
+		return nil, fmt.Errorf("%w: invalid checkpoint digest", ErrValidation)
+	}
+	if _, err := hex.DecodeString(checkpointSHA256); err != nil {
+		return nil, fmt.Errorf("%w: invalid checkpoint digest", ErrValidation)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	operator := s.data.Tokens[operatorID]
+	if operator == nil || operator.Revoked || operator.Kind != TokenAdmin || operator.Role != RoleOwner || operator.WorkspaceID != "" {
+		return nil, fmt.Errorf("%w: active global owner required", ErrAccessDenied)
+	}
+	secretRaw := make([]byte, 32)
+	if _, err := rand.Read(secretRaw); err != nil {
+		return nil, err
+	}
+	secret := "glab_admin_" + base64.RawURLEncoding.EncodeToString(secretRaw)
+	hash := hashSecret(secret)
+	tok := &Token{ID: s.nextID("tok"), Name: "hmac-rotation-approver", Kind: TokenAdmin,
+		Role: RoleOwner, SecretHash: hash, Prefix: secret[:14], CreatedAt: s.now(), CreatedBy: operatorID}
+	s.data.Tokens[tok.ID] = tok
+	s.data.TokensByHash[hash] = tok.ID
+	s.changes.markDirty(collTokens, tok.ID)
+	entry := &AuditEntry{ID: s.data.NextAudit, Time: s.now(), Actor: operatorID,
+		ActorRole: RoleOwner, Action: "hmac.approver_provision", Object: tok.ID,
+		Detail: fmt.Sprintf(`{"checkpointSha256":%q}`, checkpointSHA256)}
+	s.data.NextAudit++
+	s.data.Audit = append(s.data.Audit, entry)
+	s.changes.Audit = append(s.changes.Audit, entry)
+	s.changes.Meta = true
+	if err := s.commitLocked(); err != nil {
+		if d, loadErr := s.persist.Load(); loadErr == nil && d != nil {
+			s.data = d
+			s.changes = newChangeSet()
+		} else if loadErr != nil {
+			return nil, fmt.Errorf("provision failed: %w; reload failed: %v", err, loadErr)
+		}
+		return nil, err
+	}
+	return &CreatedToken{Token: tok, Secret: secret}, nil
+}
+
 // CreateToken mints a new credential. The secret format is
 // glab_<kind>_<43 url-safe chars>; only its SHA-256 is stored.
 func (s *Store) CreateToken(kind TokenKind, name string, role Role, workspaceID, environmentID, createdBy string) (*CreatedToken, error) {
@@ -652,14 +698,42 @@ func hashUnitLayer(key, workspaceID, v string) string {
 // hash). The new key must be 32 bytes of hex; old keys stay in the ring as
 // chain layers (each layer alone is useless for reversing the final hash).
 func (s *Store) RotateHMACKey(newKeyHex string) error {
+	return s.rotateHMACKey(newKeyHex, "", "", "")
+}
+
+// RotateHMACKeyAudited records the two authorized global owner token IDs and
+// the backup checkpoint digest in the same transaction as the migration.
+// Callers must verify the checkpoint and both credentials before invoking it.
+func (s *Store) RotateHMACKeyAudited(newKeyHex, operatorID, approverID, checkpointSHA256 string) error {
+	if operatorID == "" || approverID == "" || operatorID == approverID || len(checkpointSHA256) != 64 {
+		return fmt.Errorf("%w: invalid rotation authorization", ErrValidation)
+	}
+	if _, err := hex.DecodeString(checkpointSHA256); err != nil {
+		return fmt.Errorf("%w: invalid checkpoint digest", ErrValidation)
+	}
+	return s.rotateHMACKey(newKeyHex, operatorID, approverID, checkpointSHA256)
+}
+
+func (s *Store) rotateHMACKey(newKeyHex, operatorID, approverID, checkpointSHA256 string) error {
 	if _, err := hex.DecodeString(newKeyHex); err != nil || len(newKeyHex) != 64 {
 		return fmt.Errorf("%w: HMAC key must be 64 hex chars (32 bytes)", ErrValidation)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if operatorID != "" {
+		for _, id := range []string{operatorID, approverID} {
+			tok := s.data.Tokens[id]
+			if tok == nil || tok.Revoked || tok.Kind != TokenAdmin || tok.Role != RoleOwner || tok.WorkspaceID != "" {
+				return fmt.Errorf("%w: two active global owner tokens required", ErrAccessDenied)
+			}
+		}
+	}
 	ring := s.data.HMACKeyRing
 	if len(ring) > 0 && ring[len(ring)-1] == newKeyHex {
-		return nil // already current
+		if operatorID == "" {
+			return nil
+		}
+		return fmt.Errorf("%w: HMAC key already current", ErrConflict)
 	}
 	// Re-hash every stored pseudonym in memory with the new layer.
 	for _, ev := range s.data.Events {
@@ -685,7 +759,26 @@ func (s *Store) RotateHMACKey(newKeyHex string) error {
 	s.data.HMACKey = newKeyHex
 	s.changes.Meta = true
 	s.changes.Rotation = true
-	return s.commitLocked()
+	if operatorID != "" {
+		entry := &AuditEntry{ID: s.data.NextAudit, Time: s.now(), Actor: operatorID,
+			ActorRole: RoleOwner, Action: "hmac.rotate", Object: "platform",
+			Detail: fmt.Sprintf(`{"approverTokenId":%q,"checkpointSha256":%q}`, approverID, checkpointSHA256)}
+		s.data.NextAudit++
+		s.data.Audit = append(s.data.Audit, entry)
+		s.changes.Audit = append(s.changes.Audit, entry)
+	}
+	if err := s.commitLocked(); err != nil {
+		// A failed migration must never be replayed by a later commit or
+		// observed from the in-memory working set.
+		if d, loadErr := s.persist.Load(); loadErr == nil && d != nil {
+			s.data = d
+			s.changes = newChangeSet()
+		} else if loadErr != nil {
+			return fmt.Errorf("rotation failed: %w; reload failed: %v", err, loadErr)
+		}
+		return err
+	}
+	return nil
 }
 
 // rehashAggKeys rebuilds the UnitAggs map with rotated unit hashes. The agg

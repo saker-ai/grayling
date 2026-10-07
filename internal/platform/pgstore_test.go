@@ -746,6 +746,80 @@ func TestPGHMACKeyRotation(t *testing.T) {
 	}
 }
 
+func TestPGAuditedHMACRotationRollback(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	s := openPGStore(t, dsn)
+	ws, err := s.CreateWorkspace("rotation", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := s.HashUnit(ws.ID, "same-user")
+	key := strings.Repeat("cd", 32)
+	operator, err := s.CreateToken(TokenAdmin, "rotation-operator", RoleOwner, "", "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	approver, err := s.CreateToken(TokenAdmin, "rotation-approver", RoleOwner, "", "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RotateHMACKeyAudited(key, operator.Token.ID, operator.Token.ID, strings.Repeat("a", 64)); !errors.Is(err, ErrValidation) {
+		t.Fatalf("same approver accepted: %v", err)
+	}
+	pgtest.Exec(t, dsn, `CREATE FUNCTION reject_rotation_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN IF NEW.action = 'hmac.rotate' THEN RAISE EXCEPTION 'injected audit failure'; END IF; RETURN NEW; END $$`)
+	pgtest.Exec(t, dsn, `CREATE TRIGGER reject_rotation BEFORE INSERT ON audit FOR EACH ROW EXECUTE FUNCTION reject_rotation_audit()`)
+	if err := s.RotateHMACKeyAudited(key, operator.Token.ID, approver.Token.ID, strings.Repeat("a", 64)); err == nil {
+		t.Fatal("injected audit failure did not roll back rotation")
+	}
+	if got := s.HashUnit(ws.ID, "same-user"); got != before {
+		t.Fatalf("working set retained failed rotation: %s", got)
+	}
+	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM hmac_keys`); got[0][0] != "1" {
+		t.Fatalf("failed rotation changed durable ring: %v", got)
+	}
+	pgtest.Exec(t, dsn, `DROP TRIGGER reject_rotation ON audit`)
+	if err := s.RotateHMACKeyAudited(key, operator.Token.ID, approver.Token.ID, strings.Repeat("a", 64)); err != nil {
+		t.Fatalf("retry rotation: %v", err)
+	}
+	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM hmac_keys`); got[0][0] != "2" {
+		t.Fatalf("rotation did not commit: %v", got)
+	}
+	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM audit WHERE action='hmac.rotate' AND actor=$1 AND (detail::jsonb)->>'approverTokenId'=$2`, operator.Token.ID, approver.Token.ID); got[0][0] != "1" {
+		t.Fatalf("rotation audit missing: %v", got)
+	}
+}
+
+func TestPGProvisionRotationApproverAtomic(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	s := openPGStore(t, dsn)
+	operator, err := s.CreateToken(TokenAdmin, "operator", RoleOwner, "", "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pgtest.Exec(t, dsn, `CREATE FUNCTION reject_provision_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN IF NEW.action = 'hmac.approver_provision' THEN RAISE EXCEPTION 'injected provision failure'; END IF; RETURN NEW; END $$`)
+	pgtest.Exec(t, dsn, `CREATE TRIGGER reject_provision BEFORE INSERT ON audit FOR EACH ROW EXECUTE FUNCTION reject_provision_audit()`)
+	if _, err := s.ProvisionRotationApprover(operator.Token.ID, strings.Repeat("a", 64)); err == nil {
+		t.Fatal("audit failure did not roll back token")
+	}
+	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM tokens WHERE name='hmac-rotation-approver'`); got[0][0] != "0" {
+		t.Fatalf("failed issuance left a token: %v", got)
+	}
+	pgtest.Exec(t, dsn, `DROP TRIGGER reject_provision ON audit`)
+	created, err := s.ProvisionRotationApprover(operator.Token.ID, strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.ResolveToken(created.Secret)
+	if err != nil || resolved.ID != created.Token.ID || resolved.Role != RoleOwner {
+		t.Fatalf("issued approver cannot authenticate: %v", err)
+	}
+	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM audit WHERE action='hmac.approver_provision' AND object=$1`, created.Token.ID); got[0][0] != "1" {
+		t.Fatalf("issuance audit missing: %v", got)
+	}
+}
+
 // TestPGDedupLedgerBeyondMemoryWindow: the PostgreSQL dedup ledger covers
 // the FULL retention window, so duplicates are still rejected after the raw
 // event left the in-memory working set (simulated eviction).
