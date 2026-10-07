@@ -73,6 +73,19 @@ class NativeTopologyTest(unittest.TestCase):
         config["allowedSources"] = ["10.42.0.0/17", "10.42.128.0/17"]
         self.assertEqual(validate(config), [])
 
+    def test_allowed_sources_exclude_non_client_networks(self):
+        for source in ("0.0.0.0/1", "127.0.0.0/8", "169.254.0.0/16",
+                       "224.0.0.0/4", "::/1", "::1/128", "fe80::/10",
+                       "ff00::/8", "::ffff:10.42.0.0/112"):
+            with self.subTest(source=source):
+                config = copy.deepcopy(self.config)
+                config["allowedSources"] = [source]
+                self.assertTrue(any("source range includes" in error for error in validate(config)))
+
+        config = copy.deepcopy(self.config)
+        config["allowedSources"] = ["10.42.0.0/16", "2001:db8:42::/64"]
+        self.assertEqual(validate(config), [])
+
     def test_evidence_writer_never_replaces_existing_record(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "probe.json")

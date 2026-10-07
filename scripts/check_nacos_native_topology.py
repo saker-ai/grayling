@@ -72,12 +72,20 @@ def validate(c):
         errors.append("allowedSources must be a nonempty explicit list")
     else:
         networks_by_version = {4: [], 6: []}
+        invalid_source_ranges = {
+            4: [ipaddress.ip_network(value) for value in (
+                "0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4")],
+            6: [ipaddress.ip_network(value) for value in (
+                "::/128", "::1/128", "fe80::/10", "ff00::/8", "::ffff:0:0/96")],
+        }
         for source in sources:
             try:
                 network = ipaddress.ip_network(source, strict=False)
                 if network.prefixlen == 0:
                     raise ValueError("unrestricted source")
                 networks_by_version[network.version].append(network)
+                if any(network.overlaps(excluded) for excluded in invalid_source_ranges[network.version]):
+                    errors.append(f"allowedSources {source}: source range includes unspecified, loopback, link-local, multicast, or IPv4-mapped addresses")
             except ValueError as exc:
                 errors.append(f"allowedSources {source}: {exc}")
         for version, networks in networks_by_version.items():
