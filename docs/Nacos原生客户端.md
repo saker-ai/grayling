@@ -45,6 +45,10 @@ gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f
 
 ### 运维部署模板与预检
 
+允许源登录探针除核对 HTTP 200，还会解析 Nacos 登录 JSON：`accessToken` 必须等于本次提交的 SDK token，`tokenTtl` 必须为正整数。响应体上限为 16 KiB；通用 200 页面、空令牌或错误 TTL 均报 `ALERT`，不会写入 PASS 证据。令牌值只在进程内比较，不写入错误输出或证据文件。这项检查仍不能证明两个 token 分属不同租户；现场需完成下述双租户 SDK 读、订阅和推送验收。
+
+2026-10-07 本次补强的核验：拓扑预检 Python 单元测试 29/29、示例声明检查、`git diff --check`、`make all`（vet、全量 Go 测试、构建）与 `make client-compatibility`（直连 9/9、本机双节点 TLS/L4 1/1）均通过。全量 Go 测试使用已有 PostgreSQL 的隔离临时数据库与测试自管 Redis。此轮没有取得跨主机两节点的现场允许/拒绝源记录，正式支持边界保持上表所述。
+
 一个 GoLab 节点需提供两个独立的原生端口：HTTP 只用于 `/nacos/v1/auth/users/login`，gRPC 用于配置读取和订阅。以下是**待环境验证**的 TLS/L4 侧车示例，HAProxy 与 GoLab 在同一主机或同一网络命名空间；每个节点分别配置一份，负载均衡客户端持有两个节点的地址。`mode tcp` 保留客户端到后端的一对一 TCP 连接，禁止改成汇聚多租户后端连接的 L7 HTTP/2 路由。
 
 ```haproxy

@@ -96,18 +96,46 @@ class NativeTopologyTest(unittest.TestCase):
         with patch("check_nacos_native_topology.ssl.create_default_context", return_value=context), \
              patch("check_nacos_native_topology.socket.create_connection") as connect, \
              patch("check_nacos_native_topology.PinnedHTTPSConnection", return_value=connection) as https:
-            connection.getresponse.side_effect = [MagicMock(status=status) for status in
-                                                  (404, 401, 200, 200, 404, 401, 200, 200)]
+            def replies(statuses):
+                tokens = iter(("tenant-a-token", "tenant-b-token") * 2)
+                result = []
+                for status in statuses:
+                    reply = MagicMock(status=status)
+                    if status == 200:
+                        reply.read.return_value = json.dumps({"accessToken": next(tokens), "tokenTtl": 3600}).encode()
+                    result.append(reply)
+                return result
+
+            connection.getresponse.side_effect = replies((404, 401, 200, 200, 404, 401, 200, 200))
             probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"))
             self.assertEqual([call.args[2] for call in https.call_args_list],
                              ["10.42.1.10"] * 4 + ["10.42.1.11"] * 4)
             self.assertEqual([call.args[0] for call in connect.call_args_list],
                              [("10.42.1.10", 9848), ("10.42.1.11", 9848)])
 
-            connection.getresponse.side_effect = [MagicMock(status=status) for status in
-                                                  (404, 401, 200, 200, 404, 401, 200, 302)]
+            connection.getresponse.side_effect = replies((404, 401, 200, 200, 404, 401, 200, 302))
             with self.assertRaisesRegex(ValueError, "10.42.1.11:8848.*HTTP 302"):
                 probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"))
+
+    def test_allowed_probe_rejects_false_success_login_body(self):
+        resolved = {"nacos.example:9848": ["10.42.1.10"],
+                    "nacos.example:8848": ["10.42.1.10"]}
+        context = MagicMock()
+        context.wrap_socket.return_value.__enter__.return_value.selected_alpn_protocol.return_value = "h2"
+        for body in (b"<html>OK</html>", b'{}',
+                     b'{"accessToken":"wrong","tokenTtl":3600}',
+                     b'{"accessToken":"tenant-a-token","tokenTtl":0}',
+                     b'{"accessToken":"tenant-a-token","tokenTtl":true}'):
+            with self.subTest(body=body):
+                connection = MagicMock()
+                replies = [MagicMock(status=status) for status in (404, 401, 200)]
+                replies[-1].read.return_value = body
+                connection.getresponse.side_effect = replies
+                with patch("check_nacos_native_topology.ssl.create_default_context", return_value=context), \
+                     patch("check_nacos_native_topology.socket.create_connection"), \
+                     patch("check_nacos_native_topology.PinnedHTTPSConnection", return_value=connection):
+                    with self.assertRaisesRegex(ValueError, "invalid SDK login response"):
+                        probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"))
 
     def test_allowed_probe_rejects_invalid_valid_login(self):
         resolved = {"nacos.example:9848": ["10.42.1.10"],
@@ -115,7 +143,9 @@ class NativeTopologyTest(unittest.TestCase):
         context = MagicMock()
         context.wrap_socket.return_value.__enter__.return_value.selected_alpn_protocol.return_value = "h2"
         connection = MagicMock()
-        connection.getresponse.side_effect = [MagicMock(status=status) for status in (404, 401, 200, 401)]
+        replies = [MagicMock(status=status) for status in (404, 401, 200, 401)]
+        replies[2].read.return_value = b'{"accessToken":"tenant-a-token","tokenTtl":3600}'
+        connection.getresponse.side_effect = replies
         with patch("check_nacos_native_topology.ssl.create_default_context", return_value=context), \
              patch("check_nacos_native_topology.socket.create_connection"), \
              patch("check_nacos_native_topology.PinnedHTTPSConnection", return_value=connection):

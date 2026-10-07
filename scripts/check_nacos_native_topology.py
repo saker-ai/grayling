@@ -174,25 +174,34 @@ def probe(c, resolved, login_tokens=()):
     context.set_alpn_protocols(["http/1.1"])
     host, port = split_address(c["tlsHTTP"])
     requests = (
-        ("GET", "/nacos/v1/cs/configs?tenant=x&group=GOLAB_FLAGS&dataId=golab.manifest", None, 404),
+        ("GET", "/nacos/v1/cs/configs?tenant=x&group=GOLAB_FLAGS&dataId=golab.manifest", None, 404, None),
         ("POST", "/nacos/v1/auth/users/login",
-         urllib.parse.urlencode({"username": "golab-sdk", "password": "invalid"}), 401),
+         urllib.parse.urlencode({"username": "golab-sdk", "password": "invalid"}), 401, None),
     )
     for address in resolved[net_address(host, port)]:
         authorized = tuple(("POST", "/nacos/v1/auth/users/login",
-                            urllib.parse.urlencode({"username": "golab-sdk", "password": token}), 200)
+                            urllib.parse.urlencode({"username": "golab-sdk", "password": token}), 200, token)
                            for token in login_tokens)
-        for method, path, body, expected in requests + authorized:
+        for method, path, body, expected, token in requests + authorized:
             connection = PinnedHTTPSConnection(host, port, address, context)
             try:
                 headers = {"Content-Type": "application/x-www-form-urlencoded"} if body else {}
                 connection.request(method, path, body=body, headers=headers)
                 response = connection.getresponse()
                 status = response.status
+                login_body = response.read(16385) if token is not None and status == 200 else None
             finally:
                 connection.close()
             if status != expected:
                 raise ValueError(f"{address}:{port}{path}: HTTP {status}, expected {expected}")
+            if token is not None:
+                try:
+                    result = json.loads(login_body) if len(login_body) <= 16384 else None
+                except (TypeError, ValueError):
+                    result = None
+                if (not isinstance(result, dict) or result.get("accessToken") != token
+                        or type(result.get("tokenTtl")) is not int or result["tokenTtl"] <= 0):
+                    raise ValueError(f"{address}:{port}{path}: invalid SDK login response")
 
 
 def probe_closed_targets(targets, resolved=None, label="unauthorized source"):
