@@ -31,6 +31,8 @@ gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f
 
 截至 2026-10-07，**原生 Nacos 订阅仍未列为生产正式支持接口**。下表将真实进程测试与待完成的部署验收分开；本机 TLS/L4 测试证明协议路径和租户约束，不能代替跨主机网络策略的实测。
 
+2026-10-07 预检增强：允许源除 `h2` 握手外，现在须用 `cmd/nacos-native-grpc-probe` 对每个 gRPC 入口 IP 直发无凭证配置查询并得到 gRPC status 16；否则不写 PASS 证据。配对核验要求新证据中的 `anonymousGRPCDenied`。探针已用本地真实 TLS/HTTP2 服务验证成功与误放行路径，预检器单元测试 33/33、`make all` 和 `make client-compatibility`（直连 9/9，本机 TLS/L4 双节点 1/1）通过。没有跨主机现场入口与代理/网络策略日志，生产支持结论不变。
+
 2026-10-07 声明门禁复核：`allowedSources` 的两条 `/1` 即使合计覆盖整个 IPv4 或 IPv6 地址空间也会被拒绝；合法相邻工作负载网段仍可通过。`python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'` 32/32、示例声明检查、`make all`（vet、全量 Go 测试、构建）、`make client-compatibility`（直连 9/9、本机双节点 TLS/L4 1/1）及 `git diff --check` 通过。该门禁不能认定任意非全网 CIDR 已获批准，现场仍须核对网络策略；本次没有新增跨主机现场验收证据。
 
 | 拓扑 | 现有证据 | 正式支持 |
@@ -79,8 +81,10 @@ GoLab 使用 `-nacos-native-auth=true -gonacos-addr 127.0.0.1:18848 -gonacos-grp
 复制并填写 [`nacos-native-topology.example.json`](nacos-native-topology.example.json)，然后在**每个节点**运行：
 
 ```sh
+GOWORK=off go build -o ./bin/nacos-native-grpc-probe ./cmd/nacos-native-grpc-probe
 python3 scripts/check_nacos_native_topology.py deployment-nacos.json
 python3 scripts/check_nacos_native_topology.py deployment-nacos.json --probe \
+  --grpc-probe-bin ./bin/nacos-native-grpc-probe \
   --login-token-file /run/secrets/tenant-a-sdk-token \
   --login-token-file /run/secrets/tenant-b-sdk-token \
   --evidence node-a-allowed.json
@@ -92,7 +96,7 @@ python3 scripts/check_nacos_native_topology.py deployment-nacos.json --verify-pa
 python3 scripts/check_nacos_native_topology.py deployment-node-a.json --verify-cluster deployment-node-b.json node-a-allowed.json node-a-denied.json node-b-allowed.json node-b-denied.json
 ```
 
-第一个命令检查声明中鉴权、loopback 后端、彼此独立的 HTTP/gRPC 后端端口及 TLS 端口、显式允许源与连接不复用；`allowedSources` 即使把 IPv4/IPv6 全地址空间拆成多条 CIDR，也会因汇总后等价于 `/0` 而拒绝。此检查无法判断一个非全网的宽网段是否属于获批 SDK 工作负载，仍须对照现场网络策略审查。TLS 入口填 loopback、`localhost`、通配地址、链路本地或多播地址也会在声明阶段被拒绝。DNS 名称仍需通过在线探针验证其解析地址；探针及证据配对拒绝解析成 loopback、通配、链路本地、多播或映射到这些 IPv4 地址的 IPv6 地址。L7/HTTP2 多租户复用会输出 `ALERT` 并以非零状态退出，适合部署门禁或告警。第二个命令从允许源对两个 TLS 入口的**每个 DNS 地址**分别完成证书验证、gRPC `h2` TLS 握手、匿名 HTTP 配置读取 404、无效登录 401，以及两个有效 SDK 凭证登录 200；连接固定到所检查的 IP，证书校验和 HTTP Host 仍使用声明中的入口主机名。两个不同租户的 token 应分别存放在访问受限的单行文件中，不放入命令参数、日志或证据 JSON。脚本检查两个 token 不同；仅凭两个登录 200 不能证明它们属于不同租户，仍需现场 SDK 租户隔离测试。该探针还从允许源检查侧车宿主机的两个明文后端端口均拒绝 TCP，防止获批 SDK 主机绕过 TLS；不使用环境中的 HTTP 代理，并将 HTTP 重定向视为失败。第三个命令从拒绝源检查两个 TLS 入口和两个后端端口都无法建立 TCP，并逐个检查 DNS 返回的地址，不能因其中一个地址拒绝而漏过另一个开放地址；`backendExternalHost` 必须是允许源和拒绝源均可路由的侧车宿主机或 Pod **单播 IP**，不可填写 loopback、通配地址或主机名。两侧探针均记录四个目标的路由选择源 IP 与解析 IP，并按 `allowedSources` 检查允许源属于、拒绝源不属于允许网段；无路由、DNS 错误等探针故障不能计作网络策略拒绝。拒绝源和允许源的明文后端 TCP 探针必须使用各自路由检查时解析出的同一后端 IP；允许源完成 TLS/HTTP 探针后也会重新解析入口，若地址集合漂移则报警。第四个命令要求同一配置 SHA-256、同一 CA 文件内容 SHA-256、不同执行主机、四个目标端口完整、源 IP 分类正确、两侧入口和后端解析 IP 相同，且两份成功记录相差不超过五分钟。最后一个命令要求两个节点的 TLS 入口及可路由后端主机不同，两节点 TLS 入口的解析 IP 不重叠，四份证据处于同一五分钟窗口。旧版没有 `resolvedIPs`、允许源四个目标记录、`backendDirectDenied`、`validLoginCount: 2` 或 `caSHA256` 的证据 JSON 需重新采集；这些字段分别记录解析目标、明文后端拒绝、两个有效登录检查及探针所用 CA 内容。允许源和拒绝源机器须提供内容相同的 CA 文件；离线核验主机不需持有该文件。探针运行期间 CA 内容改变会失败；CA 指纹不能证明代理正在使用的服务端证书未轮换。
+第一个命令检查声明中鉴权、loopback 后端、彼此独立的 HTTP/gRPC 后端端口及 TLS 端口、显式允许源与连接不复用；`allowedSources` 即使把 IPv4/IPv6 全地址空间拆成多条 CIDR，也会因汇总后等价于 `/0` 而拒绝。此检查无法判断一个非全网的宽网段是否属于获批 SDK 工作负载，仍须对照现场网络策略审查。TLS 入口填 loopback、`localhost`、通配地址、链路本地或多播地址也会在声明阶段被拒绝。DNS 名称仍需通过在线探针验证其解析地址；探针及证据配对拒绝解析成 loopback、通配、链路本地、多播或映射到这些 IPv4 地址的 IPv6 地址。L7/HTTP2 多租户复用会输出 `ALERT` 并以非零状态退出，适合部署门禁或告警。第二个命令从允许源对两个 TLS 入口的**每个 DNS 地址**分别完成证书验证、gRPC `h2` TLS 握手、无凭证原生 gRPC 配置读取返回 status 16、匿名 HTTP 配置读取 404、无效登录 401，以及两个有效 SDK 凭证登录 200；连接固定到所检查的 IP，证书校验和 HTTP Host 仍使用声明中的入口主机名。gRPC 负向探针是单独构建的 Go 二进制，部署时须与检查器一同分发并核对来源；未提供 `--grpc-probe-bin`、二进制执行失败或返回非预期状态都不能生成 PASS 证据。旧版没有 `anonymousGRPCDenied` 的允许源证据需重新采集。该探针只检查匿名配置读取，不替代两个租户的有效读、订阅、推送及撤销实测。两个不同租户的 token 应分别存放在访问受限的单行文件中，不放入命令参数、日志或证据 JSON。脚本检查两个 token 不同；仅凭两个登录 200 不能证明它们属于不同租户，仍需现场 SDK 租户隔离测试。该探针还从允许源检查侧车宿主机的两个明文后端端口均拒绝 TCP，防止获批 SDK 主机绕过 TLS；不使用环境中的 HTTP 代理，并将 HTTP 重定向视为失败。第三个命令从拒绝源检查两个 TLS 入口和两个后端端口都无法建立 TCP，并逐个检查 DNS 返回的地址，不能因其中一个地址拒绝而漏过另一个开放地址；`backendExternalHost` 必须是允许源和拒绝源均可路由的侧车宿主机或 Pod **单播 IP**，不可填写 loopback、通配地址或主机名。两侧探针均记录四个目标的路由选择源 IP 与解析 IP，并按 `allowedSources` 检查允许源属于、拒绝源不属于允许网段；无路由、DNS 错误等探针故障不能计作网络策略拒绝。拒绝源和允许源的明文后端 TCP 探针必须使用各自路由检查时解析出的同一后端 IP；允许源完成 TLS/HTTP 探针后也会重新解析入口，若地址集合漂移则报警。第四个命令要求同一配置 SHA-256、同一 CA 文件内容 SHA-256、不同执行主机、四个目标端口完整、源 IP 分类正确、两侧入口和后端解析 IP 相同，且两份成功记录相差不超过五分钟。最后一个命令要求两个节点的 TLS 入口及可路由后端主机不同，两节点 TLS 入口的解析 IP 不重叠，四份证据处于同一五分钟窗口。旧版没有 `resolvedIPs`、允许源四个目标记录、`backendDirectDenied`、`validLoginCount: 2` 或 `caSHA256` 的证据 JSON 需重新采集；这些字段分别记录解析目标、明文后端拒绝、两个有效登录检查及探针所用 CA 内容。允许源和拒绝源机器须提供内容相同的 CA 文件；离线核验主机不需持有该文件。探针运行期间 CA 内容改变会失败；CA 指纹不能证明代理正在使用的服务端证书未轮换。
 
 `--verify-pair` 与 `--verify-cluster` 只接受采集于最近十分钟内、且不比核验主机时钟快超过一分钟的记录；两侧记录仍须处于同一五分钟窗口。请在探针结束后立即核验，并确认各执行主机时钟同步。旧记录可归档，但不能重复作为当前部署验收结果。
 

@@ -274,17 +274,21 @@ class NativeTopologyTest(unittest.TestCase):
                 with open(token_path, "w", encoding="utf-8") as stream:
                     stream.write(f"token-{index}\n")
             with patch("sys.argv", ["check_nacos_native_topology.py", path, "--probe",
+                                    "--grpc-probe-bin", "/tmp/nacos-native-grpc-probe",
                                     "--login-token-file", token_paths[0],
                                     "--login-token-file", token_paths[1]]), \
-                 patch("check_nacos_native_topology.source_ips", return_value={}), \
+                 patch("check_nacos_native_topology.source_ips",
+                       side_effect=lambda _c, _m, output: output.update({self.config["tlsGRPC"]: ["10.42.1.10"]}) or {}), \
                  patch("check_nacos_native_topology.probe"), \
+                 patch("check_nacos_native_topology.subprocess.run",
+                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous native gRPC configuration read rejected")), \
                  patch("check_nacos_native_topology.check_probe_dns"), \
                  patch("check_nacos_native_topology.probe_closed_targets",
                        side_effect=ValueError("allowed source reached plaintext backend")) as closed:
                 with contextlib.redirect_stderr(io.StringIO()) as errors:
                     self.assertEqual(main(), 1)
             closed.assert_called_once_with(backend_targets(self.config),
-                                           {},
+                                           {self.config["tlsGRPC"]: ["10.42.1.10"]},
                                            label="allowed source reached plaintext backend")
             self.assertIn("ALERT: live probe failed", errors.getvalue())
 
@@ -299,6 +303,7 @@ class NativeTopologyTest(unittest.TestCase):
                 with open(token_path, "w", encoding="utf-8") as stream:
                     stream.write("same-secret\n")
             arguments = ["check_nacos_native_topology.py", config_path, "--probe",
+                         "--grpc-probe-bin", "/tmp/nacos-native-grpc-probe",
                          "--login-token-file", token_paths[0],
                          "--login-token-file", token_paths[1], "--evidence", output_path]
             with patch("sys.argv", arguments), contextlib.redirect_stderr(io.StringIO()) as errors:
@@ -319,18 +324,52 @@ class NativeTopologyTest(unittest.TestCase):
                  patch("check_nacos_native_topology.source_ips", side_effect=routed_sources), \
                  patch("check_nacos_native_topology.probe",
                        return_value=self.certificates(self.config, "10.42.1.10")) as live_probe, \
+                 patch("check_nacos_native_topology.subprocess.run",
+                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous native gRPC configuration read rejected")) as grpc_probe, \
                  patch("check_nacos_native_topology.check_probe_dns"), \
                  patch("check_nacos_native_topology.probe_closed_targets"):
                 self.assertEqual(main(), 0)
             live_probe.assert_called_once_with(self.config, resolved, ["same-secret", "other-secret"])
+            grpc_probe.assert_called_once()
+            self.assertEqual(grpc_probe.call_args.args[0][2], "10.42.1.10:9848")
             with open(output_path, encoding="utf-8") as stream:
                 raw = stream.read()
             self.assertNotIn("same-secret", raw)
             self.assertNotIn("other-secret", raw)
             self.assertEqual(json.loads(raw)["validLoginCount"], 2)
+            self.assertTrue(json.loads(raw)["anonymousGRPCDenied"])
             self.assertEqual(len(json.loads(raw)["caSHA256"]), 64)
             self.assertEqual(json.loads(raw)["tlsCertSHA256"],
                              self.certificates(self.config, "10.42.1.10"))
+
+    def test_allowed_probe_fails_when_anonymous_grpc_read_succeeds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = os.path.join(directory, "deployment.json")
+            output_path = os.path.join(directory, "evidence.json")
+            with open(config_path, "w", encoding="utf-8") as stream:
+                json.dump(self.config, stream)
+            tokens = [os.path.join(directory, f"token-{index}") for index in range(2)]
+            for index, path in enumerate(tokens):
+                with open(path, "w", encoding="utf-8") as stream:
+                    stream.write(f"token-{index}\n")
+            resolved = {target: ["10.42.1.10"] for target in evidence(self.config, "allowed")["targets"]}
+
+            def routed_sources(_config, _mode, output):
+                output.update(resolved)
+                return {target: "10.42.0.7" for target in resolved}
+
+            with patch("sys.argv", ["check_nacos_native_topology.py", config_path, "--probe",
+                                    "--grpc-probe-bin", "/tmp/nacos-native-grpc-probe",
+                                    "--login-token-file", tokens[0], "--login-token-file", tokens[1],
+                                    "--evidence", output_path]), \
+                 patch("check_nacos_native_topology.source_ips", side_effect=routed_sources), \
+                 patch("check_nacos_native_topology.probe", return_value={}), \
+                 patch("check_nacos_native_topology.subprocess.run",
+                       return_value=MagicMock(returncode=1, stdout="")), \
+                 contextlib.redirect_stderr(io.StringIO()) as errors:
+                self.assertEqual(main(), 1)
+            self.assertIn("anonymous gRPC read denial failed", errors.getvalue())
+            self.assertFalse(os.path.exists(output_path))
 
     def test_probe_rejects_ca_change_during_checks(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -347,10 +386,14 @@ class NativeTopologyTest(unittest.TestCase):
                     stream.write(b"rotated CA bundle")
 
             with patch("sys.argv", ["check_nacos_native_topology.py", config_path, "--probe",
+                                    "--grpc-probe-bin", "/tmp/nacos-native-grpc-probe",
                                     "--login-token-file", token_paths[0],
                                     "--login-token-file", token_paths[1]]), \
-                 patch("check_nacos_native_topology.source_ips", return_value={}), \
+                 patch("check_nacos_native_topology.source_ips",
+                       side_effect=lambda _c, _m, output: output.update({self.config["tlsGRPC"]: ["10.42.1.10"]}) or {}), \
                  patch("check_nacos_native_topology.probe", side_effect=change_ca), \
+                 patch("check_nacos_native_topology.subprocess.run",
+                       return_value=MagicMock(returncode=0, stdout="PASS: anonymous native gRPC configuration read rejected")), \
                  patch("check_nacos_native_topology.check_probe_dns"), \
                  patch("check_nacos_native_topology.probe_closed_targets"), \
                  contextlib.redirect_stderr(io.StringIO()) as errors:
@@ -516,6 +559,10 @@ class NativeTopologyTest(unittest.TestCase):
         old_allowed = copy.deepcopy(allowed)
         del old_allowed["backendDirectDenied"]
         with self.assertRaisesRegex(ValueError, "lacks plaintext backend denial check"):
+            verify_pair(self.config, old_allowed, denied)
+        old_allowed = copy.deepcopy(allowed)
+        del old_allowed["anonymousGRPCDenied"]
+        with self.assertRaisesRegex(ValueError, "lacks anonymous gRPC read denial check"):
             verify_pair(self.config, old_allowed, denied)
         old_allowed = copy.deepcopy(allowed)
         old_allowed["validLoginCount"] = 0

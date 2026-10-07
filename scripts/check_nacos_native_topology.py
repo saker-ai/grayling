@@ -10,6 +10,7 @@ import json
 import os
 import socket
 import ssl
+import subprocess
 import sys
 import tempfile
 import urllib.parse
@@ -273,6 +274,7 @@ def evidence(c, mode, sources=None, resolved=None, valid_login_count=0, ca_diges
         "mode": mode,
         "result": "PASS",
         "backendDirectDenied": mode == "allowed",
+        "anonymousGRPCDenied": mode == "allowed",
         "validLoginCount": valid_login_count,
         "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "probeHost": socket.gethostname(),
@@ -317,6 +319,8 @@ def verify_pair(c, allowed, denied):
             raise ValueError(f"{mode} evidence lacks a CA file SHA-256; rerun the live probe")
         if mode == "allowed" and record.get("backendDirectDenied") is not True:
             raise ValueError("allowed evidence lacks plaintext backend denial check; rerun the live probe")
+        if mode == "allowed" and record.get("anonymousGRPCDenied") is not True:
+            raise ValueError("allowed evidence lacks anonymous gRPC read denial check; rerun the live probe")
         if mode == "allowed" and record.get("validLoginCount") != 2:
             raise ValueError("allowed evidence lacks two valid SDK login checks; rerun the live probe")
         if mode == "allowed":
@@ -409,6 +413,8 @@ def main():
     parser.add_argument("--evidence", help="write successful probe metadata as JSON; no credentials are recorded")
     parser.add_argument("--login-token-file", action="append", default=[], metavar="FILE",
                         help="SDK token file for a valid TLS login; --probe requires two distinct tokens")
+    parser.add_argument("--grpc-probe-bin", metavar="PATH",
+                        help="built nacos-native-grpc-probe binary; required with --probe")
     parser.add_argument("--verify-pair", nargs=2, metavar=("ALLOWED", "DENIED"),
                         help="require same-config, distinct-source live probes within five minutes")
     parser.add_argument("--verify-cluster", nargs=5,
@@ -421,6 +427,10 @@ def main():
         parser.error("--login-token-file requires --probe")
     if args.probe and len(args.login_token_file) != 2:
         parser.error("--probe requires two --login-token-file arguments")
+    if args.probe and not args.grpc_probe_bin:
+        parser.error("--probe requires --grpc-probe-bin")
+    if args.grpc_probe_bin and not args.probe:
+        parser.error("--grpc-probe-bin requires --probe")
     if args.verify_pair and (args.probe or args.probe_denied or args.evidence):
         parser.error("--verify-pair cannot be combined with live probes or --evidence")
     if args.verify_cluster and (args.verify_pair or args.probe or args.probe_denied or args.evidence):
@@ -482,6 +492,16 @@ def main():
                 raise ValueError("two distinct SDK login tokens are required")
             sources = source_ips(config, "allowed", resolved)
             certificates = probe(config, resolved, tokens)
+            host, port = split_address(config["tlsGRPC"])
+            for address in resolved[config["tlsGRPC"]]:
+                target = net_address(address, port)
+                completed = subprocess.run(
+                    [args.grpc_probe_bin, "-address", target, "-server-name", host,
+                     "-ca-file", config["caFile"]], capture_output=True, text=True,
+                    timeout=12, check=False,
+                )
+                if completed.returncode != 0 or "PASS: anonymous native gRPC configuration read rejected" not in completed.stdout:
+                    raise ValueError(f"anonymous gRPC read denial failed for {target}: probe exit {completed.returncode}")
             check_probe_dns(config, resolved)
             # An approved SDK source must also be unable to bypass TLS and
             # reach the plaintext GoLab backend on the sidecar host.
@@ -489,7 +509,7 @@ def main():
                                  label="allowed source reached plaintext backend")
             if ca_sha256(config) != ca_before:
                 raise ValueError("CA file changed during allowed probe")
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
             print("ALERT: live probe failed:", exc, file=sys.stderr)
             return 1
     if args.probe_denied:

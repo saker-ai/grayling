@@ -1,0 +1,128 @@
+// Command nacos-native-grpc-probe checks that an anonymous native Nacos
+// configuration read is rejected by a specific TLS/gRPC entrance IP.
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	json "encoding/json/v2"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	grpcsrv "github.com/godeps/gonacos/pkg/protocol/grpc"
+	"golang.org/x/net/http2"
+)
+
+func main() {
+	address := flag.String("address", "", "resolved TLS entrance IP:port")
+	serverName := flag.String("server-name", "", "TLS server name and HTTP authority")
+	caFile := flag.String("ca-file", "", "trusted CA PEM file")
+	flag.Parse()
+	if *address == "" || *serverName == "" || *caFile == "" || flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: nacos-native-grpc-probe -address IP:port -server-name DNS_NAME -ca-file CA.pem")
+		os.Exit(2)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if err := probe(ctx, *address, *serverName, *caFile); err != nil {
+		fmt.Fprintln(os.Stderr, "ALERT:", err)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: anonymous native gRPC configuration read rejected with status 16")
+}
+
+func probe(ctx context.Context, address, serverName, caFile string) error {
+	ip, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("invalid entrance address: %w", err)
+	}
+	if net.ParseIP(ip) == nil {
+		return errors.New("entrance address must contain a resolved IP literal")
+	}
+	ca, err := os.ReadFile(caFile)
+	if err != nil {
+		return fmt.Errorf("read CA: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(ca) {
+		return errors.New("CA file contains no trusted certificates")
+	}
+	body, err := json.Marshal(map[string]string{
+		"tenant": "golab-unauthorized-probe", "group": "GOLAB_FLAGS", "dataId": "golab.manifest",
+	})
+	if err != nil {
+		return fmt.Errorf("encode query: %w", err)
+	}
+	payload := grpcsrv.Payload{
+		Metadata: grpcsrv.Metadata{Type: "ConfigQueryRequest"},
+		Body: grpcsrv.Any{
+			TypeURL: "type.googleapis.com/com.alibaba.nacos.api.config.request.ConfigQueryRequest",
+			Value:   body,
+		},
+	}
+	var frame bytes.Buffer
+	if err := grpcsrv.WriteFrame(&frame, grpcsrv.Frame{Payload: payload.Encode()}); err != nil {
+		return fmt.Errorf("encode gRPC frame: %w", err)
+	}
+	transport := &http2.Transport{
+		DialTLSContext: func(ctx context.Context, _, _ string, _ *tls.Config) (net.Conn, error) {
+			var dialer net.Dialer
+			conn, err := dialer.DialContext(ctx, "tcp", address)
+			if err != nil {
+				return nil, err
+			}
+			tlsConn := tls.Client(conn, &tls.Config{
+				RootCAs: pool, ServerName: serverName, MinVersion: tls.VersionTLS12,
+				NextProtos: []string{"h2"},
+			})
+			if err := tlsConn.HandshakeContext(ctx); err != nil {
+				conn.Close()
+				return nil, err
+			}
+			if tlsConn.ConnectionState().NegotiatedProtocol != "h2" {
+				tlsConn.Close()
+				return nil, errors.New("gRPC entrance did not negotiate h2")
+			}
+			return tlsConn, nil
+		},
+	}
+	defer transport.CloseIdleConnections()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://"+net.JoinHostPort(serverName, port)+"/Request/request", &frame)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/grpc")
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		return fmt.Errorf("anonymous gRPC query: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("anonymous gRPC query returned HTTP %d, expected 200", response.StatusCode)
+	}
+	if !strings.HasPrefix(response.Header.Get("Content-Type"), "application/grpc") {
+		return errors.New("anonymous query did not receive a gRPC response")
+	}
+	if _, err := io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20)); err != nil {
+		return fmt.Errorf("read gRPC response: %w", err)
+	}
+	status := response.Header.Get("grpc-status")
+	if status == "" {
+		status = response.Trailer.Get("grpc-status")
+	}
+	if status != strconv.Itoa(grpcsrv.StatusUnauthenticated) {
+		return fmt.Errorf("anonymous gRPC query returned status %q, expected 16", status)
+	}
+	return nil
+}
