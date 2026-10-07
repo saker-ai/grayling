@@ -8,7 +8,8 @@ import unittest
 import urllib.request
 from unittest.mock import patch
 
-from check_nacos_native_topology import RejectRedirect, evidence, probe_denied, source_ips, validate, verify_cluster, verify_pair
+from check_nacos_native_topology import (RejectRedirect, check_probe_dns, evidence, probe_denied,
+                                         source_ips, validate, verify_cluster, verify_pair)
 
 
 class NativeTopologyTest(unittest.TestCase):
@@ -130,6 +131,17 @@ class NativeTopologyTest(unittest.TestCase):
         with patch("check_nacos_native_topology.socket.getaddrinfo", return_value=addresses):
             with self.assertRaisesRegex(ValueError, "DNS addresses changed"):
                 probe_denied(self.config, {target: ["10.42.1.10"]})
+
+    def test_allowed_source_rejects_dns_change_after_live_probe(self):
+        resolved = {self.config["tlsHTTP"]: ["10.42.1.10"],
+                    self.config["tlsGRPC"]: ["10.42.1.10"]}
+        stable = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.42.1.10", 8848))]
+        changed = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.42.1.11", 8848))]
+        with patch("check_nacos_native_topology.socket.getaddrinfo", return_value=stable):
+            check_probe_dns(self.config, resolved)
+        with patch("check_nacos_native_topology.socket.getaddrinfo", return_value=changed):
+            with self.assertRaisesRegex(ValueError, "DNS addresses changed during allowed probe"):
+                check_probe_dns(self.config, resolved)
 
     def test_denied_source_fails_on_unknown_host(self):
         with patch("check_nacos_native_topology.socket.getaddrinfo", side_effect=socket.gaierror("unknown")):

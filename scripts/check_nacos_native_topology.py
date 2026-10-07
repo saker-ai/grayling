@@ -125,6 +125,17 @@ def net_address(host, port):
     return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
 
 
+def check_probe_dns(c, resolved):
+    """Reject a changed endpoint between route selection and live TLS/HTTP probes."""
+    for field in ("tlsHTTP", "tlsGRPC"):
+        host, port = split_address(c[field])
+        target = net_address(host, port)
+        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        actual = sorted({address[4][0] for address in addresses})
+        if not actual or actual != resolved[target]:
+            raise ValueError(f"DNS addresses changed during allowed probe for {target}")
+
+
 class RejectRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, msg, headers, newurl):
         raise ValueError(f"HTTP probe redirected away from configured endpoint: {code} {newurl}")
@@ -323,6 +334,7 @@ def main():
         try:
             sources = source_ips(config, "allowed", resolved)
             probe(config)
+            check_probe_dns(config, resolved)
         except (OSError, ValueError, urllib.error.URLError) as exc:
             print("ALERT: live probe failed:", exc, file=sys.stderr)
             return 1
