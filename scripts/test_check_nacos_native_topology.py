@@ -16,6 +16,11 @@ from check_nacos_native_topology import (PinnedHTTPSConnection, backend_targets,
 
 
 class NativeTopologyTest(unittest.TestCase):
+    @staticmethod
+    def certificates(config, address):
+        return {target: {address: "a" * 64}
+                for target in (config["tlsHTTP"], config["tlsGRPC"])}
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -92,7 +97,9 @@ class NativeTopologyTest(unittest.TestCase):
                     "nacos.example:8848": ["10.42.1.10", "10.42.1.11"]}
         context = MagicMock()
         context.wrap_socket.return_value.__enter__.return_value.selected_alpn_protocol.return_value = "h2"
+        context.wrap_socket.return_value.__enter__.return_value.getpeercert.return_value = b"grpc certificate"
         connection = MagicMock()
+        connection.sock.getpeercert.return_value = b"http certificate"
         with patch("check_nacos_native_topology.ssl.create_default_context", return_value=context), \
              patch("check_nacos_native_topology.socket.create_connection") as connect, \
              patch("check_nacos_native_topology.PinnedHTTPSConnection", return_value=connection) as https:
@@ -122,12 +129,14 @@ class NativeTopologyTest(unittest.TestCase):
                     "nacos.example:8848": ["10.42.1.10"]}
         context = MagicMock()
         context.wrap_socket.return_value.__enter__.return_value.selected_alpn_protocol.return_value = "h2"
+        context.wrap_socket.return_value.__enter__.return_value.getpeercert.return_value = b"grpc certificate"
         for body in (b"<html>OK</html>", b'{}',
                      b'{"accessToken":"wrong","tokenTtl":3600}',
                      b'{"accessToken":"tenant-a-token","tokenTtl":0}',
                      b'{"accessToken":"tenant-a-token","tokenTtl":true}'):
             with self.subTest(body=body):
                 connection = MagicMock()
+                connection.sock.getpeercert.return_value = b"http certificate"
                 replies = [MagicMock(status=status) for status in (404, 401, 200)]
                 replies[-1].read.return_value = body
                 connection.getresponse.side_effect = replies
@@ -142,7 +151,9 @@ class NativeTopologyTest(unittest.TestCase):
                     "nacos.example:8848": ["10.42.1.10"]}
         context = MagicMock()
         context.wrap_socket.return_value.__enter__.return_value.selected_alpn_protocol.return_value = "h2"
+        context.wrap_socket.return_value.__enter__.return_value.getpeercert.return_value = b"grpc certificate"
         connection = MagicMock()
+        connection.sock.getpeercert.return_value = b"http certificate"
         replies = [MagicMock(status=status) for status in (404, 401, 200, 401)]
         replies[2].read.return_value = b'{"accessToken":"tenant-a-token","tokenTtl":3600}'
         connection.getresponse.side_effect = replies
@@ -150,6 +161,22 @@ class NativeTopologyTest(unittest.TestCase):
              patch("check_nacos_native_topology.socket.create_connection"), \
              patch("check_nacos_native_topology.PinnedHTTPSConnection", return_value=connection):
             with self.assertRaisesRegex(ValueError, "HTTP 401, expected 200"):
+                probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"))
+
+    def test_allowed_probe_rejects_http_certificate_rotation(self):
+        resolved = {"nacos.example:9848": ["10.42.1.10"],
+                    "nacos.example:8848": ["10.42.1.10"]}
+        context = MagicMock()
+        grpc = context.wrap_socket.return_value.__enter__.return_value
+        grpc.selected_alpn_protocol.return_value = "h2"
+        grpc.getpeercert.return_value = b"grpc certificate"
+        connection = MagicMock()
+        connection.sock.getpeercert.side_effect = (b"first", b"rotated")
+        connection.getresponse.return_value.status = 404
+        with patch("check_nacos_native_topology.ssl.create_default_context", return_value=context), \
+             patch("check_nacos_native_topology.socket.create_connection"), \
+             patch("check_nacos_native_topology.PinnedHTTPSConnection", return_value=connection):
+            with self.assertRaisesRegex(ValueError, "certificate changed during probe"):
                 probe(self.config, resolved, ("tenant-a-token", "tenant-b-token"))
 
     def test_pinned_https_connection_uses_ip_and_cert_hostname(self):
@@ -275,7 +302,8 @@ class NativeTopologyTest(unittest.TestCase):
 
             with patch("sys.argv", arguments), \
                  patch("check_nacos_native_topology.source_ips", side_effect=routed_sources), \
-                 patch("check_nacos_native_topology.probe") as live_probe, \
+                 patch("check_nacos_native_topology.probe",
+                       return_value=self.certificates(self.config, "10.42.1.10")) as live_probe, \
                  patch("check_nacos_native_topology.check_probe_dns"), \
                  patch("check_nacos_native_topology.probe_closed_targets"):
                 self.assertEqual(main(), 0)
@@ -286,6 +314,8 @@ class NativeTopologyTest(unittest.TestCase):
             self.assertNotIn("other-secret", raw)
             self.assertEqual(json.loads(raw)["validLoginCount"], 2)
             self.assertEqual(len(json.loads(raw)["caSHA256"]), 64)
+            self.assertEqual(json.loads(raw)["tlsCertSHA256"],
+                             self.certificates(self.config, "10.42.1.10"))
 
     def test_probe_rejects_ca_change_during_checks(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -407,12 +437,14 @@ class NativeTopologyTest(unittest.TestCase):
         resolved = {target: ["10.42.1.10"] for target in targets}
         allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in targets}, resolved)
         allowed["validLoginCount"] = 2
+        allowed["tlsCertSHA256"] = self.certificates(self.config, "10.42.1.10")
         denied_targets = evidence(self.config, "denied")["targets"]
         denied = evidence(self.config, "denied", {target: "10.43.0.7" for target in denied_targets},
                           {target: ["10.42.1.10"] for target in denied_targets})
         allowed["probeHost"] = "sdk-host"
         denied["probeHost"] = "blocked-host"
         allowed["resolvedIPs"][targets[0]] = ["0.0.0.0"]
+        allowed["tlsCertSHA256"][targets[0]] = {"0.0.0.0": "a" * 64}
         with self.assertRaisesRegex(ValueError, "non-routable unicast"):
             verify_pair(self.config, allowed, denied)
 
@@ -460,7 +492,8 @@ class NativeTopologyTest(unittest.TestCase):
         denied_targets = evidence(self.config, "denied")["targets"]
         resolved = {target: ["10.42.1.10"] for target in denied_targets}
         allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in allowed_targets},
-                           {target: resolved[target] for target in allowed_targets}, valid_login_count=2)
+                           {target: resolved[target] for target in allowed_targets}, valid_login_count=2,
+                           certificates=self.certificates(self.config, "10.42.1.10"))
         denied = evidence(self.config, "denied", {target: "10.43.0.7" for target in denied_targets}, resolved)
         allowed["probeHost"] = "sdk-host"
         denied["probeHost"] = "blocked-host"
@@ -474,6 +507,10 @@ class NativeTopologyTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "lacks two valid SDK login checks"):
             verify_pair(self.config, old_allowed, denied)
         old_allowed = copy.deepcopy(allowed)
+        old_allowed["tlsCertSHA256"] = {}
+        with self.assertRaisesRegex(ValueError, "lacks TLS certificate fingerprints"):
+            verify_pair(self.config, old_allowed, denied)
+        old_allowed = copy.deepcopy(allowed)
         del old_allowed["caSHA256"]
         with self.assertRaisesRegex(ValueError, "lacks a CA file SHA-256"):
             verify_pair(self.config, old_allowed, denied)
@@ -484,6 +521,7 @@ class NativeTopologyTest(unittest.TestCase):
         mapped = copy.deepcopy(allowed)
         mapped["sourceIPs"] = {target: "::ffff:10.42.0.7" for target in allowed_targets}
         mapped["resolvedIPs"] = {target: ["::ffff:10.42.1.10"] for target in allowed_targets}
+        mapped["tlsCertSHA256"] = self.certificates(self.config, "::ffff:10.42.1.10")
         verify_pair(self.config, mapped, denied)
         changed_backend = copy.deepcopy(allowed)
         changed_backend["resolvedIPs"]["10.42.1.10:18848"] = ["10.42.1.11"]
@@ -519,7 +557,8 @@ class NativeTopologyTest(unittest.TestCase):
         allowed_targets = evidence(self.config, "allowed")["targets"]
         denied_targets = evidence(self.config, "denied")["targets"]
         allowed = evidence(self.config, "allowed", {target: "10.42.0.7" for target in allowed_targets},
-                           {target: ["10.42.1.10"] for target in allowed_targets}, valid_login_count=2)
+                           {target: ["10.42.1.10"] for target in allowed_targets}, valid_login_count=2,
+                           certificates=self.certificates(self.config, "10.42.1.10"))
         denied = evidence(self.config, "denied", {target: "10.43.0.7" for target in denied_targets},
                           {target: ["10.42.1.10"] for target in denied_targets})
         allowed["probeHost"] = "sdk-host"
@@ -544,7 +583,8 @@ class NativeTopologyTest(unittest.TestCase):
             allowed = evidence(config, "allowed", {
                 target: "10.42.0.7" for target in evidence(config, "allowed")["targets"]},
                 {target: addresses[target] for target in evidence(config, "allowed")["targets"]},
-                valid_login_count=2)
+                valid_login_count=2,
+                certificates=self.certificates(config, config["backendExternalHost"]))
             denied = evidence(config, "denied", {
                 target: "10.43.0.7" for target in evidence(config, "denied")["targets"]}, addresses)
             allowed["probeHost"] = "sdk-host"
@@ -566,6 +606,7 @@ class NativeTopologyTest(unittest.TestCase):
         alias = copy.deepcopy(records)
         for record in alias[1]:
             record["resolvedIPs"][other_config["tlsHTTP"]] = ["10.42.1.10"]
+        alias[1][0]["tlsCertSHA256"][other_config["tlsHTTP"]] = {"10.42.1.10": "a" * 64}
         with self.assertRaisesRegex(ValueError, "shared IP address"):
             verify_cluster([self.config, other_config], alias)
         mapped_backend = copy.deepcopy(other_config)
@@ -575,6 +616,7 @@ class NativeTopologyTest(unittest.TestCase):
         mapped_tls = copy.deepcopy(records)
         for record in mapped_tls[1]:
             record["resolvedIPs"][other_config["tlsHTTP"]] = ["::ffff:10.42.1.10"]
+        mapped_tls[1][0]["tlsCertSHA256"][other_config["tlsHTTP"]] = {"::ffff:10.42.1.10": "a" * 64}
         with self.assertRaisesRegex(ValueError, "shared IP address"):
             verify_cluster([self.config, other_config], mapped_tls)
 

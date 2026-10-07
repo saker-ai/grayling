@@ -169,21 +169,28 @@ class PinnedHTTPSConnection(http.client.HTTPSConnection):
 
 def probe(c, resolved, login_tokens=()):
     context = ssl.create_default_context(cafile=c["caFile"])
+    certificates = {}
     host, port = split_address(c["tlsGRPC"])
+    grpc_target = net_address(host, port)
+    certificates[grpc_target] = {}
     context.set_alpn_protocols(["h2"])
-    for address in resolved[net_address(host, port)]:
+    for address in resolved[grpc_target]:
         with socket.create_connection((address, port), timeout=5) as sock:
             with context.wrap_socket(sock, server_hostname=host) as tls_sock:
                 if tls_sock.selected_alpn_protocol() != "h2":
                     raise ValueError(f"gRPC TLS listener {address} did not negotiate h2")
+                certificates[grpc_target][address] = hashlib.sha256(
+                    tls_sock.getpeercert(binary_form=True)).hexdigest()
     context.set_alpn_protocols(["http/1.1"])
     host, port = split_address(c["tlsHTTP"])
+    http_target = net_address(host, port)
+    certificates[http_target] = {}
     requests = (
         ("GET", "/nacos/v1/cs/configs?tenant=x&group=GOLAB_FLAGS&dataId=golab.manifest", None, 404, None),
         ("POST", "/nacos/v1/auth/users/login",
          urllib.parse.urlencode({"username": "golab-sdk", "password": "invalid"}), 401, None),
     )
-    for address in resolved[net_address(host, port)]:
+    for address in resolved[http_target]:
         authorized = tuple(("POST", "/nacos/v1/auth/users/login",
                             urllib.parse.urlencode({"username": "golab-sdk", "password": token}), 200, token)
                            for token in login_tokens)
@@ -192,6 +199,10 @@ def probe(c, resolved, login_tokens=()):
             try:
                 headers = {"Content-Type": "application/x-www-form-urlencoded"} if body else {}
                 connection.request(method, path, body=body, headers=headers)
+                fingerprint = hashlib.sha256(connection.sock.getpeercert(binary_form=True)).hexdigest()
+                previous = certificates[http_target].setdefault(address, fingerprint)
+                if previous != fingerprint:
+                    raise ValueError(f"HTTP TLS certificate changed during probe for {address}:{port}")
                 response = connection.getresponse()
                 status = response.status
                 login_body = response.read(16385) if token is not None and status == 200 else None
@@ -207,6 +218,7 @@ def probe(c, resolved, login_tokens=()):
                 if (not isinstance(result, dict) or result.get("accessToken") != token
                         or type(result.get("tokenTtl")) is not int or result["tokenTtl"] <= 0):
                     raise ValueError(f"{address}:{port}{path}: invalid SDK login response")
+    return certificates
 
 
 def probe_closed_targets(targets, resolved=None, label="unauthorized source"):
@@ -251,7 +263,7 @@ def evidence_targets(c):
     ]
 
 
-def evidence(c, mode, sources=None, resolved=None, valid_login_count=0, ca_digest=None):
+def evidence(c, mode, sources=None, resolved=None, valid_login_count=0, ca_digest=None, certificates=None):
     return {
         "mode": mode,
         "result": "PASS",
@@ -263,6 +275,7 @@ def evidence(c, mode, sources=None, resolved=None, valid_login_count=0, ca_diges
         "resolvedIPs": resolved or {},
         "configSHA256": hashlib.sha256(json.dumps(c, sort_keys=True).encode()).hexdigest(),
         "caSHA256": (ca_digest or ca_sha256(c)) if mode in ("allowed", "denied") else None,
+        "tlsCertSHA256": certificates or {},
         "targets": evidence_targets(c),
     }
 
@@ -301,6 +314,18 @@ def verify_pair(c, allowed, denied):
             raise ValueError("allowed evidence lacks plaintext backend denial check; rerun the live probe")
         if mode == "allowed" and record.get("validLoginCount") != 2:
             raise ValueError("allowed evidence lacks two valid SDK login checks; rerun the live probe")
+        if mode == "allowed":
+            certs = record.get("tlsCertSHA256")
+            if not isinstance(certs, dict) or set(certs) != {c["tlsHTTP"], c["tlsGRPC"]}:
+                raise ValueError("allowed evidence lacks TLS certificate fingerprints; rerun the live probe")
+            for target in (c["tlsHTTP"], c["tlsGRPC"]):
+                resolved = record.get("resolvedIPs", {})
+                if not isinstance(certs[target], dict) or set(certs[target]) != set(resolved.get(target, [])):
+                    raise ValueError(f"allowed evidence lacks TLS certificate fingerprints for {target}")
+                for digest in certs[target].values():
+                    if (not isinstance(digest, str) or len(digest) != 64
+                            or any(ch not in "0123456789abcdef" for ch in digest)):
+                        raise ValueError(f"allowed evidence has invalid TLS certificate fingerprint for {target}")
         if record.get("targets") != evidence_targets(c):
             raise ValueError(f"{mode} evidence does not cover every configured target")
         if not isinstance(record.get("sourceIPs"), dict) or not record["sourceIPs"]:
@@ -437,6 +462,7 @@ def main():
         return 0
     sources = None
     resolved = {}
+    certificates = {}
     if args.probe:
         try:
             ca_before = ca_sha256(config)
@@ -450,7 +476,7 @@ def main():
             if tokens[0] == tokens[1]:
                 raise ValueError("two distinct SDK login tokens are required")
             sources = source_ips(config, "allowed", resolved)
-            probe(config, resolved, tokens)
+            certificates = probe(config, resolved, tokens)
             check_probe_dns(config, resolved)
             # An approved SDK source must also be unable to bypass TLS and
             # reach the plaintext GoLab backend on the sidecar host.
@@ -475,7 +501,8 @@ def main():
     if args.evidence:
         output = evidence(config, mode, sources, resolved,
                           valid_login_count=len(tokens) if args.probe else 0,
-                          ca_digest=ca_before if args.probe or args.probe_denied else None)
+                          ca_digest=ca_before if args.probe or args.probe_denied else None,
+                          certificates=certificates)
         try:
             write_evidence(args.evidence, output)
         except FileExistsError:

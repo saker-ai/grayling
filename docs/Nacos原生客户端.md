@@ -47,6 +47,8 @@ gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f
 
 允许源登录探针要求 HTTP TLS 入口协商 `http/1.1` ALPN，再核对 HTTP 200 并解析 Nacos 登录 JSON：`accessToken` 必须等于本次提交的 SDK token，`tokenTtl` 必须为正整数。未协商 `http/1.1`、通用 200 页面、空令牌或错误 TTL 均报 `ALERT`，不会写入 PASS 证据。响应体上限为 16 KiB；令牌值只在进程内比较，不写入错误输出或证据文件。这项检查仍不能证明两个 token 分属不同租户；现场需完成下述双租户 SDK 读、订阅和推送验收。
 
+允许源证据还记录每个入口解析 IP 上实际验证过的服务端叶证书 SHA-256（`tlsCertSHA256`）；HTTP 登录探针的多次 TLS 连接若在一次运行中看到证书变化，会报 `ALERT`。`--verify-pair` 拒绝缺少这些指纹的旧证据，因此需要重新采集允许源记录。指纹是探针时的快照，须与现场代理证书部署记录核对；它不能单独证明后续连接继续使用同一证书，也不能代替代理连接日志与网络策略验收。
+
 2026-10-07 预检复核：`python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'` 30/30 通过，覆盖 HTTP TLS 未协商 ALPN 与误协商 `h2` 的拒绝路径；`python3 scripts/check_nacos_native_topology.py docs/nacos-native-topology.example.json`、`make all` 和 `make client-compatibility` 通过。后两项使用已有 PostgreSQL 与测试自管 Redis，兼容矩阵为直连 9/9、本机双节点 TLS/L4 1/1，保留 SDK 竞态和跨主机部署未验收的 LIMIT。未取得现场两节点策略或代理证据，正式支持状态不变。
 
 2026-10-07 本次补强的核验：拓扑预检 Python 单元测试 29/29、示例声明检查、`git diff --check`、`make all`（vet、全量 Go 测试、构建）与 `make client-compatibility`（直连 9/9、本机双节点 TLS/L4 1/1）均通过。全量 Go 测试使用已有 PostgreSQL 的隔离临时数据库与测试自管 Redis。此轮没有取得跨主机两节点的现场允许/拒绝源记录，正式支持边界保持上表所述。
