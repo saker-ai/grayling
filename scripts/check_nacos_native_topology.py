@@ -231,7 +231,13 @@ def probe_denied(c, resolved=None):
     probe_closed_targets(targets + backend_targets(c), resolved)
 
 
-def evidence(c, mode, sources=None, resolved=None, valid_login_count=0):
+def evidence_targets(c):
+    return [c["tlsHTTP"], c["tlsGRPC"]] + [
+        net_address(*target) for target in backend_targets(c)
+    ]
+
+
+def evidence(c, mode, sources=None, resolved=None, valid_login_count=0, ca_digest=None):
     return {
         "mode": mode,
         "result": "PASS",
@@ -242,10 +248,14 @@ def evidence(c, mode, sources=None, resolved=None, valid_login_count=0):
         "sourceIPs": sources or {},
         "resolvedIPs": resolved or {},
         "configSHA256": hashlib.sha256(json.dumps(c, sort_keys=True).encode()).hexdigest(),
-        "targets": [c["tlsHTTP"], c["tlsGRPC"]] + [
-            net_address(*target) for target in backend_targets(c)
-        ],
+        "caSHA256": (ca_digest or ca_sha256(c)) if mode in ("allowed", "denied") else None,
+        "targets": evidence_targets(c),
     }
+
+
+def ca_sha256(c):
+    with open(c["caFile"], "rb") as stream:
+        return hashlib.sha256(stream.read()).hexdigest()
 
 
 def write_evidence(path, output):
@@ -270,11 +280,14 @@ def verify_pair(c, allowed, denied):
             raise ValueError(f"missing successful {mode} live probe")
         if record.get("configSHA256") != expected:
             raise ValueError(f"{mode} evidence uses a different deployment declaration")
+        digest = record.get("caSHA256")
+        if not isinstance(digest, str) or len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+            raise ValueError(f"{mode} evidence lacks a CA file SHA-256; rerun the live probe")
         if mode == "allowed" and record.get("backendDirectDenied") is not True:
             raise ValueError("allowed evidence lacks plaintext backend denial check; rerun the live probe")
         if mode == "allowed" and record.get("validLoginCount") != 2:
             raise ValueError("allowed evidence lacks two valid SDK login checks; rerun the live probe")
-        if record.get("targets") != evidence(c, mode)["targets"]:
+        if record.get("targets") != evidence_targets(c):
             raise ValueError(f"{mode} evidence does not cover every configured target")
         if not isinstance(record.get("sourceIPs"), dict) or not record["sourceIPs"]:
             raise ValueError(f"{mode} evidence lacks routed source IPs")
@@ -299,6 +312,8 @@ def verify_pair(c, allowed, denied):
         if {canonical_ip(ip) for ip in allowed["resolvedIPs"][target]} != {
                 canonical_ip(ip) for ip in denied["resolvedIPs"][target]}:
             raise ValueError(f"allowed and denied probes resolved different IPs for {target}")
+    if allowed["caSHA256"] != denied["caSHA256"]:
+        raise ValueError("allowed and denied probes used different CA file contents")
     times = [datetime.datetime.fromisoformat(record["utc"]) for record in (allowed, denied)]
     if any(value.tzinfo is None for value in times) or abs((times[0] - times[1]).total_seconds()) > 300:
         raise ValueError("live probes must be within five minutes")
@@ -410,6 +425,7 @@ def main():
     resolved = {}
     if args.probe:
         try:
+            ca_before = ca_sha256(config)
             tokens = []
             for path in args.login_token_file:
                 with open(path, encoding="utf-8") as stream:
@@ -426,20 +442,26 @@ def main():
             # reach the plaintext GoLab backend on the sidecar host.
             probe_closed_targets(backend_targets(config), resolved,
                                  label="allowed source reached plaintext backend")
+            if ca_sha256(config) != ca_before:
+                raise ValueError("CA file changed during allowed probe")
         except (OSError, ValueError) as exc:
             print("ALERT: live probe failed:", exc, file=sys.stderr)
             return 1
     if args.probe_denied:
         try:
+            ca_before = ca_sha256(config)
             sources = source_ips(config, "denied", resolved)
             probe_denied(config, resolved)
+            if ca_sha256(config) != ca_before:
+                raise ValueError("CA file changed during denied-source probe")
         except (OSError, ValueError) as exc:
             print("ALERT: denied-source probe failed:", exc, file=sys.stderr)
             return 1
     mode = "denied" if args.probe_denied else "allowed" if args.probe else "declaration"
     if args.evidence:
         output = evidence(config, mode, sources, resolved,
-                          valid_login_count=len(tokens) if args.probe else 0)
+                          valid_login_count=len(tokens) if args.probe else 0,
+                          ca_digest=ca_before if args.probe or args.probe_denied else None)
         try:
             write_evidence(args.evidence, output)
         except FileExistsError:

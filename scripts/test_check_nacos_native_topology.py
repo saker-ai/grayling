@@ -17,11 +17,16 @@ from check_nacos_native_topology import (PinnedHTTPSConnection, backend_targets,
 
 class NativeTopologyTest(unittest.TestCase):
     def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        ca_path = os.path.join(directory.name, "ca.pem")
+        with open(ca_path, "wb") as stream:
+            stream.write(b"test CA bundle")
         self.config = {
             "mode": "tls-l4-per-client-tcp", "nativeAuth": True,
             "backendConnectionReuse": False, "backendHTTP": "127.0.0.1:18848",
             "backendGRPC": "127.0.0.1:19848", "tlsHTTP": "nacos.example:8848",
-            "tlsGRPC": "nacos.example:9848", "caFile": "/tmp/ca.pem",
+            "tlsGRPC": "nacos.example:9848", "caFile": ca_path,
             "allowedSources": ["10.42.0.0/16"],
             "backendExternalHost": "10.42.1.10",
         }
@@ -238,6 +243,32 @@ class NativeTopologyTest(unittest.TestCase):
             self.assertNotIn("same-secret", raw)
             self.assertNotIn("other-secret", raw)
             self.assertEqual(json.loads(raw)["validLoginCount"], 2)
+            self.assertEqual(len(json.loads(raw)["caSHA256"]), 64)
+
+    def test_probe_rejects_ca_change_during_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = os.path.join(directory, "deployment.json")
+            with open(config_path, "w", encoding="utf-8") as stream:
+                json.dump(self.config, stream)
+            token_paths = [os.path.join(directory, f"token-{index}") for index in range(2)]
+            for index, path in enumerate(token_paths):
+                with open(path, "w", encoding="utf-8") as stream:
+                    stream.write(f"token-{index}\n")
+
+            def change_ca(*_args, **_kwargs):
+                with open(self.config["caFile"], "wb") as stream:
+                    stream.write(b"rotated CA bundle")
+
+            with patch("sys.argv", ["check_nacos_native_topology.py", config_path, "--probe",
+                                    "--login-token-file", token_paths[0],
+                                    "--login-token-file", token_paths[1]]), \
+                 patch("check_nacos_native_topology.source_ips", return_value={}), \
+                 patch("check_nacos_native_topology.probe", side_effect=change_ca), \
+                 patch("check_nacos_native_topology.check_probe_dns"), \
+                 patch("check_nacos_native_topology.probe_closed_targets"), \
+                 contextlib.redirect_stderr(io.StringIO()) as errors:
+                self.assertEqual(main(), 1)
+            self.assertIn("CA file changed during allowed probe", errors.getvalue())
 
     def test_ipv6_backend_evidence_uses_probe_target_keys(self):
         config = copy.deepcopy(self.config)
@@ -400,6 +431,14 @@ class NativeTopologyTest(unittest.TestCase):
         old_allowed["validLoginCount"] = 0
         with self.assertRaisesRegex(ValueError, "lacks two valid SDK login checks"):
             verify_pair(self.config, old_allowed, denied)
+        old_allowed = copy.deepcopy(allowed)
+        del old_allowed["caSHA256"]
+        with self.assertRaisesRegex(ValueError, "lacks a CA file SHA-256"):
+            verify_pair(self.config, old_allowed, denied)
+        rotated_ca = copy.deepcopy(denied)
+        rotated_ca["caSHA256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "different CA file contents"):
+            verify_pair(self.config, allowed, rotated_ca)
         mapped = copy.deepcopy(allowed)
         mapped["sourceIPs"] = {target: "::ffff:10.42.0.7" for target in allowed_targets}
         mapped["resolvedIPs"] = {target: ["::ffff:10.42.1.10"] for target in allowed_targets}
@@ -430,6 +469,9 @@ class NativeTopologyTest(unittest.TestCase):
         changed["resolvedIPs"][self.config["tlsHTTP"]] = ["10.42.1.12"]
         with self.assertRaisesRegex(ValueError, "resolved different IPs"):
             verify_pair(self.config, allowed, changed)
+        # Offline verification can run on a third host without the probe CA file.
+        os.unlink(self.config["caFile"])
+        verify_pair(self.config, allowed, denied)
 
     def test_pair_rejects_stale_and_future_records_even_when_probes_match(self):
         allowed_targets = evidence(self.config, "allowed")["targets"]
