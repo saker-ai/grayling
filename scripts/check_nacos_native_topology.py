@@ -194,11 +194,16 @@ def probe(c, resolved, login_tokens, tenant_namespaces):
     http_target = net_address(host, port)
     certificates[http_target] = {}
     config_path = "/nacos/v1/cs/configs?tenant=x&group=GOLAB_FLAGS&dataId=golab.manifest"
-    requests = (
+    requests = [
         ("GET", config_path, None, 404, None, {}),
         ("POST", "/nacos/v1/auth/users/login",
          urllib.parse.urlencode({"username": "golab-sdk", "password": "invalid"}), 401, None, {}),
-    )
+    ]
+    for namespace in tenant_namespaces:
+        requests.append(("GET", "/nacos/v1/cs/configs?" + urllib.parse.urlencode({
+            "tenant": namespace, "group": "GOLAB_FLAGS", "dataId": "golab.manifest"}),
+            None, 404, None, {}))
+    requests = tuple(requests)
     for address in resolved[http_target]:
         authorized = tuple(request for token, namespace in zip(login_tokens, tenant_namespaces) for request in (
             ("POST", "/nacos/v1/auth/users/login",
@@ -283,6 +288,7 @@ def evidence(c, mode, sources=None, resolved=None, valid_login_count=0, ca_diges
         "mode": mode,
         "result": "PASS",
         "backendDirectDenied": mode == "allowed",
+        "anonymousTenantHTTPDenied": mode == "allowed",
         "authenticatedHTTPDenied": mode == "allowed",
         "anonymousGRPCDenied": mode == "allowed",
         "anonymousGRPCSubscriptionDenied": mode == "allowed",
@@ -332,6 +338,8 @@ def verify_pair(c, allowed, denied):
             raise ValueError(f"{mode} evidence lacks a CA file SHA-256; rerun the live probe")
         if mode == "allowed" and record.get("backendDirectDenied") is not True:
             raise ValueError("allowed evidence lacks plaintext backend denial check; rerun the live probe")
+        if mode == "allowed" and record.get("anonymousTenantHTTPDenied") is not True:
+            raise ValueError("allowed evidence lacks anonymous tenant HTTP config denial check; rerun the live probe")
         if mode == "allowed" and record.get("authenticatedHTTPDenied") is not True:
             raise ValueError("allowed evidence lacks authenticated HTTP config denial check; rerun the live probe")
         if mode == "allowed" and record.get("anonymousGRPCDenied") is not True:
