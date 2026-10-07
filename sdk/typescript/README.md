@@ -6,6 +6,8 @@ STALE。完整字段与保留窗口见[求值诊断与事件](../../docs/求值�
 
 远程求值优先的 GoLab TypeScript/Node SDK（首版，`docs/技术方案.md` §8 受限投影），与 Python SDK 契约完全一致：
 
+本 SDK 使用 GoLab HTTP API，不实现 Nacos 原生协议。官方 Nacos 客户端兼容矩阵目前只验证 Go `nacos-sdk-go/v2 v2.3.5`；见 [原生客户端支持边界](../../docs/Nacos原生客户端.md#固定版本兼容矩阵issue-17)。
+
 - **不下发全量快照**——求值走 `POST /api/v1/sdk/eval`（可指向 `cmd/golab-proxy` 独立中继），内部规则/segment/AI 内容永不出服务端，适合浏览器伴随服务、Node 后端与边缘运行时。
 - **配置缓存 + 轮询**——结果按 (flagKey, 规范化 context) 缓存；后台轮询 `GET /api/v1/sdk/revision`（仅 revision 数字的受限投影），revision 变化即整表失效；eval 响应携带 `manifestRevision` 联动失效。
 - **曝光由服务端记录**——远程求值进入实验时服务端自动落幂等曝光；转化由 SDK 按 collect 契约批量上报（独立 collect 凭证、队列 + 定时 flush + 一次重试 + 丢弃计数）。

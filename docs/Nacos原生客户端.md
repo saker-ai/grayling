@@ -1,4 +1,17 @@
-# Nacos 原生客户端兼容性与部署验收（Issue #11 / #13）
+# Nacos 原生客户端兼容性与部署验收（Issue #11 / #13 / #17）
+
+## 固定版本兼容矩阵（Issue #17）
+
+机器可读矩阵见 [`client-compatibility-matrix.json`](client-compatibility-matrix.json)。仅将官方 Go `nacos-sdk-go/v2 v2.3.5` 与本仓库固定的 gonacos 版本列为**已测试组合**；其他官方 SDK 版本及其他语言 Nacos SDK 没有验证，不在本矩阵的支持声明中。`make client-compatibility` 检查 `go.mod` 三个依赖版本并逐项运行真实客户端测试，缺测、跳过或失败都会使门禁失败；CI 的 “Client compatibility matrix” 工作流在依赖和相关测试变更时运行，并把 PASS/FAIL/INCOMPLETE/LIMIT 写入 job summary。升级官方 SDK 时必须同步更新矩阵版本、重新审查限制并跑完整矩阵，不能只改 `go.mod`。
+
+| 固定版本 / 拓扑 | 功能证据 | 限制 |
+| --- | --- | --- |
+| v2.3.5，单节点 loopback 直连 | manifest 读取、订阅、撤销订阅、服务重启、网络黑洞恢复、显式鉴权的租户隔离和凭证撤销；默认匿名模式跨租户可读的负向边界用例 | 本机实验兼容性验证；撤销订阅须处理 SDK 在途监听任务，不能承诺单次调用后立即停止回调；默认匿名模式不作为租户可达接口 |
+| v2.3.5，双节点本机 TLS/L4 一对一转发，共享真实 PostgreSQL/Redis | 订阅、节点故障切换、租户隔离、凭证撤销及 HTTP/2 后端连接复用的负向探针 | 不是跨主机生产网络策略验收；L7 复用不支持 |
+
+完整官方客户端 `-race` 不能宣称通过。可选最小复现命令为 `GOWORK=off go test -race -tags sdk_race_repro ./test/native -run '^TestOfficialSDKClientMapRaceReproducer$' -count=1`；该用例只并发关闭和新建官方 SDK 客户端，服务端使用真实 gonacos，预期 race detector 定位到 SDK 的全局 `rpc.clientMap`。此命令**预期非零退出**，不作为通过项；见上游 [#861](https://github.com/nacos-group/nacos-sdk-go/issues/861)（v2.3.5 的并发 client map 写）和 [#833](https://github.com/nacos-group/nacos-sdk-go/issues/833)（Start/health-check 内部竞态）。这两个上游 issue 当前已关闭，但固定的 v2.3.5 仍能复现上述 client map 竞态；升级时必须重新检查。GoLab/gonacos 自身竞态仍由各自 `-race` 检查处理，不能把第三方竞态忽略后称整个客户端通过。
+
+`CancelListenConfig` 在 v2.3.5 中只从本地缓存表移除监听器；与正在执行的监听任务并发时，旧任务可能把监听器再写回。固定用例等待该任务收敛后第二次撤销，再发布新 revision 并确认没有回调。业务调用方若需要严格撤销，应关闭整个客户端或采用这类收敛后复核流程；**单次撤销调用后的即时无回调不在已验证范围内**。
 
 ## 结论与支持边界
 

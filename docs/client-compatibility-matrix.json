@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "nacosSDK": "github.com/nacos-group/nacos-sdk-go/v2",
+  "nacosVersion": "v2.3.5",
+  "gonacos": "github.com/godeps/gonacos",
+  "gonacosVersion": "v0.0.0-20261006194453-ea39c83bf6f0",
+  "openFeatureSDK": "github.com/open-feature/go-sdk",
+  "openFeatureSDKVersion": "v1.19.0",
+  "openFeatureSpecification": "v0.9.0",
+  "cases": [
+    {
+      "id": "direct",
+      "topology": "loopback direct TCP, one gonacos node",
+      "features": ["read", "subscribe", "cancel", "server restart", "network blackhole recovery", "tenant isolation", "credential revocation"],
+      "package": "./test/native",
+      "tests": [
+        "TestNativeSnapshotAtomicityAndStatus",
+        "TestOfficialNacosClientPublishSubscribeEvaluate",
+        "TestOfficialNacosClientConvergesAfterMissedNotifications",
+        "TestOfficialNacosClientCancelSubscription",
+        "TestOfficialNacosClientReconnectsAfterServerRestart",
+        "TestOfficialNacosClientConvergesAfterNetworkBlackhole",
+        "TestOfficialNacosClientNativeConfigScope",
+        "TestOfficialNacosClientRevocationStopsExistingPush",
+        "TestNativeClientCanReadOtherTenantWithoutAuthorization"
+      ],
+      "tier": "local"
+    },
+    {
+      "id": "tls-l4-two-node",
+      "topology": "host-local TLS/L4 proxy, two GoLab nodes with real PostgreSQL and Redis",
+      "features": ["subscribe", "node failover", "tenant isolation", "credential revocation", "HTTP/2 shared-connection negative probe"],
+      "package": "./test/cluster",
+      "tests": ["TestOfficialNacosClientFailsOverAcrossGolabNodes"],
+      "tier": "cluster"
+    }
+  ],
+  "knownLimitations": [
+    "Official Nacos SDK v2.3.5 CancelListenConfig can race an in-flight listen task that restores its local listener. The pinned test calls CancelListenConfig again after quiescence and checks that later publications do not invoke the callback; single-call immediate cancellation is not guaranteed.",
+    "Official Nacos SDK v2.3.5 has internal data races under -race; see docs/Nacos原生客户端.md and upstream issues #833/#861. Functional matrix success is not a whole-client race pass.",
+    "Production cross-host TLS/network-policy allowed-source and denied-source probes have not been run.",
+    "L7 HTTP/2 backend connection multiplexing and other SDK versions/languages are unsupported."
+  ]
+}

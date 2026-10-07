@@ -372,6 +372,68 @@ func TestOfficialNacosClientConvergesAfterMissedNotifications(t *testing.T) {
 	}
 }
 
+// After the v2.3.5 in-flight listener has quiesced, repeated
+// CancelListenConfig must remove its callback while the same official client
+// remains connected and able to read newer manifests.
+func TestOfficialNacosClientCancelSubscription(t *testing.T) {
+	srv := nativeServer(t)
+	store := configstore.NewGonacosStore(srv.Services().Config)
+	const namespace = "native-cancel"
+	client := nativeClient(t, srv, namespace)
+	publish(t, store, namespace, 1, false)
+	changes := make(chan int64, 8)
+	param := vo.ConfigParam{DataId: configstore.ManifestDataID, Group: configstore.Group,
+		OnChange: func(_, _, _, content string) {
+			var manifest model.Manifest
+			if json.Unmarshal([]byte(content), &manifest) == nil {
+				select {
+				case changes <- manifest.Revision:
+				default:
+				}
+			}
+		}}
+	if err := client.ListenConfig(param); err != nil {
+		t.Fatal(err)
+	}
+	publish(t, store, namespace, 2, true)
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case revision := <-changes:
+			if revision == 2 {
+				goto subscribed
+			}
+		case <-deadline:
+			t.Fatal("subscription did not receive revision 2")
+		}
+	}
+subscribed:
+	if err := client.CancelListenConfig(param); err != nil {
+		t.Fatal(err)
+	}
+	// The SDK's in-flight listen task can reinsert its cached listener after
+	// CancelListenConfig returns. Revoke again after the task quiesces; this
+	// workaround is part of the pinned v2.3.5 compatibility contract.
+	time.Sleep(500 * time.Millisecond)
+	if err := client.CancelListenConfig(param); err != nil {
+		t.Fatal(err)
+	}
+	for len(changes) > 0 {
+		<-changes
+	}
+	publish(t, store, namespace, 3, false)
+	if _, revision, err := nativeSnapshot(client); err != nil || revision != 3 {
+		t.Fatalf("client could not read after cancellation: revision=%d err=%v", revision, err)
+	}
+	select {
+	case revision := <-changes:
+		if revision == 3 {
+			t.Fatal("cancelled subscription received revision 3")
+		}
+	case <-time.After(time.Second):
+	}
+}
+
 // Restart the real service on the same ports while retaining the official
 // client's subscription. The client must reconcile from the current manifest
 // after its established gRPC connection is severed.

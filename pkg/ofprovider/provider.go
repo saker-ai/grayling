@@ -372,6 +372,17 @@ func (p *Provider) ObjectEvaluation(_ context.Context, flag string, defaultValue
 			ProviderResolutionDetail: notReady()}
 	}
 	v, res := p.client.JSONVariation(flag, toGolabContext(flatCtx, p.opts.UnitField), defaultValue)
+	if !res.Failed {
+		switch res.Value.(type) {
+		case map[string]any, []any:
+		default:
+			return of.InterfaceResolutionDetail{Value: defaultValue,
+				ProviderResolutionDetail: of.ProviderResolutionDetail{
+					Reason:          of.ErrorReason,
+					ResolutionError: of.NewTypeMismatchResolutionError("golab value is not an object or array"),
+				}}
+		}
+	}
 	return of.InterfaceResolutionDetail{Value: v, ProviderResolutionDetail: convert(res)}
 }
 

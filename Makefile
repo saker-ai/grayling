@@ -7,7 +7,7 @@ GO     := GOWORK=$(GOWORK) go
 RUN_ARGS ?=
 ADMIN_PASSWORD_FILE ?= data/admin-password
 
-.PHONY: all build test vet tidy smoke run check-run-port ensure-admin-password show-admin-password clean sdk-test sdk-python sdk-typescript license-check release-check dist
+.PHONY: all build test vet tidy smoke run check-run-port ensure-admin-password show-admin-password clean sdk-test sdk-python sdk-typescript license-check release-check dist client-compatibility
 
 all: vet test build
 
@@ -18,6 +18,9 @@ build:
 
 test:
 	$(GO) test ./... -count=1
+
+client-compatibility:
+	python3 scripts/check_client_compatibility.py --tier all
 
 smoke:
 	$(GO) test ./test/smoke/ -v -count=1

@@ -128,7 +128,9 @@ details, _ := client.BooleanValueDetails(ctx, "checkout-router", false,
 // details.Variant=变体名；FlagMetadata["golabReason"] 保留 golab 原生 reason
 ```
 
-targetingKey 自动镜像为随机化单元（默认写入 `user_id` 字段，可用 `Options.UnitField` 改）；缺单元返回调用方默认值 + `TARGETING_KEY_MISSING`（绝不随机分组）；曝光仅在**真实进入实验**时由底层 SDK 批量上报；provider 状态随快照健康迁移（NOT_READY→READY→STALE）。
+targetingKey 自动镜像为随机化单元（默认写入 `user_id` 字段，可用 `Options.UnitField` 改）；缺单元返回调用方默认值 + `TARGETING_KEY_MISSING`（绝不随机分组）；曝光仅在**真实进入实验**时由底层 SDK 批量上报；provider 状态随快照健康迁移（NOT_READY→READY→STALE）。按 OpenFeature Specification v0.9.0 的逐项断言及初始化事件时序缺口见 [Provider 规范验收](docs/OpenFeature-Provider-规范验收.md)，目前不声明 v0.9.0 全量符合。
+
+官方 Nacos Go SDK 的单独原生协议试验只覆盖固定的 `nacos-sdk-go/v2 v2.3.5`，不是上述 GoLab SDK 或 OpenFeature Provider 的替代接口。版本、拓扑、功能和已知竞态见 [Nacos 原生客户端兼容矩阵](docs/Nacos原生客户端.md#固定版本兼容矩阵issue-17)。
 
 ## 独立 proxy 部署
 

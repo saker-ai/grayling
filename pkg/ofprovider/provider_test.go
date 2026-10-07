@@ -353,6 +353,95 @@ func TestOFNumericMapping(t *testing.T) {
 	}
 }
 
+// OpenFeature spec v0.9.0 §2.2 requires every typed resolution to return the
+// caller default and an error code for abnormal resolution, while normal
+// resolutions must leave the error code empty.
+func TestOFTypedResolutionContract(t *testing.T) {
+	h := newHarness(t)
+	h.publishFlag(boolFlag("typed-bool", false))
+	h.publishFlag(&model.Flag{SchemaVersion: model.SchemaVersion, Key: "typed-string", Type: model.FlagString,
+		Variations: map[string]any{"v": "ready"}, DefaultRule: &model.Rule{Variation: "v"}})
+	h.publishFlag(&model.Flag{SchemaVersion: model.SchemaVersion, Key: "typed-number", Type: model.FlagNumber,
+		Variations: map[string]any{"v": float64(2)}, DefaultRule: &model.Rule{Variation: "v"}})
+	h.publishFlag(&model.Flag{SchemaVersion: model.SchemaVersion, Key: "typed-object", Type: model.FlagJSON,
+		Variations: map[string]any{"v": map[string]any{"ok": true}}, DefaultRule: &model.Rule{Variation: "v"}})
+	h.publishFlag(&model.Flag{SchemaVersion: model.SchemaVersion, Key: "typed-null", Type: model.FlagJSON,
+		Variations: map[string]any{"v": nil}, DefaultRule: &model.Rule{Variation: "v"}})
+	client, _ := newOFAPI(t, h, nil)
+	ctx := t.Context()
+	ec := of.EvaluationContext{}
+	bd, err := client.BooleanValueDetails(ctx, "typed-bool", true, ec)
+	if err != nil || bd.Value || bd.Variant != "off" || bd.Reason != of.DefaultReason || bd.ErrorCode != "" {
+		t.Fatalf("boolean normal resolution: %+v, %v", bd, err)
+	}
+	sd, err := client.StringValueDetails(ctx, "typed-string", "fallback", ec)
+	if err != nil || sd.Value != "ready" || sd.Variant != "v" || sd.ErrorCode != "" {
+		t.Fatalf("string normal resolution: %+v, %v", sd, err)
+	}
+	fd, err := client.FloatValueDetails(ctx, "typed-number", 9, ec)
+	if err != nil || fd.Value != 2 || fd.Variant != "v" || fd.ErrorCode != "" {
+		t.Fatalf("float normal resolution: %+v, %v", fd, err)
+	}
+	id, err := client.IntValueDetails(ctx, "typed-number", 9, ec)
+	if err != nil || id.Value != 2 || id.Variant != "v" || id.ErrorCode != "" {
+		t.Fatalf("integer normal resolution: %+v, %v", id, err)
+	}
+	od, err := client.ObjectValueDetails(ctx, "typed-object", map[string]any{"safe": true}, ec)
+	if err != nil || od.Variant != "v" || od.ErrorCode != "" {
+		t.Fatalf("object normal resolution: %+v, %v", od, err)
+	}
+	obj, ok := od.Value.(map[string]any)
+	if !ok || obj["ok"] != true {
+		t.Fatalf("object value: %+v", od)
+	}
+	bd, err = client.BooleanValueDetails(ctx, "typed-string", true, ec)
+	if err == nil || !bd.Value || bd.Reason != of.ErrorReason || bd.ErrorCode != of.TypeMismatchCode {
+		t.Fatalf("boolean type mismatch: %+v, %v", bd, err)
+	}
+	fd, err = client.FloatValueDetails(ctx, "typed-string", 9, ec)
+	if err == nil || fd.Value != 9 || fd.Reason != of.ErrorReason || fd.ErrorCode != of.TypeMismatchCode {
+		t.Fatalf("float type mismatch: %+v, %v", fd, err)
+	}
+	od, err = client.ObjectValueDetails(ctx, "typed-string", map[string]any{"safe": true}, ec)
+	if err == nil || od.Reason != of.ErrorReason || od.ErrorCode != of.TypeMismatchCode {
+		t.Fatalf("object type mismatch: %+v, %v", od, err)
+	}
+	obj, ok = od.Value.(map[string]any)
+	if !ok || obj["safe"] != true {
+		t.Fatalf("object caller default: %+v", od)
+	}
+	od, err = client.ObjectValueDetails(ctx, "typed-null", map[string]any{"safe": true}, ec)
+	if err == nil || od.Reason != of.ErrorReason || od.ErrorCode != of.TypeMismatchCode {
+		t.Fatalf("null is not an object: %+v, %v", od, err)
+	}
+}
+
+func TestOFContextTransformation(t *testing.T) {
+	h := newHarness(t)
+	h.publishFlag(&model.Flag{SchemaVersion: model.SchemaVersion, Key: "context-unit", Type: model.FlagString,
+		Fields: []string{"user_id"}, Variations: map[string]any{"matched": "yes", "default": "no"},
+		Targeting:   []model.Rule{{Constraints: []model.Constraint{{Field: "user_id", Op: model.OpEq, Value: "explicit"}}, Variation: "matched"}},
+		DefaultRule: &model.Rule{Variation: "default"}})
+	client, _ := newOFAPI(t, h, nil)
+	ctx := t.Context()
+	for _, tc := range []struct {
+		name string
+		ec   of.EvaluationContext
+		want string
+	}{
+		{name: "explicit attribute wins", ec: of.NewEvaluationContext("other", map[string]any{"user_id": "explicit"}), want: "yes"},
+		{name: "targeting key mirrored", ec: of.NewEvaluationContext("explicit", nil), want: "yes"},
+		{name: "unmatched targeting key", ec: of.NewEvaluationContext("other", nil), want: "no"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			detail, err := client.StringValueDetails(ctx, "context-unit", "fallback", tc.ec)
+			if err != nil || detail.Value != tc.want || detail.ErrorCode != "" {
+				t.Fatalf("context resolution: %+v, %v", detail, err)
+			}
+		})
+	}
+}
+
 // TestOFExperimentExposureAttribution proves the full chain: OpenFeature
 // evaluation → golab local split → enrollment in a RUNNING experiment →
 // exposure batched to /api/v1/collect → server-side aggregate under the

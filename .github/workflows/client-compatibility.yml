@@ -1,0 +1,26 @@
+name: Client compatibility matrix
+
+on:
+  push:
+    branches: [main]
+    paths: [go.mod, go.sum, test/native/**, test/cluster/**, pkg/ofprovider/**, docs/client-compatibility-matrix.json, scripts/check_client_compatibility.py, .github/workflows/client-compatibility.yml]
+  pull_request:
+    paths: [go.mod, go.sum, test/native/**, test/cluster/**, pkg/ofprovider/**, docs/client-compatibility-matrix.json, scripts/check_client_compatibility.py, .github/workflows/client-compatibility.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Real official Nacos SDK compatibility matrix
+        run: python3 scripts/check_client_compatibility.py --tier all
+      - name: OpenFeature provider contract under race detector
+        run: GOWORK=off go test -race ./pkg/ofprovider -count=1
