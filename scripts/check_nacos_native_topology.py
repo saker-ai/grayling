@@ -107,9 +107,7 @@ def canonical_ip(value):
 def source_ips(c, mode, resolved=None):
     """Record the local routed address; NAT may change it after this host."""
     targets = [split_address(c[field]) for field in ("tlsHTTP", "tlsGRPC")]
-    if mode == "denied":
-        targets += [(c["backendExternalHost"], split_address(c[field])[1])
-                    for field in ("backendHTTP", "backendGRPC")]
+    targets += backend_targets(c)
     networks = [ipaddress.ip_network(value, strict=False) for value in c["allowedSources"]]
     result = {}
     for host, port in targets:
@@ -205,7 +203,7 @@ def probe_closed_targets(targets, resolved=None, label="unauthorized source"):
             name = net_address(*target)
             actual = sorted({address[4][0] for address in addresses})
             if resolved.get(name) != actual:
-                raise ValueError(f"DNS addresses changed during denied probe for {name}")
+                raise ValueError(f"DNS addresses changed during TCP refusal probe for {name}")
         for address in addresses:
             endpoint = (address[4][0], target[1])
             try:
@@ -240,11 +238,9 @@ def evidence(c, mode, sources=None, resolved=None):
         "sourceIPs": sources or {},
         "resolvedIPs": resolved or {},
         "configSHA256": hashlib.sha256(json.dumps(c, sort_keys=True).encode()).hexdigest(),
-        "targets": [c["tlsHTTP"], c["tlsGRPC"]] + (
-            [net_address(c["backendExternalHost"], split_address(c[field])[1])
-             for field in ("backendHTTP", "backendGRPC")]
-            if mode == "denied" else []
-        ),
+        "targets": [c["tlsHTTP"], c["tlsGRPC"]] + [
+            net_address(*target) for target in backend_targets(c)
+        ],
     }
 
 
@@ -400,7 +396,8 @@ def main():
             check_probe_dns(config, resolved)
             # An approved SDK source must also be unable to bypass TLS and
             # reach the plaintext GoLab backend on the sidecar host.
-            probe_closed_targets(backend_targets(config), label="allowed source reached plaintext backend")
+            probe_closed_targets(backend_targets(config), resolved,
+                                 label="allowed source reached plaintext backend")
         except (OSError, ValueError) as exc:
             print("ALERT: live probe failed:", exc, file=sys.stderr)
             return 1

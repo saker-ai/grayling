@@ -153,6 +153,15 @@ class NativeTopologyTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "10.42.1.10:19848"):
                     probe_closed_targets(targets)
 
+    def test_allowed_backend_refusal_uses_routed_target_address(self):
+        target = backend_targets(self.config)[0]
+        addresses = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.42.1.11", target[1]))]
+        with patch("check_nacos_native_topology.socket.getaddrinfo", return_value=addresses), \
+             patch("check_nacos_native_topology.socket.create_connection") as connect:
+            with self.assertRaisesRegex(ValueError, "DNS addresses changed during TCP refusal probe"):
+                probe_closed_targets([target], {"10.42.1.10:18848": ["10.42.1.10"]})
+        connect.assert_not_called()
+
     def test_allowed_probe_fails_when_plaintext_backend_is_open(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "deployment.json")
@@ -167,6 +176,7 @@ class NativeTopologyTest(unittest.TestCase):
                 with contextlib.redirect_stderr(io.StringIO()) as errors:
                     self.assertEqual(main(), 1)
             closed.assert_called_once_with(backend_targets(self.config),
+                                           {},
                                            label="allowed source reached plaintext backend")
             self.assertIn("ALERT: live probe failed", errors.getvalue())
 
@@ -301,7 +311,10 @@ class NativeTopologyTest(unittest.TestCase):
         addresses = [(socket.AF_INET, socket.SOCK_DGRAM, 0, "", ("10.42.1.10", 8848))]
         with patch("check_nacos_native_topology.socket.getaddrinfo", return_value=addresses):
             with patch("check_nacos_native_topology.socket.socket", return_value=RoutedSocket("10.42.0.7")):
-                self.assertEqual(len(source_ips(self.config, "allowed")), 2)
+                resolved = {}
+                self.assertEqual(len(source_ips(self.config, "allowed", resolved)), 4)
+                self.assertEqual(resolved["10.42.1.10:18848"], ["10.42.1.10"])
+                self.assertEqual(resolved["10.42.1.10:19848"], ["10.42.1.10"])
                 with self.assertRaisesRegex(ValueError, "wrong allowedSources classification"):
                     source_ips(self.config, "denied")
             with patch("check_nacos_native_topology.socket.socket", return_value=RoutedSocket("10.43.0.7")):
@@ -327,6 +340,10 @@ class NativeTopologyTest(unittest.TestCase):
         mapped["sourceIPs"] = {target: "::ffff:10.42.0.7" for target in allowed_targets}
         mapped["resolvedIPs"] = {target: ["::ffff:10.42.1.10"] for target in allowed_targets}
         verify_pair(self.config, mapped, denied)
+        changed_backend = copy.deepcopy(allowed)
+        changed_backend["resolvedIPs"]["10.42.1.10:18848"] = ["10.42.1.11"]
+        with self.assertRaisesRegex(ValueError, "resolved different IPs"):
+            verify_pair(self.config, changed_backend, denied)
         for field, value, message in (
             ("probeHost", "sdk-host", "distinct hosts"),
             ("sourceIPs", {}, "lacks routed source"),
