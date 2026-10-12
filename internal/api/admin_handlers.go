@@ -250,7 +250,20 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	writeJSON(w, http.StatusOK, s.Store.AuditList(resolved.ID, limit))
+	var before int64
+	if v := r.URL.Query().Get("before"); v != "" {
+		before, err = strconv.ParseInt(v, 10, 64)
+		if err != nil || before <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid_cursor", "before must be a positive audit ID")
+			return
+		}
+	}
+	query := r.URL.Query().Get("q")
+	if len(query) > 128 {
+		writeError(w, http.StatusBadRequest, "invalid_query", "audit search exceeds 128 bytes")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.Store.AuditPage(resolved.ID, before, limit, query))
 }
 
 func (s *Server) handleSetQuotas(w http.ResponseWriter, r *http.Request) {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	stdjson "encoding/json"
 	"encoding/json/v2"
 	"fmt"
 	"hash"
@@ -113,54 +114,24 @@ func Capture(ctx context.Context, dsn, authSecret string, store *platform.Store,
 	}
 	defer conn.Close(ctx)
 	p := &Point{Version: 1, AuthSHA256: digest(authSecret)}
-	rows, err := conn.Query(ctx, `SELECT version FROM schema_migrations ORDER BY version`)
-	if err != nil {
-		return nil, fmt.Errorf("recovery: schema migrations: %w", err)
-	}
-	for rows.Next() {
-		var v int
-		if err := rows.Scan(&v); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		p.Migrations = append(p.Migrations, v)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	rows.Close()
-	if err := conn.QueryRow(ctx, `SELECT control_version FROM meta WHERE id=1`).Scan(&p.ControlVersion); err != nil {
+	var statePayload []byte
+	if err := conn.QueryRow(ctx, `SELECT control_version, payload FROM database_states WHERE id=1`).Scan(&p.ControlVersion, &statePayload); err != nil {
 		return nil, fmt.Errorf("recovery: control version: %w", err)
 	}
-	if err := conn.QueryRow(ctx, `SELECT count(*) FROM event_index`).Scan(&p.EventCount); err != nil {
+	var durable platform.Data
+	if err := stdjson.Unmarshal(statePayload, &durable); err != nil {
+		return nil, fmt.Errorf("recovery: decode platform state: %w", err)
+	}
+	p.Migrations = []int{durable.SchemaVersion}
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM database_events`).Scan(&p.EventCount); err != nil {
 		return nil, fmt.Errorf("recovery: event ledger: %w", err)
 	}
-	if err := conn.QueryRow(ctx, `SELECT count(*) FROM tokens`).Scan(&p.TokenCount); err != nil {
-		return nil, fmt.Errorf("recovery: token count: %w", err)
-	}
+	p.TokenCount = int64(len(durable.Tokens))
 	p.PostgresSHA256, err = postgresDigest(ctx, conn)
 	if err != nil {
 		return nil, err
 	}
-	rows, err = conn.Query(ctx, `SELECT key_hex FROM hmac_keys ORDER BY version`)
-	if err != nil {
-		return nil, fmt.Errorf("recovery: HMAC key ring: %w", err)
-	}
-	var keys []string
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		keys = append(keys, key)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	rows.Close()
+	keys := durable.HMACKeyRing
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("recovery: missing PostgreSQL HMAC key ring")
 	}
@@ -218,7 +189,7 @@ func postgresDigest(ctx context.Context, conn *pgx.Conn) (string, error) {
 	rows, err := conn.Query(ctx, `SELECT c.relname FROM pg_class c
 JOIN pg_namespace n ON n.oid=c.relnamespace
 WHERE n.nspname='public' AND c.relkind IN ('r','p')
-AND c.relname <> 'control_replica_cursors'
+AND c.relname <> 'database_leases'
 AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid=c.oid)
 ORDER BY c.relname`)
 	if err != nil {

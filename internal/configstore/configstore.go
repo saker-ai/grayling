@@ -1,4 +1,4 @@
-// Package configstore adapts the gonacos Config service to GoLab's
+// Package configstore adapts Nacos configuration storage to GoLab's
 // immutable-revision distribution model (docs/技术方案.md §3, §5.1).
 //
 // Mapping:
@@ -12,9 +12,9 @@
 // Publication order and confirmation (§3): flag documents are published and
 // read back FIRST; the manifest is published only after all referenced
 // documents verified. Publishing is confirmed by read-back (Get + hash
-// comparison), never by the write call alone. gonacos push notifications are
-// left untouched — SetPushFunc/SetSyncFunc are owned by server.New and must
-// not be overridden (§2); GoLab's own SSE/poll layer handles fan-out.
+// comparison), never by the write call alone. Embedded gonacos push
+// notifications are owned by server.New; GoLab's SSE/poll layer handles
+// fan-out in both modes.
 package configstore
 
 import (
@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/godeps/golab/internal/nacos"
 	"github.com/godeps/golab/pkg/model"
 	"github.com/godeps/gonacos/pkg/config"
 )
@@ -30,6 +31,9 @@ func jsonUnmarshal(data []byte, v any) error { return json.Unmarshal(data, v) }
 
 // Group is the fixed gonacos group for all GoLab documents (§5.1).
 const Group = "GOLAB_FLAGS"
+
+// AIGroup keeps externally hosted AI versions separate from flag revisions.
+const AIGroup = "GOLAB_AI"
 
 // ManifestDataID is the well-known dataId every SDK subscribes to first (§3:
 // 枚举问题 — Nacos ListenConfig needs a known dataId).
@@ -53,9 +57,7 @@ func SegmentDataID(key string, revision int64) string {
 	return fmt.Sprintf("golab.segment.%s.r%d", key, revision)
 }
 
-// Store is the substrate abstraction. The production implementation is
-// gonacosConfig; tests may substitute fakes, but the gonacos implementation
-// itself runs against the real in-memory config service.
+// Store is the substrate abstraction used by GoLab's publish and read paths.
 type Store interface {
 	// PublishDoc writes immutable content and confirms by read-back.
 	// Returns the dataId and the SHA-256 hex of the content.
@@ -75,33 +77,61 @@ type Store interface {
 	LoadSnapshot(namespaceID string) (*model.Snapshot, error)
 }
 
-// gonacosConfig talks to the gonacos Config service in-process.
-type gonacosConfig struct {
-	cfg *config.Service
+type documentBackend interface {
+	Publish(namespace, group, dataID, content string) error
+	Get(namespace, group, dataID string) (string, error)
+	Delete(namespace, group, dataID string) error
+}
+
+type configStore struct {
+	backend documentBackend
+	group   string
+}
+
+type embeddedBackend struct{ cfg *config.Service }
+
+func (b embeddedBackend) Publish(namespace, group, dataID, content string) error {
+	return b.cfg.Publish(config.PublishRequest{
+		NamespaceID: namespace, GroupName: group, DataID: dataID,
+		Content: content, Type: "json", Desc: "golab immutable revision document", AppName: "golab",
+	})
+}
+
+func (b embeddedBackend) Get(namespace, group, dataID string) (string, error) {
+	item, err := b.cfg.Get(namespace, group, dataID)
+	if err != nil {
+		return "", err
+	}
+	return item.Content, nil
+}
+
+func (b embeddedBackend) Delete(namespace, group, dataID string) error {
+	return b.cfg.Delete(namespace, group, dataID)
 }
 
 // NewGonacosStore wraps a gonacos Config service (from
 // server.Services().Config). The service must be the one assembled by
 // server.New so cluster sync/push wiring stays intact.
 func NewGonacosStore(cfg *config.Service) Store {
-	return &gonacosConfig{cfg: cfg}
+	return &configStore{backend: embeddedBackend{cfg: cfg}, group: Group}
 }
 
-func (g *gonacosConfig) PublishDoc(namespaceID, dataID string, content []byte) (string, error) {
+// NewNacosStore uses an external Nacos 3 Admin API as the config substrate.
+func NewNacosStore(client *nacos.Client) Store {
+	return &configStore{backend: client, group: Group}
+}
+
+// NewNacosAIStore stores immutable AI versions in a separate Nacos group.
+func NewNacosAIStore(client *nacos.Client) Store {
+	return &configStore{backend: client, group: AIGroup}
+}
+
+func (g *configStore) PublishDoc(namespaceID, dataID string, content []byte) (string, error) {
 	if len(content) == 0 {
 		return "", fmt.Errorf("configstore: refusing to publish empty document %s", dataID)
 	}
 	hash := model.HashBytes(content)
-	err := g.cfg.Publish(config.PublishRequest{
-		NamespaceID: namespaceID,
-		GroupName:   Group,
-		DataID:      dataID,
-		Content:     string(content),
-		Type:        "json",
-		Desc:        "golab immutable revision document",
-		AppName:     "golab",
-	})
-	if err != nil {
+	if err := g.backend.Publish(namespaceID, g.group, dataID, string(content)); err != nil {
 		return "", fmt.Errorf("configstore: publish %s/%s: %w", namespaceID, dataID, err)
 	}
 	// Publish confirmation = read-back (§3: 不报告"已生效"直到读回验证).
@@ -115,27 +145,27 @@ func (g *gonacosConfig) PublishDoc(namespaceID, dataID string, content []byte) (
 	return dataID, nil
 }
 
-func (g *gonacosConfig) GetDoc(namespaceID, dataID string) ([]byte, string, error) {
-	item, err := g.cfg.Get(namespaceID, Group, dataID)
+func (g *configStore) GetDoc(namespaceID, dataID string) ([]byte, string, error) {
+	content, err := g.backend.Get(namespaceID, g.group, dataID)
 	if err != nil {
-		if errors.Is(err, config.ErrConfigNotFound) {
+		if errors.Is(err, config.ErrConfigNotFound) || errors.Is(err, nacos.ErrNotFound) {
 			return nil, "", fmt.Errorf("%w: %s/%s", ErrNotFound, namespaceID, dataID)
 		}
 		return nil, "", fmt.Errorf("configstore: get %s/%s: %w", namespaceID, dataID, err)
 	}
-	content := []byte(item.Content)
-	return content, model.HashBytes(content), nil
+	b := []byte(content)
+	return b, model.HashBytes(b), nil
 }
 
-func (g *gonacosConfig) DeleteDoc(namespaceID, dataID string) error {
-	err := g.cfg.Delete(namespaceID, Group, dataID)
-	if err != nil && !errors.Is(err, config.ErrConfigNotFound) {
+func (g *configStore) DeleteDoc(namespaceID, dataID string) error {
+	err := g.backend.Delete(namespaceID, g.group, dataID)
+	if err != nil && !errors.Is(err, config.ErrConfigNotFound) && !errors.Is(err, nacos.ErrNotFound) {
 		return fmt.Errorf("configstore: delete %s/%s: %w", namespaceID, dataID, err)
 	}
 	return nil // idempotent
 }
 
-func (g *gonacosConfig) PublishManifest(namespaceID string, m *model.Manifest) error {
+func (g *configStore) PublishManifest(namespaceID string, m *model.Manifest) error {
 	content, err := model.CanonicalJSON(m)
 	if err != nil {
 		return fmt.Errorf("configstore: encode manifest: %w", err)
@@ -162,7 +192,7 @@ func (g *gonacosConfig) PublishManifest(namespaceID string, m *model.Manifest) e
 	return nil
 }
 
-func (g *gonacosConfig) GetManifest(namespaceID string) (*model.Manifest, error) {
+func (g *configStore) GetManifest(namespaceID string) (*model.Manifest, error) {
 	content, _, err := g.GetDoc(namespaceID, ManifestDataID)
 	if err != nil {
 		return nil, err
@@ -178,7 +208,7 @@ func (g *gonacosConfig) GetManifest(namespaceID string) (*model.Manifest, error)
 	return &m, nil
 }
 
-func (g *gonacosConfig) LoadSnapshot(namespaceID string) (*model.Snapshot, error) {
+func (g *configStore) LoadSnapshot(namespaceID string) (*model.Snapshot, error) {
 	m, err := g.GetManifest(namespaceID)
 	if err != nil {
 		return nil, err

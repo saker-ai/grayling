@@ -30,7 +30,7 @@ const indexHTML = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const code = i18nCode + '\n' + appCode;
 
 const BRIDGE = '\n;globalThis.__x = { I18N, t, setLang, detectLang, localeFor, fmtTime, fmtDurNs,' +
-  ' S, VIEWS, renderReport, renderRollout, lintFlag, applyStaticI18n, bindLangSwitch, registerI18nHooks };';
+  ' S, VIEWS, route, renderReport, renderRollout, lintFlag, applyStaticI18n, bindLangSwitch, registerI18nHooks };';
 
 // --- sandbox factory --------------------------------------------------------
 // Rich element stub: tolerates property writes, records classList.toggle and
@@ -44,7 +44,8 @@ function el() {
       add() {}, remove() {}, contains() { return false; },
       toggle(cls, on) { s._toggles.push([cls, on]); },
     },
-    appendChild() {}, remove() {}, setAttribute() {}, addEventListener() {},
+    appendChild() {}, replaceChildren(child) { s.innerHTML = child.innerHTML; },
+    remove() {}, setAttribute() {}, addEventListener() {},
     select() {}, closest() { return null; },
     querySelector() { return el(); }, querySelectorAll() { return []; },
   };
@@ -521,6 +522,24 @@ assert(!main.warns.some(w => w.includes('[i18n] missing')), 'console.warn record
   };
   scan('app.js (code + string literals)', stripJsComments(appCode));
   scan('index.html (markup + attributes)', indexHTML.replace(/<!--[\s\S]*?-->/g, ''));
+}
+
+// An older response must not replace the current view after navigation.
+{
+  const cs = makeSandbox();
+  let finishSlow;
+  cs.x.VIEWS.flags = async m => {
+    await new Promise(resolve => { finishSlow = resolve; });
+    m.innerHTML = '<p>stale response</p>';
+  };
+  cs.x.VIEWS.audit = async m => { m.innerHTML = '<p>current response</p>'; };
+  cs.x.S.view = 'flags';
+  const slow = cs.x.route();
+  cs.x.S.view = 'audit';
+  await cs.x.route();
+  finishSlow();
+  await slow;
+  assert(cs.chrome.get('#main').innerHTML.includes('current response'), 'stale response replaced current route');
 }
 
 console.log('i18n DOM contract: all assertions passed ' +

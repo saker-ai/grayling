@@ -2,17 +2,15 @@
 //
 //   - the GoLab HTTP API (admin, SDK config/eval/stream, collect) and the
 //     embedded web console;
-//   - an in-process gonacos server providing the Config substrate (flag
-//     revisions + manifest distribution) and the AI resource store. The
-//     gonacos listeners are bound to LOOPBACK by default. Anonymous native
-//     access must never be exposed to tenants; the explicit native-auth mode
-//     scopes SDK-token reads and subscriptions (docs/Nacos原生客户端.md).
+//   - an embedded gonacos server or external Nacos 3 instance providing the
+//     Config and AI content substrate. Embedded listeners bind to loopback
+//     by default. The native-auth mode scopes embedded SDK-token reads and
+//     subscriptions (docs/Nacos原生客户端.md).
 //
-// Storage topology (docs/技术方案.md §3): GoLab server + same-process
-// gonacos + platform store. The dev/default platform store is the
-// file-backed JSON store; -pg switches to the production PostgreSQL backend
-// (schema auto-migrated, events monthly-partitioned, HMAC key-ring rotation
-// migration — docs/技术方案.md §10.2).
+// Storage topology (docs/技术方案.md §3): GoLab server + Nacos substrate +
+// platform store. The dev/default platform store is the
+// file-backed JSON store; -sqlite and -pg select the GORM-backed SQLite and
+// PostgreSQL stores (docs/storage.md).
 package main
 
 import (
@@ -20,9 +18,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"log"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -31,24 +27,24 @@ import (
 	"syscall"
 	"time"
 
-	aisvc "github.com/godeps/golab/internal/ai"
-	"github.com/godeps/golab/internal/api"
+	golabapp "github.com/godeps/golab"
 	"github.com/godeps/golab/internal/configstore"
 	"github.com/godeps/golab/internal/platform"
 	"github.com/godeps/golab/internal/recovery"
-	"github.com/godeps/golab/web"
 	"github.com/godeps/gonacos/pkg/server"
 )
 
 func main() {
 	var (
 		listenAddr            = flag.String("addr", "127.0.0.1:8688", "GoLab HTTP listen address")
-		dataFile              = flag.String("data", filepath.Join("data", "golab-store.json"), "platform store file ('' = memory-only; ignored when -pg is set)")
+		dataFile              = flag.String("data", filepath.Join("data", "golab-store.json"), "platform store file ('' = memory-only; ignored when -pg or -sqlite is set)")
 		pgDSN                 = flag.String("pg", "", "PostgreSQL DSN for the production platform store (e.g. postgres://golab:secret@127.0.0.1:5432/golab); overrides -data")
+		sqlitePath            = flag.String("sqlite", "", "pure-Go SQLite database path for the platform store; overrides -data")
 		gonacosRoot           = flag.String("gonacos-root", "", "gonacos contract root (repo with api/openapi/upstream); empty disables 501-stub registration")
 		gonacosData           = flag.String("gonacos-data", "", "gonacos embedded-redis dump dir (default <data dir>/gonacos)")
 		gonacosAddr           = flag.String("gonacos-addr", "127.0.0.1:18848", "gonacos HTTP bind — KEEP LOOPBACK/PRIVATE (§9)")
 		gonacosGRPC           = flag.String("gonacos-grpc-addr", "127.0.0.1:19848", "gonacos gRPC bind — KEEP LOOPBACK/PRIVATE (§9)")
+		nacosURL              = flag.String("nacos-url", "", "external Nacos 3 HTTP origin; empty uses embedded gonacos")
 		nativeConfigAuth      = flag.Bool("nacos-native-auth", false, "enable SDK-token-scoped native Nacos config reads; HTTP exposes only SDK login")
 		redisAddr             = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
 		authSecret            = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
@@ -70,11 +66,17 @@ func main() {
 		rotationProvisionFile = flag.String("provision-rotation-approver-file", "", "offline issue a second global owner token into a new owner-only file")
 	)
 	flag.Parse()
+	if *pgDSN != "" && *sqlitePath != "" {
+		log.Fatal("-pg and -sqlite are mutually exclusive")
+	}
 	if *evaluationSampleRate < 0 || *evaluationSampleRate > 1 {
 		log.Fatal("-evaluation-sample-rate must be within [0,1]")
 	}
 	if *rolloutLease < 0 || (*rolloutLease > 0 && *rolloutLease <= *rolloutIv) {
 		log.Fatal("-rollout-lease-duration must exceed -rollout-interval or be 0 for automatic sizing")
+	}
+	if *nacosURL != "" && (*nativeConfigAuth || *redisAddr != "" || *recoveryPoint != "" || *writePoint != "" || *verifyPoint != "" || *rotationKeyFile != "" || *rotationProvisionFile != "") {
+		log.Fatal("external Nacos is incompatible with embedded native auth, Redis, recovery checkpoints, and offline key rotation")
 	}
 
 	logger := log.New(os.Stderr, "golab ", log.LstdFlags|log.Lmsgprefix)
@@ -120,10 +122,7 @@ func main() {
 	if adminPassword != "" && (len(adminPassword) < 12 || strings.TrimSpace(adminPassword) == "") {
 		logger.Fatal("admin password must contain at least 12 bytes and non-whitespace characters")
 	}
-
-	// Anonymous gonacos has no tenant authorization. Any non-loopback bind
-	// requires native SDK-token auth as well as an explicit deployment opt-in.
-	if !isLoopback(*gonacosAddr) || !isLoopback(*gonacosGRPC) {
+	if *nacosURL == "" && (!isLoopback(*gonacosAddr) || !isLoopback(*gonacosGRPC)) {
 		if !*nativeConfigAuth {
 			logger.Fatal("refusing non-loopback gonacos listeners without -nacos-native-auth=true: anonymous native access cannot be exposed to a tenant-reachable network")
 		}
@@ -132,8 +131,63 @@ func main() {
 		}
 		logger.Printf("WARNING: native Nacos bound to non-loopback addresses %s / %s — TLS termination and network policy MUST be verified", *gonacosAddr, *gonacosGRPC)
 	}
+	if *writePoint == "" && *verifyPoint == "" && *rotationKeyFile == "" && *rotationProvisionFile == "" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		appCtx, appCancel := context.WithCancel(context.Background())
+		defer appCancel()
+		app, err := golabapp.Start(appCtx, golabapp.Options{
+			DataFile: *dataFile, SQLitePath: *sqlitePath, PostgresDSN: *pgDSN,
+			NacosURL: *nacosURL, NacosUsername: os.Getenv("GOLAB_NACOS_USERNAME"),
+			NacosPassword: os.Getenv("GOLAB_NACOS_PASSWORD"), NacosToken: os.Getenv("GOLAB_NACOS_TOKEN"),
+			GonacosAddr: *gonacosAddr, GonacosGRPCAddr: *gonacosGRPC,
+			GonacosRoot: *gonacosRoot, GonacosData: *gonacosData, RedisAddr: *redisAddr,
+			NativeConfigAuth:        *nativeConfigAuth,
+			AllowNonLoopbackGonacos: os.Getenv("GOLAB_ALLOW_NON_LOOPBACK_GONACOS") == "1",
+			AuthSecret:              *authSecret, AdminPassword: adminPassword, RecoveryPoint: *recoveryPoint,
+			BootstrapOwnerName: *bootstrapName, RolloutInterval: *rolloutIv,
+			RolloutLeaseDuration: *rolloutLease, ReconcileInterval: *reconcileIv,
+			RequestsPerSecond: *requestsPerSec, EvaluationSampleRate: *evaluationSampleRate,
+			Logger: logger,
+		})
+		if err != nil {
+			logger.Fatalf("start GoLab: %v", err)
+		}
+		if httpAddr, grpcAddr := app.GonacosAddrs(); httpAddr != "" {
+			logger.Printf("gonacos substrate: http=%s grpc=%s", httpAddr, grpcAddr)
+		} else {
+			logger.Printf("Nacos substrate: external %s", *nacosURL)
+		}
+		logBootstrapToken(logger, app.BootstrapOwnerToken())
+		httpSrv := &http.Server{Addr: *listenAddr, Handler: app.Handler(), ReadHeaderTimeout: 10 * time.Second}
+		serveErr := make(chan error, 1)
+		go func() {
+			logger.Printf("golab API + console listening on http://%s", *listenAddr)
+			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				serveErr <- err
+			}
+		}()
+		select {
+		case <-ctx.Done():
+		case err := <-app.Errors():
+			if err != nil {
+				logger.Printf("GoLab background error: %v", err)
+			}
+		case err := <-serveErr:
+			logger.Printf("GoLab HTTP error: %v", err)
+		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+			logger.Printf("HTTP shutdown: %v", err)
+		}
+		if err := app.Close(shutdownCtx); err != nil {
+			logger.Printf("GoLab shutdown: %v", err)
+		}
+		return
+	}
 
-	if *dataFile != "" && *gonacosData == "" {
+	if *nacosURL == "" && *dataFile != "" && *gonacosData == "" {
 		*gonacosData = filepath.Join(filepath.Dir(*dataFile), "gonacos")
 	}
 	var diskSnapshotHash string
@@ -159,17 +213,11 @@ func main() {
 		}
 	}
 
-	// ---- gonacos substrate ----
+	// ---- offline operations use the embedded gonacos snapshot ----
 	var store *platform.Store
-	gopts := []server.Option{
-		server.WithAddr(*gonacosAddr),
-		server.WithGRPCAddr(*gonacosGRPC),
-	}
-	if *nativeConfigAuth {
-		gopts = append(gopts, server.WithNativeConfigAuth(func(secret, namespace, group, dataID string) error {
-			return authorizeNativeConfig(store, secret, namespace, group, dataID)
-		}))
-	}
+	var err error
+	var configStore configstore.Store
+	gopts := []server.Option{server.WithAddr(*gonacosAddr), server.WithGRPCAddr(*gonacosGRPC)}
 	if *gonacosRoot != "" {
 		gopts = append(gopts, server.WithRoot(*gonacosRoot))
 	}
@@ -182,9 +230,7 @@ func main() {
 	if *authSecret != "" {
 		gopts = append(gopts, server.WithAuthSecret(*authSecret))
 	}
-	if *recoveryPoint != "" || *verifyPoint != "" || *rotationKeyFile != "" || *rotationProvisionFile != "" {
-		gopts = append(gopts, server.WithStrictSnapshot(true))
-	}
+	gopts = append(gopts, server.WithStrictSnapshot(true))
 	gsrv, err := server.New(gopts...)
 	if err != nil {
 		logger.Fatalf("gonacos server: %v", err)
@@ -193,6 +239,7 @@ func main() {
 	if bundle == nil || bundle.Config == nil || bundle.AI == nil {
 		logger.Fatal("gonacos services unavailable")
 	}
+	configStore = configstore.NewGonacosStore(bundle.Config)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -205,6 +252,12 @@ func main() {
 			logger.Fatalf("platform store (postgres): %v", err)
 		}
 		logger.Printf("platform store: postgresql (schema migrated, state loaded)")
+	} else if *sqlitePath != "" {
+		store, err = platform.NewSQLiteStore(ctx, *sqlitePath)
+		if err != nil {
+			logger.Fatalf("platform store (sqlite): %v", err)
+		}
+		logger.Printf("platform store: sqlite (%s)", *sqlitePath)
 	} else {
 		store, err = platform.NewStore(*dataFile)
 		if err != nil {
@@ -222,7 +275,7 @@ func main() {
 			logger.Fatal("approver provisioning requires -pg, -redis, auth secret file, backup point, operator token file, and a new output path")
 		}
 		if err := provisionRotationApprover(ctx, store, *pgDSN, *authSecret, *redisAddr, diskSnapshotHash,
-			configstore.NewGonacosStore(bundle.Config), *rotationBackupPoint, *rotationOperatorFile, *rotationProvisionFile); err != nil {
+			configStore, *rotationBackupPoint, *rotationOperatorFile, *rotationProvisionFile); err != nil {
 			logger.Fatalf("provision rotation approver: %v", err)
 		}
 		logger.Print("rotation approver token issued with audit; escrow the output and take a new joint backup")
@@ -232,7 +285,7 @@ func main() {
 		if *pgDSN == "" || *redisAddr == "" || *authSecretFile == "" || *rotationBackupPoint == "" || *rotationOperatorFile == "" || *rotationApproverFile == "" || *recoveryPoint != "" || *writePoint != "" || *verifyPoint != "" {
 			logger.Fatal("rotation requires -pg, backup checkpoint, key and two owner token files; recovery modes are exclusive")
 		}
-		if err := runHMACRotation(ctx, store, *pgDSN, *authSecret, *redisAddr, diskSnapshotHash, configstore.NewGonacosStore(bundle.Config),
+		if err := runHMACRotation(ctx, store, *pgDSN, *authSecret, *redisAddr, diskSnapshotHash, configStore,
 			*rotationBackupPoint, *rotationKeyFile, *rotationOperatorFile, *rotationApproverFile); err != nil {
 			logger.Fatalf("HMAC rotation: %v", err)
 		}
@@ -246,7 +299,7 @@ func main() {
 		if (*writePoint != "" && (*recoveryPoint != "" || *verifyPoint != "")) || (*recoveryPoint != "" && *verifyPoint != "") {
 			logger.Fatal("recovery point modes are mutually exclusive")
 		}
-		point, err := recovery.Capture(ctx, *pgDSN, *authSecret, store, configstore.NewGonacosStore(bundle.Config))
+		point, err := recovery.Capture(ctx, *pgDSN, *authSecret, store, configStore)
 		if err != nil {
 			logger.Fatalf("recovery gate: %v", err)
 		}
@@ -298,130 +351,19 @@ func main() {
 			return
 		}
 	}
-	go func() {
-		if err := gsrv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			logger.Printf("gonacos serve: %v", err)
-		}
-	}()
-	logger.Printf("gonacos substrate: http=%s grpc=%s (loopback-only by design)", gsrv.HTTPAddr(), gsrv.GRPCAddr())
-
-	// ---- API + AI gate ----
-	apiSrv := api.NewServer(store, configstore.NewGonacosStore(bundle.Config), api.Options{
-		Logger:               log.New(os.Stderr, "golab-api ", log.LstdFlags),
-		AdminPassword:        adminPassword,
-		RequestsPerSecond:    *requestsPerSec,
-		EvaluationSampleRate: *evaluationSampleRate,
-	})
-	if *evaluationSampleRate > 0 {
-		telemetryLogger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-		go func() {
-			for {
-				select {
-				case event := <-apiSrv.SampledEvents():
-					telemetryLogger.InfoContext(ctx, event.Name,
-						"decision_id", event.DecisionID, "attributes", event.Attributes)
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-	}
-	if adminPassword != "" {
-		logger.Printf("fixed admin password enabled")
-	}
-	apiSrv.SetAI(aisvc.NewService(store, bundle.AI))
-
-	// ---- staged-release auto-advance engine (§5.3 P4) ----
-	apiSrv.Rollout.LeaseDuration = *rolloutLease
-	go apiSrv.Rollout.Run(ctx, *rolloutIv)
-	// ---- publish reconciliation background task (§3/§11) ----
-	go apiSrv.Admin.RunReconciler(ctx, *reconcileIv)
-	go store.RunChangeSync(ctx, 500*time.Millisecond, logger.Printf)
-	// ---- bootstrap owner credential (printed once) ----
-	if token := bootstrapOwner(store, *bootstrapName, logger); token != "" {
-		logger.Printf("")
-		logger.Printf("  ╔══════════════════════════════════════════════════════════════╗")
-		logger.Printf("  ║ GLOBAL OWNER TOKEN (shown once — store it now):              ║")
-		logger.Printf("  ║ %s", token)
-		logger.Printf("  ╚══════════════════════════════════════════════════════════════╝")
-		logger.Printf("")
-	}
-
-	// ---- HTTP surface: API + embedded console ----
-	handler := withConsole(apiSrv.Handler())
-	httpSrv := &http.Server{
-		Addr:              *listenAddr,
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	go func() {
-		logger.Printf("golab API + console listening on http://%s", *listenAddr)
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Fatalf("http serve: %v", err)
-		}
-	}()
-
-	<-ctx.Done()
-	logger.Printf("shutting down…")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	_ = httpSrv.Shutdown(shutdownCtx)
-	_ = gsrv.Shutdown(shutdownCtx)
-	logger.Printf("bye")
+	logger.Fatal("offline operation did not exit")
 }
 
-// bootstrapOwner creates the initial global owner token when the store has
-// none yet. Returns the plaintext secret to print, or "" when credentials
-// already exist.
-func bootstrapOwner(store *platform.Store, name string, logger *log.Logger) string {
-	if len(store.ListTokens("")) > 0 {
-		return ""
+func logBootstrapToken(logger *log.Logger, token string) {
+	if token == "" {
+		return
 	}
-	ct, err := store.CreateToken(platform.TokenAdmin, name, platform.RoleOwner, "", "", "bootstrap")
-	if err != nil {
-		logger.Fatalf("bootstrap owner token: %v", err)
-	}
-	_ = store.Audit(name, platform.RoleOwner, "bootstrap.owner", "", "", ct.Token.ID, "initial credential")
-	return ct.Secret
-}
-
-// withConsole serves the embedded SPA for every non-/api path, with an
-// index.html fallback for client-side routes. index.html is written
-// directly (http.FileServer would redirect /index.html → / in a loop).
-func withConsole(apiHandler http.Handler) http.Handler {
-	assets, err := fs.Sub(web.Assets, ".")
-	if err != nil {
-		return apiHandler
-	}
-	indexHTML, err := fs.ReadFile(assets, "index.html")
-	if err != nil {
-		// Without console assets the API must still run headless.
-		return apiHandler
-	}
-	fileServer := http.FileServerFS(assets)
-	serveIndex := func(w http.ResponseWriter) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write(indexHTML)
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			apiHandler.ServeHTTP(w, r)
-			return
-		}
-		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
-			serveIndex(w)
-			return
-		}
-		// Static file if present, else SPA fallback.
-		clean := strings.TrimPrefix(r.URL.Path, "/")
-		if f, err := assets.Open(clean); err == nil {
-			f.Close()
-			fileServer.ServeHTTP(w, r)
-			return
-		}
-		serveIndex(w)
-	})
+	logger.Printf("")
+	logger.Printf("  ╔══════════════════════════════════════════════════════════════╗")
+	logger.Printf("  ║ GLOBAL OWNER TOKEN (shown once — store it now):              ║")
+	logger.Printf("  ║ %s", token)
+	logger.Printf("  ╚══════════════════════════════════════════════════════════════╝")
+	logger.Printf("")
 }
 
 func isLoopback(addr string) bool {

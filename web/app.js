@@ -24,10 +24,18 @@ function fmtDurNs(ns) {
 }
 function shortHash(h) { return h ? String(h).slice(0, 12) : '—'; }
 function chip(label, cls) { return '<span class="chip ' + (cls || 'gray') + '">' + esc(label) + '</span>'; }
+function bindListSearch(m) {
+  const input = $('.list-search', m);
+  if (!input) return;
+  input.oninput = () => {
+    const query = input.value.trim().toLocaleLowerCase();
+    $$('tbody tr', m).forEach(row => { row.hidden = !!query && !row.textContent.toLocaleLowerCase().includes(query); });
+  };
+}
 
-function reviewPreview(p) {
+function reviewPreview(p, id = 'review-preview') {
   if (!p) return '';
-  return '<section class="card" id="review-preview"><h3>' + esc(t('approval.preview')) + '</h3>' +
+  return '<section class="card" id="' + esc(id) + '"><h3>' + esc(t('approval.preview')) + '</h3>' +
     '<p>' + esc(t('approval.environment')) + ': ' + esc(p.targetEnvironment) + ' · ' +
       esc(t('approval.risk')) + ': ' + esc(p.risk) + ' · ' + esc(t('approval.base')) + ': r' + esc(p.baseRevision) + '</p>' +
     '<p>' + esc(t('approval.changed')) + ': ' + esc((p.changedFields || []).join(', ') || '—') + '</p>' +
@@ -39,8 +47,9 @@ function reviewPreview(p) {
     '</section>';
 }
 
-async function requestChange(action, object, payload) {
-  const reason = prompt(t('approval.reason'), '');
+async function requestChange(action, object, payload, reasonOverride = '') {
+  if (!confirmLeaveEditor()) return null;
+  const reason = reasonOverride || prompt(t('approval.reason'), '');
   if (!reason) { toast(t('toast.reasonRequired'), false); return null; }
   const a = await api(scopePath() + '/approvals', { method: 'POST', body: { action, object, payload, reason } });
   toast(t('approval.requested', { id: a.id }));
@@ -67,15 +76,19 @@ class ApiError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
 }
 function baseUrl() { return (localStorage.getItem('golab_url') || '').replace(/\/+$/, ''); }
+let memoryToken = '';
+let cookieSession = false;
+const sameOriginConsole = () => !baseUrl() || baseUrl() === location.origin;
 
 async function api(path, opts = {}) {
   const { method = 'GET', body } = opts;
-  const headers = { 'Authorization': 'Bearer ' + (localStorage.getItem('golab_token') || '') };
+  const headers = {};
+  if (!cookieSession && memoryToken) headers.Authorization = 'Bearer ' + memoryToken;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   let res;
   try {
     res = await fetch(baseUrl() + path, {
-      method, headers,
+      method, headers, credentials: cookieSession ? 'same-origin' : 'omit',
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (e) {
@@ -87,7 +100,7 @@ async function api(path, opts = {}) {
   if (!res.ok) {
     const err = (data && data.error) || {};
     const e = new ApiError(res.status, err.code || 'http_' + res.status, err.message || res.statusText);
-    if (res.status === 401) showAuth(t('err.tokenRejected401'));
+    if (res.status === 401) { cookieSession = false; memoryToken = ''; showAuth(t('err.tokenRejected401')); }
     throw e;
   }
   return data;
@@ -113,9 +126,11 @@ function reportError(e) {
   if (e.status === 403) refreshCapabilities().then(route);
 }
 // Runs a mutation: success → toast + re-route; failure → toast with code+message.
-async function run(fn, okMsg) {
+async function run(fn, okMsg, savedEditor = false) {
+  if (!savedEditor && !confirmLeaveEditor()) return undefined;
   try {
     const r = await fn();
+    if (savedEditor) S.editorBaseline = editorValue();
     toast(typeof okMsg === 'function' ? okMsg(r) : okMsg);
     route();
     return r;
@@ -139,11 +154,25 @@ const S = {
   flagKey: null, flagNew: false,
   segKey: null, segDrafts: [],
   expId: null, expCreate: false,
-  auditLimit: 200,
+  auditLimit: 50,
+  auditQuery: '', auditCursors: [0], auditPage: 0,
   aiAvailable: true,
   booted: false,
   timer: null,
+  editorBaseline: null,
 };
+function editorValue() {
+  const flag = $('#flag-json');
+  if (flag) return JSON.stringify(['flag', flag.value, $('#flag-risk')?.value, $('#flag-base')?.value]);
+  const segment = $('#seg-json');
+  if (segment) return JSON.stringify(['segment', segment.value, $('#seg-risk')?.value]);
+  return null;
+}
+function confirmLeaveEditor() {
+  const value = editorValue();
+  if (value === null || S.editorBaseline === null || value === S.editorBaseline) return true;
+  return confirm(t('confirm.unsaved'));
+}
 const wsPath = () => '/api/v1/admin/workspaces/' + encodeURIComponent(S.ws);
 const scopePath = () => wsPath() + '/environments/' + encodeURIComponent(S.env);
 const can = permission => permission === 'workspace.admin'
@@ -208,7 +237,7 @@ function needScope(m) {
 function promptForm(title, fields, submitLabel, onSubmit) {
   const ov = document.createElement('div');
   ov.className = 'overlay';
-  ov.innerHTML = '<div class="modal"><h3>' + esc(title) + '</h3><div class="modal-body"></div>' +
+  ov.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><h3 id="modal-title">' + esc(title) + '</h3><div class="modal-body"></div>' +
     '<div class="modal-foot"><button class="btn" data-x="cancel">' + esc(t('btn.cancel')) + '</button>' +
     '<button class="btn primary" data-x="ok">' + esc(submitLabel || t('btn.ok')) + '</button></div></div>';
   const body = $('.modal-body', ov);
@@ -233,31 +262,88 @@ function promptForm(title, fields, submitLabel, onSubmit) {
     w.appendChild(inp);
     body.appendChild(w);
   }
+  const previousFocus = document.activeElement;
   document.body.appendChild(ov);
-  const close = () => ov.remove();
+  const close = () => { ov.remove(); previousFocus?.focus?.(); };
+  ov.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape') { ev.preventDefault(); close(); return; }
+    if (ev.key !== 'Tab') return;
+    const focusables = $$('input, select, textarea, button', ov).filter(el => !el.disabled);
+    if (!focusables.length) return;
+    const first = focusables[0], last = focusables[focusables.length - 1];
+    if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+    else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+  });
+  ($('input, select, textarea', ov) || $('[data-x="cancel"]', ov))?.focus?.();
   $('[data-x="cancel"]', ov).onclick = close;
   ov.addEventListener('click', ev => { if (ev.target === ov) close(); });
   $('[data-x="ok"]', ov).onclick = async () => {
+    const ok = $('[data-x="ok"]', ov);
+    ok.disabled = true;
     const vals = {};
     for (const f of fields) vals[f.name] = body.querySelector('[name="' + f.name + '"]').value;
-    try { await onSubmit(vals); close(); } catch (e) { reportError(e); }
+    try { await onSubmit(vals); close(); } catch (e) { reportError(e); ok.disabled = false; }
   };
+}
+
+function actionDialog({ title, summary, preview = '', reasonLabel = '', reasonRequired = true, confirmLabel = '' }) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    const previousFocus = document.activeElement;
+    ov.className = 'overlay';
+    ov.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="action-title" aria-describedby="action-summary">' +
+      '<h3 id="action-title">' + esc(title) + '</h3><p id="action-summary">' + esc(summary) + '</p>' + preview +
+      (reasonLabel ? '<label class="field">' + esc(reasonLabel) + '<textarea id="action-reason" rows="3"' + (reasonRequired ? ' required' : '') + '></textarea></label>' : '') +
+      '<div class="modal-foot"><button class="btn" id="action-cancel" type="button">' + esc(t('btn.cancel')) + '</button>' +
+      '<button class="btn danger" id="action-confirm" type="button">' + esc(confirmLabel || t('btn.ok')) + '</button></div></div>';
+    const finish = value => { ov.remove(); previousFocus?.focus?.(); resolve(value); };
+    $('#action-cancel', ov).onclick = () => finish(null);
+    ov.addEventListener('click', ev => { if (ev.target === ov) finish(null); });
+    ov.addEventListener('keydown', ev => {
+      if (ev.key === 'Escape') { ev.preventDefault(); finish(null); }
+      if (ev.key === 'Tab') {
+        const controls = $$('textarea, button', ov);
+        if (ev.shiftKey && document.activeElement === controls[0]) { ev.preventDefault(); controls.at(-1).focus(); }
+        else if (!ev.shiftKey && document.activeElement === controls.at(-1)) { ev.preventDefault(); controls[0].focus(); }
+      }
+    });
+    $('#action-confirm', ov).onclick = () => {
+      const reason = $('#action-reason', ov)?.value.trim() || '';
+      if (reasonLabel && reasonRequired && !reason) { $('#action-reason', ov).focus(); return; }
+      finish({ reason });
+    };
+    document.body.appendChild(ov);
+    ($('#action-reason', ov) || $('#action-cancel', ov)).focus();
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 const VIEWS = {}; // populated at the bottom of each view section
+let routeEpoch = 0;
 
 async function route() {
+  const epoch = ++routeEpoch;
   if (S.timer) { clearInterval(S.timer); S.timer = null; }
-  $$('#nav button').forEach(b => b.classList.toggle('active', b.dataset.view === S.view));
+  $$('#nav button').forEach(b => {
+    const active = b.dataset.view === S.view;
+    b.classList.toggle('active', active);
+    if (active) b.setAttribute?.('aria-current', 'page'); else b.removeAttribute?.('aria-current');
+  });
   const m = $('#main');
   m.innerHTML = '<p class="muted">' + esc(t('misc.loading')) + '</p>';
+  // Keep async views detached until their data belongs to the current route.
+  // A slower request must never replace a newer editor or its unsaved work.
+  const stage = document.createElement('div');
   try {
-    await VIEWS[S.view](m);
+    await VIEWS[S.view](stage);
+    if (epoch !== routeEpoch) return;
+    m.replaceChildren(stage);
     gateActions(m);
+    S.editorBaseline = editorValue();
   } catch (e) {
+    if (epoch !== routeEpoch) return;
     if (e.status === 401) return; // showAuth already triggered by api()
     m.innerHTML = errBanner(e);
     const rb = $('#btn-reauth2', m);
@@ -270,7 +356,7 @@ async function route() {
 // ---------------------------------------------------------------------------
 function showAuth(msg) {
   $('#auth-url').value = localStorage.getItem('golab_url') || '';
-  $('#auth-token').value = localStorage.getItem('golab_token') || '';
+  $('#auth-token').value = '';
   if (msg !== undefined) $('#auth-error').textContent = msg;
   $('#app').classList.add('hidden');
   $('#auth').classList.remove('hidden');
@@ -280,16 +366,53 @@ async function doConnect() {
   const tok = $('#auth-token').value.trim();
   if (!tok) { $('#auth-error').textContent = t('auth.enterToken'); return; }
   localStorage.setItem('golab_url', $('#auth-url').value.trim());
-  localStorage.setItem('golab_token', tok);
   $('#auth-error').textContent = t('auth.connecting');
   try {
-    const h = await api('/api/v1/health');
-    if (!h || h.status !== 'ok') throw new ApiError(0, 'bad_health', t('err.badHealth', { body: JSON.stringify(h) }));
+    const target = new URL(baseUrl() || location.origin);
+    if (target.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(target.hostname)) {
+      throw new ApiError(0, 'tls_required', t('auth.httpsRequired'));
+    }
+    if (sameOriginConsole()) {
+      const res = await fetch(baseUrl() + '/api/v1/admin/session', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'token=' + encodeURIComponent(tok),
+      });
+      if (!res.ok) {
+        let error = {};
+        try { error = (await res.json()).error || {}; } catch { /* server may return plain text */ }
+        throw new ApiError(res.status, error.code || 'login_failed', error.message || t('auth.rejected401'));
+      }
+      cookieSession = true;
+      memoryToken = '';
+    } else {
+      // Cross-origin API connections use an ephemeral bearer credential.
+      // It is lost when the tab reloads and never enters browser storage.
+      memoryToken = tok;
+      cookieSession = false;
+    }
+    $('#auth-token').value = '';
     $('#auth-error').textContent = '';
     await boot();
   } catch (e) {
-    $('#auth-error').textContent = e.status === 401 ? t('auth.rejected401') : errMsg(e);
+    memoryToken = '';
+    $('#auth-token').value = '';
+    $('#auth-error').textContent = e.code === 'tls_required' ? t('auth.httpsRequired') :
+      e.status === 401 ? t('auth.rejected401') : errMsg(e);
   }
+}
+
+async function signOut() {
+  if (!confirmLeaveEditor()) return;
+  if (cookieSession) {
+    try { await api('/api/v1/admin/session', { method: 'DELETE' }); }
+    catch (e) { if (e.status !== 401) reportError(e); }
+  }
+  cookieSession = false;
+  memoryToken = '';
+  S.booted = false;
+  $('#auth-token').value = '';
+  showAuth('');
 }
 
 async function loadWorkspaces() {
@@ -321,8 +444,7 @@ async function boot() {
   $('#auth').classList.add('hidden');
   $('#app').classList.remove('hidden');
   S.booted = true;
-  const tok = localStorage.getItem('golab_token') || '';
-  $('#conn-info').textContent = (baseUrl() || location.origin) + ' · ' + tok.slice(0, 10) + '…';
+  $('#conn-info').textContent = (baseUrl() || location.origin) + ' · ' + t(cookieSession ? 'auth.session' : 'auth.temporary');
   await route();
   probeAI();
 }
@@ -395,7 +517,7 @@ async function viewFlags(m) {
   const flags = (await api(scopePath() + '/flags')) || [];
   m.innerHTML =
     '<div class="view-head"><h2>' + esc(t('flags.title')) + '</h2><span class="muted">' + esc(t('flags.count', { n: flags.length })) + '</span>' +
-    '<button class="btn primary sm" id="flag-new">' + esc(t('flags.new')) + '</button></div>' +
+    '<input class="list-search" type="search" placeholder="' + esc(t('list.search')) + '" aria-label="' + esc(t('list.search')) + '"><button class="btn primary sm" id="flag-new">' + esc(t('flags.new')) + '</button></div>' +
     '<table class="grid"><thead><tr><th>' + esc(t('th.key')) + '</th><th>' + esc(t('th.type')) + '</th><th>' + esc(t('th.draftState')) + '</th><th>' + esc(t('th.revision')) + '</th><th>' + esc(t('th.updated')) + '</th></tr></thead><tbody>' +
     (flags.map(f => {
       const d = f.draft, c = f.current;
@@ -404,11 +526,12 @@ async function viewFlags(m) {
         ? chip(d.state, DRAFT_CHIP[d.state] || 'gray') + (d.deleted ? ' ' + chip(t('chip.del'), 'red') : '')
         : (c ? chip(t('chip.published'), 'green') : chip(t('chip.none'), 'gray'));
       const upd = (d && d.updatedAt) || (c && c.publishedAt) || null;
-      return '<tr class="clickable" data-flag="' + esc(f.key) + '"><td class="mono">' + esc(f.key) +
+      return '<tr><td class="mono"><button class="row-link" type="button" data-flag="' + esc(f.key) + '">' + esc(f.key) + '</button>' +
         '</td><td>' + esc(type) + '</td><td>' + st + '</td><td>' + esc(f.currentRevision || 0) +
         '</td><td class="nowrap">' + esc(fmtTime(upd)) + '</td></tr>';
     }).join('') || '<tr><td colspan="5" class="muted">' + esc(t('flags.empty')) + '</td></tr>') +
     '</tbody></table>';
+  bindListSearch(m);
   $('#flag-new', m).onclick = () => {
     const key = (prompt(t('prompt.newFlagKey')) || '').trim();
     if (!key) return;
@@ -482,11 +605,11 @@ async function viewFlagDetail(m) {
   $('#flag-json', m).value = JSON.stringify(content, null, 2);
   $('#flag-current', m).textContent = f && f.current ? JSON.stringify(f.current.content, null, 2) : '';
   if (draft && draft.risk) $('#flag-risk', m).value = draft.risk;
-  bindFlagDetail(m, key, kp);
+  bindFlagDetail(m, key, kp, f);
 }
 
-function bindFlagDetail(m, key, kp) {
-  $('#flag-back', m).onclick = () => { S.flagKey = null; S.flagNew = false; route(); };
+function bindFlagDetail(m, key, kp, f) {
+  $('#flag-back', m).onclick = () => { if (!confirmLeaveEditor()) return; S.flagKey = null; S.flagNew = false; route(); };
   // Returns parsed content, or null (with toast) when invalid.
   const readJSON = () => {
     let c;
@@ -511,7 +634,7 @@ function bindFlagDetail(m, key, kp) {
     run(() => api(kp + '/draft', {
       method: 'PUT',
       body: { content, risk: $('#flag-risk', m).value, baseRevision: Number($('#flag-base', m).value || 0) },
-    }), t('toast.draftSaved'));
+    }), t('toast.draftSaved'), true);
   };
   $('#flag-submit', m).onclick = () => {
     const reason = prompt(t('approval.reason'), '');
@@ -526,36 +649,38 @@ function bindFlagDetail(m, key, kp) {
     const note = prompt(t('prompt.rejectReason'), '') || '';
     run(() => api(kp + '/reject', { method: 'POST', body: { note } }), t('toast.draftRejected'));
   };
-  $('#flag-publish', m).onclick = () => {
-    const note = prompt(t('prompt.publishNote'), '') || '';
-    if (!note) { toast(t('toast.reasonRequired'), false); return; }
-    run(() => api(kp + '/publish', { method: 'POST', body: { note } }),
+  $('#flag-publish', m).onclick = async () => {
+    const approval = await actionDialog({ title: t('btn.publish'), summary: t('action.flagSummary', { key }),
+      preview: reviewPreview(f?.preview, 'action-review-preview'), reasonLabel: t('prompt.publishNote'), reasonRequired: false, confirmLabel: t('btn.publish') });
+    if (!approval) return;
+    run(() => api(kp + '/publish', { method: 'POST', body: { note: approval.reason } }),
       r => t('toast.published', { flag: r && r.flagRevision, manifest: r && r.manifestRevision }));
   };
-  $('#flag-delete', m).onclick = () => {
-    if (!confirm(t('confirm.markDeleted', { key }))) return;
+  $('#flag-delete', m).onclick = async () => {
+    const approval = await actionDialog({ title: t('btn.markDeleted'), summary: t('confirm.markDeleted', { key }), confirmLabel: t('btn.markDeleted') });
+    if (!approval) return;
     run(() => api(kp, { method: 'DELETE' }), t('toast.deletionMarked'));
   };
-  $('#flag-emergency-disable', m).onclick = () => {
-    if (!confirm(t('approval.confirmDisable', { key }))) return;
-    const reason = prompt(t('prompt.rollbackReason'), '');
-    if (!reason) { toast(t('toast.reasonRequired'), false); return; }
-    run(() => api(kp + '/emergency-disable', { method: 'POST', body: { reason } }),
+  $('#flag-emergency-disable', m).onclick = async () => {
+    const approval = await actionDialog({ title: t('approval.emergencyDisable'), summary: t('approval.confirmDisable', { key }),
+      preview: reviewPreview(f?.preview, 'action-review-preview'), reasonLabel: t('prompt.rollbackReason'), confirmLabel: t('approval.emergencyDisable') });
+    if (!approval) return;
+    run(() => api(kp + '/emergency-disable', { method: 'POST', body: { reason: approval.reason } }),
       r => t('approval.emergencyDone', { id: r.reviewId }));
   };
-  $('#flag-revs', m).addEventListener('click', ev => {
+  $('#flag-revs', m).addEventListener('click', async ev => {
     const b = ev.target.closest('[data-rb], [data-er]');
     if (!b) return;
     const emergency = b.hasAttribute('data-er');
     const rev = Number(emergency ? b.dataset.er : b.dataset.rb);
-    if (!confirm(t('confirm.rollback', { rev }))) return;
+    const approval = await actionDialog({ title: t('flags.rollbackTo', { n: rev }), summary: t('confirm.rollback', { rev }),
+      reasonLabel: t('prompt.rollbackReason'), confirmLabel: t('flags.rollbackTo', { n: rev }) });
+    if (!approval) return;
     if (!emergency) {
-      requestChange('flag.rollback', key, { revision: rev }).catch(e => reportError(e));
+      requestChange('flag.rollback', key, { revision: rev }, approval.reason).catch(e => reportError(e));
       return;
     }
-    const reason = prompt(t('prompt.rollbackReason'), '');
-    if (!reason) { toast(t('toast.reasonRequired'), false); return; }
-    run(() => api(kp + '/rollback', { method: 'POST', body: { revision: rev, reason, emergency: true } }),
+    run(() => api(kp + '/rollback', { method: 'POST', body: { revision: rev, reason: approval.reason, emergency: true } }),
       r => t('approval.emergencyDone', { id: r.reviewId }));
   });
   $('#gff-run', m).onclick = async () => {
@@ -589,14 +714,15 @@ async function viewSegments(m) {
   if (S.segKey) return viewSegmentDetail(m);
   m.innerHTML =
     '<div class="view-head"><h2>' + esc(t('seg.title')) + '</h2><span class="muted">' + esc(t('seg.count', { n: S.segDrafts.length })) + '</span>' +
-    '<button class="btn primary sm" id="seg-new">' + esc(t('seg.new')) + '</button></div>' +
+    '<input class="list-search" type="search" placeholder="' + esc(t('list.search')) + '" aria-label="' + esc(t('list.search')) + '"><button class="btn primary sm" id="seg-new">' + esc(t('seg.new')) + '</button></div>' +
     '<table class="grid"><thead><tr><th>' + esc(t('th.key')) + '</th><th>' + esc(t('th.state')) + '</th><th>' + esc(t('th.risk')) + '</th><th>' + esc(t('th.updatedBy')) + '</th><th>' + esc(t('th.updated')) + '</th></tr></thead><tbody>' +
     (S.segDrafts.map(d =>
-      '<tr class="clickable" data-seg="' + esc(d.key) + '"><td class="mono">' + esc(d.key) + '</td><td>' +
+      '<tr><td class="mono"><button class="row-link" type="button" data-seg="' + esc(d.key) + '">' + esc(d.key) + '</button></td><td>' +
       chip(d.state, DRAFT_CHIP[d.state] || 'gray') + '</td><td>' + esc(d.risk || '—') + '</td><td>' +
       esc(d.updatedBy || '—') + '</td><td class="nowrap">' + esc(fmtTime(d.updatedAt)) + '</td></tr>').join('') ||
       '<tr><td colspan="5" class="muted">' + esc(t('seg.empty')) + '</td></tr>') +
     '</tbody></table>';
+  bindListSearch(m);
   $('#seg-new', m).onclick = () => {
     const key = (prompt(t('prompt.newSegKey')) || '').trim();
     if (!key) return;
@@ -632,13 +758,16 @@ async function viewSegmentDetail(m) {
     '<button class="btn" id="seg-publish">' + esc(t('btn.publish')) + '</button></div></section>' + reviewPreview(preview);
   $('#seg-json', m).value = JSON.stringify(content, null, 2);
   if (d && d.risk) $('#seg-risk', m).value = d.risk;
-  $('#seg-back', m).onclick = () => { S.segKey = null; route(); };
+  $('#seg-back', m).onclick = () => { if (!confirmLeaveEditor()) return; S.segKey = null; route(); };
   $('#seg-validate', m).onclick = () => {
     const out = $('#seg-valid', m);
     try {
       const c = JSON.parse($('#seg-json', m).value);
-      out.className = (c && c.key === key) ? 'ok-text grow' : 'warn-text grow';
-      out.textContent = (c && c.key === key) ? t('validate.valid') : t('validate.keyShould', { key });
+      const hasRules = c && ((Array.isArray(c.constraints) && c.constraints.length > 0) ||
+        (Array.isArray(c.segments) && c.segments.length > 0));
+      out.className = (c && c.key === key && hasRules) ? 'ok-text grow' : 'warn-text grow';
+      out.textContent = !c || c.key !== key ? t('validate.keyShould', { key }) :
+        !hasRules ? t('validate.segmentNonEmpty') : t('validate.valid');
     } catch (e) { out.className = 'err-text grow'; out.textContent = t('validate.invalidJson', { msg: e.message }); }
   };
   const readJSON = () => {
@@ -646,12 +775,16 @@ async function viewSegmentDetail(m) {
     try { c = JSON.parse($('#seg-json', m).value); }
     catch (e) { toast(t('toast.invalidJson', { msg: e.message }), false); return null; }
     if (!c || c.key !== key) { toast(t('toast.keyMismatch', { key }), false); return null; }
+    if (!((Array.isArray(c.constraints) && c.constraints.length > 0) ||
+      (Array.isArray(c.segments) && c.segments.length > 0))) {
+      toast(t('validate.segmentNonEmpty'), false); return null;
+    }
     return c;
   };
   $('#seg-save', m).onclick = () => {
     const content2 = readJSON();
     if (!content2) return;
-    run(() => api(kp + '/draft', { method: 'PUT', body: { content: content2, risk: $('#seg-risk', m).value } }), t('toast.segSaved'));
+    run(() => api(kp + '/draft', { method: 'PUT', body: { content: content2, risk: $('#seg-risk', m).value } }), t('toast.segSaved'), true);
   };
   $('#seg-submit', m).onclick = () => {
     const reason = prompt(t('approval.reason'), '');
@@ -659,10 +792,11 @@ async function viewSegmentDetail(m) {
     run(() => api(kp + '/submit', { method: 'POST', body: { reason } }), t('toast.segSubmitted'));
   };
   $('#seg-approve', m).onclick = () => run(() => api(kp + '/approve', { method: 'POST', body: {} }), t('toast.segApproved'));
-  $('#seg-publish', m).onclick = () => {
-    const note = prompt(t('prompt.publishNote'), '') || '';
-    if (!note) { toast(t('toast.reasonRequired'), false); return; }
-    run(() => api(kp + '/publish', { method: 'POST', body: { note } }), t('toast.segPublished'));
+  $('#seg-publish', m).onclick = async () => {
+    const approval = await actionDialog({ title: t('btn.publish'), summary: t('action.flagSummary', { key }),
+      preview: reviewPreview(preview, 'action-review-preview'), reasonLabel: t('prompt.publishNote'), reasonRequired: false, confirmLabel: t('btn.publish') });
+    if (!approval) return;
+    run(() => api(kp + '/publish', { method: 'POST', body: { note: approval.reason } }), t('toast.segPublished'));
   };
   return Promise.resolve();
 }
@@ -679,15 +813,16 @@ async function viewExperiments(m) {
   const exps = (await api(scopePath() + '/experiments')) || [];
   m.innerHTML =
     '<div class="view-head"><h2>' + esc(t('exp.title')) + '</h2><span class="muted">' + esc(exps.length) + '</span>' +
-    '<button class="btn primary sm" id="exp-new">' + esc(t('exp.new')) + '</button></div>' +
+    '<input class="list-search" type="search" placeholder="' + esc(t('list.search')) + '" aria-label="' + esc(t('list.search')) + '"><button class="btn primary sm" id="exp-new">' + esc(t('exp.new')) + '</button></div>' +
     '<table class="grid"><thead><tr><th>' + esc(t('th.id')) + '</th><th>' + esc(t('th.flag')) + '</th><th>' + esc(t('th.unit')) + '</th><th>' + esc(t('th.state')) + '</th><th>' + esc(t('th.variants')) + '</th><th>' + esc(t('th.epoch')) + '</th><th>' + esc(t('th.created')) + '</th></tr></thead><tbody>' +
     (exps.map(e =>
-      '<tr class="clickable" data-exp="' + esc(e.id) + '"><td class="mono">' + esc(e.id) + '</td><td class="mono">' +
+      '<tr><td class="mono"><button class="row-link" type="button" data-exp="' + esc(e.id) + '">' + esc(e.id) + '</button></td><td class="mono">' +
       esc(e.flagKey) + '</td><td class="mono">' + esc(e.unit) + '</td><td>' +
       chip(e.state, EXP_CHIP[e.state] || 'gray') + '</td><td>' + esc((e.variants || []).join(', ')) +
       '</td><td>' + esc(e.epoch || 0) + '</td><td class="nowrap">' + esc(fmtTime(e.createdAt)) + '</td></tr>').join('') ||
       '<tr><td colspan="7" class="muted">' + esc(t('exp.empty')) + '</td></tr>') +
     '</tbody></table>';
+  bindListSearch(m);
   $('#exp-new', m).onclick = () => { S.expCreate = true; route(); };
   $('tbody', m).addEventListener('click', ev => {
     const tr = ev.target.closest('[data-exp]');
@@ -1477,14 +1612,14 @@ async function viewTokens(m) {
       $('tbody', m).innerHTML = tokenRows((await api(wsPath() + '/tokens')) || []);
     } catch (e) { reportError(e); }
   };
-  $('table.grid', m).addEventListener('click', ev => {
+  $('table.grid', m).addEventListener('click', async ev => {
     const b = ev.target.closest('[data-rev]');
     if (!b) return;
-    if (!confirm(t('confirm.revokeToken', { name: b.dataset.name }))) return;
-    const reason = (prompt(t('prompt.tokenRevokeReason', { name: b.dataset.name }), '') || '').trim();
-    if (!reason) { toast(t('toast.reasonRequired'), false); return; }
+    const approval = await actionDialog({ title: t('btn.revoke'), summary: t('confirm.revokeToken', { name: b.dataset.name }),
+      reasonLabel: t('prompt.tokenRevokeReason', { name: b.dataset.name }), confirmLabel: t('btn.revoke') });
+    if (!approval) return;
     run(() => api('/api/v1/admin/tokens/' + encodeURIComponent(b.dataset.rev),
-      { method: 'DELETE', body: { reason } }), t('toast.tokenRevoked'));
+      { method: 'DELETE', body: { reason: approval.reason } }), t('toast.tokenRevoked'));
   });
 }
 
@@ -1496,10 +1631,12 @@ async function viewAudit(m) {
   m.innerHTML =
     '<div class="view-head"><h2>' + esc(t('audit.title')) + '</h2>' +
     '<label class="inline">' + esc(t('audit.limit')) + ' <select id="a-limit">' +
-    [50, 200, 500, 1000].map(n => '<option' + (n === S.auditLimit ? ' selected' : '') + '>' + n + '</option>').join('') +
-    '</select></label></div><section class="card"><h3>' + esc(t('approval.inbox')) + '</h3><div id="approval-box"></div></section>' +
+    [25, 50, 100].map(n => '<option' + (n === S.auditLimit ? ' selected' : '') + '>' + n + '</option>').join('') +
+    '</select></label><form id="a-search-form" class="inline-search"><input id="a-search" type="search" maxlength="128" value="' + esc(S.auditQuery) + '" placeholder="' + esc(t('audit.search')) + '" aria-label="' + esc(t('audit.search')) + '"><button class="btn sm" type="submit">' + esc(t('audit.searchButton')) + '</button></form></div><section class="card"><h3>' + esc(t('approval.inbox')) + '</h3><div id="approval-box"></div></section>' +
     '<div id="a-box"><p class="muted">' + esc(t('misc.loading')) + '</p></div>';
+  let loadSeq = 0;
   const load = async () => {
+    const seq = ++loadSeq;
     const approvalData = await api(wsPath() + '/approvals');
     const approvals = Array.isArray(approvalData) ? approvalData : [];
     $('#approval-box', m).innerHTML = '<table class="grid"><thead><tr><th>' + esc(t('th.time')) + '</th><th>' + esc(t('th.action')) + '</th>' +
@@ -1513,25 +1650,37 @@ async function viewAudit(m) {
         (can('flag.approve') && a.state === 'submitted' ? '<button class="btn sm" data-appr="' + esc(a.id) + '">' + esc(t('btn.approve')) + '</button>' : '') +
         (can('flag.publish') && a.state === 'approved' && a.action !== 'breakglass.review' ? '<button class="btn sm primary" data-exec="' + esc(a.id) + '">' + esc(t('approval.execute')) + '</button>' : '') +
         '</td></tr>').join('') || '<tr><td colspan="8" class="muted">' + esc(t('approval.none')) + '</td></tr>') + '</tbody></table>';
-    $('#approval-box', m).onclick = ev => {
+    $('#approval-box', m).onclick = async ev => {
       const btn = ev.target.closest('[data-appr], [data-exec]');
       if (!btn) return;
       const a = approvals.find(x => x.id === (btn.dataset.appr || btn.dataset.exec));
       if (!a) return;
       if (btn.dataset.appr) {
         if (!can('flag.approve')) return;
-        const note = prompt(t('prompt.approvalReason'), '') || '';
-        if (!note.trim()) { toast(t('toast.reasonRequired'), false); return; }
-        if (!confirm(t('approval.confirmReview', { action: a.action, object: a.object }))) return;
+        const approval = await actionDialog({ title: t('btn.approve'), summary: t('approval.confirmReview', { action: a.action, object: a.object }),
+          preview: reviewPreview({ targetEnvironment: a.environmentId, risk: a.risk, baseRevision: a.baseRevision,
+            estimatedAffected: a.impact, rollbackTarget: a.rollbackTarget, guardrails: a.guardrails, proposedHash: a.payloadHash }, 'action-review-preview'),
+          reasonLabel: t('prompt.approvalReason'), confirmLabel: t('btn.approve') });
+        if (!approval) return;
         run(() => api(wsPath() + '/approvals/' + encodeURIComponent(a.id) + '/approve',
-          { method: 'POST', body: { note } }), t('approval.reviewed'));
+          { method: 'POST', body: { note: approval.reason } }), t('approval.reviewed'));
       } else {
         if (!can('flag.publish')) return;
-        if (!confirm(t('approval.confirmExecute', { action: a.action, object: a.object }))) return;
+        const approval = await actionDialog({ title: t('approval.execute'), summary: t('approval.confirmExecute', { action: a.action, object: a.object }),
+          preview: reviewPreview({ targetEnvironment: a.environmentId, risk: a.risk, baseRevision: a.baseRevision,
+            estimatedAffected: a.impact, rollbackTarget: a.rollbackTarget, guardrails: a.guardrails, proposedHash: a.payloadHash }, 'action-review-preview'),
+          confirmLabel: t('approval.execute') });
+        if (!approval) return;
         run(() => executeApproval(a), t('approval.executed'));
       }
     };
-    const rows = (await api(wsPath() + '/audit?limit=' + S.auditLimit)) || [];
+    const cursor = S.auditCursors[S.auditPage] || 0;
+    const params = 'limit=' + (S.auditLimit + 1) + '&q=' + encodeURIComponent(S.auditQuery) +
+      (cursor ? '&before=' + encodeURIComponent(cursor) : '');
+    const page = (await api(wsPath() + '/audit?' + params)) || [];
+    if (seq !== loadSeq) return;
+    const rows = page.slice(0, S.auditLimit);
+    const hasMore = page.length > S.auditLimit;
     $('#a-box', m).innerHTML =
       '<table class="grid"><thead><tr><th>' + esc(t('th.time')) + '</th><th>' + esc(t('th.actor')) + '</th><th>' + esc(t('th.action')) + '</th><th>' + esc(t('th.object')) + '</th><th>' + esc(t('th.env')) + '</th><th>' + esc(t('th.detail')) + '</th></tr></thead><tbody>' +
       (rows.map(a => {
@@ -1541,11 +1690,27 @@ async function viewAudit(m) {
           '</td><td class="mono">' + esc(a.environmentId || '—') + '</td>' +
           '<td class="detail" title="' + esc(detail) + '">' + esc(detail) + '</td></tr>';
       }).join('') || '<tr><td colspan="6" class="muted">' + esc(t('audit.empty')) + '</td></tr>') +
-      '</tbody></table>';
+      '</tbody></table><div class="pager"><button class="btn sm" id="a-prev" type="button"' + (S.auditPage ? '' : ' disabled') + '>' + esc(t('audit.previous')) + '</button><span>' + esc(t('audit.page', { n: S.auditPage + 1 })) + '</span><button class="btn sm" id="a-next" type="button"' + (hasMore ? '' : ' disabled') + '>' + esc(t('audit.next')) + '</button></div>';
+    const prev = $('#a-prev', m), next = $('#a-next', m);
+    if (prev) prev.onclick = () => { if (S.auditPage > 0) { S.auditPage--; load().catch(reportError); } };
+    if (next) next.onclick = () => {
+      if (!hasMore || !rows.length) return;
+      S.auditCursors[S.auditPage + 1] = rows[rows.length - 1].id;
+      S.auditPage++;
+      load().catch(reportError);
+    };
     gateActions(m);
   };
   $('#a-limit', m).onchange = ev => {
     S.auditLimit = Number(ev.target.value);
+    S.auditCursors = [0]; S.auditPage = 0;
+    load().catch(e => { $('#a-box', m).innerHTML = errBanner(e); });
+  };
+  const searchForm = $('#a-search-form', m);
+  if (searchForm) searchForm.onsubmit = ev => {
+    ev.preventDefault();
+    S.auditQuery = $('#a-search', m).value.trim();
+    S.auditCursors = [0]; S.auditPage = 0;
     load().catch(e => { $('#a-box', m).innerHTML = errBanner(e); });
   };
   await load();
@@ -1645,7 +1810,7 @@ async function viewAI(m) {
     if (!body.logicalId || !body.name) { toast(t('toast.aiFieldsRequired'), false); return; }
     run(() => api(aiPath, { method: 'POST', body }), t('toast.resourceRegistered'));
   };
-  $('#ai-res-tbl', m).addEventListener('click', ev => {
+  $('#ai-res-tbl', m).addEventListener('click', async ev => {
     const pin = ev.target.closest('[data-pin]'), rev = ev.target.closest('[data-revoke]');
     if (pin) {
       const [ty, lid] = split(pin.dataset.pin);
@@ -1657,24 +1822,24 @@ async function viewAI(m) {
         });
     } else if (rev) {
       const [ty, lid] = split(rev.dataset.revoke);
-      const reason = prompt(t('prompt.revokeReason', { type: ty, id: lid }), '');
-      if (!reason) { toast(t('toast.reasonRequired'), false); return; }
-      if (!confirm(t('confirm.revokeResource'))) return;
+      const approval = await actionDialog({ title: t('btn.revoke'), summary: t('confirm.revokeResource'),
+        reasonLabel: t('prompt.revokeReason', { type: ty, id: lid }), confirmLabel: t('btn.revoke') });
+      if (!approval) return;
       run(() => api(aiPath + '/' + encodeURIComponent(ty) + '/' + encodeURIComponent(lid) + '/revoke',
-        { method: 'POST', body: { reason } }), t('toast.resourceRevoked'));
+        { method: 'POST', body: { reason: approval.reason } }), t('toast.resourceRevoked'));
     }
   });
   const revTbl = $('#ai-rev-tbl', m);
   if (revTbl) {
-    revTbl.addEventListener('click', ev => {
+    revTbl.addEventListener('click', async ev => {
       const b = ev.target.closest('[data-reinstate]');
       if (!b) return;
       const [ty, lid] = split(b.dataset.reinstate);
-      const reason = (prompt(t('prompt.reinstateReason', { type: ty, id: lid }), '') || '').trim();
-      if (!reason) { toast(t('toast.reasonRequired'), false); return; }
-      if (!confirm(t('confirm.reinstateResource', { type: ty, id: lid }))) return;
+      const approval = await actionDialog({ title: t('btn.reinstate'), summary: t('confirm.reinstateResource', { type: ty, id: lid }),
+        reasonLabel: t('prompt.reinstateReason', { type: ty, id: lid }), confirmLabel: t('btn.reinstate') });
+      if (!approval) return;
       run(() => api(aiPath + '/' + encodeURIComponent(ty) + '/' + encodeURIComponent(lid) + '/reinstate',
-        { method: 'POST', body: { reason } }), t('toast.resourceReinstated'));
+        { method: 'POST', body: { reason: approval.reason } }), t('toast.resourceReinstated'));
     });
   }
   $('#ai-resolve', m).onclick = async () => {
@@ -1753,14 +1918,16 @@ function updateLangActive() {
   const zh = $('#lang-zh'), en = $('#lang-en');
   if (zh) zh.classList.toggle('active', I18N.lang === 'zh');
   if (en) en.classList.toggle('active', I18N.lang === 'en');
+  zh?.setAttribute?.('aria-pressed', String(I18N.lang === 'zh'));
+  en?.setAttribute?.('aria-pressed', String(I18N.lang === 'en'));
 }
 
 // bindLangSwitch wires the top-bar 中/EN toggle: switching persists the
 // choice (setLang → localStorage) and re-renders chrome + current view.
 function bindLangSwitch() {
   const zh = $('#lang-zh'), en = $('#lang-en');
-  if (zh) zh.onclick = () => setLang('zh');
-  if (en) en.onclick = () => setLang('en');
+  if (zh) zh.onclick = () => { if (confirmLeaveEditor()) setLang('zh'); };
+  if (en) en.onclick = () => { if (confirmLeaveEditor()) setLang('en'); };
   updateLangActive();
 }
 
@@ -1780,11 +1947,12 @@ function init() {
   bindLangSwitch();
   $('#btn-connect').onclick = doConnect;
   $('#auth-token').addEventListener('keydown', ev => { if (ev.key === 'Enter') doConnect(); });
-  $('#btn-reauth').onclick = () => showAuth('');
+  $('#btn-reauth').onclick = signOut;
 
   $$('#nav button').forEach(b => {
     b.onclick = () => {
       if (S.view === b.dataset.view) return;
+      if (!confirmLeaveEditor()) return;
       S.view = b.dataset.view;
       S.flagKey = S.segKey = S.expId = null;
       S.flagNew = S.expCreate = false;
@@ -1792,6 +1960,7 @@ function init() {
     };
   });
   $('#sel-ws').onchange = async ev => {
+    if (!confirmLeaveEditor()) { ev.target.value = S.ws; return; }
     S.ws = ev.target.value;
     S.capabilities = null;
     S.globalCapabilities = null;
@@ -1804,6 +1973,7 @@ function init() {
     probeAI();
   };
   $('#sel-env').onchange = ev => {
+    if (!confirmLeaveEditor()) { ev.target.value = S.env; return; }
     S.env = ev.target.value;
     S.flagKey = S.segKey = S.expId = null;
     localStorage.setItem('golab_env', S.env);
@@ -1842,12 +2012,17 @@ function init() {
     });
   };
 
-  if (localStorage.getItem('golab_token')) {
-    $('#auth-error').textContent = '';
-    boot().catch(e => showAuth(e.status === 401 ? '' : errMsg(e)));
-  } else {
-    showAuth('');
-  }
+  localStorage.removeItem('golab_token'); // remove credentials saved by older console versions
+  if (sameOriginConsole()) {
+    cookieSession = true;
+    api('/api/v1/admin/session').then(() => boot()).catch(() => { cookieSession = false; showAuth(''); });
+  } else showAuth('');
+  window.addEventListener('beforeunload', ev => {
+    if (editorValue() !== null && S.editorBaseline !== null && editorValue() !== S.editorBaseline) {
+      ev.preventDefault();
+      ev.returnValue = '';
+    }
+  });
 }
 
 document.addEventListener('DOMContentLoaded', init);

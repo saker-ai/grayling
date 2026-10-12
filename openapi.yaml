@@ -10,7 +10,10 @@ info:
 
     ## 认证与受众（三受众互斥）
 
-    所有端点（除 `GET /api/v1/health`）要求 `Authorization: Bearer <token>`。
+    所有端点（除健康检查与浏览器会话创建）要求管理凭证：
+    `Authorization: Bearer <token>`；同源 Web 控制台也可通过 HttpOnly、
+    SameSite=Strict 的加密会话 Cookie 访问管理端点。浏览器会话创建要求
+    同源 Origin，写请求使用 Cookie 时也要求同源 Origin。
     凭证 secret 前缀标识受众，受众之间互斥——持错误受众的凭证访问端点返回
     `403 wrong_audience`：
 
@@ -129,6 +132,42 @@ paths:
                   lastError: {type: string}
         "503":
           description: PostgreSQL 不可用，无法确认选主状态。
+  "/api/v1/admin/session":
+    post:
+      tags: [workspaces]
+      summary: 同源 Web 控制台登录，设置八小时 HttpOnly 会话 Cookie
+      operationId: createConsoleSession
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: {type: string}
+      responses:
+        "200": {description: 已创建浏览器会话。}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    get:
+      tags: [workspaces]
+      summary: 检查当前浏览器会话
+      operationId: getConsoleSession
+      security: [{cookieSession: []}, {bearerAuth: []}]
+      responses:
+        "200": {description: 当前管理员名称。}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+    delete:
+      tags: [workspaces]
+      summary: 退出浏览器会话并清除 Cookie
+      operationId: deleteConsoleSession
+      security: [{cookieSession: []}]
+      responses:
+        "200": {description: 已清除 Cookie。}
+        "403": {$ref: "#/components/responses/Forbidden"}
   "/api/v1/admin/workspaces":
     post:
       tags: [workspaces]
@@ -400,6 +439,14 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WsPath"
         - $ref: "#/components/parameters/AuditLimitQuery"
+        - in: query
+          name: before
+          schema: {type: integer, format: int64, minimum: 1}
+          description: 排他性审计 ID 游标，读取更早条目。
+        - in: query
+          name: q
+          schema: {type: string, maxLength: 128}
+          description: 搜索操作人、动作、对象、环境和详情。
       responses:
         "200":
           description: 审计条目列表。
@@ -2141,6 +2188,10 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
 components:
   securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: golab_admin_session
     bearerAuth:
       type: http
       scheme: bearer

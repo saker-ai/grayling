@@ -121,7 +121,10 @@ func TestPostgresReportWindowRecomputesAfterReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close(t.Context())
-	if _, err := conn.Exec(t.Context(), `UPDATE unit_aggs SET sum_val=sum_val+1 WHERE experiment_id=$1`, exp.ID); err != nil {
+	if _, err := conn.Exec(t.Context(), `UPDATE database_metrics
+		SET payload=convert_to(jsonb_set(convert_from(payload, 'UTF8')::jsonb,
+		'{count}', '999'::jsonb)::text, 'UTF8')
+		WHERE category='agg' AND key LIKE '%/' || $1 || '/%'`, exp.ID); err != nil {
 		t.Fatal(err)
 	}
 	drift, err := BuildReport(reloaded, exp.ID, clock)

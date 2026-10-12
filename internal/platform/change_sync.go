@@ -72,6 +72,21 @@ type controlChange struct {
 // fetched by primary key from their canonical tables; less frequent collection
 // types use the existing atomic full reload until they gain a dedicated loader.
 func (s *Store) SyncChanges() error {
+	if p, ok := s.persist.(*gormPersistence); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		version, err := p.currentVersion(ctx)
+		if err != nil {
+			return fmt.Errorf("platform: read database version: %w", err)
+		}
+		s.mu.RLock()
+		current := p.version
+		s.mu.RUnlock()
+		if version == current {
+			return nil
+		}
+		return s.ReloadFromBackend()
+	}
 	p, ok := s.persist.(*pgPersistence)
 	if !ok {
 		return s.ReloadFromBackend()
@@ -436,6 +451,26 @@ func (p *pgPersistence) applyControlObject(ctx context.Context, d *Data, c contr
 // RunChangeSync listens for hints and checks the durable sequence on every
 // poll. A broken LISTEN connection is retried; polling continues meanwhile.
 func (s *Store) RunChangeSync(ctx context.Context, interval time.Duration, logf func(string, ...any)) {
+	if p, ok := s.persist.(*gormPersistence); ok {
+		if p.dialect != "postgres" {
+			return
+		}
+		if interval <= 0 {
+			interval = 500 * time.Millisecond
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := s.SyncChanges(); err != nil && logf != nil {
+					logf("control sync: %v", err)
+				}
+			}
+		}
+	}
 	p, ok := s.persist.(*pgPersistence)
 	if !ok {
 		return

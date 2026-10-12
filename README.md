@@ -4,6 +4,8 @@
 
 GoLab 是通用功能灰度与 A/B 实验平台，为传统后端、Web 应用与 AI Agent 提供变体决策、可信实验分析，以及 AI 资源（prompt/模型/skill/AgentSpec）的版本绑定、会话级配置冻结与紧急撤销。
 
+**当前平台存储：** `-sqlite` 使用纯 Go SQLite，`-pg` 使用 GORM PostgreSQL；两者的 schema 与旧 pgx 后端不同。下文较早的分区和压测记录属于旧实现，当前存储结构见 [平台存储](docs/storage.md)。
+
 **状态：首版已实现并可运行。** 单节点闭环（管理 API → gonacos 配置分发 → Go SDK 本地求值 → 事件采集 → 统计报告 → AI 资源灰度）全部落地并有端到端测试；生产化扩展已落地：PostgreSQL 存储后端（真实 PG 测试）、独立 proxy 部署形态（`cmd/golab-proxy`）、OpenFeature Go Provider（`pkg/ofprovider`）、gonacos 依赖固定为确定 commit 伪版本；阶段二已落地：**Python / TypeScript SDK**（远程求值 + 缓存/轮询 + collect 契约上报，集成测试连真实 golab 二进制）、**自动推进发布**（预注册计划步骤/观察窗/决策门驱动的 eligibility 分步放量，幂等、可暂停、人工接管开关）、**P0 收尾**（`openapi.yaml` 与路由表机械化核对、`docs/threat-model.md`、`test/perf` 正式压测——P99/可见延迟/SSE 并发达成 §13 待测目标）。阶段三（P5）高级统计已落地：**ratio（delta-method）/ quantile / CUPED / 序贯（always-valid mSPRT）/ 贝叶斯后验**（`internal/stats`）、**Bandit 流量自适应分配**（Thompson/ε-greedy + SRM/护栏触发冻结探索，`internal/bandit`）、**LLM-as-judge 在线评估管道**（可插拔 provider + 本地 mock + 真实 provider config-only 接入点 + 离线校准 + 作为护栏接入决策门，`internal/judge`）——每种方法含独立数值验证（对照解析解/权威实现/蒙特卡洛）与固定种子模拟验证（I 型错误/覆盖/功效/regret 落预注册区间），新指标类型（ratio/quantile/CUPED-mean）可预注册并接入既有决策门、SRM/护栏阻断对其同样生效，贝叶斯/序贯与频率派结论**分离呈现**（验证数值见 [实施状态](docs/实施状态.md) "P5 统计方法验证证据"节）。阶段四已落地：**Traefik 网关集成**（`internal/gateway` router 配置生成器 file/KV/IngressRoute 三目标+层级校验；golab-proxy forwardAuth 求值端点（fail-open 契约）；`test/gateway` 在**真实官方 Traefik v3.7.13 二进制**上七项断言端到端通过）、**多节点/多副本集群验证**（`test/cluster`：双 golab 副本+双 gonacos 节点（外部真实 Redis）+共享真实 PostgreSQL——发布收敛 439µs、Redis 断连经对账任务 1.7s 收敛、节点重启 590µs 恢复一致、跨副本并发发布串行化）与**发布对账后台任务**（`internal/admin/reconcile.go`，`-reconcile-interval`）。阶段五（收尾）已落地：根目录 **Apache-2.0 LICENSE**、全文档总校与全量终验（见 [实施状态](docs/实施状态.md) "阶段五收尾证据"节）。**仍待验收**：Nacos 原生客户端多租户正式接口（显式鉴权模式已通过官方客户端单节点及双节点直连、跨租户拒绝和撤销用例；L7 代理拓扑未支持，官方 SDK 的竞态限制已记录）；gonacos 已补充 Apache-2.0 LICENSE/NOTICE 并重新固定到带许可证据的版本（见下"许可"节）。逐项完成范围见 [实施状态](docs/实施状态.md)，端点清单见 [API 参考](docs/api.md) 与 [openapi.yaml](openapi.yaml)，设计依据见 [技术方案](docs/技术方案.md)，安全分析见 [威胁模型](docs/threat-model.md)。
 
 ## 快速开始
@@ -13,7 +15,7 @@ GoLab 是通用功能灰度与 A/B 实验平台，为传统后端、Web 应用�
 make run
 ```
 
-`make run` 会构建并启动 GoLab API、内嵌控制台和 gonacos 底座；GoLab 监听 `0.0.0.0:19080`，可通过 `http://<服务器 IP>:19080/` 从外部访问。若 `19080` 已被占用，启动会报错，不会终止占用端口的进程。gonacos 的 HTTP/gRPC 端口仅监听本机，由系统分配空闲端口（启动日志会显示实际端口）。启动日志会打印一次性的 **global owner token**（`glab_admin_...`）。在控制台填入该 token 即可创建工作空间/环境、编辑与发布 flag、注册实验、管理分阶段放量计划（实验详情 rollout 区块：计划预注册/步骤与进度/执行历史/暂停恢复/手动推进/人工接管）、查看报告与审计。
+`make run` 会构建并启动 GoLab API、内嵌控制台和 gonacos 底座；GoLab 监听 `0.0.0.0:19080`，本机可打开 `http://localhost:19080/`。从其他机器访问控制台时，请在入口提供 HTTPS；管理会话登录拒绝非回环地址上的明文 HTTP。若 `19080` 已被占用，启动会报错，不会终止占用端口的进程。gonacos 的 HTTP/gRPC 端口仅监听本机，由系统分配空闲端口（启动日志会显示实际端口）。启动日志会打印一次性的 **global owner token**（`glab_admin_...`）。在控制台填入该 token 即可创建工作空间/环境、编辑与发布 flag、注册实验、管理分阶段放量计划（实验详情 rollout 区块：计划预注册/步骤与进度/执行历史/暂停恢复/手动推进/人工接管）、查看报告与审计。
 
 首次运行 `make run` 会生成固定管理员密码，保存到权限为 `0600` 的 `data/admin-password`；重启后继续使用同一密码，启动日志不会打印密码。可在服务器上显式运行 `make show-admin-password` 查看文件中的密码。在控制台的“管理员密码或令牌”栏输入即可登录。
 
@@ -28,15 +30,29 @@ make run
 
 控制台内置 **i18n（中文/英文双语，零构建步骤）**：词典为内嵌静态文件 `web/i18n.js`（en/zh 两套完整 catalog，`t(key, params)` 支持 `{name}` 参数插值，缺失键回退 en 并 `console.warn` 记录供测试收集）。**默认语言判定**顺序：`localStorage golab_lang` > `navigator.language`（`zh*` → 中文，其余 → 英文）> 英文；顶栏提供 **中/EN 切换**，切换后**不刷新页面**、就地重渲染导航与当前视图，选择**持久化**到 `localStorage`。日期/时长格式跟随语言（zh 用 `zh-CN` 本地化格式）。服务端返回的动态内容（flag key、备注、审计 actor、服务端错误消息本体、状态枚举值）原样展示不翻译，只翻译包裹它们的固定框架文案。双语 DOM 契约测试 `web/i18n_contract.mjs`（Node VM 加载真实 i18n.js+app.js）覆盖：语言判定顺序、全部关键视图 en/zh 双渲染（采样字符串命中对应语言且布局节点 ID 不变）、语言切换点击模拟（持久化+就地重渲染）、词典完整性（渲染全程 t() 缺失键为零、en/zh 键集对齐、静态提取的 t()/data-i18n 键全部在双 catalog 中）与静态扫描（app.js/index.html 中禁止 catalog 之外的 CJK 字面量，注释除外）；`GOWORK=off go test ./web/` 执行。
 
-生产存储使用 PostgreSQL（自动执行 schema 迁移；事件按月分区、保留期按分区删除、HMAC 密钥轮换有迁移路径）：
+控制台同源登录会设置有效期 8 小时的 `HttpOnly`、`SameSite=Strict` 会话 Cookie；退出登录会清除浏览器 Cookie，撤销管理员令牌会立即使会话失效。多副本部署应为所有副本配置相同的 `-auth-secret`，以共享会话签名密钥。跨源 API 连接只在当前页面内存中保留凭据，刷新后须重新登录。旧版控制台保存在 `localStorage` 的管理员凭据会自动清除。开关和分段草稿有未保存修改提示，审计页支持服务端搜索与翻页。
+
+平台存储可使用纯 Go SQLite（单节点）或 PostgreSQL（多副本）；两者通过 GORM 连接，无需 CGO。默认仍使用开发用 JSON 文件。SQLite 示例：
+
+```bash
+./bin/golab -sqlite data/golab.sqlite
+```
+
+PostgreSQL 示例：
 
 ```bash
 ./bin/golab -pg "postgres://golab:secret@127.0.0.1:5432/golab?sslmode=require"
 ```
 
+存储选择、事务语义与新旧 schema 的边界见 [平台存储](docs/storage.md)。
+
+配置和 AI 底座默认使用内置 gonacos；设置 `-nacos-url=https://nacos.example.com` 可改用外部 Nacos 3.x。启动参数、凭证和数据布局见 [外部 Nacos 底座](docs/external-nacos.md)。
+
 > 注意：本仓库处于父级 Go workspace 内，独立构建必须 `GOWORK=off`（Makefile 已内置）。gonacos 底座 HTTP/gRPC 默认仅绑定 loopback，租户流量只应走 GoLab API。
 
 ## SDK 接入（Go）
+
+如需在自己的 Go 服务中启动整个控制面，可 import 根包 `github.com/godeps/golab`，使用 `golab.Start` 和 `App.APIHandler()`；完整示例见[嵌入 GoLab](docs/embedding.md)。
 
 ```go
 client, err := sdk.New(ctx, sdk.Options{
@@ -174,10 +190,11 @@ AI 应用 ──会话冻结──> 授权资源解析(所有权索引+版本 pi
 | `pkg/bucketing` | 分桶规范实现 + 黄金向量 |
 | `pkg/model` | Flag DSL/segment/快照/manifest 类型与校验 |
 | `pkg/evaluation` | 原生求值器（规则/segment/百分比/实验门控/曝光语义） |
+| 根包 `golab` | 可嵌入运行时（启动、HTTP Handler、错误通知与关闭） |
 | `pkg/sdk` | Go SDK（同步/求值/曝光上报） |
 | `sdk/python`、`sdk/typescript` | Python / TypeScript SDK（远程求值+缓存/轮询+collect 契约上报+分桶黄金向量；集成测试连真实二进制） |
 | `pkg/ofprovider` | OpenFeature Go Provider（官方 go-sdk 契约：五类型求值/状态事件/reason 与错误码映射） |
-| `internal/platform` | 控制面存储（工作空间/凭证/草稿/revision/实验+发布计划/事件/审计/AI 索引）；持久化后端：文件 JSON（开发默认）与 **PostgreSQL**（`pgstore.go`：schema 迁移/聚合表/事件分区/密钥轮换迁移） |
+| `internal/platform` | 控制面存储（工作空间/凭证/草稿/revision/实验+发布计划/事件/审计/AI 索引）；持久化后端：文件 JSON（开发默认）、纯 Go SQLite 和 PostgreSQL（`gormstore.go`，GORM 事务、事件账本、密钥轮换与跨副本锁/租约） |
 | `internal/configstore` | gonacos Config 适配（不可变 revision、manifest、读回验证） |
 | `internal/admin` | RBAC + 发布流水线 + 实验生命周期（含 eligibility ramp 幂等应用）+ 发布对账后台任务（`reconcile.go`） |
 | `internal/rollout` | 自动推进发布引擎（计划步骤/观察窗/决策门 → advance/pause/rollback/complete；人工接管开关） |

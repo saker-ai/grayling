@@ -10,7 +10,9 @@ import (
 // BanditEvents returns an event-ledger snapshot for policy replay. PostgreSQL
 // uses the complete raw ledger; a truncated local ledger fails closed.
 func (s *Store) BanditEvents(exp *Experiment, now time.Time) ([]*Event, error) {
-	if pg, ok := s.persist.(*pgPersistence); ok {
+	if pg, ok := s.persist.(interface {
+		analysisEvents(*Experiment, time.Time) ([]*Event, int64, int64, bool, error)
+	}); ok {
 		events, total, durable, mismatch, err := pg.analysisEvents(exp, now.UTC())
 		if err != nil {
 			return nil, err
@@ -92,7 +94,9 @@ func BanditAnalysisView(exp *Experiment, events []*Event, now time.Time) *Store 
 // PinBanditAssignment returns the first assignment for one randomization
 // unit. PostgreSQL's unique key serializes concurrent evaluations on replicas.
 func (s *Store) PinBanditAssignment(exp *Experiment, candidate *Event) (*Event, error) {
-	if pg, ok := s.persist.(*pgPersistence); ok {
+	if pg, ok := s.persist.(interface {
+		pinBanditAssignment(*Experiment, *Event) (*Event, error)
+	}); ok {
 		return pg.pinBanditAssignment(exp, candidate)
 	}
 	s.mu.Lock()

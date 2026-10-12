@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to main content</a>
 
 <div id="auth" class="auth-wrap hidden">
   <div class="auth-card">
@@ -16,7 +17,7 @@
       <input id="auth-url" data-i18n-ph="auth.urlPh" placeholder="blank = same origin (relative paths)" spellcheck="false"></label>
     <label class="field"><span data-i18n="auth.tokenLabel">Admin password or token</span>
       <input id="auth-token" type="password" placeholder="Password or glab_admin_…" autocomplete="off" spellcheck="false"></label>
-    <div id="auth-error" class="err-text"></div>
+    <div id="auth-error" class="err-text" role="alert"></div>
     <button class="btn primary grow" id="btn-connect" data-i18n="auth.connect">Connect</button>
   </div>
 </div>
@@ -34,7 +35,7 @@
       <button data-view="audit" data-i18n="nav.audit">Audit</button>
       <button data-view="ai" id="nav-ai" data-i18n="nav.ai">AI Resources</button>
     </nav>
-    <div class="side-foot"><button class="btn sm grow" id="btn-reauth" data-i18n="nav.reauth">Change connection…</button></div>
+    <div class="side-foot"><button class="btn sm grow" id="btn-reauth" data-i18n="nav.reauth">Sign out</button></div>
   </aside>
   <div class="maincol">
     <header class="topbar">
@@ -52,7 +53,7 @@
   </div>
 </div>
 
-<div id="toasts"></div>
+<div id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
 <script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>

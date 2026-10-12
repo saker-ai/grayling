@@ -1,5 +1,5 @@
 // Package ai brokers all access to AI resources (prompts, skills, agent
-// specs) stored in gonacos (docs/技术方案.md §5.1, §7).
+// specs) stored in embedded gonacos or external Nacos config documents.
 //
 // gonacos AI resources are indexed by GLOBAL IDs without any namespace
 // field, so tenant isolation cannot come from the substrate. GoLab provides
@@ -23,6 +23,7 @@ package ai
 
 import (
 	"crypto/md5"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -30,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/godeps/golab/internal/configstore"
 	"github.com/godeps/golab/internal/platform"
 	gonacosai "github.com/godeps/gonacos/pkg/ai"
 )
@@ -46,8 +48,9 @@ var (
 
 // Service gates all AI resource operations.
 type Service struct {
-	Store   *platform.Store
-	Gonacos *gonacosai.Service
+	Store    *platform.Store
+	Gonacos  *gonacosai.Service
+	External configstore.Store
 
 	mu          sync.RWMutex
 	localRevoke map[string]bool // fast-path cache of live revocations
@@ -57,6 +60,11 @@ type Service struct {
 // server.Services().AI.
 func NewService(store *platform.Store, gonacosAI *gonacosai.Service) *Service {
 	return &Service{Store: store, Gonacos: gonacosAI, localRevoke: map[string]bool{}}
+}
+
+// NewExternalService stores immutable AI versions as Nacos config documents.
+func NewExternalService(store *platform.Store, cfg configstore.Store) *Service {
+	return &Service{Store: store, External: cfg, localRevoke: map[string]bool{}}
 }
 
 // Content is one resolved, digest-verified resource version.
@@ -76,7 +84,7 @@ func (s *Service) RegisterResource(workspaceID, environmentID, typ, logicalID, n
 	switch typ {
 	case platform.AITypePrompt, platform.AITypeSkill, platform.AITypeAgentSpec:
 	case platform.AITypeMCP, platform.AITypePipeline:
-		return nil, fmt.Errorf("%w: %s lacks immutable-version semantics in gonacos; managed hosting is disabled until an adapter provides it (§7)",
+		return nil, fmt.Errorf("%w: %s lacks immutable-version semantics; managed hosting is disabled until an adapter provides it (§7)",
 			ErrTypeUnsupported, typ)
 	default:
 		return nil, fmt.Errorf("%w: unknown type %q", ErrTypeUnsupported, typ)
@@ -84,6 +92,9 @@ func (s *Service) RegisterResource(workspaceID, environmentID, typ, logicalID, n
 	ref, err := s.Store.RegisterAIResource(workspaceID, environmentID, typ, logicalID, actor)
 	if err != nil {
 		return nil, err
+	}
+	if s.External != nil {
+		return ref, nil
 	}
 	// Create the gonacos-side placeholder draft so the physical ID exists.
 	// Content is published through PublishVersion afterwards.
@@ -124,6 +135,9 @@ func (s *Service) PublishVersion(workspaceID, environmentID, typ, logicalID, con
 	}
 	if strings.TrimSpace(content) == "" {
 		return nil, fmt.Errorf("ai: refusing to publish empty content")
+	}
+	if s.External != nil {
+		return s.publishExternal(workspaceID, environmentID, typ, logicalID, content, actor, ref)
 	}
 	var res *gonacosai.Resource
 	switch typ {
@@ -166,7 +180,7 @@ func (s *Service) PublishVersion(workspaceID, environmentID, typ, logicalID, con
 	// Read-back verification before pinning: the version we just published
 	// must download with exactly the digest gonacos reported (§3: 不报告
 	// "已生效"直到读回验证).
-	got, err := s.downloadVersion(typ, ref.PhysicalID, version)
+	got, err := s.downloadVersion(workspaceID, environmentID, typ, ref.PhysicalID, version)
 	if err != nil {
 		return nil, fmt.Errorf("ai: read-back of %s@%s failed: %w", ref.PhysicalID, version, err)
 	}
@@ -178,6 +192,35 @@ func (s *Service) PublishVersion(workspaceID, environmentID, typ, logicalID, con
 		WorkspaceID: workspaceID, EnvironmentID: environmentID,
 		Type: typ, LogicalID: logicalID, PhysicalID: ref.PhysicalID,
 		Version: version, Digest: md5, PinnedBy: actor,
+	}
+	if err := s.Store.PinAIVersion(pin); err != nil {
+		return nil, err
+	}
+	return pin, nil
+}
+
+func externalDataID(typ, physicalID, version string) string {
+	return "golab.ai." + typ + "." + physicalID + "." + version
+}
+
+func (s *Service) publishExternal(workspaceID, environmentID, typ, logicalID, content, actor string, ref *platform.AIResourceRef) (*platform.PinnedVersion, error) {
+	env, err := s.Store.GetEnvironment(workspaceID, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return nil, fmt.Errorf("ai: create version ID: %w", err)
+	}
+	version := hex.EncodeToString(random[:])
+	dataID := externalDataID(typ, ref.PhysicalID, version)
+	if _, err := s.External.PublishDoc(env.NamespaceID, dataID, []byte(content)); err != nil {
+		return nil, fmt.Errorf("ai: publish external version: %w", err)
+	}
+	pin := &platform.PinnedVersion{
+		WorkspaceID: workspaceID, EnvironmentID: environmentID,
+		Type: typ, LogicalID: logicalID, PhysicalID: ref.PhysicalID,
+		Version: version, Digest: md5Hex(content), PinnedBy: actor,
 	}
 	if err := s.Store.PinAIVersion(pin); err != nil {
 		return nil, err
@@ -224,7 +267,15 @@ func versionMD5(res *gonacosai.Resource, version string) string {
 }
 
 // downloadVersion fetches version content through the gonacos API.
-func (s *Service) downloadVersion(typ, physicalID, version string) (string, error) {
+func (s *Service) downloadVersion(workspaceID, environmentID, typ, physicalID, version string) (string, error) {
+	if s.External != nil {
+		env, err := s.Store.GetEnvironment(workspaceID, environmentID)
+		if err != nil {
+			return "", err
+		}
+		content, _, err := s.External.GetDoc(env.NamespaceID, externalDataID(typ, physicalID, version))
+		return string(content), err
+	}
 	switch typ {
 	case platform.AITypePrompt:
 		return s.Gonacos.DownloadPromptVersion(physicalID, version)
@@ -270,7 +321,7 @@ func (s *Service) Resolve(workspaceID, environmentID, typ, logicalID, version st
 	if pin.PhysicalID != ref.PhysicalID {
 		return nil, ErrUnauthorized
 	}
-	content, err := s.downloadVersion(typ, ref.PhysicalID, version)
+	content, err := s.downloadVersion(workspaceID, environmentID, typ, ref.PhysicalID, version)
 	if err != nil {
 		return nil, fmt.Errorf("ai: version %s@%s unreadable: %w", ref.PhysicalID, version, err)
 	}

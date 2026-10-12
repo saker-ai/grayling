@@ -1,0 +1,372 @@
+// Package golab embeds the GoLab control plane in a Go process. The caller
+// owns the HTTP listener and process signals; App owns its storage, Nacos
+// substrate, and background jobs.
+package golab
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/godeps/golab/internal/ai"
+	"github.com/godeps/golab/internal/api"
+	"github.com/godeps/golab/internal/configstore"
+	"github.com/godeps/golab/internal/nacos"
+	"github.com/godeps/golab/internal/nativeauth"
+	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/golab/internal/recovery"
+	"github.com/godeps/golab/web"
+	"github.com/godeps/gonacos/pkg/server"
+)
+
+// Options selects platform storage and the Nacos substrate. Empty DataFile
+// selects an in-memory platform store; empty NacosURL selects embedded gonacos.
+// The zero-value embedded listener addresses use ephemeral loopback ports.
+type Options struct {
+	DataFile                string
+	SQLitePath              string
+	PostgresDSN             string
+	RecoveryPoint           string
+	NacosURL                string
+	NacosUsername           string
+	NacosPassword           string
+	NacosToken              string
+	GonacosAddr             string
+	GonacosGRPCAddr         string
+	GonacosRoot             string
+	GonacosData             string
+	RedisAddr               string
+	NativeConfigAuth        bool
+	AllowNonLoopbackGonacos bool
+	AuthSecret              string
+	AdminPassword           string
+	BootstrapOwnerName      string
+	RolloutInterval         time.Duration
+	RolloutLeaseDuration    time.Duration
+	ReconcileInterval       time.Duration
+	RequestsPerSecond       float64
+	EvaluationSampleRate    float64
+	Logger                  *log.Logger
+}
+
+// App is one running GoLab instance. Close is safe to call more than once.
+type App struct {
+	apiHandler http.Handler
+	handler    http.Handler
+	gonacos    *server.Server
+	ownerToken string
+	cancel     context.CancelFunc
+	errors     chan error
+	done       chan struct{}
+	wg         sync.WaitGroup
+	closeErr   error
+}
+
+// Start constructs the stores and begins background jobs. It does not open
+// an HTTP listener; serve Handler or APIHandler in the caller's server.
+// Canceling ctx also closes the App. An unexpected embedded server failure is
+// sent to Errors and triggers shutdown.
+func Start(ctx context.Context, opts Options) (*App, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateOptions(opts); err != nil {
+		return nil, err
+	}
+	if opts.Logger == nil {
+		opts.Logger = log.New(io.Discard, "", 0)
+	}
+	if opts.GonacosAddr == "" {
+		opts.GonacosAddr = "127.0.0.1:0"
+	}
+	if opts.GonacosGRPCAddr == "" {
+		opts.GonacosGRPCAddr = "127.0.0.1:0"
+	}
+	if opts.BootstrapOwnerName == "" {
+		opts.BootstrapOwnerName = "bootstrap-owner"
+	}
+	if opts.NacosURL == "" && (!loopbackBind(opts.GonacosAddr) || !loopbackBind(opts.GonacosGRPCAddr)) &&
+		(!opts.NativeConfigAuth || !opts.AllowNonLoopbackGonacos) {
+		return nil, fmt.Errorf("golab: non-loopback gonacos requires native config auth and explicit allowance")
+	}
+	if opts.NacosURL == "" && opts.GonacosData == "" && opts.DataFile != "" {
+		opts.GonacosData = filepath.Join(filepath.Dir(opts.DataFile), "gonacos")
+	}
+	var snapshotHash string
+	if opts.RecoveryPoint != "" {
+		var err error
+		if opts.RedisAddr == "" {
+			if opts.GonacosData == "" {
+				return nil, fmt.Errorf("golab: recovery requires a gonacos data directory")
+			}
+			snapshot := filepath.Join(opts.GonacosData, "snapshot.json")
+			for _, path := range []string{snapshot, snapshot + ".hmac"} {
+				if _, err := os.Stat(path); err != nil {
+					return nil, fmt.Errorf("golab: recovery snapshot %s: %w", path, err)
+				}
+			}
+			snapshotHash, err = recovery.DigestFile(snapshot)
+		} else {
+			snapshotHash, err = recovery.DigestRedisSnapshot(ctx, opts.RedisAddr)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("golab: recovery snapshot: %w", err)
+		}
+	}
+
+	store, err := openPlatform(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	cleanupStore := true
+	defer func() {
+		if cleanupStore {
+			_ = store.Close()
+		}
+	}()
+
+	var gsrv *server.Server
+	var cfg configstore.Store
+	var aiService *ai.Service
+	defer func() {
+		if cleanupStore && gsrv != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = gsrv.Shutdown(shutdownCtx)
+		}
+	}()
+	if opts.NacosURL != "" {
+		client, err := nacos.NewClient(nacos.Config{
+			URL: opts.NacosURL, Username: opts.NacosUsername,
+			Password: opts.NacosPassword, Token: opts.NacosToken,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("golab: external Nacos: %w", err)
+		}
+		if err := client.Ping(); err != nil {
+			return nil, fmt.Errorf("golab: external Nacos health check: %w", err)
+		}
+		cfg = configstore.NewNacosStore(client)
+		aiService = ai.NewExternalService(store, configstore.NewNacosAIStore(client))
+	} else {
+		gopts := []server.Option{server.WithAddr(opts.GonacosAddr), server.WithGRPCAddr(opts.GonacosGRPCAddr)}
+		if opts.NativeConfigAuth {
+			gopts = append(gopts, server.WithNativeConfigAuth(func(secret, namespace, group, dataID string) error {
+				return nativeauth.Authorize(store, secret, namespace, group, dataID)
+			}))
+		}
+		if opts.GonacosRoot != "" {
+			gopts = append(gopts, server.WithRoot(opts.GonacosRoot))
+		}
+		if opts.GonacosData != "" {
+			gopts = append(gopts, server.WithDataDir(opts.GonacosData))
+		}
+		if opts.RedisAddr != "" {
+			gopts = append(gopts, server.WithRedisAddr(opts.RedisAddr))
+		}
+		if opts.AuthSecret != "" {
+			gopts = append(gopts, server.WithAuthSecret(opts.AuthSecret))
+		}
+		if opts.RecoveryPoint != "" {
+			gopts = append(gopts, server.WithStrictSnapshot(true))
+		}
+		gsrv, err = server.New(gopts...)
+		if err != nil {
+			return nil, fmt.Errorf("golab: embedded gonacos: %w", err)
+		}
+		bundle := gsrv.Services()
+		if bundle == nil || bundle.Config == nil || bundle.AI == nil {
+			return nil, fmt.Errorf("golab: embedded gonacos services unavailable")
+		}
+		cfg = configstore.NewGonacosStore(bundle.Config)
+		aiService = ai.NewService(store, bundle.AI)
+	}
+	if opts.RecoveryPoint != "" {
+		point, err := recovery.Capture(ctx, opts.PostgresDSN, opts.AuthSecret, store, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("golab: recovery gate: %w", err)
+		}
+		point.GonacosSHA256 = snapshotHash
+		if err := recovery.Verify(opts.RecoveryPoint, point); err != nil {
+			return nil, fmt.Errorf("golab: recovery gate: %w", err)
+		}
+	}
+
+	apiServer := api.NewServer(store, cfg, api.Options{
+		Logger: opts.Logger, AdminPassword: opts.AdminPassword,
+		ConsoleSessionSecret: opts.AuthSecret,
+		RequestsPerSecond:    opts.RequestsPerSecond,
+		EvaluationSampleRate: opts.EvaluationSampleRate,
+	})
+	apiServer.SetAI(aiService)
+	apiServer.Rollout.LeaseDuration = opts.RolloutLeaseDuration
+	ownerToken, err := bootstrapOwner(store, opts.BootstrapOwnerName)
+	if err != nil {
+		return nil, err
+	}
+	apiHandler := apiServer.Handler()
+	runCtx, cancel := context.WithCancel(ctx)
+	app := &App{
+		apiHandler: apiHandler, handler: web.Handler(apiHandler),
+		gonacos: gsrv, ownerToken: ownerToken, cancel: cancel,
+		errors: make(chan error, 1), done: make(chan struct{}),
+	}
+	cleanupStore = false
+	if gsrv != nil {
+		app.wg.Go(func() {
+			if err := gsrv.Start(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+				select {
+				case app.errors <- fmt.Errorf("golab: embedded gonacos stopped: %w", err):
+				default:
+				}
+				cancel()
+			}
+		})
+	}
+	app.wg.Go(func() { apiServer.Rollout.Run(runCtx, opts.RolloutInterval) })
+	app.wg.Go(func() { apiServer.Admin.RunReconciler(runCtx, opts.ReconcileInterval) })
+	app.wg.Go(func() { store.RunChangeSync(runCtx, 500*time.Millisecond, opts.Logger.Printf) })
+	if opts.EvaluationSampleRate > 0 {
+		telemetry := slog.New(slog.NewJSONHandler(opts.Logger.Writer(), nil))
+		app.wg.Go(func() {
+			for {
+				select {
+				case event := <-apiServer.SampledEvents():
+					telemetry.InfoContext(runCtx, event.Name, "decision_id", event.DecisionID, "attributes", event.Attributes)
+				case <-runCtx.Done():
+					return
+				}
+			}
+		})
+	}
+	go func() {
+		<-runCtx.Done()
+		app.wg.Wait()
+		app.closeErr = store.Close()
+		close(app.done)
+		close(app.errors)
+	}()
+	return app, nil
+}
+
+func validateOptions(opts Options) error {
+	if opts.SQLitePath != "" && opts.PostgresDSN != "" {
+		return fmt.Errorf("golab: SQLite and PostgreSQL stores are mutually exclusive")
+	}
+	if opts.NacosURL != "" && (opts.RedisAddr != "" || opts.NativeConfigAuth || opts.GonacosData != "" || opts.GonacosRoot != "") {
+		return fmt.Errorf("golab: external Nacos cannot use embedded gonacos options")
+	}
+	if opts.RecoveryPoint != "" && (opts.PostgresDSN == "" || opts.NacosURL != "" || opts.AuthSecret == "") {
+		return fmt.Errorf("golab: recovery point requires PostgreSQL, embedded gonacos, and auth secret")
+	}
+	if opts.EvaluationSampleRate < 0 || opts.EvaluationSampleRate > 1 {
+		return fmt.Errorf("golab: evaluation sample rate must be within [0,1]")
+	}
+	if opts.RolloutLeaseDuration < 0 || (opts.RolloutLeaseDuration > 0 && opts.RolloutLeaseDuration <= opts.RolloutInterval) {
+		return fmt.Errorf("golab: rollout lease must exceed rollout interval")
+	}
+	if opts.AdminPassword != "" && (len(opts.AdminPassword) < 12 || strings.TrimSpace(opts.AdminPassword) == "") {
+		return fmt.Errorf("golab: admin password must contain at least 12 bytes and non-whitespace characters")
+	}
+	return nil
+}
+
+func openPlatform(ctx context.Context, opts Options) (*platform.Store, error) {
+	if opts.PostgresDSN != "" {
+		store, err := platform.NewPGStore(ctx, opts.PostgresDSN)
+		if err != nil {
+			return nil, fmt.Errorf("golab: PostgreSQL store: %w", err)
+		}
+		return store, nil
+	}
+	if opts.SQLitePath != "" {
+		store, err := platform.NewSQLiteStore(ctx, opts.SQLitePath)
+		if err != nil {
+			return nil, fmt.Errorf("golab: SQLite store: %w", err)
+		}
+		return store, nil
+	}
+	store, err := platform.NewStore(opts.DataFile)
+	if err != nil {
+		return nil, fmt.Errorf("golab: platform store: %w", err)
+	}
+	return store, nil
+}
+
+func bootstrapOwner(store *platform.Store, name string) (string, error) {
+	if len(store.ListTokens("")) > 0 {
+		return "", nil
+	}
+	ct, err := store.CreateToken(platform.TokenAdmin, name, platform.RoleOwner, "", "", "bootstrap")
+	if err != nil {
+		return "", fmt.Errorf("golab: bootstrap owner: %w", err)
+	}
+	_ = store.Audit(name, platform.RoleOwner, "bootstrap.owner", "", "", ct.Token.ID, "initial credential")
+	return ct.Secret, nil
+}
+
+func loopbackBind(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// Handler serves the API and embedded console. Mount APIHandler if the host
+// application wants to serve its own pages at non-API paths.
+func (a *App) Handler() http.Handler { return a.handler }
+
+// APIHandler serves only GoLab API routes.
+func (a *App) APIHandler() http.Handler { return a.apiHandler }
+
+// BootstrapOwnerToken returns the new owner credential once at first start.
+// It is empty when an owner credential already existed.
+func (a *App) BootstrapOwnerToken() string { return a.ownerToken }
+
+// Errors reports unexpected background server failures. The channel closes
+// when the App has finished shutting down.
+func (a *App) Errors() <-chan error { return a.errors }
+
+// Done closes after storage and all background jobs have stopped.
+func (a *App) Done() <-chan struct{} { return a.done }
+
+// GonacosAddrs reports embedded listener addresses, or empty values in
+// external Nacos mode.
+func (a *App) GonacosAddrs() (httpAddr, grpcAddr string) {
+	if a.gonacos == nil {
+		return "", ""
+	}
+	return a.gonacos.HTTPAddr(), a.gonacos.GRPCAddr()
+}
+
+// Close requests shutdown and waits until resources have been released.
+// The caller owns its HTTP server and should shut it down separately.
+func (a *App) Close(ctx context.Context) error {
+	a.cancel()
+	select {
+	case <-a.done:
+		return a.closeErr
+	default:
+	}
+	select {
+	case <-a.done:
+		return a.closeErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}

@@ -637,6 +637,18 @@
       ]
     },
     {
+      "module": "github.com/dustin/go-humanize",
+      "version": "v1.0.1",
+      "runtime": true,
+      "license": "MIT",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "a973b4498c13eb74baa2a8e5c351426a6826f2fcdd909916dbe53ee2e755fd71"
+        }
+      ]
+    },
+    {
       "module": "github.com/envoyproxy/go-control-plane",
       "version": "v0.13.4",
       "runtime": false,
@@ -862,7 +874,7 @@
     },
     {
       "module": "github.com/google/pprof",
-      "version": "v0.0.0-20200708004538-1a94d8640e99",
+      "version": "v0.0.0-20260802141513-ef3492d7dac3",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -877,9 +889,14 @@
     {
       "module": "github.com/google/uuid",
       "version": "v1.6.0",
-      "runtime": false,
-      "license": "NOT_DISTRIBUTED",
-      "evidence": []
+      "runtime": true,
+      "license": "BSD-3-Clause",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "0a8d61ed3cbfd5312326e8126c31ce9c627a283adc99131b56896d29ada04b2d"
+        }
+      ]
     },
     {
       "module": "github.com/googleapis/gax-go/v2",
@@ -912,6 +929,13 @@
     {
       "module": "github.com/hashicorp/golang-lru",
       "version": "v1.0.2",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/hashicorp/golang-lru/v2",
+      "version": "v2.0.7",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -994,6 +1018,30 @@
         {
           "file": "LICENSE",
           "sha256": "2d50e98a4900b4d6457a38d39c1432fdc156fc2f7b365f2e33ec9344acbb0057"
+        }
+      ]
+    },
+    {
+      "module": "github.com/jinzhu/inflection",
+      "version": "v1.0.0",
+      "runtime": true,
+      "license": "MIT",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "a2e27d9b06edb292d37f31504b59a9f56f5211db26e21873fa060b1184801129"
+        }
+      ]
+    },
+    {
+      "module": "github.com/jinzhu/now",
+      "version": "v1.1.5",
+      "runtime": true,
+      "license": "MIT",
+      "evidence": [
+        {
+          "file": "License",
+          "sha256": "59f62caa972078dc1664ce928b5e5d51b78633fc43b78894d2dab83bc504edee"
         }
       ]
     },
@@ -1110,6 +1158,18 @@
       "evidence": []
     },
     {
+      "module": "github.com/libtnb/sqlite",
+      "version": "v1.2.2",
+      "runtime": true,
+      "license": "MIT",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "b6a126b2710e794fb25f0ec72d1812073c3c6752051de3c2221ae2a51f3cee85"
+        }
+      ]
+    },
+    {
       "module": "github.com/mailru/easyjson",
       "version": "v0.9.1",
       "runtime": false,
@@ -1132,7 +1192,14 @@
     },
     {
       "module": "github.com/mattn/go-isatty",
-      "version": "v0.0.20",
+      "version": "v0.0.24",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/mattn/go-sqlite3",
+      "version": "v1.14.22",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -1194,6 +1261,13 @@
     {
       "module": "github.com/nacos-group/nacos-sdk-go/v2",
       "version": "v2.3.5",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/ncruces/go-strftime",
+      "version": "v1.0.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -1305,6 +1379,18 @@
         {
           "file": "LICENSE",
           "sha256": "a3a7dff87da3927db65cb4c87b1cfbc96ca2755704461a485d457be7ae300a86"
+        }
+      ]
+    },
+    {
+      "module": "github.com/remyoudompheng/bigfft",
+      "version": "v0.0.0-20230129092748-24d4a6f8daec",
+      "runtime": true,
+      "license": "BSD-3-Clause",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "dd26a7abddd02e2d0aba97805b31f248ef7835d9e10da289b22e3b8ab78b324d"
         }
       ]
     },
@@ -1729,7 +1815,7 @@
     },
     {
       "module": "golang.org/x/sys",
-      "version": "v0.46.0",
+      "version": "v0.47.0",
       "runtime": true,
       "license": "BSD-3-Clause",
       "evidence": [
@@ -1906,8 +1992,177 @@
       ]
     },
     {
+      "module": "gorm.io/driver/postgres",
+      "version": "v1.6.3",
+      "runtime": true,
+      "license": "MIT",
+      "evidence": [
+        {
+          "file": "License",
+          "sha256": "59f62caa972078dc1664ce928b5e5d51b78633fc43b78894d2dab83bc504edee"
+        }
+      ]
+    },
+    {
+      "module": "gorm.io/driver/sqlite",
+      "version": "v1.6.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "gorm.io/gorm",
+      "version": "v1.31.2",
+      "runtime": true,
+      "license": "MIT",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "a7535fe9fee1f534b47846eee31be7492c73fb766e6f4fe9433a427e16e147c3"
+        }
+      ]
+    },
+    {
       "module": "honnef.co/go/tools",
       "version": "v0.0.1-2020.1.4",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "modernc.org/cc/v4",
+      "version": "v4.29.1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "modernc.org/ccgo/v4",
+      "version": "v4.34.6",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "modernc.org/fileutil",
+      "version": "v1.4.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "modernc.org/gc/v2",
+      "version": "v2.6.5",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "modernc.org/gc/v3",
+      "version": "v3.1.4",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "modernc.org/goabi0",
+      "version": "v0.2.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "modernc.org/libc",
+      "version": "v1.74.4",
+      "runtime": true,
+      "license": "BSD-3-Clause",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "95ff867eb55a56935fa7492406cfa953fb7c13ca73f4c0a86ae05756b4605600"
+        },
+        {
+          "file": "LICENSE-3RD-PARTY.md",
+          "sha256": "f597097efe3d97021f89170746bd3a0fb9a8b6fb26b82043ed68a4e0283bee6c"
+        }
+      ]
+    },
+    {
+      "module": "modernc.org/mathutil",
+      "version": "v1.7.1",
+      "runtime": true,
+      "license": "BSD-3-Clause",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "bfa9bf72a72ca009fd62a8f84fca3dca67e51d93af96352723646599898b6cf5"
+        }
+      ]
+    },
+    {
+      "module": "modernc.org/memory",
+      "version": "v1.11.0",
+      "runtime": true,
+      "license": "BSD-3-Clause",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "59895e669f48f168b6b858358f6005779cdf40a265f7828813061b56af67b496"
+        },
+        {
+          "file": "LICENSE-GO",
+          "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
+        },
+        {
+          "file": "LICENSE-LOGO",
+          "sha256": "5ae5bee3072a841376451b48d8cfcec7188e10543926d5870828d36c8a750dc5"
+        },
+        {
+          "file": "LICENSE-MMAP-GO",
+          "sha256": "c2eba69f20d05414538c3a5df7694dde392e065ff70882e1625e90f5d6659fff"
+        }
+      ]
+    },
+    {
+      "module": "modernc.org/opt",
+      "version": "v0.2.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "modernc.org/sortutil",
+      "version": "v1.2.1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "modernc.org/sqlite",
+      "version": "v1.56.0",
+      "runtime": true,
+      "license": "BSD-3-Clause",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "c6fe05491a60ae13bcd223088d2705e36dede24e5587226231d2459ada5c4822"
+        },
+        {
+          "file": "SQLITE-LICENSE",
+          "sha256": "8438c9c89b849131ead81d5435cb97fcf052df5b0b286dda8a2d4c29e6cb3fd0"
+        }
+      ]
+    },
+    {
+      "module": "modernc.org/strutil",
+      "version": "v1.2.1",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "modernc.org/token",
+      "version": "v1.1.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []

@@ -51,6 +51,8 @@ type pgPersistence struct {
 	lastPrune       time.Time
 }
 
+func (p *pgPersistence) acceptedEventIDs() map[string]bool { return p.lastAcceptedIDs }
+
 // pgCommitTimeout bounds one Store-operation transaction.
 const pgCommitTimeout = 2 * time.Minute
 

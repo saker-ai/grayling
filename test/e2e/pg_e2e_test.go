@@ -44,7 +44,7 @@ func TestE2EPostgresConcurrentCollectCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := platform.NewPGStore(t.Context(), dsn)
+	b, err := platform.NewGORMPostgresStore(t.Context(), dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestE2EPostgresConcurrentCollectCounts(t *testing.T) {
 	if accepted != 1 || duplicates != 1 {
 		t.Fatalf("API counts: accepted=%v duplicates=%v", accepted, duplicates)
 	}
-	if rows := pgtest.Query(t, dsn, `SELECT count(*) FROM events`); rows[0][0] != "1" {
+	if rows := pgtest.Query(t, dsn, `SELECT count(*) FROM database_events`); rows[0][0] != "1" {
 		t.Fatalf("database accepted=%v", rows)
 	}
 }
@@ -110,7 +110,7 @@ func newPGHarness(t *testing.T) (string, *harness) {
 	dsn := pgtest.DSN(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	store, err := platform.NewPGStore(ctx, dsn)
+	store, err := platform.NewGORMPostgresStore(ctx, dsn)
 	if err != nil {
 		t.Fatalf("NewPGStore: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestE2EPostgresExperimentLoop(t *testing.T) {
 	restoredCfg := configstore.NewGonacosStore(restoredConfig)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	reloaded, err := platform.NewPGStore(ctx, targetDSN)
+	reloaded, err := platform.NewGORMPostgresStore(ctx, targetDSN)
 	if err != nil {
 		t.Fatalf("reopen on same database: %v", err)
 	}

@@ -24,7 +24,7 @@ func openPGStore(t *testing.T, dsn string) *Store {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	s, err := NewPGStore(ctx, dsn)
+	s, err := newLegacyPGStore(ctx, dsn)
 	if err != nil {
 		t.Fatalf("NewPGStore: %v", err)
 	}

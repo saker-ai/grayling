@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -65,15 +66,20 @@ type AnalysisWindowStatus struct {
 	Issues       []string  `json:"issues,omitempty"`
 }
 
-// AnalysisStore rebuilds the PostgreSQL analysis population from accepted raw
+// AnalysisStore rebuilds the database analysis population from accepted raw
 // events. The local/file backends retain their incremental view for developer
 // use; they cannot establish a durable, complete raw-event watermark.
 func (s *Store) AnalysisStore(exp *Experiment, now time.Time) (*Store, AnalysisWindowStatus, error) {
 	status := AnalysisWindowStatus{Version: "utc-exposure-v1", Backend: "incremental",
 		Watermark: now.UTC().Add(-maxLateWindow)}
-	pg, postgres := s.persist.(*pgPersistence)
-	if postgres {
+	reader, durable := s.persist.(interface {
+		analysisEvents(*Experiment, time.Time) ([]*Event, int64, int64, bool, error)
+	})
+	if durable {
 		status.Backend = "postgresql-raw"
+		if p, ok := s.persist.(*gormPersistence); ok && p.dialect == "sqlite" {
+			status.Backend = "sqlite-raw"
+		}
 		status.Recomputable = true
 	}
 	if exp.StartedAt == nil || exp.AnalysisWindow <= 0 {
@@ -82,13 +88,13 @@ func (s *Store) AnalysisStore(exp *Experiment, now time.Time) (*Store, AnalysisW
 	}
 	status.Start = exp.StartedAt.UTC()
 	status.End = status.Start.Add(exp.AnalysisWindow)
-	if postgres {
-		events, total, durable, aggregateMismatch, err := pg.analysisEvents(exp, now.UTC())
+	if durable {
+		events, total, durableCount, aggregateMismatch, err := reader.analysisEvents(exp, now.UTC())
 		if err != nil {
 			return nil, status, err
 		}
-		if total != durable {
-			status.Issues = append(status.Issues, fmt.Sprintf("raw events %d differ from incremental count %d (retention or replay mismatch)", total, durable))
+		if total != durableCount {
+			status.Issues = append(status.Issues, fmt.Sprintf("raw events %d differ from incremental count %d (retention or replay mismatch)", total, durableCount))
 		}
 		if aggregateMismatch {
 			status.Issues = append(status.Issues, "raw events differ from incremental unit or exposure aggregates")
@@ -105,11 +111,13 @@ func (s *Store) AnalysisStore(exp *Experiment, now time.Time) (*Store, AnalysisW
 }
 
 // AnalysisEventSnapshot supplies the accepted raw event stream for ordered
-// journey metrics. PostgreSQL reads the durable ledger; local backends are
+// journey metrics. Database backends read the durable ledger; local backends are
 // useful for previews but cannot establish historical completeness.
 func (s *Store) AnalysisEventSnapshot(exp *Experiment, now time.Time) ([]*Event, error) {
-	if pg, ok := s.persist.(*pgPersistence); ok {
-		events, _, _, _, err := pg.analysisEvents(exp, now.UTC())
+	if reader, ok := s.persist.(interface {
+		analysisEvents(*Experiment, time.Time) ([]*Event, int64, int64, bool, error)
+	}); ok {
+		events, _, _, _, err := reader.analysisEvents(exp, now.UTC())
 		return events, err
 	}
 	return s.EventsForExperiment(exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch, ""), nil
@@ -178,6 +186,16 @@ const futureSkew = 5 * time.Minute
 //   - raw events are retained up to MaxRetainedEvents with FIFO eviction;
 //     aggregates are never evicted.
 func (s *Store) IngestEvents(events []*Event) (IngestResult, error) {
+	for attempt := range 3 {
+		result, err := s.ingestEventsOnce(events)
+		if !errors.Is(err, ErrConflict) || attempt == 2 {
+			return result, err
+		}
+	}
+	return IngestResult{}, ErrConflict
+}
+
+func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
 	res := IngestResult{}
 	if len(events) == 0 {
 		return res, nil
@@ -290,12 +308,15 @@ func (s *Store) IngestEvents(events []*Event) (IngestResult, error) {
 		if err := s.commitLocked(); err != nil {
 			return res, err
 		}
-		if pg, ok := s.persist.(*pgPersistence); ok {
+		if pg, ok := s.persist.(interface {
+			acceptedEventIDs() map[string]bool
+			Load() (*Data, error)
+		}); ok {
 			// A second replica may have won the ledger race after our initial
 			// KnownEventIDs read. The committed ledger is authoritative.
 			accepted := 0
 			for _, ev := range candidates {
-				if pg.lastAcceptedIDs[ev.EventID] {
+				if pg.acceptedEventIDs()[ev.EventID] {
 					accepted++
 				}
 			}
@@ -594,9 +615,8 @@ func (s *Store) EventsForExperiment(workspaceID, environmentID, experimentID str
 // 按保留期分区删除). Aggregates are kept — they are the sufficient
 // statistics for in-flight and analyzed experiments.
 //
-// The durable backend prunes its OWN raw-event store (PostgreSQL drops whole
-// time partitions plus a boundary delete, and shrinks the dedup ledger to
-// match), which may remove more rows than the in-memory working set held —
+// The durable backend prunes its own raw-event store and dedup ledger, which
+// may remove more rows than the in-memory working set held —
 // the returned count is what left memory, backend-side totals are logged by
 // the backend itself.
 func (s *Store) PruneEvents(retention time.Duration) int {

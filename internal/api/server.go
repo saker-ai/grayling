@@ -48,6 +48,7 @@ type Server struct {
 	limiter              *rateLimiter
 	adminPasswordHash    [sha256.Size]byte
 	adminPasswordEnabled bool
+	consoleSessionKey    [sha256.Size]byte
 
 	// Rollout is the staged-release auto-advance engine (§5.3 P4). Created
 	// with the server; cmd/golab starts its ticker loop, tests may Tick it
@@ -83,6 +84,9 @@ type Options struct {
 	// AdminPassword permits a configured password on admin endpoints only.
 	// The server retains its digest, not the plaintext value.
 	AdminPassword string
+	// ConsoleSessionSecret is shared by replicas so browser sessions survive
+	// routing between nodes. An empty value creates a per-process key.
+	ConsoleSessionSecret string
 	// RequestsPerSecond bounds per-token request rate on sdk/collect
 	// endpoints (0 = default 200).
 	RequestsPerSecond float64
@@ -108,6 +112,9 @@ func NewServer(store *platform.Store, cfg configstore.Store, opts Options) *Serv
 		sampleRate:    opts.EvaluationSampleRate,
 		sampledEvents: make(chan model.EvaluationEvent, 256),
 	}
+	if err := s.initConsoleSessionKey(opts.ConsoleSessionSecret); err != nil {
+		panic(fmt.Errorf("initialize console session key: %w", err))
+	}
 	if opts.AdminPassword != "" {
 		s.adminPasswordHash = sha256.Sum256([]byte(opts.AdminPassword))
 		s.adminPasswordEnabled = true
@@ -132,6 +139,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
+	mux.HandleFunc("POST /api/v1/admin/session", s.handleConsoleLogin)
+	mux.HandleFunc("GET /api/v1/admin/session", s.adminOnly(s.handleConsoleSession))
+	mux.HandleFunc("DELETE /api/v1/admin/session", s.handleConsoleLogout)
 	mux.HandleFunc("GET /api/v1/admin/rollout/leadership", s.adminOnly(s.handleRolloutLeadership))
 
 	// Admin (admin tokens only).
@@ -237,6 +247,9 @@ func bearerToken(r *http.Request) string {
 
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, kinds ...platform.TokenKind) (*platform.Token, bool) {
 	secret := bearerToken(r)
+	if secret == "" && slices.Contains(kinds, platform.TokenAdmin) {
+		secret = s.consoleSessionToken(r)
+	}
 	if secret == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
 		return nil, false
@@ -268,6 +281,10 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, kinds ...p
 // adminOnly authenticates an admin token and attaches the Actor.
 func (s *Server) adminOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if bearerToken(r) == "" && r.Method != http.MethodGet && r.Method != http.MethodHead && !sameOriginRequest(r) {
+			writeError(w, http.StatusForbidden, "bad_origin", "same-origin request required")
+			return
+		}
 		if !s.limiter.allow(adminLimiterKey(r)) {
 			writeError(w, http.StatusTooManyRequests, "rate_limited", "admin request rate exceeded")
 			return

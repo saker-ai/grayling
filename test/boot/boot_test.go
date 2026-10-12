@@ -308,10 +308,11 @@ func TestBinaryBootsWithPostgres(t *testing.T) {
 	if wsResp.StatusCode != http.StatusCreated {
 		t.Fatalf("create workspace: %d %s", wsResp.StatusCode, wsBody)
 	}
-	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM workspaces WHERE slug = 'pgboot'`); got[0][0] != "1" {
+	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM database_states s,
+		jsonb_each(convert_from(s.payload, 'UTF8')::jsonb->'workspaces') AS ws WHERE ws.value->>'slug' = 'pgboot'`); got[0][0] != "1" {
 		t.Fatalf("workspace not persisted in postgres: %v", got)
 	}
-	if got := pgtest.Query(t, dsn, `SELECT count(*) FROM hmac_keys`); got[0][0] != "1" {
+	if got := pgtest.Query(t, dsn, `SELECT jsonb_array_length(convert_from(payload, 'UTF8')::jsonb->'hmacKeyRing') FROM database_states WHERE id=1`); got[0][0] != "1" {
 		t.Fatalf("hmac ring not bootstrapped in postgres: %v", got)
 	}
 	// No file-store may be created when -pg is active.
@@ -329,6 +330,58 @@ func TestBinaryBootsWithPostgres(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("server did not exit after SIGTERM")
 	}
+}
+
+func TestBinaryBootsWithSQLite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("boot test builds and runs the binary")
+	}
+	root := repoRoot(t)
+	bin := filepath.Join(t.TempDir(), "golab-sqlite")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/golab")
+	build.Dir = root
+	build.Env = append(os.Environ(), "GOWORK=off")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	path := filepath.Join(t.TempDir(), "nested", "platform.sqlite")
+	apiPort := freePort(t)
+	cmd := exec.Command(bin,
+		"-addr", fmt.Sprintf("127.0.0.1:%d", apiPort),
+		"-sqlite", path,
+		"-gonacos-root", resolveGonacosRoot(t, root),
+		"-gonacos-data", filepath.Join(t.TempDir(), "gonacos"),
+		"-gonacos-addr", "127.0.0.1:0",
+		"-gonacos-grpc-addr", "127.0.0.1:0",
+	)
+	if out, err := cmd.StderrPipe(); err == nil {
+		go io.Copy(io.Discard, out)
+	} else {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	base := fmt.Sprintf("http://127.0.0.1:%d/api/v1/health", apiPort)
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(base)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				if _, err := os.Stat(path); err != nil {
+					t.Fatalf("SQLite file missing: %v", err)
+				}
+				return
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatal("SQLite-backed server never became healthy")
 }
 
 func truncate(s string, n int) string {

@@ -10,7 +10,8 @@ const element = () => {
   return { innerHTML: '', textContent: '', value: '', dataset: {},
     classList: { add: c => classes.add(c), remove: c => classes.delete(c),
       contains: c => classes.has(c), toggle: (c, on) => on ? classes.add(c) : classes.delete(c) },
-    addEventListener() {}, appendChild() {}, querySelector() { return element(); }, querySelectorAll() { return []; } };
+    addEventListener() {}, appendChild() {}, replaceChildren(child) { this.innerHTML = child.innerHTML; },
+    querySelector() { return element(); }, querySelectorAll() { return []; } };
 };
 const chrome = new Map();
 const root = { innerHTML: '', nodes: new Map(), querySelector(selector) {

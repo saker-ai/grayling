@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,7 +32,7 @@ type Data struct {
 	SchemaVersion int `json:"schemaVersion"`
 
 	NextCounter int64 `json:"nextCounter"`
-	// ControlVersion is a PostgreSQL compare-and-swap epoch for management writes.
+	// ControlVersion is a database compare-and-swap epoch for management writes.
 	ControlVersion int64 `json:"controlVersion,omitempty"`
 
 	Workspaces   map[string]*Workspace   `json:"workspaces"`   // by ID
@@ -120,10 +121,14 @@ func NewStore(path string) (*Store, error) {
 	return newStore(&filePersistence{path: path})
 }
 
-// NewPGStore opens (or creates) a PostgreSQL-backed store. The DSN is a
-// standard postgres connection string; the schema is migrated automatically
-// and the full state is loaded into memory on open (production path, §10.2).
+// NewPGStore opens the GORM-backed PostgreSQL store.
 func NewPGStore(ctx context.Context, dsn string) (*Store, error) {
+	return NewGORMPostgresStore(ctx, dsn)
+}
+
+// newLegacyPGStore keeps the former pgx storage contract under test while
+// installations move to the GORM schema. It is not used by the server.
+func newLegacyPGStore(ctx context.Context, dsn string) (*Store, error) {
 	p, err := newPGPersistence(ctx, dsn)
 	if err != nil {
 		return nil, err
@@ -160,10 +165,12 @@ func newStore(p Persistence) (*Store, error) {
 	if err := s.normalizeKeyRing(); err != nil {
 		return nil, err
 	}
-	// Reopening an initialized PostgreSQL store is read-only. Bumping its
+	// Reopening an initialized database store is read-only. Bumping its
 	// control version here would make a verified recovery point drift merely
 	// because an operator ran the offline verifier.
-	if _, pg := p.(*pgPersistence); pg && !needsBootstrap {
+	_, pg := p.(*pgPersistence)
+	_, gormDB := p.(*gormPersistence)
+	if (pg || gormDB) && !needsBootstrap {
 		return s, nil
 	}
 	// Persist bootstrap state (counters + key ring) — matches the historical
@@ -533,7 +540,7 @@ func hashSecret(secret string) string {
 // ResolveToken authenticates a presented secret and returns the token
 // metadata. Revoked or unknown tokens yield ErrAccessDenied.
 //
-// PostgreSQL looks up the token in the database on every request so revocation
+// Database backends look up the token on every request so revocation
 // on another replica takes effect immediately. File/memory stores update
 // LastUsedAt in memory with a 60s throttle; that touch rides along with the
 // next mutation that saves.
@@ -621,11 +628,24 @@ func (s *Store) Audit(actor string, role Role, action, workspaceID, environmentI
 
 // AuditList returns the most recent entries first, limited to n (0 = all).
 func (s *Store) AuditList(workspaceID string, n int) []*AuditEntry {
+	return s.AuditPage(workspaceID, 0, n, "")
+}
+
+// AuditPage returns matching records newest first. beforeID is an exclusive
+// cursor; zero begins at the latest record. A zero limit returns all records.
+func (s *Store) AuditPage(workspaceID string, beforeID int64, n int, query string) []*AuditEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*AuditEntry, 0, len(s.data.Audit))
+	out := make([]*AuditEntry, 0, min(len(s.data.Audit), max(n, 0)))
+	query = strings.ToLower(strings.TrimSpace(query))
 	for i := len(s.data.Audit) - 1; i >= 0; i-- {
 		e := s.data.Audit[i]
+		if beforeID > 0 && e.ID >= beforeID {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(e.Actor+" "+e.Action+" "+e.Object+" "+e.EnvironmentID+" "+e.Detail), query) {
+			continue
+		}
 		if workspaceID == "" || e.WorkspaceID == workspaceID {
 			out = append(out, e)
 			if n > 0 && len(out) >= n {

@@ -31,7 +31,7 @@ else
   pg_client pg_restore --exit-on-error --no-owner --no-acl --dbname="$GOLAB_PG_DSN" /backup/postgres.dump
 fi
 want=$(jq -r '.migrations | join(",")' "$work/set/point.json")
-got=$(pg_client psql -At -c "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations" "$GOLAB_PG_DSN")
+got=$(pg_client psql -At -c "SELECT convert_from(payload, 'UTF8')::jsonb->>'schemaVersion' FROM database_states WHERE id=1" "$GOLAB_PG_DSN")
 test "$got" = "$want" || { echo "schema migration mismatch: restored=$got expected=$want; stop and roll back" >&2; exit 1; }
 
 mkdir -m 700 "$GOLAB_RESTORE_DIR"

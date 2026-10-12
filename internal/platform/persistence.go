@@ -113,8 +113,8 @@ type ChangeSet struct {
 
 	// PruneEventsBefore, when non-zero, applies the retention window:
 	// backends delete raw events (and their dedup-ledger rows) with
-	// server_time before it — in PostgreSQL by dropping whole time
-	// partitions (§10.2: 按保留期分区删除).
+	// server_time before it. The GORM backends delete indexed event rows;
+	// the legacy PostgreSQL backend drops whole time partitions.
 	PruneEventsBefore time.Time
 
 	// Rotation signals that the HMAC key ring in data grew: backends with

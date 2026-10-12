@@ -7,10 +7,10 @@
 // persistence.go): every Store method is a single transactional unit of
 // work with explicit keys, no cross-store transactions are assumed (§3:
 // Config 与 PostgreSQL 没有跨库原子事务). Shipped backends: in-memory with
-// optional atomic JSON-file persistence (dev/single-node default) and
-// PostgreSQL (pgstore.go — production path per §3/§10.2: versioned schema
-// migrations, unit-level aggregate tables, monthly-partitioned raw events
-// with partition-drop retention, and an HMAC key-ring rotation migration).
+// optional atomic JSON-file persistence (dev/single-node default), pure-Go
+// SQLite and PostgreSQL (gormstore.go). The database backends persist the
+// event ledger and aggregates separately from control state; see
+// docs/storage.md. The earlier pgx backend remains for legacy tests.
 // gonacos Config remains the distribution substrate in all topologies.
 package platform
 
@@ -56,7 +56,7 @@ type Environment struct {
 	WorkspaceID string    `json:"workspaceId"`
 	Slug        string    `json:"slug"`
 	Name        string    `json:"name"`
-	NamespaceID string    `json:"namespaceId"` // gonacos namespace for this pair
+	NamespaceID string    `json:"namespaceId"` // Nacos namespace for this pair
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
@@ -474,7 +474,7 @@ type PinnedVersion struct {
 	LogicalID     string    `json:"logicalId"`
 	PhysicalID    string    `json:"physicalId"`
 	Version       string    `json:"version"`
-	Digest        string    `json:"digest"` // MD5 hex from gonacos version metadata
+	Digest        string    `json:"digest"` // MD5 hex of the pinned content
 	PinnedAt      time.Time `json:"pinnedAt"`
 	PinnedBy      string    `json:"pinnedBy"`
 }
