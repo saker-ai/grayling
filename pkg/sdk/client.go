@@ -1021,7 +1021,8 @@ send:
 		if errors.As(err, &rejected) {
 			c.opts.Logger.Printf("sdk: collection rejected %d of %d events: %v", rejected.count, len(batch), err)
 			c.droppedExposures.Add(int64(rejected.count))
-			c.markBatchExposure(batch, "rejected_or_partial")
+			c.flushedExposures.Add(int64(len(batch) - rejected.count))
+			c.markCollectOutcomes(batch, rejected.outcomes)
 			return
 		}
 		select {
@@ -1040,7 +1041,8 @@ send:
 			var rejected *collectRejection
 			if errors.As(err, &rejected) {
 				c.droppedExposures.Add(int64(rejected.count))
-				c.markBatchExposure(batch, "rejected_or_partial")
+				c.flushedExposures.Add(int64(len(batch) - rejected.count))
+				c.markCollectOutcomes(batch, rejected.outcomes)
 			} else {
 				c.droppedExposures.Add(int64(len(batch)))
 				c.markBatchExposure(batch, "dropped")
@@ -1053,11 +1055,35 @@ send:
 }
 
 type collectRejection struct {
-	count   int
-	message string
+	count    int
+	message  string
+	outcomes []collectOutcome
 }
 
 func (e *collectRejection) Error() string { return e.message }
+
+type collectOutcome struct {
+	EventID string `json:"eventId"`
+	Status  string `json:"status"`
+	Code    string `json:"code"`
+}
+
+func (c *Client) markCollectOutcomes(batch []*collectEvent, outcomes []collectOutcome) {
+	if len(outcomes) != len(batch) {
+		c.markBatchExposure(batch, "rejected_or_partial")
+		return
+	}
+	for i, event := range batch {
+		if event.Type != "exposure" {
+			continue
+		}
+		if outcomes[i].Status == "accepted" || outcomes[i].Status == "duplicate" {
+			c.setExposureStatus(event.DecisionID, "submitted")
+		} else {
+			c.setExposureStatus(event.DecisionID, "rejected")
+		}
+	}
+}
 
 func (c *Client) markBatchExposure(batch []*collectEvent, status string) {
 	for _, ev := range batch {
@@ -1088,20 +1114,33 @@ func (c *Client) postEvents(ctx context.Context, batch []*collectEvent) error {
 		return fmt.Errorf("collect HTTP %d", resp.StatusCode)
 	}
 	var result struct {
-		Accepted   int      `json:"accepted"`
-		Duplicates int      `json:"duplicates"`
-		Rejected   int      `json:"rejected"`
-		Messages   []string `json:"rejectMessages"`
+		Accepted   int              `json:"accepted"`
+		Duplicates int              `json:"duplicates"`
+		Rejected   int              `json:"rejected"`
+		Messages   []string         `json:"rejectMessages"`
+		Results    []collectOutcome `json:"results"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&result); err != nil {
 		return fmt.Errorf("sdk: decode collect response: %w", err)
 	}
+	if result.Accepted+result.Duplicates+result.Rejected != len(batch) {
+		return fmt.Errorf("sdk: collect acknowledged %d of %d events",
+			result.Accepted+result.Duplicates+result.Rejected, len(batch))
+	}
+	if len(result.Results) > 0 {
+		if len(result.Results) != len(batch) {
+			return fmt.Errorf("sdk: collect returned %d results for %d events", len(result.Results), len(batch))
+		}
+		for i, outcome := range result.Results {
+			if outcome.EventID != batch[i].EventID {
+				return fmt.Errorf("sdk: collect result event ID mismatch at index %d", i)
+			}
+		}
+	}
 	if result.Rejected > 0 {
 		return &collectRejection{count: result.Rejected,
-			message: fmt.Sprintf("collect rejected %d events: %s", result.Rejected, strings.Join(result.Messages, "; "))}
-	}
-	if result.Accepted+result.Duplicates != len(batch) {
-		return fmt.Errorf("sdk: collect acknowledged %d of %d events", result.Accepted+result.Duplicates, len(batch))
+			message:  fmt.Sprintf("collect rejected %d events: %s", result.Rejected, strings.Join(result.Messages, "; ")),
+			outcomes: result.Results}
 	}
 	return nil
 }

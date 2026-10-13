@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -13,6 +15,39 @@ import (
 	"github.com/saker-ai/grayling/pkg/evaluation"
 	"github.com/saker-ai/grayling/pkg/model"
 )
+
+func TestPartialCollectMarksOnlyRejectedExposure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"accepted": 1, "duplicates": 0, "rejected": 1,
+			"results": []map[string]string{
+				{"eventId": "event-1", "status": "accepted"},
+				{"eventId": "event-2", "status": "rejected", "code": "stale_epoch"},
+			},
+		})
+	}))
+	defer server.Close()
+	client := &Client{
+		opts: Options{BaseURL: server.URL, CollectToken: "collect", ExposureBatchSize: 2,
+			Logger: log.New(io.Discard, "", 0)},
+		httpc: server.Client(), exposures: make(chan *collectEvent, 2), closed: make(chan struct{}),
+		decisions: map[string]model.DecisionDiagnostic{
+			"decision-1": {}, "decision-2": {},
+		},
+	}
+	client.exposures <- &collectEvent{EventID: "event-1", DecisionID: "decision-1", Type: "exposure"}
+	client.exposures <- &collectEvent{EventID: "event-2", DecisionID: "decision-2", Type: "exposure"}
+	client.flushExposures(t.Context())
+	if got := client.Status(); got.FlushedExposures != 1 || got.DroppedExposures != 1 {
+		t.Fatalf("partial collect counters: %+v", got)
+	}
+	if got, _ := client.Diagnose("decision-1"); got.ExposureStatus != "submitted" {
+		t.Fatalf("accepted exposure status: %+v", got)
+	}
+	if got, _ := client.Diagnose("decision-2"); got.ExposureStatus != "rejected" {
+		t.Fatalf("rejected exposure status: %+v", got)
+	}
+}
 
 func snapshotJSON(t *testing.T, rev int64, flags map[string]*model.Flag) []byte {
 	t.Helper()
