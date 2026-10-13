@@ -87,8 +87,8 @@ const approvalComparison = sandbox.__renderApprovalComparison({ action: 'flag.ro
   before: { variations: { on: '<script>alert(1)</script>' } },
   after: { variations: { on: false } },
 });
-assert(approvalComparison.includes('Published Flag r2') && approvalComparison.includes('Variations') === false &&
-  approvalComparison.includes('variations') && approvalComparison.includes('&lt;script&gt;') &&
+assert(approvalComparison.includes('Published Flag r2') && approvalComparison.includes('Variations') &&
+  approvalComparison.includes('&lt;script&gt;') &&
   !approvalComparison.includes('<script>'), 'approval comparison must show escaped before and after values');
 assert(sandbox.__renderApprovalComparison({ action: 'flag.rollback' },
   { available: true, stale: true, beforeRevision: 2, afterRevision: 1, before: {}, after: {} })

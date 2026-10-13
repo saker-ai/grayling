@@ -61,18 +61,24 @@ function renderApprovalComparison(approval, comparison) {
       'approval.comparisonUnsupported')) + '</div>';
   const before = comparison.before || {};
   const after = comparison.after || {};
+  const labels = {
+    type: t('flags.diffType'), disable: t('flags.diffDisable'), bucketing: t('flags.diffBucketing'),
+    fields: t('flags.diffFields'), variations: t('flags.diffVariations'),
+    defaultRule: t('flags.diffDefaultRule'), targeting: t('flags.diffTargeting'),
+    experiment: t('flags.diffExperiment'), steps: t('approval.releaseSteps'),
+  };
   const fields = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(field =>
-    JSON.stringify(before[field] ?? null) !== JSON.stringify(after[field] ?? null));
+    flagDiffValue(before[field]) !== flagDiffValue(after[field]));
   return '<section class="approval-comparison"><h4>' + esc(t('approval.comparison')) + '</h4>' +
     (comparison.stale ? '<div class="banner warn" role="alert">' + esc(t('approval.comparisonStale')) + '</div>' : '') +
     '<p class="muted">' + esc(approval.action === 'flag.rollback' ? t('approval.comparisonVersions', {
       a: comparison.beforeRevision, b: comparison.afterRevision }) :
       t('approval.releasePlanBase', { n: comparison.beforeRevision })) + '</p>' +
-    (fields.length ? fields.map(field => '<div class="flag-diff-item"><strong class="mono">' + esc(field) +
+    (fields.length ? fields.map(field => '<div class="flag-diff-item"><strong>' + esc(labels[field] || field) +
       '</strong><div class="flag-diff-values"><div><span>' + esc(t('approval.before')) +
-      '</span><pre class="pre">' + esc(JSON.stringify(before[field] ?? null, null, 2)) +
+      '</span><pre class="pre">' + esc(flagDiffValue(before[field])) +
       '</pre></div><div><span>' + esc(t('approval.after')) + '</span><pre class="pre">' +
-      esc(JSON.stringify(after[field] ?? null, null, 2)) + '</pre></div></div></div>').join('') :
+      esc(flagDiffValue(after[field])) + '</pre></div></div></div>').join('') :
       '<p class="muted">' + esc(t('approval.noFieldChanges')) + '</p>') + '</section>';
 }
 
