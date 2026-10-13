@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/saker-ai/grayling/internal/admin"
@@ -199,6 +200,44 @@ func (s *Server) handleListAIResources(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"resources":   s.Store.ListAIResources(ws.ID, env.ID),
 		"revocations": s.Store.ListAIRevocations(ws.ID, env.ID),
+	})
+}
+
+type aiResourceDetail struct {
+	Resource         *platform.AIResourceRef   `json:"resource"`
+	Pins             []*platform.PinnedVersion `json:"pins"`
+	Revoked          bool                      `json:"revoked"`
+	RevocationReason string                    `json:"revocationReason,omitempty"`
+	SourceMode       string                    `json:"sourceMode"`
+}
+
+// handleGetAIResource returns only metadata. Raw content has a separate grant.
+func (s *Server) handleGetAIResource(w http.ResponseWriter, r *http.Request) {
+	actor := actorFrom(r)
+	ws, env, err := s.resolveScope(actor, r.PathValue("ws"), r.PathValue("env"), admin.PermFlagRead)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	typ, logical := r.PathValue("type"), r.PathValue("logical")
+	ref, err := s.Store.GetAIResource(ws.ID, env.ID, typ, logical)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	pins := s.Store.ListPinnedVersions(ws.ID, env.ID, typ, logical)
+	slices.Reverse(pins)
+	reason, revoked := s.Store.IsAIRevoked(ws.ID, env.ID, typ, logical)
+	mode := "unavailable"
+	if s.ai != nil {
+		if s.ai.External != nil {
+			mode = "external-config"
+		} else if s.ai.Gonacos != nil {
+			mode = "embedded-gonacos"
+		}
+	}
+	writeJSON(w, http.StatusOK, aiResourceDetail{
+		Resource: ref, Pins: pins, Revoked: revoked, RevocationReason: reason, SourceMode: mode,
 	})
 }
 

@@ -38,7 +38,7 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
 
 const structuredFlag = sandbox.__renderFlagStructured({ type: 'bool',
@@ -93,6 +93,14 @@ assert(approvalComparison.includes('Published Flag r2') && approvalComparison.in
 assert(sandbox.__renderApprovalComparison({ action: 'flag.rollback' },
   { available: true, stale: true, beforeRevision: 2, afterRevision: 1, before: {}, after: {} })
   .includes('source changed'), 'stale approval must display its changed baseline');
+const aiDetail = sandbox.__renderAIResourceDetail({ resource: { type: 'prompt', logicalId: '<img src=x>',
+  physicalId: 'physical', owner: 'owner', createdAt: '2026-10-13T10:00:00Z' },
+pins: [{ version: 'v2', digest: '<script>', pinnedBy: 'owner', pinnedAt: '2026-10-13T10:00:00Z' }],
+revoked: true, revocationReason: 'incident', sourceMode: 'external-config' });
+assert(aiDetail.includes('External Nacos config documents') && aiDetail.includes('Pinned version history') &&
+  aiDetail.includes('Resolution is blocked') && aiDetail.includes('&lt;img') &&
+  aiDetail.includes('&lt;script&gt;') && !aiDetail.includes('<img') && !aiDetail.includes('<script>'),
+  'AI detail must show metadata, revocation and source without injecting content');
 
 const flagDiff = sandbox.__renderFlagDiff(
   { revision: 4, content: { type: 'bool', variations: { safe: false, launch: true }, disable: false } },

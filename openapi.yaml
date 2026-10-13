@@ -1804,6 +1804,26 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}":
+    get:
+      tags: [ai]
+      summary: 查询 AI 资源所有权、固定版本、撤销状态和配置来源
+      description: 仅返回元数据，不含原始内容或连接健康状态。
+      operationId: getAIResourceDetail
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/AITypePath"
+        - $ref: "#/components/parameters/AILogicalPath"
+      responses:
+        "200":
+          description: 按固定时间倒序的版本元数据与当前撤销状态。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIResourceDetail"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   "/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}/pin":
     post:
       tags: [ai]
@@ -4913,6 +4933,20 @@ components:
           type: string
         detail:
           type: string
+    AIResourceDetail:
+      type: object
+      required: [resource, pins, revoked, sourceMode]
+      properties:
+        resource: { $ref: "#/components/schemas/AIResourceRef" }
+        pins:
+          type: array
+          items: { $ref: "#/components/schemas/PinnedVersion" }
+        revoked: { type: boolean }
+        revocationReason: { type: string }
+        sourceMode:
+          type: string
+          enum: [embedded-gonacos, external-config, unavailable]
+          description: 配置来源，不代表连接健康状态。
     AIResourceRef:
       type: object
       description: 所有权索引：逻辑名（租户内）→ 服务端生成的全局唯一 physical ID。

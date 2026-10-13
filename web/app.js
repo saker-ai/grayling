@@ -188,7 +188,7 @@ const S = {
   deepLinkRequested: false, deepLinkDenied: false,
   auditLimit: 50,
   auditQuery: '', auditCursors: [0], auditPage: 0,
-  aiAvailable: true,
+  aiAvailable: true, aiRef: null,
   booted: false,
   timer: null,
   pollCleanup: null,
@@ -260,7 +260,7 @@ function gateActions(root) {
     'flag.approve': ['#flag-approve', '#flag-reject', '#seg-approve', '[data-appr]'],
     'flag.publish': ['#flag-publish', '#flag-emergency-disable', '[data-rb]', '[data-er]', '#seg-publish', '#exp-transition', '#ro-create', '#ro-pause', '#ro-resume', '#ro-advance', '#ro-takeover-on', '#ro-takeover-off', '[data-pin]', '[data-exec]', '#metric-publish', '#metric-deprecate'],
     'experiment.write': ['#exp-new', '#x-create', '#exp-review', '#metric-new', '#metric-submit'],
-    'ai.write': ['#ai-reg', '[data-revoke]', '[data-reinstate]'],
+    'ai.write': ['#ai-reg', '[data-pin]', '[data-revoke]', '[data-reinstate]'],
     'ai.content.read': ['#ai-resolve', '#ai-allow-add', '#ai-allow-save'],
   };
   for (const [permission, selectors] of Object.entries(groups)) {
@@ -379,6 +379,7 @@ function consoleHash() {
   if (S.view === 'experiments' && S.expCreate) parts.push('~new');
   if (S.view === 'metrics' && S.metricRef) parts.push(S.metricRef.key, String(S.metricRef.version));
   if (S.view === 'approvals' && S.approvalID) parts.push(S.approvalID);
+  if (S.view === 'ai' && S.aiRef) parts.push(S.aiRef.type, S.aiRef.logicalId);
   return '#/' + parts.map(encodeURIComponent).join('/');
 }
 
@@ -390,10 +391,11 @@ function restoreConsoleHash(hash) {
   if (parts.length < 4 || parts[0] !== 'console' || !Object.hasOwn(VIEWS, parts[3])) return false;
   if (parts[3] === 'experiments' && (parts.length > 6 ||
     (parts[5] && (parts[4] === '~new' || parts[5] !== 'diagnostics')))) return false;
+  if (parts[3] === 'ai' && parts.length !== 4 && parts.length !== 6) return false;
   S.ws = parts[1] === '~' ? '' : parts[1];
   S.env = parts[2] === '~' ? '' : parts[2];
   S.view = parts[3];
-  S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = null;
+  S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;
   S.expCreate = false;
   S.expTab = 'summary';
   if (S.view === 'flags' && parts[4]) S.flagKey = parts[4];
@@ -409,6 +411,7 @@ function restoreConsoleHash(hash) {
     S.metricRef = { key: parts[4], version: Number(parts[5]) };
   }
   if (S.view === 'approvals' && parts[4]) S.approvalID = parts[4];
+  if (S.view === 'ai' && parts[4] && parts[5]) S.aiRef = { type: parts[4], logicalId: parts[5] };
   S.deepLinkRequested = true;
   S.deepLinkDenied = false;
   return true;
@@ -2573,8 +2576,77 @@ async function executeApproval(a) {
 // ---------------------------------------------------------------------------
 // View: AI resources
 // ---------------------------------------------------------------------------
+function renderAIResourceDetail(detail) {
+  const resource = detail.resource;
+  const pins = detail.pins || [];
+  const source = {
+    'embedded-gonacos': t('ai.sourceEmbedded'),
+    'external-config': t('ai.sourceExternal'),
+    unavailable: t('ai.sourceUnavailable'),
+  }[detail.sourceMode] || t('ai.sourceUnavailable');
+  return '<div class="view-head"><button type="button" class="btn sm" id="ai-back">' + esc(t('ai.back')) +
+    '</button><h2 class="wrap-anywhere">' + esc(resource.type) + ' / ' + esc(resource.logicalId) + '</h2>' +
+    chip(detail.revoked ? t('chip.revoked') : t('chip.active'), detail.revoked ? 'red' : 'green') + '</div>' +
+    '<section class="card"><h3>' + esc(t('ai.resourceStatus')) + '</h3><dl class="detail-grid">' +
+    '<dt>' + esc(t('ai.source')) + '</dt><dd>' + esc(source) + '</dd>' +
+    '<dt>' + esc(t('ai.physicalId')) + '</dt><dd class="mono wrap-anywhere">' + esc(resource.physicalId) + '</dd>' +
+    '<dt>' + esc(t('th.owner')) + '</dt><dd>' + esc(resource.owner) + '</dd>' +
+    '<dt>' + esc(t('th.created')) + '</dt><dd>' + esc(fmtTime(resource.createdAt)) + '</dd>' +
+    '<dt>' + esc(t('ai.latestPin')) + '</dt><dd>' + esc(pins[0]?.version || '—') + '</dd></dl>' +
+    (detail.revoked ? '<div class="banner warn">' + esc(t('ai.revocationDetail', {
+      reason: detail.revocationReason || '—' })) + '</div>' : '') +
+    '<p class="muted">' + esc(t('ai.sourceNoHealth')) + '</p>' +
+    '<div class="row actions"><button type="button" class="btn" data-pin="1">' + esc(t('btn.pinVersion')) + '</button>' +
+    (detail.revoked ? '<button type="button" class="btn" data-reinstate="1">' + esc(t('btn.reinstate')) + '</button>' :
+      '<button type="button" class="btn danger" data-revoke="1">' + esc(t('btn.revoke')) + '</button>') +
+    '</div></section><section class="card"><h3>' + esc(t('ai.pinnedHistory')) + '</h3>' +
+    (pins.length ? '<ol class="ai-pin-history">' + pins.map(pin => '<li><strong class="mono">' + esc(pin.version) +
+      '</strong><span>' + esc(fmtTime(pin.pinnedAt)) + ' · ' + esc(pin.pinnedBy) +
+      '</span><span class="mono wrap-anywhere">' + esc(pin.digest) + '</span></li>').join('') + '</ol>' :
+      '<p class="muted">' + esc(t('ai.noPins')) + '</p>') +
+    '<div class="banner info">' + esc(t('ai.dependenciesUnknown')) + '</div></section>';
+}
+
+async function handleAIResourceAction(action, type, logical) {
+  const path = scopePath() + '/ai/resources/' + encodeURIComponent(type) + '/' + encodeURIComponent(logical);
+  if (action === 'pin') {
+    promptForm(t('ai.pinTitle', { type, id: logical }),
+      [{ name: 'content', label: t('ai.content'), type: 'textarea', rows: 10, placeholder: t('ai.contentPh') }],
+      t('btn.pin'), async values => {
+        if (!values.content) throw new ApiError(0, 'validation_failed', t('err.contentRequired'));
+        await requestChange('ai.pin', type + '/' + logical, { content: values.content });
+      });
+    return;
+  }
+  const revoke = action === 'revoke';
+  const approval = await actionDialog({ title: t(revoke ? 'btn.revoke' : 'btn.reinstate'),
+    summary: revoke ? t('confirm.revokeResource') : t('confirm.reinstateResource', { type, id: logical }),
+    reasonLabel: t(revoke ? 'prompt.revokeReason' : 'prompt.reinstateReason', { type, id: logical }),
+    confirmLabel: t(revoke ? 'btn.revoke' : 'btn.reinstate') });
+  if (!approval) return;
+  run(() => api(path + (revoke ? '/revoke' : '/reinstate'),
+    { method: 'POST', body: { reason: approval.reason } }),
+  t(revoke ? 'toast.resourceRevoked' : 'toast.resourceReinstated'));
+}
+
+async function viewAIResourceDetail(m) {
+  const ref = S.aiRef;
+  const path = scopePath() + '/ai/resources/' + encodeURIComponent(ref.type) + '/' + encodeURIComponent(ref.logicalId);
+  const detail = await api(path);
+  m.innerHTML = renderAIResourceDetail(detail);
+  $('#ai-back', m).onclick = () => { S.aiRef = null; route(); };
+  m.addEventListener('click', event => {
+    const action = event.target.closest('[data-pin], [data-revoke], [data-reinstate]');
+    if (!action) return;
+    const kind = action.hasAttribute('data-pin') ? 'pin' :
+      action.hasAttribute('data-revoke') ? 'revoke' : 'reinstate';
+    handleAIResourceAction(kind, ref.type, ref.logicalId).catch(reportError);
+  });
+}
+
 async function viewAI(m) {
   if (!needScope(m)) return;
+  if (S.aiRef) return viewAIResourceDetail(m);
   let data;
   try {
     data = await api(scopePath() + '/ai/resources');
@@ -2607,7 +2679,8 @@ async function viewAI(m) {
     '<section class="card"><h3>' + esc(t('ai.resources', { n: resources.length })) + '</h3>' +
     '<table class="grid" id="ai-res-tbl"><thead><tr><th>' + esc(t('th.type')) + '</th><th>' + esc(t('ai.logicalId')) + '</th><th>' + esc(t('ai.physicalId')) + '</th><th>' + esc(t('th.owner')) + '</th><th>' + esc(t('th.created')) + '</th><th>' + esc(t('th.actions')) + '</th></tr></thead><tbody>' +
     (resources.map(r =>
-      '<tr><td>' + chip(r.type, 'teal') + '</td><td class="mono">' + esc(r.logicalId) + '</td><td class="mono">' +
+      '<tr><td>' + chip(r.type, 'teal') + '</td><td class="mono"><button type="button" class="row-link" data-ai-detail="' +
+      esc(r.type + '|' + r.logicalId) + '">' + esc(r.logicalId) + '</button></td><td class="mono">' +
       esc(r.physicalId || '—') + '</td><td>' + esc(r.owner || '—') + '</td><td class="nowrap">' + esc(fmtTime(r.createdAt)) +
       '</td><td class="nowrap"><button class="btn sm" data-pin="' + esc(r.type + '|' + r.logicalId) + '">' + esc(t('btn.pinVersion')) + '</button> ' +
       '<button class="btn sm danger" data-revoke="' + esc(r.type + '|' + r.logicalId) + '">' + esc(t('btn.revoke')) + '</button></td></tr>').join('') ||
@@ -2642,22 +2715,15 @@ async function viewAI(m) {
     run(() => api(aiPath, { method: 'POST', body }), t('toast.resourceRegistered'));
   };
   $('#ai-res-tbl', m).addEventListener('click', async ev => {
-    const pin = ev.target.closest('[data-pin]'), rev = ev.target.closest('[data-revoke]');
-    if (pin) {
-      const [ty, lid] = split(pin.dataset.pin);
-      promptForm(t('ai.pinTitle', { type: ty, id: lid }),
-        [{ name: 'content', label: t('ai.content'), type: 'textarea', rows: 10, placeholder: t('ai.contentPh') }],
-        t('btn.pin'), async v => {
-          if (!v.content) throw new ApiError(0, 'validation_failed', t('err.contentRequired'));
-          await requestChange('ai.pin', ty + '/' + lid, { content: v.content });
-        });
-    } else if (rev) {
-      const [ty, lid] = split(rev.dataset.revoke);
-      const approval = await actionDialog({ title: t('btn.revoke'), summary: t('confirm.revokeResource'),
-        reasonLabel: t('prompt.revokeReason', { type: ty, id: lid }), confirmLabel: t('btn.revoke') });
-      if (!approval) return;
-      run(() => api(aiPath + '/' + encodeURIComponent(ty) + '/' + encodeURIComponent(lid) + '/revoke',
-        { method: 'POST', body: { reason: approval.reason } }), t('toast.resourceRevoked'));
+    const detail = ev.target.closest('[data-ai-detail]');
+    if (detail) {
+      const [type, logicalId] = split(detail.dataset.aiDetail);
+      S.aiRef = { type, logicalId }; route(); return;
+    }
+    const pin = ev.target.closest('[data-pin]'), revoke = ev.target.closest('[data-revoke]');
+    if (pin || revoke) {
+      const [type, logicalId] = split(pin ? pin.dataset.pin : revoke.dataset.revoke);
+      handleAIResourceAction(pin ? 'pin' : 'revoke', type, logicalId).catch(reportError);
     }
   });
   const revTbl = $('#ai-rev-tbl', m);
@@ -2666,11 +2732,7 @@ async function viewAI(m) {
       const b = ev.target.closest('[data-reinstate]');
       if (!b) return;
       const [ty, lid] = split(b.dataset.reinstate);
-      const approval = await actionDialog({ title: t('btn.reinstate'), summary: t('confirm.reinstateResource', { type: ty, id: lid }),
-        reasonLabel: t('prompt.reinstateReason', { type: ty, id: lid }), confirmLabel: t('btn.reinstate') });
-      if (!approval) return;
-      run(() => api(aiPath + '/' + encodeURIComponent(ty) + '/' + encodeURIComponent(lid) + '/reinstate',
-        { method: 'POST', body: { reason: approval.reason } }), t('toast.resourceReinstated'));
+      handleAIResourceAction('reinstate', ty, lid).catch(reportError);
     });
   }
   $('#ai-resolve', m).onclick = async () => {
@@ -2926,7 +2988,7 @@ function init() {
       if (!confirmLeaveEditor()) return;
       S.view = b.dataset.view;
       S.deepLinkDenied = false;
-      S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = null;
+      S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;
       S.flagNew = S.expCreate = S.wizardDirty = false;
       $('#nav').classList.remove('mobile-open');
       $('#btn-menu').setAttribute('aria-expanded', 'false');
@@ -2942,7 +3004,7 @@ function init() {
     S.globalCapabilities = null;
     updateCapabilities();
     S.env = '';
-    S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = null;
+    S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;
     S.expCreate = S.wizardDirty = false;
     localStorage.setItem('golab_ws', S.ws);
     try { await loadEnvs(); await refreshCapabilities(); } catch (e) { reportError(e); }
@@ -2954,7 +3016,7 @@ function init() {
     S.env = ev.target.value;
     S.deepLinkDenied = false;
     S.deepLinkRequested = false;
-    S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = null;
+    S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;
     S.expCreate = S.wizardDirty = false;
     localStorage.setItem('golab_env', S.env);
     route();

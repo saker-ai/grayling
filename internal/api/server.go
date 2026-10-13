@@ -230,6 +230,7 @@ func (s *Server) Handler() http.Handler {
 	// AI resource governance.
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources", s.adminOnly(s.handleRegisterAIResource))
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources", s.adminOnly(s.handleListAIResources))
+	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}", s.adminOnly(s.handleGetAIResource))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}/pin", s.adminOnly(s.handlePinAIVersion))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}/revoke", s.adminOnly(s.handleRevokeAIResource))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}/reinstate", s.adminOnly(s.handleReinstateAIResource))

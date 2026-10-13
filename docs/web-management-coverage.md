@@ -62,6 +62,7 @@
 | `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/debug/eval` | 已覆盖 | 调试页：无曝光求值 | i18n DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources` | 已覆盖 | AI 资源页：注册、解析、版本、撤销、恢复、模型白名单 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources` | 已覆盖 | AI 资源页：注册、解析、版本、撤销、恢复、模型白名单 | i18n DOM；API 路由契约 |
+| `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}` | 已覆盖 | AI 资源详情：所有权、固定版本历史、撤销状态及配置来源；无原始内容 | 只读/跨空间 API 测试；渲染契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}/pin` | 已覆盖 | AI 资源页：注册、解析、版本、撤销、恢复、模型白名单 | i18n DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}/revoke` | 已覆盖 | AI 资源页：注册、解析、版本、撤销、恢复、模型白名单 | i18n DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/ai/resources/{type}/{logical}/reinstate` | 已覆盖 | AI 资源页：注册、解析、版本、撤销、恢复、模型白名单 | i18n DOM；API 路由契约 |
