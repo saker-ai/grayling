@@ -165,6 +165,15 @@ const report = {
   guardrails: [{ metric: 'latency_p95', detail: 'ok', breached: false }],
   decision: { verdict: 'ship', reasons: ['primary significantly better'], guardrailBreaches: [] },
 };
+const diagnostics = {
+  experimentId: 'exp-1', epoch: 1, exposureMode: 'onRender', generatedAt: TS,
+  window: { version: 'utc-exposure-v1', start: TS, end: TS, watermark: TS,
+    backend: 'sqlite-raw', complete: false, recomputable: true, issues: ['watermark pending'] },
+  perVariant: [{ variant: 'control', assignments: 100, randomizedAssignments: 100,
+    exposures: 90, randomizedExposures: 90, unexposed: 10, conversions: 8, duplicateExposures: 0 }],
+  crossVariantUnits: 0, assignmentMismatch: 0, lastCollectedAt: TS,
+  issues: ['10 assigned units have no recorded exposure'],
+};
 const tokens = [
   { id: 'tk1', name: 'ci-token', kind: 'sdk', role: 'viewer', prefix: 'glab_sdk_ab', environmentId: 'prod', createdAt: TS, revoked: false },
   { id: 'tk2', name: 'old-admin', kind: 'admin', role: 'owner', prefix: 'glab_adm_cd', environmentId: '', createdAt: TS, revoked: true },
@@ -195,6 +204,7 @@ function mockResponse(url) {
   if (url.includes('/metrics?')) return json({ items: [metric] });
   if (url.includes('/audit')) return json(audit);
   if (url.includes('/experiments/exp-1/report')) return json(report);
+  if (url.includes('/experiments/exp-1/diagnostics')) return json(diagnostics);
   if (url.includes('/experiments/exp-1')) return json(expDetail);
   if (url.endsWith('/experiments')) return json([expSummary]);
   if (url.endsWith('/flags/my-flag')) return json(flagDetail);
@@ -228,6 +238,11 @@ assert(themed.x.restoreConsoleHash('#/console/acme/prod/metrics/activation.compl
 assert.strictEqual(themed.x.S.metricRef.key, 'activation.complete');
 assert.strictEqual(themed.x.consoleHash(), '#/console/acme/prod/metrics/activation.complete/1');
 assert(!themed.x.restoreConsoleHash('#/console/acme/prod/unknown'), 'unknown deep link view rejected');
+assert(themed.x.restoreConsoleHash('#/console/acme/prod/experiments/exp-1/diagnostics'));
+assert.strictEqual(themed.x.S.expTab, 'diagnostics');
+assert.strictEqual(themed.x.consoleHash(), '#/console/acme/prod/experiments/exp-1/diagnostics');
+assert(!themed.x.restoreConsoleHash('#/console/acme/prod/experiments/exp-1/unknown'),
+  'unknown experiment tab rejected');
 
 // ===========================================================================
 // 2. Bilingual view sweep — sampled strings hit each language, layout IDs are
@@ -287,13 +302,19 @@ const SWEEPS = [
       '创建实验', '统计与运行时长', '+ 添加护栏', '主指标'],
     ids: ['x-create', 'x-vars', 'x-guards', 'x-mkey'] },
   { name: 'experiments-detail', view: 'experiments',
-    setup: S => { S.expCreate = false; S.expId = 'exp-1'; },
+    setup: S => { S.expCreate = false; S.expId = 'exp-1'; S.expTab = 'summary'; },
     en: ['Pre-registration', 'Lifecycle', 'Load / refresh report', 'Staged rollout',
       'Plan steps', 'Next gate evaluation:', 'Action history'],
     zh: ['预注册', '生命周期', '加载 / 刷新报告', '分阶段放量',
       '计划步骤', '下次决策门评估：', '执行历史'],
     ids: ['exp-report', 'exp-transition', 'rollout-box', 'ro-steps-tbl',
       'ro-history-tbl', 'ro-refresh', 'ro-pause', 'ro-advance'] },
+  { name: 'experiments-diagnostics', view: 'experiments',
+    setup: S => { S.expCreate = false; S.expId = 'exp-1'; S.expTab = 'diagnostics'; },
+    en: ['Experiment diagnostics', 'Data status', 'Blocking issues', 'Assignment to delivery', 'Not exposed'],
+    zh: ['实验诊断', '数据状态', '阻断问题', '分配到实际触达', '未曝光单元'],
+    shared: ['watermark pending'],
+    ids: ['diag-back', 'diag-refresh'] },
   { name: 'tokens', view: 'tokens',
     en: ['<h2>Tokens</h2>', 'Create token', '2 token(s)', 'Revoke', 'Status'],
     zh: ['<h2>令牌</h2>', '创建令牌', '2 个令牌', '撤销', '状态'],

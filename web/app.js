@@ -154,7 +154,7 @@ const S = {
   globalCapabilities: null,
   flagKey: null, flagNew: false,
   segKey: null, segDrafts: [],
-  expId: null, expCreate: false,
+  expId: null, expCreate: false, expTab: 'summary',
   metricRef: null, metricQuery: '', metricStatus: '', metricCursor: '',
   deepLinkRequested: false, deepLinkDenied: false,
   auditLimit: 50,
@@ -331,7 +331,10 @@ function consoleHash() {
   const parts = ['console', S.ws || '~', S.env || '~', S.view];
   if (S.view === 'flags' && S.flagKey) parts.push(S.flagKey);
   if (S.view === 'segments' && S.segKey) parts.push(S.segKey);
-  if (S.view === 'experiments' && S.expId) parts.push(S.expId);
+  if (S.view === 'experiments' && S.expId) {
+    parts.push(S.expId);
+    if (S.expTab === 'diagnostics') parts.push('diagnostics');
+  }
   if (S.view === 'experiments' && S.expCreate) parts.push('~new');
   if (S.view === 'metrics' && S.metricRef) parts.push(S.metricRef.key, String(S.metricRef.version));
   return '#/' + parts.map(encodeURIComponent).join('/');
@@ -343,16 +346,22 @@ function restoreConsoleHash(hash) {
   try { parts = hash.slice(2).split('/').map(decodeURIComponent); }
   catch { return false; }
   if (parts.length < 4 || parts[0] !== 'console' || !Object.hasOwn(VIEWS, parts[3])) return false;
+  if (parts[3] === 'experiments' && (parts.length > 6 ||
+    (parts[5] && (parts[4] === '~new' || parts[5] !== 'diagnostics')))) return false;
   S.ws = parts[1] === '~' ? '' : parts[1];
   S.env = parts[2] === '~' ? '' : parts[2];
   S.view = parts[3];
   S.flagKey = S.segKey = S.expId = S.metricRef = null;
   S.expCreate = false;
+  S.expTab = 'summary';
   if (S.view === 'flags' && parts[4]) S.flagKey = parts[4];
   if (S.view === 'segments' && parts[4]) S.segKey = parts[4];
   if (S.view === 'experiments' && parts[4]) {
     if (parts[4] === '~new') S.expCreate = true;
-    else S.expId = parts[4];
+    else {
+      S.expId = parts[4];
+      if (parts[5] === 'diagnostics') S.expTab = 'diagnostics';
+    }
   }
   if (S.view === 'metrics' && parts[4] && /^[1-9]\d*$/.test(parts[5] || '')) {
     S.metricRef = { key: parts[4], version: Number(parts[5]) };
@@ -573,7 +582,7 @@ async function viewOverview(m) {
     const button = ev.target.closest('[data-overview-kind]');
     if (!button) return;
     if (button.dataset.overviewKind === 'experiment') {
-      S.view = 'experiments'; S.expId = button.dataset.overviewId;
+      S.view = 'experiments'; S.expId = button.dataset.overviewId; S.expTab = 'summary';
     } else S.view = 'audit';
     route();
   });
@@ -936,10 +945,10 @@ async function viewExperiments(m) {
       '<tr><td colspan="7" class="muted">' + esc(t('exp.empty')) + '</td></tr>') +
     '</tbody></table>';
   bindListSearch(m);
-  $('#exp-new', m).onclick = () => { S.expCreate = true; route(); };
+  $('#exp-new', m).onclick = () => { S.expCreate = true; S.expTab = 'summary'; route(); };
   $('tbody', m).addEventListener('click', ev => {
     const tr = ev.target.closest('[data-exp]');
-    if (tr) { S.expId = tr.dataset.exp; route(); }
+    if (tr) { S.expId = tr.dataset.exp; S.expTab = 'summary'; route(); }
   });
 }
 
@@ -1145,10 +1154,12 @@ async function viewExpDetail(m) {
   const id = S.expId;
   const p = '/api/v1/admin/experiments/' + encodeURIComponent(id);
   const e = await api(p);
+  if (S.expTab === 'diagnostics') return viewExpDiagnostics(m, e, p);
   m.innerHTML =
     '<div class="view-head"><button class="btn sm" id="exp-back">' + esc(t('exp.back')) + '</button>' +
     '<h2 class="mono">' + esc(e.id) + '</h2>' + chip(e.state, EXP_CHIP[e.state] || 'gray') +
-    '<span class="muted">' + esc(t('exp.meta', { flag: e.flagKey, rev: e.flagRevision || 0, epoch: e.epoch || 0, by: e.createdBy || '—' })) + '</span></div>' +
+    '<span class="muted">' + esc(t('exp.meta', { flag: e.flagKey, rev: e.flagRevision || 0, epoch: e.epoch || 0, by: e.createdBy || '—' })) + '</span>' +
+    '<button class="btn" id="exp-diagnostics">' + esc(t('exp.openDiagnostics')) + '</button></div>' +
     '<div class="cols"><section class="card"><h3>' + esc(t('exp.prereg')) + '</h3><table class="kv">' +
       '<tr><th>' + esc(t('th.unit')) + '</th><td class="mono">' + esc(e.unit) + '</td></tr>' +
       '<tr><th>' + esc(t('exp.layerShort')) + '</th><td>' + esc(e.layer || '—') + (e.layerSlot ? ' <span class="muted">' + esc(t('exp.slot', { json: JSON.stringify(e.layerSlot) })) + '</span>' : '') + '</td></tr>' +
@@ -1194,7 +1205,8 @@ async function viewExpDetail(m) {
     '</section></div>' +
     '<section class="card"><h3>' + esc(t('ro.title')) + ' <span class="muted">' + esc(t('ro.subtitle')) + '</span></h3>' +
     '<div id="rollout-box">' + renderRollout(e) + '</div></section>';
-  $('#exp-back', m).onclick = () => { S.expId = null; route(); };
+  $('#exp-back', m).onclick = () => { S.expId = null; S.expTab = 'summary'; route(); };
+  $('#exp-diagnostics', m).onclick = () => { S.expTab = 'diagnostics'; route(); };
   const act = (path, body, msg) => run(() => api(p + path, { method: 'POST', body }), msg);
   $('#exp-review', m).onclick = () => {
     const note = prompt(t('prompt.reviewNote'), '') || '';
@@ -1263,6 +1275,35 @@ function metricReferenceSummary(r) {
       esc(t('report.legacyInline'))) + '</div>';
 }
 
+async function viewExpDiagnostics(m, experiment, path) {
+  const d = await api(path + '/diagnostics');
+  const window = d.window || {};
+  const blockers = [...new Set([...(window.issues || []), ...(d.issues || [])])];
+  const totalAssignments = (d.perVariant || []).reduce((sum, v) => sum + (v.assignments || 0), 0);
+  const totalExposures = (d.perVariant || []).reduce((sum, v) => sum + (v.exposures || 0), 0);
+  m.innerHTML = '<div class="view-head"><button class="btn sm" id="diag-back">' + esc(t('exp.back')) + '</button>' +
+    '<h2>' + esc(t('exp.diagnosticsTitle')) + '</h2>' +
+    '<span class="mono">' + esc(experiment.id) + '</span>' + chip(experiment.state, EXP_CHIP[experiment.state] || 'gray') +
+    '<button class="btn" id="diag-refresh">' + esc(t('btn.refresh')) + '</button></div>' +
+    '<section class="card"><h3>' + esc(t('exp.diagnosticsStatus')) + '</h3>' +
+      '<p>' + esc(t('exp.exposureMode')) + ': ' + esc(t(d.exposureMode === 'onRender' ? 'exp.onRender' : 'exp.onDecision')) +
+      ' · epoch ' + esc(d.epoch) + ' · ' + esc(t('report.windowVersion')) + ': <span class="mono">' + esc(window.version || '—') + '</span></p>' +
+      '<p>' + esc(t('report.watermark')) + ': ' + esc(fmtTime(window.watermark)) +
+      ' · ' + esc(t('report.backend')) + ': ' + esc(window.backend || '—') +
+      ' · ' + esc(t('exp.lastCollected')) + ': ' + esc(fmtTime(d.lastCollectedAt)) + '</p>' +
+      '<p>' + chip(window.complete ? t('report.complete') : t('report.incomplete'), window.complete ? 'green' : 'amber') +
+      (window.recomputable ? '' : ' ' + chip(t('report.notRecomputable'), 'amber')) + '</p>' +
+      (totalAssignments + totalExposures === 0 ? '<p class="muted">' + esc(t('exp.noDiagnosticEvents')) + '</p>' : '') +
+    '</section>' +
+    '<section class="card"><h3>' + esc(t('exp.diagnosticIssues')) + '</h3>' +
+      (blockers.length ? '<ul>' + blockers.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>' :
+        '<p class="muted">' + esc(t('exp.noDiagnosticIssues')) + '</p>') +
+    '</section>' +
+    '<section class="card">' + renderDiagnostics(d) + '</section>';
+  $('#diag-back', m).onclick = () => { S.expTab = 'summary'; route(); };
+  $('#diag-refresh', m).onclick = () => route();
+}
+
 function renderDiagnostics(d) {
   if (!d) return '';
   const srm = (label, value) => '<div>' + esc(label) + ': ' +
@@ -1277,7 +1318,7 @@ function renderDiagnostics(d) {
     '<h4>' + esc(t('report.deliveryDiagnostics')) + '</h4>' +
     '<p class="muted">' + esc(t('report.deliveryExplanation')) + '</p>' +
     srmSummary +
-    '<table class="grid"><thead><tr><th>' + esc(t('th.variant')) + '</th><th>' +
+    '<table class="grid diagnostic-table"><thead><tr><th>' + esc(t('th.variant')) + '</th><th>' +
       esc(t('report.assignments')) + '</th><th>' + esc(t('report.exposures')) +
       '</th><th>' + esc(t('report.unexposed')) + '</th><th>' +
       esc(t('th.converted')) + '</th></tr></thead><tbody>' +
@@ -1285,6 +1326,12 @@ function renderDiagnostics(d) {
         '</td><td>' + esc(v.assignments) + '</td><td>' + esc(v.exposures) +
         '</td><td>' + esc(v.unexposed) + '</td><td>' + esc(v.conversions) + '</td></tr>').join('') +
       '</tbody></table>' +
+    '<div class="diagnostic-cards">' + (d.perVariant || []).map(v =>
+      '<dl class="diagnostic-card"><dt class="mono">' + esc(v.variant) + '</dt><dd>' +
+      '<span>' + esc(t('report.assignments')) + '</span><strong>' + esc(v.assignments) + '</strong></dd><dd>' +
+      '<span>' + esc(t('report.exposures')) + '</span><strong>' + esc(v.exposures) + '</strong></dd><dd>' +
+      '<span>' + esc(t('report.unexposed')) + '</span><strong>' + esc(v.unexposed) + '</strong></dd><dd>' +
+      '<span>' + esc(t('th.converted')) + '</span><strong>' + esc(v.conversions) + '</strong></dd></dl>').join('') + '</div>' +
     '<div>' + esc(t('report.crossVariantUnits')) + ': ' + esc(d.crossVariantUnits) +
       ' · ' + esc(t('report.assignmentMismatch')) + ': ' + esc(d.assignmentMismatch) + '</div>' +
     '</section>';
