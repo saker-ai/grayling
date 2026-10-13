@@ -59,6 +59,7 @@ async function requestChange(action, object, payload, reasonOverride = '') {
 const DRAFT_CHIP = { editing: 'blue', submitted: 'amber', approved: 'green' };
 const EXP_CHIP = { draft: 'gray', reviewed: 'blue', bound: 'teal', running: 'green', paused: 'amber', stopped: 'red', analyzed: 'blue', archived: 'gray' };
 const VERDICT_CHIP = { ship: 'green', rollback: 'red', continue: 'blue', hold: 'amber' };
+const METRIC_CHIP = { draft: 'blue', published: 'green', deprecated: 'gray' };
 
 function toast(msg, ok = true) {
   const d = document.createElement('div');
@@ -154,6 +155,7 @@ const S = {
   flagKey: null, flagNew: false,
   segKey: null, segDrafts: [],
   expId: null, expCreate: false,
+  metricRef: null, metricQuery: '', metricStatus: '', metricCursor: '',
   auditLimit: 50,
   auditQuery: '', auditCursors: [0], auditPage: 0,
   aiAvailable: true,
@@ -213,8 +215,8 @@ function gateActions(root) {
   const groups = {
     'flag.write': ['#flag-new', '#flag-save', '#flag-submit', '#flag-delete', '#gff-run', '#seg-new', '#seg-save', '#seg-submit'],
     'flag.approve': ['#flag-approve', '#flag-reject', '#seg-approve', '[data-appr]'],
-    'flag.publish': ['#flag-publish', '#flag-emergency-disable', '[data-rb]', '[data-er]', '#seg-publish', '#exp-bind', '#exp-transition', '#ro-create', '#ro-pause', '#ro-resume', '#ro-advance', '#ro-takeover-on', '#ro-takeover-off', '[data-pin]', '[data-exec]'],
-    'experiment.write': ['#exp-new', '#x-create', '#exp-review'],
+    'flag.publish': ['#flag-publish', '#flag-emergency-disable', '[data-rb]', '[data-er]', '#seg-publish', '#exp-bind', '#exp-transition', '#ro-create', '#ro-pause', '#ro-resume', '#ro-advance', '#ro-takeover-on', '#ro-takeover-off', '[data-pin]', '[data-exec]', '#metric-publish', '#metric-deprecate'],
+    'experiment.write': ['#exp-new', '#x-create', '#exp-review', '#metric-new', '#metric-submit'],
     'ai.write': ['#ai-reg', '[data-revoke]', '[data-reinstate]'],
     'ai.content.read': ['#ai-resolve', '#ai-allow-add', '#ai-allow-save'],
   };
@@ -830,7 +832,9 @@ async function viewExperiments(m) {
   });
 }
 
-function viewExpCreate(m) {
+async function viewExpCreate(m) {
+  const metricPage = await api(wsPath() + '/metrics?status=published&limit=200');
+  const publishedMetrics = metricPage.items || [];
   m.innerHTML =
     '<div class="view-head"><button class="btn sm" id="exp-back">' + esc(t('exp.back')) + '</button><h2>' + esc(t('exp.newTitle')) + '</h2></div>' +
     '<section class="card">' +
@@ -844,6 +848,8 @@ function viewExpCreate(m) {
     '<h4>' + t('exp.variantsHead') + '</h4>' +
     '<div id="x-vars"></div><button class="btn sm" id="x-add-var">' + esc(t('exp.addVariant')) + '</button>' +
     '<h4>' + esc(t('exp.primaryMetric')) + '</h4>' +
+    '<label class="field">' + esc(t('metrics.selectPrimary')) + '<select id="x-mref"><option value="">' + esc(t('metrics.inline')) + '</option>' +
+      publishedMetrics.map(d => '<option value="' + esc(d.key + '/v' + d.version) + '">' + esc(d.displayName + ' · ' + d.key + ' v' + d.version) + '</option>').join('') + '</select></label>' +
     '<div class="form-grid">' +
       '<label class="field">' + esc(t('exp.metricKey')) + '<input id="x-mkey" placeholder="checkout_success"></label>' +
       '<label class="field">' + esc(t('th.type')) + '<select id="x-mtype"><option>proportion</option><option>mean</option><option>ratio</option><option>quantile</option><option>funnel</option><option>retention</option></select></label>' +
@@ -907,6 +913,21 @@ function viewExpCreate(m) {
   };
   mtype.onchange = syncMetricAdv;
   syncMetricAdv();
+  $('#x-mref', m).onchange = ev => {
+    const def = publishedMetrics.find(d => d.key + '/v' + d.version === ev.target.value);
+    $$('#x-mkey, #x-mtype, #x-mdir, #x-numkey, #x-denkey, #x-qlevel, #x-covkey, #x-journey', m)
+      .forEach(input => { input.disabled = !!def; });
+    if (!def) return;
+    $('#x-mkey', m).value = def.spec.key;
+    $('#x-mtype', m).value = def.spec.type;
+    $('#x-mdir', m).value = def.spec.direction;
+    $('#x-numkey', m).value = def.spec.numeratorKey || '';
+    $('#x-denkey', m).value = def.spec.denominatorKey || '';
+    $('#x-qlevel', m).value = def.spec.quantileLevel || '';
+    $('#x-covkey', m).value = def.spec.covariateKey || '';
+    if (def.spec.funnel || def.spec.retention) $('#x-journey', m).value = JSON.stringify(def.spec.funnel || def.spec.retention);
+    syncMetricAdv();
+  };
 	$('#x-mode', m).onchange = ev => { $('#x-bandit', m).style.display = ev.target.value === 'bandit' ? '' : 'none'; };
   $('#x-add-guard', m).onclick = () => {
     const row = document.createElement('div');
@@ -973,6 +994,8 @@ function viewExpCreate(m) {
       analysisWindow: Math.round(Number($('#x-window', m).value) * NS_DAY),
       hypothesis: $('#x-hyp', m).value.trim(),
     };
+    const selectedMetric = publishedMetrics.find(d => d.key + '/v' + d.version === $('#x-mref', m).value);
+    if (selectedMetric) body.primaryMetricRef = { key: selectedMetric.key, version: selectedMetric.version };
 	body.allocationMode = $('#x-mode', m).value;
 	if (body.allocationMode === 'bandit') {
 	  if (variants.length !== 2 || pm.type !== 'proportion') { toast(t('exp.banditRequiresProportion'), false); return; }
@@ -1718,6 +1741,12 @@ async function viewAudit(m) {
 
 async function executeApproval(a) {
   const scope = wsPath() + '/environments/' + encodeURIComponent(a.environmentId);
+  if (a.action === 'metric.publish') {
+    const match = /^(.*)\/v([1-9]\d*)$/.exec(a.object);
+    if (!match) throw new ApiError(0, 'validation_failed', t('approval.unsupported'));
+    return api(metricVersionPath({ key: match[1], version: Number(match[2]) }) + '/publish',
+      { method: 'POST', body: { approvalId: a.id } });
+  }
   if (a.action === 'release_plan.create') {
     const payload = JSON.parse(a.payload);
     return api('/api/v1/admin/experiments/' + encodeURIComponent(a.object) + '/release-plan',
@@ -1888,12 +1917,117 @@ async function viewAI(m) {
 }
 
 // ---------------------------------------------------------------------------
+// View: Metric catalog
+// ---------------------------------------------------------------------------
+function metricVersionPath(ref) {
+  return wsPath() + '/metrics/' + encodeURIComponent(ref.key) + '/versions/' + encodeURIComponent(ref.version);
+}
+
+async function viewMetrics(m) {
+  if (!needWs(m)) return;
+  if (S.metricRef) {
+    const def = await api(metricVersionPath(S.metricRef));
+    const path = metricVersionPath(def);
+    m.innerHTML = '<div class="view-head"><button class="btn sm" id="metric-back">' + esc(t('exp.back')) + '</button>' +
+      '<h2>' + esc(def.displayName) + '</h2>' + chip(def.status, METRIC_CHIP[def.status] || 'gray') + '</div>' +
+      '<section class="card"><dl class="detail-grid">' +
+      '<dt>' + esc(t('metrics.key')) + '</dt><dd class="mono">' + esc(def.key) + '</dd>' +
+      '<dt>' + esc(t('metrics.version')) + '</dt><dd>v' + esc(def.version) + '</dd>' +
+      '<dt>' + esc(t('metrics.owner')) + '</dt><dd>' + esc(def.owner) + '</dd>' +
+      '<dt>' + esc(t('metrics.description')) + '</dt><dd>' + esc(def.description || '—') + '</dd>' +
+      '<dt>' + esc(t('metrics.source')) + '</dt><dd>' + esc(def.source) + '</dd>' +
+      '<dt>' + esc(t('metrics.eventKeys')) + '</dt><dd class="mono">' + esc((def.eventKeys || []).join(', ')) + '</dd>' +
+      '<dt>' + esc(t('metrics.windowDays')) + '</dt><dd>' + esc(Number(def.attributionWindow) / NS_DAY) + '</dd>' +
+      '<dt>' + esc(t('metrics.hash')) + '</dt><dd class="mono">' + esc(def.hash) + '</dd>' +
+      '</dl><h3>' + esc(t('metrics.spec')) + '</h3><pre class="mono">' + esc(JSON.stringify(def.spec, null, 2)) + '</pre>' +
+      '<div class="action-row">' +
+      (def.status === 'draft' ? '<button class="btn sm" id="metric-submit">' + esc(t('metrics.submit')) + '</button>' +
+        '<button class="btn primary sm" id="metric-publish">' + esc(t('metrics.publish')) + '</button>' : '') +
+      (def.status === 'published' ? '<button class="btn sm" id="metric-deprecate">' + esc(t('metrics.deprecate')) + '</button>' : '') +
+      '</div></section>';
+    $('#metric-back', m).onclick = () => { S.metricRef = null; route(); };
+    const submit = $('#metric-submit', m);
+    if (submit) submit.onclick = async () => {
+      const choice = await actionDialog({ title: t('metrics.submit'), summary: def.displayName + ' v' + def.version,
+        reasonLabel: t('approval.reason'), confirmLabel: t('metrics.submit') });
+      if (choice) run(() => api(path + '/submit', { method: 'POST', body: { reason: choice.reason } }), t('metrics.submitted'));
+    };
+    const publish = $('#metric-publish', m);
+    if (publish) publish.onclick = () => promptForm(t('metrics.publish'), [
+      { name: 'approvalId', label: t('metrics.approvalId') },
+    ], t('metrics.publish'), async v => {
+      if (!v.approvalId.trim()) throw new ApiError(0, 'validation_failed', t('metrics.approvalId'));
+      await api(path + '/publish', { method: 'POST', body: { approvalId: v.approvalId.trim() } });
+      toast(t('metrics.published')); route();
+    });
+    const deprecate = $('#metric-deprecate', m);
+    if (deprecate) deprecate.onclick = async () => {
+      const choice = await actionDialog({ title: t('metrics.deprecate'), summary: def.displayName + ' v' + def.version,
+        reasonLabel: t('approval.reason'), confirmLabel: t('metrics.deprecate') });
+      if (choice) run(() => api(path + '/deprecate', { method: 'POST', body: { reason: choice.reason } }), t('metrics.deprecated'));
+    };
+    return;
+  }
+
+  const query = new URLSearchParams({ limit: '50' });
+  if (S.metricQuery) query.set('q', S.metricQuery);
+  if (S.metricStatus) query.set('status', S.metricStatus);
+  if (S.metricCursor) query.set('cursor', S.metricCursor);
+  const page = await api(wsPath() + '/metrics?' + query);
+  const rows = page.items || [];
+  m.innerHTML = '<div class="view-head"><h2>' + esc(t('metrics.title')) + '</h2>' +
+    '<form id="metric-search" class="inline-search"><input id="metric-q" type="search" value="' + esc(S.metricQuery) + '" placeholder="' + esc(t('list.search')) + '" aria-label="' + esc(t('list.search')) + '">' +
+    '<select id="metric-status" aria-label="' + esc(t('metrics.status')) + '">' +
+    ['', 'draft', 'published', 'deprecated'].map(v => '<option value="' + v + '"' + (v === S.metricStatus ? ' selected' : '') + '>' + esc(v || t('metrics.all')) + '</option>').join('') +
+    '</select><button class="btn sm" type="submit">' + esc(t('audit.searchButton')) + '</button></form>' +
+    '<button class="btn primary sm" id="metric-new">' + esc(t('metrics.new')) + '</button></div>' +
+    '<table class="grid"><thead><tr><th>' + esc(t('metrics.key')) + '</th><th>' + esc(t('metrics.version')) + '</th><th>' + esc(t('label.displayName')) + '</th><th>' + esc(t('metrics.status')) + '</th><th>' + esc(t('metrics.owner')) + '</th></tr></thead><tbody>' +
+    (rows.map(d => '<tr><td><button class="row-link mono" type="button" data-metric-key="' + esc(d.key) + '" data-metric-version="' + esc(d.version) + '">' + esc(d.key) + '</button></td><td>v' + esc(d.version) + '</td><td>' + esc(d.displayName) + '</td><td>' + chip(d.status, METRIC_CHIP[d.status] || 'gray') + '</td><td>' + esc(d.owner) + '</td></tr>').join('') ||
+      '<tr><td colspan="5" class="muted">' + esc(t('metrics.empty')) + '</td></tr>') + '</tbody></table>' +
+    (page.nextCursor ? '<button class="btn sm" id="metric-next">' + esc(t('audit.next')) + '</button>' : '');
+  $('#metric-search', m).onsubmit = ev => {
+    ev.preventDefault();
+    S.metricQuery = $('#metric-q', m).value.trim();
+    S.metricStatus = $('#metric-status', m).value;
+    S.metricCursor = '';
+    route();
+  };
+  $('tbody', m).onclick = ev => {
+    const button = ev.target.closest('[data-metric-key]');
+    if (button) { S.metricRef = { key: button.dataset.metricKey, version: Number(button.dataset.metricVersion) }; route(); }
+  };
+  if (page.nextCursor) $('#metric-next', m).onclick = () => { S.metricCursor = page.nextCursor; route(); };
+  $('#metric-new', m).onclick = () => promptForm(t('metrics.new'), [
+    { name: 'key', label: t('metrics.key'), placeholder: 'activation.complete' },
+    { name: 'displayName', label: t('label.displayName') },
+    { name: 'description', label: t('metrics.description'), type: 'textarea', rows: 2 },
+    { name: 'owner', label: t('metrics.owner') },
+    { name: 'eventKeys', label: t('metrics.eventKeys'), placeholder: 'activation_complete' },
+    { name: 'windowDays', label: t('metrics.windowDays'), type: 'number', value: '7' },
+    { name: 'spec', label: t('metrics.spec'), type: 'textarea', rows: 5,
+      value: JSON.stringify({ type: 'proportion', direction: 'increase' }, null, 2) },
+  ], t('metrics.create'), async v => {
+    let spec;
+    try { spec = JSON.parse(v.spec); }
+    catch { throw new ApiError(0, 'validation_failed', t('exp.journeyInvalid')); }
+    const body = { key: v.key.trim(), displayName: v.displayName.trim(), description: v.description.trim(),
+      owner: v.owner.trim(), source: 'collect', dedupUnit: 'user',
+      eventKeys: v.eventKeys.split(',').map(s => s.trim()).filter(Boolean),
+      attributionWindow: Math.round(Number(v.windowDays) * NS_DAY), spec };
+    const created = await api(wsPath() + '/metrics', { method: 'POST', body });
+    S.metricRef = { key: created.key, version: created.version };
+    toast(t('metrics.created')); route();
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 Object.assign(VIEWS, {
   flags: viewFlags,
   segments: viewSegments,
   experiments: viewExperiments,
+  metrics: viewMetrics,
   debug: viewDebug,
   tokens: viewTokens,
   quotas: viewQuotas,
@@ -1964,7 +2098,7 @@ function init() {
       }
       if (!confirmLeaveEditor()) return;
       S.view = b.dataset.view;
-      S.flagKey = S.segKey = S.expId = null;
+      S.flagKey = S.segKey = S.expId = S.metricRef = null;
       S.flagNew = S.expCreate = false;
       $('#nav').classList.remove('mobile-open');
       $('#btn-menu').setAttribute('aria-expanded', 'false');
@@ -1978,7 +2112,7 @@ function init() {
     S.globalCapabilities = null;
     updateCapabilities();
     S.env = '';
-    S.flagKey = S.segKey = S.expId = null;
+    S.flagKey = S.segKey = S.expId = S.metricRef = null;
     localStorage.setItem('golab_ws', S.ws);
     try { await loadEnvs(); await refreshCapabilities(); } catch (e) { reportError(e); }
     route();
@@ -1987,7 +2121,7 @@ function init() {
   $('#sel-env').onchange = ev => {
     if (!confirmLeaveEditor()) { ev.target.value = S.env; return; }
     S.env = ev.target.value;
-    S.flagKey = S.segKey = S.expId = null;
+    S.flagKey = S.segKey = S.expId = S.metricRef = null;
     localStorage.setItem('golab_env', S.env);
     route();
     probeAI();

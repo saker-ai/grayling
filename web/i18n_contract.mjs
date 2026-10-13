@@ -78,6 +78,7 @@ function makeSandbox({ storedLang, navLang } = {}) {
   const chrome = new Map(); // document.querySelector stubs keyed by selector
   const fetchCalls = [];
   const sandbox = {
+    URLSearchParams,
     document: {
       addEventListener() {},
       createElement: () => el(),
@@ -175,6 +176,10 @@ const allowlist = [{ provider: 'openai', model: 'gpt-4o', enabled: true }];
 const quotas = { maxFlags: 500, maxFlagBytes: 65536, maxSegments: 200,
   maxExperiments: 100, maxEventBytes: 16384, maxEventsPerBatch: 500,
   eventRetention: 2592000000000000 };
+const metric = { key: 'activation.complete', version: 1, displayName: 'Activation completion',
+  description: 'Completed activation', owner: 'growth', source: 'collect', eventKeys: ['activation_complete'],
+  attributionWindow: 604800000000000, spec: { key: 'activation_complete', type: 'proportion', direction: 'increase' },
+  status: 'draft', hash: 'sha256:abc123' };
 
 function mockResponse(url) {
   const json = v => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(v)) });
@@ -183,6 +188,8 @@ function mockResponse(url) {
   if (url.includes('/model-allowlist')) return json(allowlist);
   if (url.endsWith('/quotas')) return json(quotas);
   if (url.endsWith('/tokens')) return json(tokens);
+  if (url.includes('/metrics/activation.complete/versions/1')) return json(metric);
+  if (url.includes('/metrics?')) return json({ items: [metric] });
   if (url.includes('/audit')) return json(audit);
   if (url.includes('/experiments/exp-1/report')) return json(report);
   if (url.includes('/experiments/exp-1')) return json(expDetail);
@@ -213,6 +220,17 @@ assert.strictEqual(makeSandbox({}).x.I18N.lang, 'en', 'no navigator.language →
 //    identical across languages.
 // ===========================================================================
 const SWEEPS = [
+  { name: 'metrics-list', view: 'metrics',
+    setup: S => { S.metricRef = null; S.metricQuery = ''; S.metricStatus = ''; S.metricCursor = ''; },
+    en: ['Metric catalog', 'New metric', 'All statuses'],
+    zh: ['指标目录', '新建指标', '全部状态'],
+    shared: ['Activation completion'],
+    ids: ['metric-new', 'metric-search'] },
+  { name: 'metrics-detail', view: 'metrics',
+    setup: S => { S.metricRef = { key: 'activation.complete', version: 1 }; },
+    en: ['Definition hash', 'Submit for review', 'Publish approved version'],
+    zh: ['定义哈希', '提交评审', '发布已批准版本'],
+    ids: ['metric-back', 'metric-submit', 'metric-publish'] },
   { name: 'flags-list', view: 'flags',
     setup: S => { S.flagKey = null; S.flagNew = false; },
     en: ['<h2>Flags</h2>', '+ New flag', 'Draft state', 'Revision', '1 flag(s)'],

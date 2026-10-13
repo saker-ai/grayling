@@ -124,6 +124,10 @@ table.grid tr[hidden] { display: none; }
 .list-search { min-width: 180px; margin-left: auto; }
 .inline-search { display: inline-flex; gap: 6px; align-items: center; }
 .inline-search input { min-width: 220px; }
+.detail-grid { display: grid; grid-template-columns: minmax(120px, 190px) minmax(0, 1fr); gap: 10px 16px; margin: 0; }
+.detail-grid dt { color: var(--muted); }
+.detail-grid dd { margin: 0; overflow-wrap: anywhere; }
+.action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
 .pager { display: flex; gap: 10px; align-items: center; justify-content: flex-end; padding: 12px 0; }
 table.grid th {
   text-align: left; color: var(--muted); font-weight: 600;
@@ -199,5 +203,7 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
   main { padding: 12px; overflow-x: auto; }
   .list-search, .inline-search, .inline-search input { min-width: 0; width: 100%; margin-left: 0; }
   .view-head { align-items: stretch; }
+  .detail-grid { grid-template-columns: 1fr; gap: 4px; }
+  .detail-grid dd { margin-bottom: 8px; }
   input, select, textarea { font-size: 16px; }
 }

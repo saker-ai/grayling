@@ -49,7 +49,9 @@ for (const [role, permissions] of Object.entries(byRole)) {
   assert.equal(chrome.get('#nav-quotas').classList.contains('hidden'), role !== 'owner', `${role} quota nav`);
   assert(chrome.get('#btn-new-ws').classList.contains('hidden'), `${role} workspace creation`);
   const actions = { '#flag-save': 'flag.write', '#flag-approve': 'flag.approve', '#flag-publish': 'flag.publish',
-    '#x-create': 'experiment.write', '#ai-reg': 'ai.write', '[data-pin]': 'flag.publish', '#ai-resolve': 'ai.content.read' };
+    '#x-create': 'experiment.write', '#metric-new': 'experiment.write', '#metric-submit': 'experiment.write',
+    '#metric-publish': 'flag.publish', '#metric-deprecate': 'flag.publish',
+    '#ai-reg': 'ai.write', '[data-pin]': 'flag.publish', '#ai-resolve': 'ai.content.read' };
   const nodes = { querySelectorAll: () => [], };
   const actual = new Map();
   nodes.querySelectorAll = selector => {

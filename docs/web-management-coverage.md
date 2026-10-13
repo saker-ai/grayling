@@ -22,12 +22,12 @@
 | `GET` | `/api/v1/admin/workspaces/{ws}/audit` | 已覆盖 | 审计页：搜索、条数选择与游标翻页 | i18n DOM；游标筛选测试；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/quotas` | 已覆盖 | 配额页：owner 可见，读取/编辑/校验/确认/保存 | quota API + i18n DOM |
 | `PUT` | `/api/v1/admin/workspaces/{ws}/quotas` | 已覆盖 | 配额页：owner 可见，读取/编辑/校验/确认/保存 | quota API + i18n DOM |
-| `GET` | `/api/v1/admin/workspaces/{ws}/metrics` | 需补齐 | 指标目录列表与搜索 | API 契约；Web 入口待实现 |
-| `POST` | `/api/v1/admin/workspaces/{ws}/metrics` | 需补齐 | 创建指标草稿版本 | API 契约；Web 入口待实现 |
-| `GET` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}` | 需补齐 | 指标版本详情 | API 契约；Web 入口待实现 |
-| `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/submit` | 需补齐 | 提交独立审批 | API 契约；Web 入口待实现 |
-| `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/publish` | 需补齐 | 经批准发布版本 | API 契约；Web 入口待实现 |
-| `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/deprecate` | 需补齐 | 弃用版本 | API 契约；Web 入口待实现 |
+| `GET` | `/api/v1/admin/workspaces/{ws}/metrics` | 已覆盖 | 指标目录列表、搜索和状态筛选 | i18n DOM；API 路由契约 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/metrics` | 已覆盖 | 新建指标表单 | i18n DOM；API 路由契约 |
+| `GET` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}` | 已覆盖 | 指标版本详情与定义哈希 | i18n DOM；API 路由契约 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/submit` | 已覆盖 | 详情页提交独立审批 | i18n DOM；API 路由契约 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/publish` | 已覆盖 | 详情页或审批队列执行已批准发布 | i18n DOM；API 路由契约 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/deprecate` | 已覆盖 | 详情页确认并弃用版本 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags` | 已覆盖 | 开关列表/详情：草稿、审批、发布、回滚、删除、导入、紧急禁用 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}` | 已覆盖 | 开关列表/详情：草稿、审批、发布、回滚、删除、导入、紧急禁用 | i18n DOM；API 路由契约 |
 | `DELETE` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}` | 已覆盖 | 开关列表/详情：草稿、审批、发布、回滚、删除、导入、紧急禁用 | i18n DOM；API 路由契约 |
