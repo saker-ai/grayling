@@ -2,7 +2,7 @@
 
 范围：`openapi.yaml` 中的 `/api/v1/admin/` 管理操作（共 62 项）。`GET /api/v1/health` 是健康检查，不属于管理操作。SDK config/eval/collect、原生 Nacos 协议及 HMAC 原始密钥为数据面或运维密钥，刻意不进入管理 UI。
 
-下表说明 Web 是否提供入口及代码契约，**不表示每项都已在浏览器执行**。真实浏览器的操作、截图、HTTP 结果与未覆盖项见 [2026-10-08 验收报告](acceptance/web-2026-10-08/report.md)、[跨角色发布验收](acceptance/web-2026-10-13-roles/report.md)、[故障状态模拟验收](acceptance/web-2026-10-13-failures/report.md)、[会话恢复验收](acceptance/web-2026-10-13-reauth/report.md)、[实验列表摘要验收](acceptance/web-2026-10-13-exp-list/report.md)、[实验绑定并发冲突验收](acceptance/web-2026-10-13-bind-conflict/report.md)、[实验首屏决策验收](acceptance/web-2026-10-13-exp-decision/report.md)、[总览摘要验收](acceptance/web-2026-10-13-overview/report.md)及 [放量操作报告门禁验收](acceptance/web-2026-10-13-rollout-report-gate/report.md)。[Flag 关联实验验收](acceptance/web-2026-10-13-flag-experiment-impact/report.md)记录本次代码契约及未完成的现场浏览器验证。
+下表说明 Web 是否提供入口及代码契约，**不表示每项都已在浏览器执行**。真实浏览器的操作、截图、HTTP 结果与未覆盖项见 [2026-10-08 验收报告](acceptance/web-2026-10-08/report.md)、[跨角色发布验收](acceptance/web-2026-10-13-roles/report.md)、[故障状态模拟验收](acceptance/web-2026-10-13-failures/report.md)、[会话恢复验收](acceptance/web-2026-10-13-reauth/report.md)、[实验列表摘要验收](acceptance/web-2026-10-13-exp-list/report.md)、[实验绑定并发冲突验收](acceptance/web-2026-10-13-bind-conflict/report.md)、[实验首屏决策验收](acceptance/web-2026-10-13-exp-decision/report.md)、[总览摘要验收](acceptance/web-2026-10-13-overview/report.md)、[放量操作报告门禁验收](acceptance/web-2026-10-13-rollout-report-gate/report.md)、[Flag 关联实验验收](acceptance/web-2026-10-13-flag-experiment-impact/report.md)和[报告证据版本验收](acceptance/web-2026-10-13-rollout-report-version/report.md)。
 
 | 方法 | 管理端点 | 分类 | Web 入口 / 行为或仅 API 理由 | 验证证据 |
 |---|---|---|---|---|
