@@ -195,9 +195,14 @@ const withPlan = over => ({ id: 'exp-1', state: 'running', releasePlan: { ...bas
   assert.strictEqual(sandbox.__planNextGate(exp.releasePlan).toISOString(), '2026-09-23T00:00:00.000Z',
     'next gate = stepStartedAt + minRuntime + observationWindow');
   assert(html.includes('ro-steps-tbl') && html.includes('Observation window'), 'plan-step table missing');
+  assert(html.includes('id="ro-steps-tbl"') && html.includes('mobile-card-table') &&
+    html.includes('mobile-record-cards') && html.includes('Eligibility'),
+  'rollout steps must have readable mobile cards alongside the desktop table');
   assert(html.includes('>done<') && html.includes('>current<') && html.includes('>pending<'), 'step status chips missing');
   assert(html.includes('>auto<') && html.includes('>manual hold<'), 'advance-mode chips missing');
   assert(html.includes('ro-history-tbl'), 'history table missing');
+  assert(html.includes('rollout-engine') && html.includes('mobile-record'),
+    'action history must have mobile records with actor and detail');
   assert(html.indexOf('step.advance') < html.indexOf('plan.start'), 'history must render newest first');
   assert(html.includes('rollout-engine'), 'history actor missing');
   for (const id of ['ro-refresh', 'ro-pause', 'ro-advance', 'ro-takeover-on']) {

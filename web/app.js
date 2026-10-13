@@ -2335,35 +2335,48 @@ function planNextGate(plan) {
 
 function renderRolloutSteps(plan) {
   const steps = plan.steps || [];
-  return '<table class="grid" id="ro-steps-tbl"><thead><tr><th>#</th><th>' + esc(t('th.step')) + '</th><th>' + esc(t('exp.eligShort')) + '</th>' +
+  const rows = steps.map((s, i) => {
+    let status;
+    if (plan.state === 'completed' || i < plan.currentStep) status = chip(t('chip.done'), 'green');
+    else if (i === plan.currentStep) {
+      status = plan.state === 'rolled_back' ? chip(t('chip.stoppedHere'), 'red')
+        : chip(plan.state === 'paused' ? t('chip.heldHere') : t('chip.current'), plan.state === 'paused' ? 'amber' : 'blue');
+    } else status = chip(t('chip.pending'), 'gray');
+    const advance = chip(s.autoAdvance ? t('chip.auto') : t('chip.manualHold'), s.autoAdvance ? 'green' : 'amber');
+    return { step: s, index: i, status, advance };
+  });
+  return '<table class="grid mobile-card-table" id="ro-steps-tbl"><thead><tr><th>#</th><th>' + esc(t('th.step')) + '</th><th>' + esc(t('exp.eligShort')) + '</th>' +
     '<th>' + esc(t('exp.minRuntime')) + '</th><th>' + esc(t('ro.obsWindow')) + '</th><th>' + esc(t('ro.advance')) + '</th><th>' + esc(t('th.status')) + '</th></tr></thead><tbody>' +
-    (steps.map((s, i) => {
-      let st;
-      if (plan.state === 'completed' || i < plan.currentStep) st = chip(t('chip.done'), 'green');
-      else if (i === plan.currentStep) {
-        st = plan.state === 'rolled_back' ? chip(t('chip.stoppedHere'), 'red')
-          : chip(plan.state === 'paused' ? t('chip.heldHere') : t('chip.current'), plan.state === 'paused' ? 'amber' : 'blue');
-      } else st = chip(t('chip.pending'), 'gray');
-      return '<tr' + (i === plan.currentStep ? ' class="ro-current"' : '') + '><td>' + i +
-        '</td><td class="mono">' + esc(s.name) + '</td><td>' + esc(s.ratio) +
-        '%</td><td>' + esc(fmtDurNs(s.minRuntime)) + '</td><td>' + esc(fmtDurNs(s.observationWindow)) +
-        '</td><td>' + chip(s.autoAdvance ? t('chip.auto') : t('chip.manualHold'), s.autoAdvance ? 'green' : 'amber') +
-        '</td><td>' + st + '</td></tr>';
+    (rows.map(({ step, index, status, advance }) => {
+      return '<tr' + (index === plan.currentStep ? ' class="ro-current"' : '') + '><td>' + index +
+        '</td><td class="mono">' + esc(step.name) + '</td><td>' + esc(step.ratio) +
+        '%</td><td>' + esc(fmtDurNs(step.minRuntime)) + '</td><td>' + esc(fmtDurNs(step.observationWindow)) +
+        '</td><td>' + advance + '</td><td>' + status + '</td></tr>';
     }).join('') || '<tr><td colspan="7" class="muted">' + esc(t('ro.noSteps')) + '</td></tr>') +
-    '</tbody></table>' +
+    '</tbody></table><div class="mobile-record-cards">' + rows.map(({ step, index, status, advance }) =>
+      '<article class="mobile-record"><div class="row"><strong class="mono">' + esc(index + 1) + '. ' + esc(step.name) +
+      '</strong>' + status + '</div><div><b>' + esc(t('exp.eligShort')) + ':</b> ' + esc(step.ratio) +
+      '% · <b>' + esc(t('ro.advance')) + ':</b> ' + advance + '</div><div class="muted">' +
+      esc(t('exp.minRuntime')) + ': ' + esc(fmtDurNs(step.minRuntime)) + ' · ' + esc(t('ro.obsWindow')) +
+      ': ' + esc(fmtDurNs(step.observationWindow)) + '</div></article>').join('') +
+    (rows.length ? '' : '<p class="muted">' + esc(t('ro.noSteps')) + '</p>') + '</div>' +
     '<div class="muted">' + esc(t('ro.gateNote')) + '</div>';
 }
 
 function renderRolloutHistory(plan) {
   const hist = (plan.history || []).slice().reverse(); // newest first
-  return '<table class="grid" id="ro-history-tbl"><thead><tr><th>' + esc(t('th.time')) + '</th><th>' + esc(t('th.actor')) + '</th><th>' + esc(t('th.action')) + '</th>' +
+  return '<table class="grid mobile-card-table" id="ro-history-tbl"><thead><tr><th>' + esc(t('th.time')) + '</th><th>' + esc(t('th.actor')) + '</th><th>' + esc(t('th.action')) + '</th>' +
     '<th>' + esc(t('th.step')) + '</th><th>' + esc(t('th.detailSkip')) + '</th></tr></thead><tbody>' +
     (hist.map(ev =>
       '<tr><td class="nowrap">' + esc(fmtTime(ev.at)) + '</td><td>' + esc(ev.actor || '—') + '</td><td>' +
       chip(ev.action, PLAN_ACTION_CHIP[ev.action] || 'gray') + '</td><td>' + esc(ev.step ?? '—') +
       '</td><td>' + esc(ev.detail || '—') + '</td></tr>').join('') ||
       '<tr><td colspan="5" class="muted">' + esc(t('ro.noActions')) + '</td></tr>') +
-    '</tbody></table>';
+    '</tbody></table><div class="mobile-record-cards">' + hist.map(ev =>
+      '<article class="mobile-record"><div class="row">' + chip(ev.action, PLAN_ACTION_CHIP[ev.action] || 'gray') +
+      '<strong>' + esc(t('th.step')) + ' ' + esc(ev.step ?? '—') + '</strong></div><div class="muted">' +
+      esc(fmtTime(ev.at)) + ' · ' + esc(ev.actor || '—') + '</div><div>' + esc(ev.detail || '—') +
+      '</div></article>').join('') + (hist.length ? '' : '<p class="muted">' + esc(t('ro.noActions')) + '</p>') + '</div>';
 }
 
 function renderRolloutCreate() {
