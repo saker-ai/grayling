@@ -205,6 +205,9 @@ main { flex: 1; overflow: auto; padding: 16px; }
 table.grid { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 table.grid { min-width: 620px; }
 .diagnostic-cards { display: none; }
+.flag-record-cards { display: none; }
+.flag-empty-mobile { display: none; }
+[data-flag-record][hidden] { display: none !important; }
 table.grid tr[hidden] { display: none; }
 .row-link { border: 0; background: none; padding: 2px 0; color: var(--accent); font: inherit; cursor: pointer; text-align: left; }
 .row-link:hover { text-decoration: underline; }
@@ -283,6 +286,10 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
 .auth-card h1 span { color: var(--muted); font-weight: 400; }
 .auth-card .field { margin: 12px 0; }
 @media (max-width: 700px) {
+  table.grid.flag-list-table { display: none; }
+  .flag-record-cards { display: grid; gap: 10px; margin: 10px 0; }
+  .flag-empty-mobile { display: block; }
+  .flag-record { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; }
   table.grid.diagnostic-table { display: none; }
   .diagnostic-cards { display: grid; gap: 10px; margin: 10px 0; }
   .diagnostic-card { border: 1px solid var(--border); border-radius: 8px; margin: 0; padding: 10px; }

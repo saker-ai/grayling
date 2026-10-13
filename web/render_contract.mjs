@@ -35,8 +35,20 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
+
+const flagRows = [
+  { key: 'published', current: { publishedAt: '2026-10-13T10:00:00Z' } },
+  { key: 'review', draft: { state: 'submitted', updatedAt: '2026-10-10T10:00:00Z' } },
+  { key: 'running-change', draft: { state: 'editing', risk: 'high', updatedAt: '2026-10-09T10:00:00Z' },
+    current: { content: { experiment: { state: 'running' } } } },
+  { key: 'newer-review', draft: { state: 'submitted', updatedAt: '2026-10-12T10:00:00Z' } },
+];
+assert.deepEqual(Array.from(sandbox.__sortFlagsForList(flagRows), row => row.key),
+  ['running-change', 'newer-review', 'review', 'published'], 'flag list priority and recency order');
+assert.equal(flagRows[0].key, 'published', 'sorting must not mutate API response');
+assert.equal(sandbox.__flagListCategory(flagRows[1]), 'submitted', 'filter category comes from draft state');
 
 const blockedBind = sandbox.__renderBindReadiness({ ready: false, registeredRevision: 2, currentRevision: 3,
   checks: [{ code: 'registered_revision', ready: false }, { code: 'draft_clear', ready: false }] });

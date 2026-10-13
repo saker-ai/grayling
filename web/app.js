@@ -668,33 +668,96 @@ function lintFlag(c) {
 async function viewFlags(m) {
   if (!needScope(m)) return;
   if (S.flagKey) return viewFlagDetail(m);
-  const flags = (await api(scopePath() + '/flags')) || [];
+  const flags = sortFlagsForList((await api(scopePath() + '/flags')) || []);
   m.innerHTML =
     '<div class="view-head"><h2>' + esc(t('flags.title')) + '</h2><span class="muted">' + esc(t('flags.count', { n: flags.length })) + '</span>' +
     '<input class="list-search" type="search" placeholder="' + esc(t('list.search')) + '" aria-label="' + esc(t('list.search')) + '"><button class="btn primary sm" id="flag-new">' + esc(t('flags.new')) + '</button></div>' +
-    '<table class="grid"><thead><tr><th>' + esc(t('th.key')) + '</th><th>' + esc(t('th.type')) + '</th><th>' + esc(t('th.draftState')) + '</th><th>' + esc(t('th.revision')) + '</th><th>' + esc(t('th.updated')) + '</th></tr></thead><tbody>' +
+    '<div class="row"><label class="inline">' + esc(t('flags.statusFilter')) + ' <select id="flag-status-filter">' +
+      '<option value="all">' + esc(t('flags.statusAll')) + '</option>' +
+      '<option value="submitted">' + esc(t('flags.statusSubmitted')) + '</option>' +
+      '<option value="approved">' + esc(t('flags.statusApproved')) + '</option>' +
+      '<option value="editing">' + esc(t('flags.statusEditing')) + '</option>' +
+      '<option value="published">' + esc(t('flags.statusPublished')) + '</option></select></label>' +
+      '<span class="muted">' + esc(t('flags.sortNote')) + '</span></div>' +
+    '<table class="grid flag-list-table"><thead><tr><th>' + esc(t('th.key')) + '</th><th>' + esc(t('th.type')) + '</th><th>' + esc(t('th.draftState')) + '</th><th>' + esc(t('th.revision')) + '</th><th>' + esc(t('th.updated')) + '</th></tr></thead><tbody>' +
     (flags.map(f => {
       const d = f.draft, c = f.current;
       const type = (d && d.content && d.content.type) || (c && c.content && c.content.type) || '—';
       const st = d
-        ? chip(d.state, DRAFT_CHIP[d.state] || 'gray') + (d.deleted ? ' ' + chip(t('chip.del'), 'red') : '')
+        ? chip(flagListStatusLabel(f), DRAFT_CHIP[d.state] || 'gray') +
+          (d.deleted ? ' ' + chip(t('chip.del'), 'red') : '')
         : (c ? chip(t('chip.published'), 'green') : chip(t('chip.none'), 'gray'));
       const upd = (d && d.updatedAt) || (c && c.publishedAt) || null;
-      return '<tr><td class="mono"><button class="row-link" type="button" data-flag="' + esc(f.key) + '">' + esc(f.key) + '</button>' +
-        '</td><td>' + esc(type) + '</td><td>' + st + '</td><td>' + esc(f.currentRevision || 0) +
+      return '<tr data-flag-record data-key="' + esc(f.key) + '" data-category="' + esc(flagListCategory(f)) + '"><td class="mono"><button class="row-link" type="button" data-flag="' + esc(f.key) + '">' + esc(f.key) + '</button>' +
+        '</td><td>' + esc(type) + '</td><td>' + st +
+        (flagRunningChange(f) ? ' ' + chip(t('flags.runningChange'), 'red') : '') +
+        '</td><td>' + esc(f.currentRevision || 0) +
         '</td><td class="nowrap">' + esc(fmtTime(upd)) + '</td></tr>';
     }).join('') || '<tr><td colspan="5" class="muted">' + esc(t('flags.empty')) + '</td></tr>') +
-    '</tbody></table>';
-  bindListSearch(m);
+    '</tbody></table>' +
+    '<div class="flag-record-cards">' + flags.map(f => {
+      const d = f.draft, c = f.current;
+      const status = flagListStatusLabel(f);
+      const upd = (d && d.updatedAt) || (c && c.publishedAt) || null;
+      return '<article class="flag-record" data-flag-record data-key="' + esc(f.key) + '" data-category="' + esc(flagListCategory(f)) + '">' +
+        '<button class="row-link mono" type="button" data-flag="' + esc(f.key) + '">' + esc(f.key) + '</button>' +
+        '<div>' + esc(status) + ' · r' + esc(f.currentRevision || 0) + '</div>' +
+        (flagRunningChange(f) ? '<div>' + chip(t('flags.runningChange'), 'red') + '</div>' : '') +
+        '<div class="muted">' + esc(fmtTime(upd)) + '</div></article>';
+    }).join('') + '</div>' +
+    (flags.length ? '' : '<p class="muted flag-empty-mobile">' + esc(t('flags.empty')) + '</p>') +
+    '<p class="muted hidden" id="flag-filter-empty">' + esc(t('flags.noMatch')) + '</p>';
+  const applyFilter = () => {
+    const query = $('.list-search', m).value.trim().toLocaleLowerCase();
+    const category = $('#flag-status-filter', m).value;
+    let visible = 0;
+    $$('[data-flag-record]', m).forEach(record => {
+      const match = (category === 'all' || record.dataset.category === category) &&
+        (!query || record.dataset.key.toLocaleLowerCase().includes(query));
+      record.hidden = !match;
+      if (match && record.tagName === 'TR') visible++;
+    });
+    $('#flag-filter-empty', m).classList.toggle('hidden', visible > 0 || flags.length === 0);
+  };
+  $('.list-search', m).oninput = applyFilter;
+  $('#flag-status-filter', m).onchange = applyFilter;
   $('#flag-new', m).onclick = () => {
     const key = (prompt(t('prompt.newFlagKey')) || '').trim();
     if (!key) return;
     S.flagKey = key; S.flagNew = true; route();
   };
-  $('tbody', m).addEventListener('click', ev => {
+  m.addEventListener('click', ev => {
     const tr = ev.target.closest('[data-flag]');
     if (tr) { S.flagKey = tr.dataset.flag; S.flagNew = false; route(); }
   });
+}
+
+function flagListCategory(flag) {
+  return flag.draft?.state || (flag.current ? 'published' : 'editing');
+}
+
+function flagListStatusLabel(flag) {
+  return {
+    submitted: t('flags.statusSubmitted'),
+    approved: t('flags.statusApproved'),
+    editing: t('flags.statusEditing'),
+    published: t('chip.published'),
+  }[flagListCategory(flag)] || flagListCategory(flag);
+}
+
+function flagRunningChange(flag) {
+  return flag.current?.content?.experiment?.state === 'running' && flag.draft?.risk === 'high';
+}
+
+function sortFlagsForList(flags) {
+  const rank = flag => {
+    if (flagRunningChange(flag)) return 0;
+    return { submitted: 1, approved: 2, editing: 3, published: 4 }[flagListCategory(flag)] ?? 5;
+  };
+  const updated = flag => Date.parse(flag.draft?.updatedAt || flag.current?.publishedAt || '') || 0;
+  return [...flags].sort((a, b) => rank(a) - rank(b) ||
+    updated(b) - updated(a) ||
+    String(a.key).localeCompare(String(b.key)));
 }
 
 function revisionsTable(f) {
