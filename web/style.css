@@ -178,6 +178,21 @@ main { flex: 1; overflow: auto; padding: 16px; }
 .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
 .row.actions { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin: 8px 0; }
+.wizard-progress { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; list-style: none; padding: 0; margin: 0 0 20px; }
+.wizard-progress li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px; color: var(--muted); border-bottom: 2px solid var(--border); }
+.wizard-progress li span { display: inline-grid; place-items: center; flex: 0 0 26px; height: 26px; border: 1px solid var(--border); border-radius: 50%; font-variant-numeric: tabular-nums; }
+.wizard-progress li.current { color: var(--text); border-color: var(--accent); font-weight: 600; }
+.wizard-progress li.current span { border-color: var(--accent); }
+.wizard-step[hidden], .wizard-actions [hidden], #x-error[hidden] { display: none; }
+#x-render-fields[hidden] { display: none; }
+.wizard-step h3 { margin-top: 0; }
+.wizard-step h3:focus { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.wizard-actions { justify-content: space-between; margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--border); }
+.wizard-review { margin: 18px 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.wizard-review dl { display: grid; grid-template-columns: minmax(120px, 1fr) 3fr; gap: 6px 14px; margin: 0; }
+.wizard-review dt { color: var(--muted); }
+.wizard-review dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 700px) { .wizard-progress { display: block; } .wizard-progress li:not(.current) { display: none; } .wizard-review dl { grid-template-columns: 1fr; } }
 .overview-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .overview-stat { display: flex; flex-direction: column; gap: 8px; }
 .overview-stat strong { font-size: 28px; line-height: 1.1; font-variant-numeric: tabular-nums; }
