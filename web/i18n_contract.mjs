@@ -209,6 +209,9 @@ function mockResponse(url) {
   if (url.includes('/experiments/exp-1/report')) return json(report);
   if (url.includes('/experiments/exp-1/diagnostics')) return json(diagnostics);
   if (url.includes('/experiments/exp-1')) return json(expDetail);
+  if (url.includes('/experiment-summaries?')) return json({ items: [{ experiment: expSummary,
+    report: { status: 'ready', healthy: false, verdict: 'hold', issue: 'watermark pending', generatedAt: TS } }],
+    total: 1, offset: 0, limit: 20 });
   if (url.endsWith('/experiments')) return json([expSummary]);
   if (url.endsWith('/flags/my-flag')) return json(flagDetail);
   if (url.endsWith('/flags')) return json([flagSummary]);
@@ -293,10 +296,10 @@ const SWEEPS = [
     ids: ['seg-json', 'seg-save', 'seg-submit', 'seg-approve', 'seg-publish'] },
   { name: 'experiments-list', view: 'experiments',
     setup: S => { S.expId = null; S.expCreate = false; },
-    en: ['<h2>Experiments</h2>', '+ New experiment', 'Created'],
-    zh: ['<h2>实验</h2>', '+ 新建实验', '创建时间'],
-    shared: ['exp-1'],
-    ids: ['exp-new'] },
+    en: ['<h2>Experiments</h2>', '+ New experiment', 'Data health / decision', 'Needs diagnosis'],
+    zh: ['<h2>实验</h2>', '+ 新建实验', '数据健康 / 决策', '需要诊断'],
+    shared: ['exp-1', 'watermark pending'],
+    ids: ['exp-new', 'exp-list-filter', 'exp-prev', 'exp-next'] },
   { name: 'experiments-create', view: 'experiments',
     setup: S => { S.expCreate = true; S.expId = null; },
     en: ['New experiment', 'Variants &amp; proportions (percent — must sum to 100)',

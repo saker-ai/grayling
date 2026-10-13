@@ -1277,6 +1277,72 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/experiment-summaries":
+    get:
+      tags: [experiments]
+      summary: 分页列出实验及实时报告摘要
+      description: >-
+        最多对当前页 50 个实验计算报告；未启动、无报告读取权限或计算失败时
+        分别返回 pending、restricted、unavailable，不将未知状态当作健康。
+        按更新时间降序排列，报告与详情使用相同的实时分析口径。
+      operationId: listExperimentSummaries
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - name: q
+          in: query
+          schema: {type: string}
+          description: 按实验 ID、Flag key 或创建人检索。
+        - name: state
+          in: query
+          schema: {type: string}
+        - name: offset
+          in: query
+          schema: {type: integer, minimum: 0, default: 0}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 50, default: 20}
+      responses:
+        "200":
+          description: 当前页与总量。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, offset, limit]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [experiment, report]
+                      properties:
+                        experiment:
+                          $ref: "#/components/schemas/Experiment"
+                        report:
+                          type: object
+                          required: [status, healthy]
+                          properties:
+                            status: {type: string, enum: [pending, ready, unavailable, restricted]}
+                            healthy: {type: boolean}
+                            verdict: {type: string}
+                            issue: {type: string}
+                            generatedAt: {type: string, format: date-time}
+                  total: {type: integer}
+                  offset: {type: integer}
+                  limit: {type: integer}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
   "/api/v1/admin/experiments/{id}":
     get:
       tags: [experiments]

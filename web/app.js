@@ -1354,35 +1354,67 @@ async function viewSegmentDetail(m) {
 // View: Experiments
 // ---------------------------------------------------------------------------
 const NS_HOUR = 3.6e12, NS_DAY = 8.64e13;
+const expList = { scope: '', offset: 0, q: '', state: '' };
+
+function expReportCell(report) {
+  if (report.status === 'pending') return chip(t('exp.listPending'), 'gray');
+  if (report.status === 'restricted') return chip(t('exp.listRestricted'), 'gray');
+  if (report.status === 'unavailable') return chip(t('exp.listUnavailable'), 'red');
+  const health = chip(t(report.healthy ? 'exp.listHealthy' : 'exp.listUnhealthy'), report.healthy ? 'green' : 'amber');
+  const verdict = report.verdict ? ' ' + chip(report.verdict, VERDICT_CHIP[report.verdict] || 'gray') : '';
+  const issue = report.issue ? '<div class="muted exp-list-issue" title="' + esc(report.issue) + '">' + esc(report.issue) + '</div>' : '';
+  return health + verdict + issue;
+}
 
 async function viewExperiments(m) {
   if (!needScope(m)) return;
   if (S.expCreate) return viewExpCreate(m);
   if (S.expId) return viewExpDetail(m);
-  const exps = (await api(scopePath() + '/experiments')) || [];
+  const scope = S.ws + '/' + S.env;
+  if (expList.scope !== scope) Object.assign(expList, { scope, offset: 0, q: '', state: '' });
+  const params = new URLSearchParams({ limit: '20', offset: String(expList.offset) });
+  if (expList.q) params.set('q', expList.q);
+  if (expList.state) params.set('state', expList.state);
+  const page = await api(scopePath() + '/experiment-summaries?' + params);
+  const rows = page.items || [];
+  const first = page.total ? page.offset + 1 : 0;
+  const last = page.offset + rows.length;
   m.innerHTML =
-    '<div class="view-head"><h2>' + esc(t('exp.title')) + '</h2><span class="muted">' + esc(exps.length) + '</span>' +
-    '<input class="list-search" type="search" placeholder="' + esc(t('list.search')) + '" aria-label="' + esc(t('list.search')) + '"><button class="btn primary sm" id="exp-new">' + esc(t('exp.new')) + '</button></div>' +
-    '<table class="grid mobile-card-table"><thead><tr><th>' + esc(t('th.id')) + '</th><th>' + esc(t('th.flag')) + '</th><th>' + esc(t('th.unit')) + '</th><th>' + esc(t('th.state')) + '</th><th>' + esc(t('th.variants')) + '</th><th>' + esc(t('th.epoch')) + '</th><th>' + esc(t('th.created')) + '</th></tr></thead><tbody>' +
-    (exps.map(e =>
-      '<tr data-list-record><td class="mono"><button class="row-link" type="button" data-exp="' + esc(e.id) + '">' + esc(e.id) + '</button></td><td class="mono">' +
-      esc(e.flagKey) + '</td><td class="mono">' + esc(e.unit) + '</td><td>' +
-      chip(e.state, EXP_CHIP[e.state] || 'gray') + '</td><td>' + esc((e.variants || []).join(', ')) +
-      '</td><td>' + esc(e.epoch || 0) + '</td><td class="nowrap">' + esc(fmtTime(e.createdAt)) + '</td></tr>').join('') ||
-      '<tr><td colspan="7" class="muted">' + esc(t('exp.empty')) + '</td></tr>') +
-    '</tbody></table><div class="mobile-record-cards">' + exps.map(e =>
+    '<div class="view-head"><h2>' + esc(t('exp.title')) + '</h2><span class="muted">' + esc(page.total) + '</span>' +
+    '<button class="btn primary sm" id="exp-new">' + esc(t('exp.new')) + '</button></div>' +
+    '<form class="exp-list-filters" id="exp-list-filter"><label>' + esc(t('exp.listSearch')) +
+    '<input id="exp-list-q" type="search" value="' + esc(expList.q) + '" placeholder="' + esc(t('exp.listSearchHint')) + '"></label>' +
+    '<label>' + esc(t('th.state')) + '<select id="exp-list-state"><option value="">' + esc(t('exp.listAllStates')) + '</option>' +
+    ['draft', 'reviewed', 'scheduled', 'running', 'paused', 'stopped', 'analyzed', 'archived'].map(state =>
+      '<option value="' + state + '"' + (expList.state === state ? ' selected' : '') + '>' + esc(state) + '</option>').join('') +
+    '</select></label><button class="btn sm" type="submit">' + esc(t('exp.listApply')) + '</button></form>' +
+    '<table class="grid mobile-card-table"><thead><tr><th>' + esc(t('th.id')) + '</th><th>' + esc(t('th.flag')) + '</th><th>' + esc(t('th.state')) + '</th><th>' + esc(t('exp.listHealth')) + '</th><th>' + esc(t('exp.listCreator')) + '</th><th>' + esc(t('th.updated')) + '</th></tr></thead><tbody>' +
+    (rows.map(({ experiment: e, report }) =>
+      '<tr><td class="mono"><button class="row-link" type="button" data-exp="' + esc(e.id) + '">' + esc(e.id) + '</button></td><td class="mono">' +
+      esc(e.flagKey) + '</td><td>' + chip(e.state, EXP_CHIP[e.state] || 'gray') + '</td><td>' + expReportCell(report) +
+      '</td><td>' + esc(e.createdBy || '—') + '</td><td class="nowrap">' + esc(fmtTime(e.updatedAt)) + '</td></tr>').join('') ||
+      '<tr><td colspan="6" class="muted">' + esc(t('exp.empty')) + '</td></tr>') +
+    '</tbody></table><div class="mobile-record-cards">' + rows.map(({ experiment: e, report }) =>
       '<article class="mobile-record" data-list-record><button class="row-link mono" type="button" data-exp="' +
       esc(e.id) + '">' + esc(e.id) + '</button><div>' + chip(e.state, EXP_CHIP[e.state] || 'gray') +
-      ' · ' + esc(e.flagKey) + ' · ' + esc(e.unit) + '</div><div class="muted">' +
-      esc((e.variants || []).join(', ')) + ' · ' + esc(t('th.epoch')) + ' ' + esc(e.epoch || 0) + '</div><div class="muted">' +
-      esc(fmtTime(e.createdAt)) + '</div></article>').join('') + '</div>' +
-    (exps.length ? '' : '<p class="muted mobile-empty">' + esc(t('exp.empty')) + '</p>') +
-    '<p class="muted hidden" data-list-no-match>' + esc(t('list.noMatch')) + '</p>';
-  bindListSearch(m);
+      ' · ' + esc(e.flagKey) + '</div><div>' + expReportCell(report) + '</div><div class="muted">' +
+      esc(e.createdBy || '—') + ' · ' + esc(fmtTime(e.updatedAt)) + '</div></article>').join('') + '</div>' +
+    (rows.length ? '' : '<p class="muted mobile-empty">' + esc(t('exp.empty')) + '</p>') +
+    '<div class="exp-list-pager"><span class="muted">' + esc(t('exp.listRange', { first, last, total: page.total })) + '</span>' +
+    '<button class="btn sm" id="exp-prev"' + (page.offset === 0 ? ' disabled' : '') + '>' + esc(t('exp.listPrev')) + '</button>' +
+    '<button class="btn sm" id="exp-next"' + (last >= page.total ? ' disabled' : '') + '>' + esc(t('exp.listNext')) + '</button></div>';
+  $('#exp-list-filter', m).onsubmit = ev => {
+    ev.preventDefault();
+    expList.q = $('#exp-list-q', m).value.trim();
+    expList.state = $('#exp-list-state', m).value;
+    expList.offset = 0;
+    viewExperiments(m);
+  };
+  $('#exp-prev', m).onclick = () => { expList.offset = Math.max(0, page.offset - page.limit); viewExperiments(m); };
+  $('#exp-next', m).onclick = () => { expList.offset = last; viewExperiments(m); };
   $('#exp-new', m).onclick = () => { S.expCreate = true; S.wizardDirty = false; S.expTab = 'summary'; route(); };
-  m.addEventListener('click', ev => {
-    const tr = ev.target.closest('[data-exp]');
-    if (tr) { S.expId = tr.dataset.exp; S.expTab = 'summary'; route(); }
+  $$('[data-exp]', m).forEach(button => {
+    button.onclick = () => { S.expId = button.dataset.exp; S.expTab = 'summary'; route(); };
   });
 }
 

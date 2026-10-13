@@ -473,12 +473,16 @@ func TestExperimentLifecycleRepublishesFlag(t *testing.T) {
 	}
 	exp.Variants = []string{"on", "off"}
 	exp.Proportions = map[string]float64{"on": 50, "off": 50}
+	exp.CreatedBy = "spoofed"
 	created, err := f.svc.CreateExperiment(f.analyst, f.ws.ID, f.env.ID, exp)
 	if err != nil {
 		t.Fatalf("CreateExperiment: %v", err)
 	}
 	if created.Epoch != 1 || created.State != model.ExperimentDraft {
 		t.Fatalf("created: %+v", created)
+	}
+	if created.CreatedBy != f.analyst.Name {
+		t.Fatalf("createdBy = %q, want authenticated actor %q", created.CreatedBy, f.analyst.Name)
 	}
 	if created.AnalysisMethod != "two-proportion-z" {
 		t.Fatalf("analysis method = %q", created.AnalysisMethod)

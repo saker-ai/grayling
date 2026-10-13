@@ -261,6 +261,11 @@ table.grid tr[hidden] { display: none; }
 .row-link { border: 0; background: none; padding: 2px 0; color: var(--accent); font: inherit; cursor: pointer; text-align: left; }
 .row-link:hover { text-decoration: underline; }
 .list-search { min-width: 180px; margin-left: auto; }
+.exp-list-filters, .exp-list-pager { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+.exp-list-filters label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+.exp-list-filters input { min-width: 220px; }
+.exp-list-pager span { margin-right: auto; }
+.exp-list-issue { max-width: 340px; overflow-wrap: anywhere; margin-top: 4px; }
 .inline-search { display: inline-flex; gap: 6px; align-items: center; }
 .inline-search input { min-width: 220px; }
 .detail-grid { display: grid; grid-template-columns: minmax(120px, 190px) minmax(0, 1fr); gap: 10px 16px; margin: 0; }

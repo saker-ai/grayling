@@ -27,6 +27,7 @@ func (s *Service) CreateExperiment(actor Actor, workspaceID, environmentID strin
 		return nil, err
 	}
 	exp.WorkspaceID, exp.EnvironmentID = env.WorkspaceID, env.ID
+	exp.CreatedBy = actor.Name
 	exp, err = s.Store.ResolveExperimentMetricRefs(exp)
 	if err != nil {
 		return nil, err

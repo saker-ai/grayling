@@ -208,6 +208,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/experiments", s.adminOnly(s.handleCreateExperiment))
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/experiments", s.adminOnly(s.handleListExperiments))
+	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/experiment-summaries", s.adminOnly(s.handleExperimentSummaries))
 	mux.HandleFunc("GET /api/v1/admin/experiments/{id}", s.adminOnly(s.handleGetExperiment))
 	mux.HandleFunc("POST /api/v1/admin/experiments/{id}/review", s.adminOnly(s.handleReviewExperiment))
 	mux.HandleFunc("POST /api/v1/admin/experiments/{id}/bind", s.adminOnly(s.handleBindExperiment))
