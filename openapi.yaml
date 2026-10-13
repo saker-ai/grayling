@@ -2445,6 +2445,27 @@ paths:
                 $ref: "#/components/schemas/Approval"
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+  "/api/v1/admin/workspaces/{ws}/approvals/{id}/comparison":
+    get:
+      tags: [workspaces]
+      summary: 查询审批申请绑定的前后文档及基线是否已变化
+      description: 回滚对照读取不可变 Flag 版本；放量计划对照展示拟创建步骤；AI pin 不返回内容。
+      operationId: getApprovalComparison
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 前后文档或明确的不可用原因。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalComparison"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   "/api/v1/admin/workspaces/{ws}/environments/{env}/approvals":
     post:
       tags: [workspaces]
@@ -2811,6 +2832,17 @@ components:
         rejectedAt: { type: string, format: date-time }
         rejectionReason: { type: string }
         usedAt: { type: string, format: date-time }
+    ApprovalComparison:
+      type: object
+      required: [available, stale, beforeRevision, afterRevision]
+      properties:
+        available: { type: boolean }
+        stale: { type: boolean, description: 申请后对象基线发生变化，原申请不可执行。 }
+        beforeRevision: { type: integer, format: int64 }
+        afterRevision: { type: integer, format: int64 }
+        before: { type: object, description: 回滚前的不可变 Flag 文档；AI pin 不返回。 }
+        after: { type: object, description: 回滚目标 Flag 文档或新放量步骤；AI pin 不返回。 }
+        reason: { type: string, enum: [content_not_retained, unsupported_action] }
     ReviewPreview:
       type: object
       required: [targetEnvironment, risk, baseRevision, proposedHash, changedFields, estimatedAffected, rollbackTarget, guardrails]

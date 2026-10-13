@@ -71,6 +71,7 @@
 | `GET` | `/api/v1/admin/workspaces/{ws}/approvals` | 已覆盖 | 审批队列/详情：申请、批准、执行 | i18n DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/approvals/{id}/approve` | 已覆盖 | 审批队列/详情：申请、批准、执行 | i18n DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/approvals/{id}/reject` | 已覆盖 | 审批详情：异人拒绝并保留原因 | 审批状态与 API 测试；i18n DOM |
+| `GET` | `/api/v1/admin/workspaces/{ws}/approvals/{id}/comparison` | 已覆盖 | 审批详情：回滚前后版本及新放量计划差异、过期基线提示；AI 内容不回传 | 权限与 API 测试；i18n DOM |
 | `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/approvals` | 已覆盖 | 审批队列/详情：申请、批准、执行 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/preview` | 已覆盖 | 分段列表/详情：草稿、预览、审批、发布 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/dependencies` | 已覆盖 | Segment 详情：当前发布 Flag 的直接和嵌套引用 | 管理服务与 API 测试；i18n DOM |

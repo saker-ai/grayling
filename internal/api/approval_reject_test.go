@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 func TestRejectApprovalAPI(t *testing.T) {
@@ -88,5 +89,100 @@ func TestRejectApprovalAPI(t *testing.T) {
 	}
 	if !foundAudit {
 		t.Fatal("rejection audit missing")
+	}
+}
+
+func TestApprovalComparisonShowsRollbackDocumentsAndStaleness(t *testing.T) {
+	store, err := platform.NewStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := store.CreateWorkspace("compare", "Compare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := store.CreateEnvironment(ws.ID, "prod", "Production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer, err := store.CreateToken(platform.TokenAdmin, "viewer", platform.RoleViewer, ws.ID, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := store.CreateWorkspace("outside", "Outside")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outsider, err := store.CreateToken(platform.TokenAdmin, "outsider", platform.RoleViewer, other.ID, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, revision := range []int64{1, 2} {
+		if err := store.AppendFlagRevision(&platform.FlagRevision{WorkspaceID: ws.ID, EnvironmentID: env.ID,
+			Key: "release", Revision: revision, Hash: "hash", Content: &model.Flag{Key: "release",
+				Variations: map[string]any{"on": revision == 2}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	approval, err := store.RequestApproval(platform.Approval{WorkspaceID: ws.ID, EnvironmentID: env.ID,
+		Action: "flag.rollback", Object: "release", BaseRevision: 2, Payload: `{"revision":1}`,
+		PayloadHash: "hash", Reason: "incident", SubmittedBy: "owner", SubmittedTokenID: "owner-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(store, nil, Options{})
+	path := "/api/v1/admin/workspaces/compare/approvals/" + approval.ID + "/comparison"
+	call := func(secret string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+secret)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, req)
+		return response
+	}
+	if got := call(outsider.Secret); got.Code != http.StatusForbidden {
+		t.Fatalf("cross-workspace comparison: %d %s", got.Code, got.Body.String())
+	}
+	check := func(wantStale bool) {
+		t.Helper()
+		response := call(viewer.Secret)
+		if response.Code != http.StatusOK {
+			t.Fatalf("comparison: %d %s", response.Code, response.Body.String())
+		}
+		var body struct {
+			Available      bool       `json:"available"`
+			Stale          bool       `json:"stale"`
+			BeforeRevision int64      `json:"beforeRevision"`
+			AfterRevision  int64      `json:"afterRevision"`
+			Before         model.Flag `json:"before"`
+			After          model.Flag `json:"after"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if !body.Available || body.Stale != wantStale || body.BeforeRevision != 2 || body.AfterRevision != 1 ||
+			body.Before.Variations["on"] != true || body.After.Variations["on"] != false {
+			t.Fatalf("comparison: %+v", body)
+		}
+	}
+	check(false)
+	if err := store.AppendFlagRevision(&platform.FlagRevision{WorkspaceID: ws.ID, EnvironmentID: env.ID,
+		Key: "release", Revision: 3, Hash: "hash3", Content: &model.Flag{Key: "release"}}); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+	aiApproval, err := store.RequestApproval(platform.Approval{WorkspaceID: ws.ID, EnvironmentID: env.ID,
+		Action: "ai.pin", Object: "prompt/tone", BaseRevision: 0, PayloadHash: "secret-hash",
+		Reason: "new prompt", SubmittedBy: "owner", SubmittedTokenID: "owner-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/admin/workspaces/compare/approvals/"+aiApproval.ID+"/comparison", nil)
+	req.Header.Set("Authorization", "Bearer "+viewer.Secret)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, req)
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"reason":"content_not_retained"`)) ||
+		bytes.Contains(response.Body.Bytes(), []byte(`"after"`)) {
+		t.Fatalf("AI comparison must not expose content: %d %s", response.Code, response.Body.String())
 	}
 }

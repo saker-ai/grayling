@@ -173,6 +173,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/approvals", s.adminOnly(s.handleListApprovals))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/approvals/{id}/approve", s.adminOnly(s.handleApproveChange))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/approvals/{id}/reject", s.adminOnly(s.handleRejectChange))
+	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/approvals/{id}/comparison", s.adminOnly(s.handleApprovalComparison))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/approvals", s.adminOnly(s.handleRequestApproval))
 	mux.HandleFunc("PUT /api/v1/admin/workspaces/{ws}/quotas", s.adminOnly(s.handleSetQuotas))
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/quotas", s.adminOnly(s.handleGetQuotas))

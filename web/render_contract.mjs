@@ -38,7 +38,7 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
 
 const structuredFlag = sandbox.__renderFlagStructured({ type: 'bool',
@@ -82,6 +82,17 @@ const approvalDetail = sandbox.__renderApprovalDetail({ id: 'a1', state: 'submit
 assert(!approvalDetail.includes('<script>') && !approvalDetail.includes('<img') &&
   approvalDetail.includes('&lt;script&gt;') && approvalDetail.includes('revision'),
   'approval detail must escape request data and show proposed operation input');
+const approvalComparison = sandbox.__renderApprovalComparison({ action: 'flag.rollback' }, {
+  available: true, stale: false, beforeRevision: 2, afterRevision: 1,
+  before: { variations: { on: '<script>alert(1)</script>' } },
+  after: { variations: { on: false } },
+});
+assert(approvalComparison.includes('Published Flag r2') && approvalComparison.includes('Variations') === false &&
+  approvalComparison.includes('variations') && approvalComparison.includes('&lt;script&gt;') &&
+  !approvalComparison.includes('<script>'), 'approval comparison must show escaped before and after values');
+assert(sandbox.__renderApprovalComparison({ action: 'flag.rollback' },
+  { available: true, stale: true, beforeRevision: 2, afterRevision: 1, before: {}, after: {} })
+  .includes('source changed'), 'stale approval must display its changed baseline');
 
 const flagDiff = sandbox.__renderFlagDiff(
   { revision: 4, content: { type: 'bool', variations: { safe: false, launch: true }, disable: false } },

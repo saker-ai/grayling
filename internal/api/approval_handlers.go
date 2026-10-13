@@ -171,6 +171,94 @@ func (s *Server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.Store.ListApprovals(ws.ID))
 }
 
+type approvalComparison struct {
+	Available      bool   `json:"available"`
+	Stale          bool   `json:"stale"`
+	BeforeRevision int64  `json:"beforeRevision"`
+	AfterRevision  int64  `json:"afterRevision"`
+	Before         any    `json:"before,omitempty"`
+	After          any    `json:"after,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+}
+
+// handleApprovalComparison reads the immutable documents named by the grant.
+// It never returns AI pin content: only a hash was retained for that action.
+func (s *Server) handleApprovalComparison(w http.ResponseWriter, r *http.Request) {
+	actor := actorFrom(r)
+	ws, err := s.Store.GetWorkspace(r.PathValue("ws"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := admin.Authorize(actor, ws.ID, admin.PermFlagRead); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	a, err := s.Store.GetApproval(r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if a.WorkspaceID != ws.ID {
+		writeStoreError(w, platform.ErrAccessDenied)
+		return
+	}
+	result := approvalComparison{BeforeRevision: a.BaseRevision}
+	switch a.Action {
+	case "flag.rollback":
+		var body struct {
+			Revision int64 `json:"revision"`
+		}
+		if err := json.Unmarshal([]byte(a.Payload), &body); err != nil || body.Revision < 1 {
+			writeStoreError(w, fmt.Errorf("%w: invalid rollback approval payload", platform.ErrValidation))
+			return
+		}
+		before, err := s.Store.GetFlagRevision(ws.ID, a.EnvironmentID, a.Object, a.BaseRevision)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		after, err := s.Store.GetFlagRevision(ws.ID, a.EnvironmentID, a.Object, body.Revision)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		result.Available = true
+		result.Stale = s.Store.CurrentFlagRevision(ws.ID, a.EnvironmentID, a.Object) != a.BaseRevision
+		result.Before, result.After = before.Content, after.Content
+		result.AfterRevision = after.Revision
+	case "release_plan.create":
+		var body struct {
+			Steps []platform.ReleaseStep `json:"steps"`
+		}
+		if err := jsonv1.Unmarshal([]byte(a.Payload), &body); err != nil || len(body.Steps) == 0 {
+			writeStoreError(w, fmt.Errorf("%w: invalid release plan approval payload", platform.ErrValidation))
+			return
+		}
+		exp, err := s.Store.GetExperiment(a.Object)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		if exp.WorkspaceID != ws.ID || exp.EnvironmentID != a.EnvironmentID {
+			writeStoreError(w, platform.ErrAccessDenied)
+			return
+		}
+		result.Available = true
+		result.After = map[string]any{"steps": body.Steps}
+		result.Stale = exp.ReleasePlan != nil ||
+			s.Store.CurrentFlagRevision(ws.ID, a.EnvironmentID, exp.FlagKey) != a.BaseRevision
+	case "ai.pin":
+		result.Reason = "content_not_retained"
+		if typ, logical, ok := strings.Cut(a.Object, "/"); ok {
+			result.Stale = int64(len(s.Store.ListPinnedVersions(ws.ID, a.EnvironmentID, typ, logical))) != a.BaseRevision
+		}
+	default:
+		result.Reason = "unsupported_action"
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handleApproveChange(w http.ResponseWriter, r *http.Request) {
 	actor := actorFrom(r)
 	ws, err := s.Store.GetWorkspace(r.PathValue("ws"))

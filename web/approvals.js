@@ -53,7 +53,30 @@ function renderApprovalList(approvals) {
         t('approval.noneForMe') : t('approval.none')) + '</div>');
 }
 
-function renderApprovalDetail(approval) {
+function renderApprovalComparison(approval, comparison) {
+  if (!comparison) return '<div class="banner warn">' + esc(t('approval.comparisonUnavailable')) + '</div>';
+  if (!comparison.available) return (comparison.stale ? '<div class="banner warn" role="alert">' +
+    esc(t('approval.comparisonStale')) + '</div>' : '') + '<div class="banner info">' +
+    esc(t(comparison.reason === 'content_not_retained' ? 'approval.contentNotRetained' :
+      'approval.comparisonUnsupported')) + '</div>';
+  const before = comparison.before || {};
+  const after = comparison.after || {};
+  const fields = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(field =>
+    JSON.stringify(before[field] ?? null) !== JSON.stringify(after[field] ?? null));
+  return '<section class="approval-comparison"><h4>' + esc(t('approval.comparison')) + '</h4>' +
+    (comparison.stale ? '<div class="banner warn" role="alert">' + esc(t('approval.comparisonStale')) + '</div>' : '') +
+    '<p class="muted">' + esc(approval.action === 'flag.rollback' ? t('approval.comparisonVersions', {
+      a: comparison.beforeRevision, b: comparison.afterRevision }) :
+      t('approval.releasePlanBase', { n: comparison.beforeRevision })) + '</p>' +
+    (fields.length ? fields.map(field => '<div class="flag-diff-item"><strong class="mono">' + esc(field) +
+      '</strong><div class="flag-diff-values"><div><span>' + esc(t('approval.before')) +
+      '</span><pre class="pre">' + esc(JSON.stringify(before[field] ?? null, null, 2)) +
+      '</pre></div><div><span>' + esc(t('approval.after')) + '</span><pre class="pre">' +
+      esc(JSON.stringify(after[field] ?? null, null, 2)) + '</pre></div></div></div>').join('') :
+      '<p class="muted">' + esc(t('approval.noFieldChanges')) + '</p>') + '</section>';
+}
+
+function renderApprovalDetail(approval, comparison) {
   let payload = '';
   if (approval.payload) {
     try { payload = JSON.stringify(JSON.parse(approval.payload), null, 2); }
@@ -78,6 +101,7 @@ function renderApprovalDetail(approval) {
     '<dt>' + esc(t('approval.reviewer')) + '</dt><dd>' + esc(approval.approvedBy || approval.rejectedBy || '—') + '</dd>' +
     (approval.rejectionReason ? '<dt>' + esc(t('approval.rejectionReason')) + '</dt><dd>' +
       esc(approval.rejectionReason) + '</dd>' : '') + '</dl>' +
+    renderApprovalComparison(approval, comparison) +
     (payload ? '<h4>' + esc(t('approval.proposedPayload')) + '</h4><pre class="pre">' + esc(payload) + '</pre>' : '') +
     (approval.submittedBy === S.actorName && approval.state === 'submitted'
       ? '<div class="banner info">' + esc(t('approval.selfReview')) + '</div>' : '') +
@@ -85,9 +109,11 @@ function renderApprovalDetail(approval) {
     (action === 'review' ? '<label class="field">' + esc(t('approval.reviewNote')) +
       '<textarea id="approval-note" rows="3"></textarea></label>' : '') +
     '<div id="approval-feedback" role="alert"></div><div class="row actions">' +
-    (action === 'review' ? '<button type="button" class="btn primary" id="approval-review">' + esc(t('btn.approve')) +
+    (action === 'review' ? '<button type="button" class="btn primary" id="approval-review"' +
+      (!comparison || comparison.stale ? ' disabled' : '') + '>' + esc(t('btn.approve')) +
       '</button><button type="button" class="btn danger" id="approval-reject">' + esc(t('approval.reject')) + '</button>' : '') +
-    (action === 'execute' ? '<button type="button" class="btn primary" id="approval-execute">' + esc(t('approval.execute')) + '</button>' : '') +
+    (action === 'execute' ? '<button type="button" class="btn primary" id="approval-execute"' +
+      (!comparison || comparison.stale ? ' disabled' : '') + '>' + esc(t('approval.execute')) + '</button>' : '') +
     '</div></section>';
 }
 
@@ -108,9 +134,16 @@ async function viewApprovals(root) {
   }
   const approval = approvals.find(item => item.id === S.approvalID);
   if (!approval) { root.innerHTML = errBanner(new ApiError(404, 'not_found', '')); return; }
-  root.innerHTML = renderApprovalDetail(approval);
+  let comparison = null;
+  try { comparison = await api(wsPath() + '/approvals/' + encodeURIComponent(approval.id) + '/comparison'); }
+  catch { /* Keep rejection and navigation available when comparison cannot load. */ }
+  root.innerHTML = renderApprovalDetail(approval, comparison);
   $('#approval-back', root).onclick = () => { S.approvalID = null; route(); };
   const act = async kind => {
+    if (kind !== 'reject' && (!comparison || comparison.stale)) {
+      $('#approval-feedback', root).textContent = t('approval.comparisonUnavailable');
+      return;
+    }
     const note = $('#approval-note', root)?.value.trim() || '';
     if ((kind === 'review' || kind === 'reject') && !note) {
       $('#approval-note', root).focus();
@@ -138,6 +171,13 @@ async function viewApprovals(root) {
           approvalExpired(latest)) {
         $('#approval-feedback', root).textContent = t('approval.changedBeforeAction');
         return;
+      }
+      if (kind !== 'reject') {
+        const latestComparison = await api(wsPath() + '/approvals/' + encodeURIComponent(approval.id) + '/comparison');
+        if (latestComparison.stale) {
+          $('#approval-feedback', root).textContent = t('approval.comparisonStale');
+          return;
+        }
       }
       if (kind === 'review') {
         await api(wsPath() + '/approvals/' + encodeURIComponent(approval.id) + '/approve',
