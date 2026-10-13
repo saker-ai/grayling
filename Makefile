@@ -74,7 +74,7 @@ check-run-port:
 	fi
 
 run: build ensure-admin-password check-run-port
-	GOLAB_ADMIN_PASSWORD_FILE="$(ADMIN_PASSWORD_FILE)" ./bin/golab -addr 0.0.0.0:19080 \
+	GOLAB_ADMIN_PASSWORD_FILE="$(ADMIN_PASSWORD_FILE)" ./bin/golab -addr 127.0.0.1:19080 \
 	  -gonacos-addr 127.0.0.1:0 -gonacos-grpc-addr 127.0.0.1:0 \
 	  -gonacos-root "$$($(GO) list -m -f '{{.Dir}}' github.com/godeps/gonacos)" $(RUN_ARGS)
 
