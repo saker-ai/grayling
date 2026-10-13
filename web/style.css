@@ -207,6 +207,10 @@ main { flex: 1; overflow: auto; padding: 16px; }
 table.grid { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 table.grid { min-width: 620px; }
 .diagnostic-cards { display: none; }
+.sample-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 14px 0 8px; padding: 0; list-style: none; }
+.sample-flow-stage { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; }
+.sample-flow-stage span { color: var(--muted); }
+.sample-flow-stage strong { font-size: 22px; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .flag-record-cards { display: none; }
 .flag-empty-mobile { display: none; }
 .mobile-record-cards, .mobile-empty { display: none; }
@@ -368,6 +372,7 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
   .flag-record { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; }
   table.grid.diagnostic-table { display: none; }
   .diagnostic-cards { display: grid; gap: 10px; margin: 10px 0; }
+  .sample-flow { grid-template-columns: 1fr; }
   .diagnostic-card { border: 1px solid var(--border); border-radius: 8px; margin: 0; padding: 10px; }
   .diagnostic-card dt { font-weight: 700; margin-bottom: 6px; }
   .diagnostic-card dd { display: flex; justify-content: space-between; gap: 12px; margin: 0; padding: 4px 0; border-top: 1px solid var(--row-line); }

@@ -2105,6 +2105,21 @@ async function viewExpDiagnostics(m, experiment, path) {
 
 function renderDiagnostics(d) {
   if (!d) return '';
+  const flow = d.perVariant || [];
+  const count = field => flow.reduce((sum, variant) => sum + Number(variant[field] || 0), 0);
+  const assigned = count('assignments');
+  const exposed = count('exposures');
+  const converted = count('conversions');
+  const unexposed = count('unexposed');
+  const hasAssignmentFacts = d.exposureMode === 'onRender';
+  const sampleFlow = '<ol class="sample-flow" aria-label="' + esc(t('report.sampleFlow')) + '">' +
+    '<li class="sample-flow-stage"><span>' + esc(t('report.assignments')) + '</span><strong>' +
+      esc(hasAssignmentFacts ? assigned : '—') + '</strong></li>' +
+    '<li class="sample-flow-stage"><span>' + esc(t('report.exposures')) + '</span><strong>' + esc(exposed) + '</strong></li>' +
+    '<li class="sample-flow-stage"><span>' + esc(t('report.collectedConverters')) + '</span><strong>' + esc(converted) + '</strong></li></ol>' +
+    '<p class="muted">' + esc(t(hasAssignmentFacts ? 'report.sampleFlowOnRender' : 'report.sampleFlowOnDecision')) +
+    (hasAssignmentFacts ? ' ' + esc(t('report.unexposed')) + ': ' + esc(unexposed) + '.' : '') + '</p>' +
+    '<p class="muted">' + esc(t('report.sampleFlowScope')) + '</p>';
   const collectionLabels = {
     invalid_event: t('collect.code.invalid_event'),
     unknown_experiment: t('collect.code.unknown_experiment'),
@@ -2129,6 +2144,7 @@ function renderDiagnostics(d) {
   return '<section aria-label="' + esc(t('report.deliveryDiagnostics')) + '">' +
     '<h4>' + esc(t('report.deliveryDiagnostics')) + '</h4>' +
     '<p class="muted">' + esc(t('report.deliveryExplanation')) + '</p>' +
+    sampleFlow +
     srmSummary +
     '<table class="grid diagnostic-table"><thead><tr><th>' + esc(t('th.variant')) + '</th><th>' +
       esc(t('report.assignments')) + '</th><th>' + esc(t('report.exposures')) +

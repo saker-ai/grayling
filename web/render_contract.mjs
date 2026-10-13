@@ -38,8 +38,25 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderExpDecisionHero = renderExpDecisionHero; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagExperimentImpact = renderFlagExperimentImpact; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderDiagnostics = renderDiagnostics; globalThis.__renderExpDecisionHero = renderExpDecisionHero; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagExperimentImpact = renderFlagExperimentImpact; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
+
+const delivered = sandbox.__renderDiagnostics({ exposureMode: 'onRender', perVariant: [
+  { variant: 'control', assignments: 100, exposures: 80, conversions: 10, unexposed: 20 },
+  { variant: 'treatment', assignments: 100, exposures: 70, conversions: 7, unexposed: 30 },
+] });
+assert(delivered.includes('Assignment, exposure, and conversion') &&
+  delivered.includes('<strong>200</strong>') && delivered.includes('<strong>150</strong>') &&
+  delivered.includes('<strong>17</strong>') && delivered.includes('Not exposed: 50') &&
+  delivered.includes('unique units within each variant'),
+  'onRender diagnostics must show true assignment, exposure and conversion counts with scope');
+const decisionExposure = sandbox.__renderDiagnostics({ exposureMode: 'onDecision', perVariant: [
+  { variant: 'control', assignments: 0, exposures: 80, conversions: 10, unexposed: 0 },
+] });
+assert(decisionExposure.includes('<strong>—</strong>') &&
+  decisionExposure.includes('no separate assignment count') &&
+  !decisionExposure.includes('Not exposed: 0'),
+  'onDecision diagnostics must not turn missing historical assignments into zero');
 
 const structuredFlag = sandbox.__renderFlagStructured({ type: 'bool',
   variations: { control: false, treatment: true }, defaultRule: { variation: 'control' },
