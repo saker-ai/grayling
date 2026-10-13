@@ -145,6 +145,12 @@ func TestExperimentFreezesPublishedMetricReferences(t *testing.T) {
 	if _, err := store.CreateExperiment(short); !errors.Is(err, ErrValidation) {
 		t.Fatalf("short analysis window accepted for catalog metric: %v", err)
 	}
+	long := baseP5Experiment(ws.ID, env.ID, MetricSpec{})
+	long.AnalysisWindow = 14 * 24 * time.Hour
+	long.PrimaryMetricRef = &primary
+	if _, err := store.CreateExperiment(long); !errors.Is(err, ErrValidation) {
+		t.Fatalf("different analysis window accepted for catalog metric: %v", err)
+	}
 	exp := baseP5Experiment(ws.ID, env.ID, MetricSpec{})
 	exp.AnalysisWindow = 7 * 24 * time.Hour
 	exp.PrimaryMetricRef = &primary
