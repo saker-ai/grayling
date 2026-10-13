@@ -103,8 +103,11 @@ class GolabServer:
     def publish_flag(self, ws: str, env: str, content: dict, *,
                      approver: str | None = None, risk: str = "normal") -> dict:
         base = f"/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{content['key']}"
+        _, current = self.request("GET", base, self.owner_token, expect=200)
         self.request("PUT", base + "/draft", self.owner_token,
-                     {"content": content, "risk": risk}, expect=200)
+                     {"content": content, "risk": risk,
+                      "baseRevision": current["currentRevision"],
+                      "expectedDraftHash": current["draftHash"]}, expect=200)
         self.request("POST", base + "/submit", self.owner_token,
                      {"reason": "Python SDK integration"}, expect=200)
         self.request("POST", base + "/approve", approver or self.reviewer_token,

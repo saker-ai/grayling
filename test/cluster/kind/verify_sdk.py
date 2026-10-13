@@ -119,8 +119,13 @@ def publish_next_revision(api=None, owner=None):
         "variations": {"on": f"tenant-a-{time.time_ns()}"},
         "defaultRule": {"variation": "on"},
     }
+    current = provision.request("GET", base, owner)
     for method, path, token, body in (
-        ("PUT", base + "/draft", owner, {"content": flag, "risk": "normal"}),
+        ("PUT", base + "/draft", owner, {
+            "content": flag, "risk": "normal",
+            "baseRevision": current["currentRevision"],
+            "expectedDraftHash": current["draftHash"],
+        }),
         ("POST", base + "/submit", owner, {"reason": "Kind SDK push"}),
         ("POST", base + "/approve", reviewer, {"note": "ok"}),
         ("POST", base + "/publish", owner, {"note": "Kind SDK push"}),

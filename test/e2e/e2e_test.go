@@ -16,13 +16,13 @@ import (
 	"testing"
 	"time"
 
+	gconfig "github.com/godeps/gonacos/pkg/config"
 	"github.com/saker-ai/grayling/internal/api"
 	"github.com/saker-ai/grayling/internal/configstore"
 	"github.com/saker-ai/grayling/internal/platform"
 	"github.com/saker-ai/grayling/pkg/bucketing"
 	"github.com/saker-ai/grayling/pkg/model"
 	"github.com/saker-ai/grayling/pkg/sdk"
-	gconfig "github.com/godeps/gonacos/pkg/config"
 )
 
 type harness struct {
@@ -156,8 +156,16 @@ func testFlag(key string) *model.Flag {
 func (h *harness) publishFlag(t *testing.T, flag *model.Flag, risk platform.Risk, approver string) adminPublishResult {
 	t.Helper()
 	base := fmt.Sprintf("/api/v1/admin/workspaces/acme/environments/prod/flags/%s", flag.Key)
+	var current struct {
+		CurrentRevision int64  `json:"currentRevision"`
+		DraftHash       string `json:"draftHash"`
+	}
+	if code := h.do("GET", base, h.owner, nil, &current); code != http.StatusOK {
+		t.Fatalf("read flag before saving draft: %d", code)
+	}
 	if code := h.do("PUT", base+"/draft", h.owner, map[string]any{
 		"content": flag, "risk": risk,
+		"baseRevision": current.CurrentRevision, "expectedDraftHash": current.DraftHash,
 	}, nil); code != http.StatusOK {
 		t.Fatalf("save draft: %d", code)
 	}

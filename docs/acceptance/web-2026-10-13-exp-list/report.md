@@ -19,4 +19,6 @@
 
 浏览器使用临时本机 JSON 数据仓库和本机管理员会话；构造了一个用于验收的实验，先创建 Draft 再迁移到 Running，另外创建一个 Draft 检查未启动状态和创建人归属。运行中实验没有用户曝光，因此报告的阻断状态来自真实服务端分析。它不是生产流量或统计效果验收。
 
-`GOLAB_TEST_PG_SKIP=1 go test ./internal/api ./internal/experiment ./web` 的 API 和 Web 包通过；`internal/experiment` 包中已有 3 个用例失败，原因是测试在创建后修改了返回实验对象的 `MinRuntime`，存储的预注册值没有随之改变，故报告正确返回最短运行时间未满足的 HOLD。本次列表改动没有修改分析算法。这些用例需要单独修正测试夹具后才能作为完整回归门禁。
+`GOLAB_TEST_PG_SKIP=1 go test ./internal/api ./internal/experiment ./web` 最初有 3 个统计用例失败：测试在创建后修改返回实验对象的 `MinRuntime`，存储的预注册值没有随之改变，故报告正确返回最短运行时间未满足的 HOLD。现已将参数配置移到入库前，`internal/experiment` 包通过；分析算法没有改动。本机跳过 PostgreSQL 容器测试，生产数据库路径仍以 CI 为准。
+
+全项目回归还发现多个端到端夹具沿用旧版无条件保存 Flag 草稿的请求体。夹具现带 `baseRevision` 和 `expectedDraftHash`；重复发布前先读最新值。跳过本机 PostgreSQL 容器并排除 `test/gateway` 后，`go test` 对其余所有 Go 包通过；网关 A–E/G 子测试也通过。完整 `test/gateway` 的 Redis 子测试在本机 Docker Redis 等待可用时超时，属于当前环境门禁，未据此推断网关 Redis 路径通过。Python SDK 与 Kind 夹具已更新并通过 `python3 -m py_compile`；`uv run --project sdk/python --extra test python -m pytest sdk/python/tests -q` 有 24 个测试通过。

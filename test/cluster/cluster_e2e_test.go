@@ -389,7 +389,9 @@ func (c *client) doOnce(method, path string, body any, out any) int {
 func (c *client) publishFlag(flag *model.Flag) (manifestRev int64, status int) {
 	c.t.Helper()
 	base := fmt.Sprintf("/api/v1/admin/workspaces/acme/environments/prod/flags/%s", flag.Key)
-	if status = c.do("PUT", base+"/draft", map[string]any{"content": flag, "risk": "normal"}, nil); status != 200 {
+	if status = c.do("PUT", base+"/draft", map[string]any{
+		"content": flag, "risk": "normal", "baseRevision": 0, "expectedDraftHash": "",
+	}, nil); status != 200 {
 		return 0, status
 	}
 	if status = c.do("POST", base+"/submit", map[string]any{"reason": "cluster publish"}, nil); status != 200 {
@@ -946,7 +948,9 @@ func TestClusterMultiReplica(t *testing.T) {
 		for i := 0; i < n; i++ {
 			fl := splitFlag(fmt.Sprintf("conc-%d", i), 50)
 			base := fmt.Sprintf("/api/v1/admin/workspaces/acme/environments/prod/flags/%s", fl.Key)
-			if code := adminA.do("PUT", base+"/draft", map[string]any{"content": fl, "risk": "normal"}, nil); code != 200 {
+			if code := adminA.do("PUT", base+"/draft", map[string]any{
+				"content": fl, "risk": "normal", "baseRevision": 0, "expectedDraftHash": "",
+			}, nil); code != 200 {
 				t.Fatalf("draft %d: %d", i, code)
 			}
 			if code := adminA.do("POST", base+"/submit", map[string]any{"reason": "cluster publish"}, nil); code != 200 {
@@ -1048,7 +1052,9 @@ func TestClusterMultiReplica(t *testing.T) {
 	t.Run("SameFlagRaceOneWinner", func(t *testing.T) {
 		fl := splitFlag("race-flag", 50)
 		base := fmt.Sprintf("/api/v1/admin/workspaces/acme/environments/prod/flags/%s", fl.Key)
-		if code := adminA.do("PUT", base+"/draft", map[string]any{"content": fl, "risk": "normal"}, nil); code != 200 {
+		if code := adminA.do("PUT", base+"/draft", map[string]any{
+			"content": fl, "risk": "normal", "baseRevision": 0, "expectedDraftHash": "",
+		}, nil); code != 200 {
 			t.Fatalf("draft: %d", code)
 		}
 		if code := adminA.do("POST", base+"/submit", map[string]any{"reason": "cluster publish"}, nil); code != 200 {

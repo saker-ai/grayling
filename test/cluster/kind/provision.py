@@ -72,7 +72,9 @@ def main():
         base = f"/api/v1/admin/workspaces/{slug}/environments/prod/flags/{key}"
         flag = {"schemaVersion": 1, "key": key, "type": "string",
                 "variations": {"on": slug}, "defaultRule": {"variation": "on"}}
-        request("PUT", base + "/draft", owner, {"content": flag, "risk": "normal"})
+        request("PUT", base + "/draft", owner, {
+            "content": flag, "risk": "normal", "baseRevision": 0, "expectedDraftHash": "",
+        })
         request("POST", base + "/submit", owner, {"reason": "Kind native isolation"})
         request("POST", base + "/approve", reviewer["Secret"], {"note": "ok"})
         request("POST", base + "/publish", owner, {"note": "ship"})

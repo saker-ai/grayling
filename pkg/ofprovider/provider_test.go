@@ -18,15 +18,15 @@ import (
 	"testing"
 	"time"
 
+	gconfig "github.com/godeps/gonacos/pkg/config"
+	of "github.com/open-feature/go-sdk/openfeature"
+	"github.com/open-feature/go-sdk/openfeature/isolated"
 	"github.com/saker-ai/grayling/internal/api"
 	"github.com/saker-ai/grayling/internal/configstore"
 	"github.com/saker-ai/grayling/internal/platform"
 	"github.com/saker-ai/grayling/pkg/bucketing"
 	"github.com/saker-ai/grayling/pkg/model"
 	"github.com/saker-ai/grayling/pkg/sdk"
-	gconfig "github.com/godeps/gonacos/pkg/config"
-	of "github.com/open-feature/go-sdk/openfeature"
-	"github.com/open-feature/go-sdk/openfeature/isolated"
 )
 
 // ---------------------------------------------------------------------------
@@ -123,7 +123,9 @@ func (h *harness) do(method, path, token string, body any) int {
 func (h *harness) publishFlag(flag *model.Flag) {
 	h.t.Helper()
 	base := fmt.Sprintf("/api/v1/admin/workspaces/acme/environments/prod/flags/%s", flag.Key)
-	if code := h.do("PUT", base+"/draft", h.owner, map[string]any{"content": flag}); code != http.StatusOK {
+	if code := h.do("PUT", base+"/draft", h.owner, map[string]any{
+		"content": flag, "baseRevision": 0, "expectedDraftHash": "",
+	}); code != http.StatusOK {
 		h.t.Fatalf("draft %s: %d", flag.Key, code)
 	}
 	if code := h.do("POST", base+"/submit", h.owner, map[string]any{"reason": "provider verification"}); code != http.StatusOK {

@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	gconfig "github.com/godeps/gonacos/pkg/config"
 	"github.com/saker-ai/grayling/internal/admin"
 	"github.com/saker-ai/grayling/internal/api"
 	"github.com/saker-ai/grayling/internal/configstore"
@@ -28,7 +29,6 @@ import (
 	"github.com/saker-ai/grayling/pkg/evaluation"
 	"github.com/saker-ai/grayling/pkg/model"
 	"github.com/saker-ai/grayling/test/pgtest"
-	gconfig "github.com/godeps/gonacos/pkg/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -659,7 +659,7 @@ func (h *harness) publishFlag(flag *model.Flag, risk platform.Risk, approver str
 	h.t.Helper()
 	base := fmt.Sprintf("/api/v1/admin/workspaces/acme/environments/prod/flags/%s", flag.Key)
 	if code := h.do("PUT", base+"/draft", h.owner,
-		map[string]any{"content": flag, "risk": risk}, nil); code != http.StatusOK {
+		map[string]any{"content": flag, "risk": risk, "baseRevision": 0, "expectedDraftHash": ""}, nil); code != http.StatusOK {
 		h.t.Fatalf("save draft: %d", code)
 	}
 	if code := h.do("POST", base+"/submit", h.owner, map[string]any{"reason": "rollout test"}, nil); code != http.StatusOK {

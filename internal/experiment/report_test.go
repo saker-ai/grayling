@@ -196,6 +196,11 @@ func setup(t *testing.T) (*platform.Store, *platform.Workspace, *platform.Enviro
 
 func newExp(t *testing.T, store *platform.Store, ws *platform.Workspace, env *platform.Environment,
 	metricType string, guardrails ...platform.GuardrailSpec) *platform.Experiment {
+	return newExpConfigured(t, store, ws, env, metricType, nil, guardrails...)
+}
+
+func newExpConfigured(t *testing.T, store *platform.Store, ws *platform.Workspace, env *platform.Environment,
+	metricType string, configure func(*platform.Experiment), guardrails ...platform.GuardrailSpec) *platform.Experiment {
 	t.Helper()
 	exp := &platform.Experiment{
 		WorkspaceID: ws.ID, EnvironmentID: env.ID,
@@ -213,6 +218,9 @@ func newExp(t *testing.T, store *platform.Store, ws *platform.Workspace, env *pl
 		MinRuntime:      time.Hour,
 		AnalysisWindow:  7 * 24 * time.Hour,
 		Hypothesis:      "treatment lifts conversion",
+	}
+	if configure != nil {
+		configure(exp)
 	}
 	created, err := store.CreateExperiment(exp)
 	if err != nil {
@@ -338,9 +346,10 @@ func TestReportProportionShip(t *testing.T) {
 
 func TestReportMeanMetricWelch(t *testing.T) {
 	store, ws, env := setup(t)
-	exp := newExp(t, store, ws, env, "mean")
-	exp.AnalysisMethod = "welch"
-	exp.MinRuntime = 0
+	exp := newExpConfigured(t, store, ws, env, "mean", func(exp *platform.Experiment) {
+		exp.AnalysisMethod = "welch"
+		exp.MinRuntime = 0
+	})
 	simulate(t, store, ws, env, exp, 800, 0.9, 0.9, "mean", 0)
 
 	rep, err := BuildReport(store, exp.ID, time.Now())
@@ -361,8 +370,9 @@ func TestReportMeanMetricWelch(t *testing.T) {
 // TestReportSRMBlocksVerdict is the P2 acceptance rule: 异常数据不出胜负结论.
 func TestReportSRMBlocksVerdict(t *testing.T) {
 	store, ws, env := setup(t)
-	exp := newExp(t, store, ws, env, "proportion")
-	exp.MinRuntime = 0
+	exp := newExpConfigured(t, store, ws, env, "proportion", func(exp *platform.Experiment) {
+		exp.MinRuntime = 0
+	})
 	// 60% more treatment units than registered → massive SRM, and the
 	// treatment lift is significant regardless. The gate must hold.
 	simulate(t, store, ws, env, exp, 2000, 0.10, 0.20, "proportion", 1.6)
@@ -390,11 +400,12 @@ func TestReportSRMBlocksVerdict(t *testing.T) {
 
 func TestReportGuardrailRollback(t *testing.T) {
 	store, ws, env := setup(t)
-	exp := newExp(t, store, ws, env, "proportion", platform.GuardrailSpec{
+	exp := newExpConfigured(t, store, ws, env, "proportion", func(exp *platform.Experiment) {
+		exp.MinRuntime = 0
+	}, platform.GuardrailSpec{
 		MetricKey: "conversion", Type: "proportion", Direction: "increase",
 		MaxRelativeRegression: 0.02, MinSample: 50,
 	})
-	exp.MinRuntime = 0
 	// Primary metric REGRESSES badly (10% → 5%) → guardrail breach and
 	// significant negative primary both point at rollback.
 	simulate(t, store, ws, env, exp, 2000, 0.10, 0.05, "proportion", 0)
@@ -413,9 +424,10 @@ func TestReportGuardrailRollback(t *testing.T) {
 
 func TestReportInsufficientSampleHolds(t *testing.T) {
 	store, ws, env := setup(t)
-	exp := newExp(t, store, ws, env, "proportion")
-	exp.MinRuntime = 0
-	exp.MinSamplePerArm = 5000 // never reached
+	exp := newExpConfigured(t, store, ws, env, "proportion", func(exp *platform.Experiment) {
+		exp.MinRuntime = 0
+		exp.MinSamplePerArm = 5000 // never reached
+	})
 	simulate(t, store, ws, env, exp, 300, 0.10, 0.30, "proportion", 0)
 
 	rep, err := BuildReport(store, exp.ID, time.Now())
@@ -429,8 +441,9 @@ func TestReportInsufficientSampleHolds(t *testing.T) {
 
 func TestReportMinRuntimeHolds(t *testing.T) {
 	store, ws, env := setup(t)
-	exp := newExp(t, store, ws, env, "proportion")
-	exp.MinRuntime = 30 * 24 * time.Hour // 30 days — just started
+	exp := newExpConfigured(t, store, ws, env, "proportion", func(exp *platform.Experiment) {
+		exp.MinRuntime = 30 * 24 * time.Hour // 30 days — just started
+	})
 	simulate(t, store, ws, env, exp, 2000, 0.10, 0.20, "proportion", 0)
 
 	rep, err := BuildReport(store, exp.ID, time.Now())

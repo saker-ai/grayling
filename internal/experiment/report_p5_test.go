@@ -319,9 +319,10 @@ func TestReportGuardrailBlocksQuantileMetric(t *testing.T) {
 // SEPARATE from the frequentist Primary/Decision (docs/技术方案.md §10.3).
 func TestReportMeanHasSeparateBayesianSequential(t *testing.T) {
 	store, ws, env := setup(t)
-	exp := newExp(t, store, ws, env, "mean")
-	exp.MDE = 0.2 // sequential mixing scale
-	exp.MinRuntime = 0
+	exp := newExpConfigured(t, store, ws, env, "mean", func(exp *platform.Experiment) {
+		exp.MDE = 0.2 // sequential mixing scale
+		exp.MinRuntime = 0
+	})
 	simulate(t, store, ws, env, exp, 800, 0.9, 0.9, "mean", 0)
 
 	rep, err := BuildReport(store, exp.ID, time.Now())
@@ -361,8 +362,9 @@ func TestReportMeanHasSeparateBayesianSequential(t *testing.T) {
 // the Bayesian proportion view (separate from the frequentist z-test).
 func TestReportProportionHasBayesianView(t *testing.T) {
 	store, ws, env := setup(t)
-	exp := newExp(t, store, ws, env, "proportion")
-	exp.MinRuntime = 0
+	exp := newExpConfigured(t, store, ws, env, "proportion", func(exp *platform.Experiment) {
+		exp.MinRuntime = 0
+	})
 	simulate(t, store, ws, env, exp, 2000, 0.10, 0.16, "proportion", 0)
 	rep, err := BuildReport(store, exp.ID, time.Now())
 	if err != nil {

@@ -6,14 +6,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	gonacosai "github.com/godeps/gonacos/pkg/ai"
+	gconfig "github.com/godeps/gonacos/pkg/config"
 	aisvc "github.com/saker-ai/grayling/internal/ai"
 	"github.com/saker-ai/grayling/internal/api"
 	"github.com/saker-ai/grayling/internal/configstore"
 	"github.com/saker-ai/grayling/internal/platform"
 	"github.com/saker-ai/grayling/pkg/bucketing"
 	"github.com/saker-ai/grayling/pkg/model"
-	gonacosai "github.com/godeps/gonacos/pkg/ai"
-	gconfig "github.com/godeps/gonacos/pkg/config"
 )
 
 // aiHarness extends the base harness with the AI gate wired in.
@@ -102,7 +102,9 @@ func TestAIPublishRequiresAllowlist(t *testing.T) {
 	// Without a model allowlist the flag CANNOT publish (§7: modelRef 白名单).
 	flag := aiFlag("ai-router")
 	base := "/api/v1/admin/workspaces/acme/environments/prod/flags/ai-router"
-	if code := h.do("PUT", base+"/draft", h.owner, map[string]any{"content": flag}, nil); code != http.StatusOK {
+	if code := h.do("PUT", base+"/draft", h.owner, map[string]any{
+		"content": flag, "baseRevision": 0, "expectedDraftHash": "",
+	}, nil); code != http.StatusOK {
 		t.Fatalf("draft: %d", code)
 	}
 	if code := h.do("POST", base+"/submit", h.owner, map[string]any{"reason": "AI route release"}, nil); code != http.StatusOK {

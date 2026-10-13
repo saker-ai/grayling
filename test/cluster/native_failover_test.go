@@ -17,15 +17,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/saker-ai/grayling/internal/configstore"
-	"github.com/saker-ai/grayling/pkg/model"
-	"github.com/saker-ai/grayling/test/pgtest"
-	"github.com/saker-ai/grayling/test/redistest"
 	grpcsrv "github.com/godeps/gonacos/pkg/protocol/grpc"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients/config_client"
 	"github.com/nacos-group/nacos-sdk-go/v2/common/constant"
 	"github.com/nacos-group/nacos-sdk-go/v2/vo"
+	"github.com/saker-ai/grayling/internal/configstore"
+	"github.com/saker-ai/grayling/pkg/model"
+	"github.com/saker-ai/grayling/test/pgtest"
+	"github.com/saker-ai/grayling/test/redistest"
 	"golang.org/x/net/http2"
 )
 
@@ -189,7 +189,9 @@ func TestOfficialNacosClientFailsOverAcrossGolabNodes(t *testing.T) {
 		body         map[string]any
 		token        string
 	}{
-		{http.MethodPut, otherPath + "/draft", map[string]any{"content": otherFlag, "risk": "normal"}, owner},
+		{http.MethodPut, otherPath + "/draft", map[string]any{
+			"content": otherFlag, "risk": "normal", "baseRevision": 0, "expectedDraftHash": "",
+		}, owner},
 		{http.MethodPost, otherPath + "/submit", map[string]any{"reason": "native tenant isolation"}, owner},
 		{http.MethodPost, otherPath + "/approve", map[string]any{"note": "ok"}, otherReviewer.Secret},
 		{http.MethodPost, otherPath + "/publish", map[string]any{"note": "ship"}, owner},

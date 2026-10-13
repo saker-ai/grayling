@@ -35,6 +35,7 @@ import (
 	"testing"
 	"time"
 
+	gconfig "github.com/godeps/gonacos/pkg/config"
 	"github.com/saker-ai/grayling/internal/api"
 	"github.com/saker-ai/grayling/internal/configstore"
 	"github.com/saker-ai/grayling/internal/platform"
@@ -42,7 +43,6 @@ import (
 	"github.com/saker-ai/grayling/pkg/evaluation"
 	"github.com/saker-ai/grayling/pkg/model"
 	"github.com/saker-ai/grayling/pkg/sdk"
-	gconfig "github.com/godeps/gonacos/pkg/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -324,8 +324,16 @@ func (p *perfServer) ensureWorkspace(t *testing.T, ws, env string) {
 func (p *perfServer) publishFlag(t *testing.T, ws, env string, flag *model.Flag) int64 {
 	t.Helper()
 	base := fmt.Sprintf("/api/v1/admin/workspaces/%s/environments/%s/flags/%s", ws, env, flag.Key)
+	var current struct {
+		CurrentRevision int64  `json:"currentRevision"`
+		DraftHash       string `json:"draftHash"`
+	}
+	if code := p.do(t, "GET", base, p.owner, nil, &current); code != http.StatusOK {
+		t.Fatalf("read flag before saving draft: %d", code)
+	}
 	if code := p.do(t, "PUT", base+"/draft", p.owner,
-		map[string]any{"content": flag, "risk": "normal"}, nil); code != http.StatusOK {
+		map[string]any{"content": flag, "risk": "normal",
+			"baseRevision": current.CurrentRevision, "expectedDraftHash": current.DraftHash}, nil); code != http.StatusOK {
 		t.Fatalf("draft: %d", code)
 	}
 	if code := p.do(t, "POST", base+"/submit", p.owner, map[string]any{"reason": "performance verification"}, nil); code != http.StatusOK {

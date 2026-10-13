@@ -253,7 +253,17 @@ func (a *adminClient) do(method, path string, body any, out any) int {
 func (a *adminClient) publishFlag(flag *model.Flag) (manifestRev int64) {
 	a.t.Helper()
 	base := fmt.Sprintf("/api/v1/admin/workspaces/acme/environments/prod/flags/%s", flag.Key)
-	if code := a.do("PUT", base+"/draft", map[string]any{"content": flag, "risk": "normal"}, nil); code != 200 {
+	var current struct {
+		CurrentRevision int64  `json:"currentRevision"`
+		DraftHash       string `json:"draftHash"`
+	}
+	if code := a.do("GET", base, nil, &current); code != 200 {
+		a.t.Fatalf("read flag before saving draft: %d", code)
+	}
+	if code := a.do("PUT", base+"/draft", map[string]any{
+		"content": flag, "risk": "normal",
+		"baseRevision": current.CurrentRevision, "expectedDraftHash": current.DraftHash,
+	}, nil); code != 200 {
 		a.t.Fatalf("save draft: %d", code)
 	}
 	if code := a.do("POST", base+"/submit", map[string]any{"reason": "gateway verification"}, nil); code != 200 {

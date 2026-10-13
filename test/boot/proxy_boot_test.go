@@ -174,7 +174,9 @@ func TestProxyBinaryDeployment(t *testing.T) {
 		"defaultRule": map[string]any{"variation": "on"},
 	}
 	base := "/api/v1/admin/workspaces/pxboot/environments/prod/flags/boot-flag"
-	if code := admin("PUT", base+"/draft", map[string]any{"content": flagDoc}, nil); code != http.StatusOK {
+	if code := admin("PUT", base+"/draft", map[string]any{
+		"content": flagDoc, "baseRevision": 0, "expectedDraftHash": "",
+	}, nil); code != http.StatusOK {
 		t.Fatalf("draft: %d", code)
 	}
 	if code := admin("POST", base+"/submit", map[string]any{"reason": "proxy boot"}, nil); code != http.StatusOK {
