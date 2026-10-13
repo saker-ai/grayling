@@ -34,6 +34,8 @@ const el = () => ({
 
 const fetchCalls = [];
 let currentExperiment = null;
+let reportUnavailable = false;
+let reportFetches = 0;
 const sandbox = {
   document: {
     addEventListener() {}, createElement: el,
@@ -55,6 +57,13 @@ const sandbox = {
       return Promise.resolve({ ok: true, status: 200,
         text: () => Promise.resolve(JSON.stringify(currentExperiment)) });
     }
+    if (opts.method === 'GET' && url === '/api/v1/admin/experiments/exp-1/report') {
+      reportFetches++;
+      return Promise.resolve(reportUnavailable
+        ? { ok: false, status: 503, statusText: 'report unavailable',
+          text: () => Promise.resolve('{"error":{"message":"report unavailable"}}') }
+        : { ok: true, status: 200, text: () => Promise.resolve('{"healthy":false}') });
+    }
     fetchCalls.push({ url, opts });
     return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('{}') });
   },
@@ -66,12 +75,14 @@ vm.createContext(sandbox);
 vm.runInNewContext(
   code + '\n;globalThis.__renderRollout = renderRollout;' +
   'globalThis.__bindRollout = bindRollout;' +
+  'globalThis.__setRolloutReportStatus = setRolloutReportStatus;' +
   'globalThis.__planNextGate = planNextGate;',
   sandbox);
 assert.strictEqual(typeof sandbox.__renderRollout, 'function', 'renderRollout() not exposed from app.js');
 assert.strictEqual(typeof sandbox.__bindRollout, 'function', 'bindRollout() not exposed from app.js');
 assert.strictEqual(typeof sandbox.__planNextGate, 'function', 'planNextGate() not exposed from app.js');
 vm.runInNewContext("S.env = 'prod'", sandbox);
+vm.runInNewContext("S.capabilities = { permissions: { 'flag.publish': true } }", sandbox);
 const dialogs = [];
 sandbox.actionDialog = async options => {
   dialogs.push(options);
@@ -96,7 +107,7 @@ function makeRoot(html) {
   for (const mt of html.matchAll(/id="([^"]+)"/g)) ids.add(mt[1]);
   const stubs = new Map();
   return {
-    _ids: ids, _stubs: stubs, innerHTML: '',
+    _ids: ids, _stubs: stubs, innerHTML: '', dataset: {},
     querySelector(sel) {
       if (typeof sel !== 'string' || !/^#[A-Za-z0-9_-]+$/.test(sel)) return null;
       const id = sel.slice(1);
@@ -367,4 +378,34 @@ const withPlan = over => ({ id: 'exp-1', state: 'running', releasePlan: { ...bas
   assert.strictEqual(fetchCalls.length, 0, 'stale step must not POST a mutation');
 }
 
-console.log('rollout UI DOM contract: all assertions passed (8 plan states + 5 action flows)');
+// 14. A failed report blocks advancing and resuming, while pause and manual
+// takeover remain available. A later successful read restores the controls.
+{
+  const { root } = renderState(withPlan());
+  sandbox.__setRolloutReportStatus(root, 'pending');
+  assert(root._stubs.get('ro-advance').disabled, 'advance must wait for the current report');
+  sandbox.__setRolloutReportStatus(root, 'unavailable');
+  assert(root._stubs.get('ro-advance').disabled, 'advance must be disabled after report failure');
+  assert(!root._stubs.get('ro-pause').disabled && !root._stubs.get('ro-takeover-on').disabled,
+    'pause and manual takeover must remain available');
+  assert(root._stubs.get('ro-report-gate').innerHTML.includes('current report is unavailable'),
+    'report failure must explain the blocked actions');
+  reportUnavailable = true; fetchCalls.length = 0;
+  root._stubs.get('ro-advance').onclick();
+  await tick();
+  assert.strictEqual(fetchCalls.length, 0, 'failed just-in-time report check must not POST advance');
+  reportUnavailable = false;
+  sandbox.__setRolloutReportStatus(root, 'ready');
+  assert(!root._stubs.get('ro-advance').disabled, 'advance must recover after a successful report read');
+
+  const paused = renderState(withPlan({ state: 'paused' })).root;
+  sandbox.__setRolloutReportStatus(paused, 'unavailable');
+  assert(paused._stubs.get('ro-resume').disabled, 'resume must be blocked on report failure');
+  const takeover = renderState(withPlan({ manualOverride: true })).root;
+  sandbox.__setRolloutReportStatus(takeover, 'unavailable');
+  assert(takeover._stubs.get('ro-takeover-off').disabled,
+    'return to automatic control must be blocked on report failure');
+  assert(reportFetches > 0, 'advance must re-read the report before showing confirmation');
+}
+
+console.log('rollout UI DOM contract: all assertions passed (8 plan states + report safety gate + action flows)');

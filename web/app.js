@@ -1942,6 +1942,8 @@ async function viewExpDetail(m) {
   let lastReport = null;
   let reportDetailOpen = false;
   let reportRequest = 0;
+  const preLaunch = ['draft', 'reviewed', 'scheduled'].includes(e.state);
+  setRolloutReportStatus(m, preLaunch ? 'not_required' : can('report.read') ? 'pending' : 'restricted');
   const loadReport = async (showDetail = false) => {
     const box = $('#report-box', m);
     if (!box) return false;
@@ -1952,11 +1954,13 @@ async function viewExpDetail(m) {
       if (S.expId !== id || S.view !== 'experiments' || request !== reportRequest) return false;
       lastReport = report;
       $('#exp-decision', m).innerHTML = renderExpDecisionHero(report, e.state);
+      setRolloutReportStatus(m, 'ready');
       if (reportDetailOpen) renderReport(box, report);
       return true;
     } catch (err) {
       if (request !== reportRequest) return false;
       $('#exp-decision', m).innerHTML = renderExpDecisionHero(lastReport, e.state, err);
+      setRolloutReportStatus(m, 'unavailable');
       if (reportDetailOpen) {
         if (lastReport) {
           renderReport(box, lastReport);
@@ -2001,8 +2005,9 @@ async function viewExpDetail(m) {
     failures = 0;
     if (autoRefresh) poll();
   };
-  if (can('report.read') && !['draft', 'reviewed', 'scheduled'].includes(e.state)) loadReport();
+  if (can('report.read') && !preLaunch) loadReport();
   bindRollout(m, id, e);
+  setRolloutReportStatus(m, m.dataset.rolloutReportStatus);
 }
 
 function renderExpDecisionHero(report, state, error = null) {
@@ -2421,6 +2426,7 @@ function renderRollout(exp) {
     '<h4>' + esc(t('ro.planSteps')) + '</h4>' + renderRolloutSteps(plan) +
     '<h4>' + esc(t('ro.actionHistory')) + ' <span class="muted">' + esc(t('ro.historyNote')) + '</span></h4>' +
     renderRolloutHistory(plan) +
+    '<div id="ro-report-gate" role="status"></div>' +
     '<div class="row actions">' +
       '<button class="btn sm" id="ro-refresh">' + esc(t('btn.refresh')) + '</button>' +
       (plan.state === 'armed' || plan.state === 'running' ? '<button class="btn danger" id="ro-pause">' + esc(t('btn.pause')) + '</button>' : '') +
@@ -2449,14 +2455,41 @@ function rolloutStepRow() {
   return row;
 }
 
+function setRolloutReportStatus(m, status) {
+  m.dataset.rolloutReportStatus = status;
+  const gate = $('#ro-report-gate', m);
+  if (gate) {
+    const message = status === 'ready' || status === 'not_required' ? '' : status === 'restricted' ? 'ro.reportRestricted' :
+      status === 'unavailable' ? 'ro.reportUnavailable' : 'ro.reportPending';
+    gate.innerHTML = message ? '<div class="banner warn">' + esc(t(message)) + '</div>' : '';
+  }
+  for (const selector of ['#ro-resume', '#ro-advance', '#ro-takeover-off']) {
+    const button = $(selector, m);
+    if (button) button.disabled = !['ready', 'not_required'].includes(status) || !can('flag.publish');
+  }
+}
+
 // bindRollout wires the rendered rollout card. State-conditional buttons are
 // guarded (they exist only in the states where the action is legal server-side).
 function bindRollout(m, expId, exp = null) {
   const base = '/api/v1/admin/experiments/' + encodeURIComponent(expId) + '/release-plan';
   const plan = exp?.releasePlan;
+  const checkReport = async () => {
+    try {
+      await api('/api/v1/admin/experiments/' + encodeURIComponent(expId) + '/report');
+      setRolloutReportStatus(m, 'ready');
+      return true;
+    } catch (err) {
+      setRolloutReportStatus(m, err.status === 403 ? 'restricted' : 'unavailable');
+      reportError(err);
+      return false;
+    }
+  };
   const decide = async ({ title, summary, reasonLabel = '', reasonRequired = true,
-    confirmLabel, path, body, success }) => {
+    confirmLabel, path, body, success, requireReport = false }) => {
     if (!confirmLeaveEditor()) return;
+    const reportRequired = requireReport && !['draft', 'reviewed', 'scheduled'].includes(exp?.state);
+    if (reportRequired && !await checkReport()) return;
     let latest;
     try { latest = await api('/api/v1/admin/experiments/' + encodeURIComponent(expId)); }
     catch (e) { reportError(e); return; }
@@ -2472,6 +2505,7 @@ function bindRollout(m, expId, exp = null) {
       step: step?.name || '—', ratio: step?.ratio ?? '—' });
     const accepted = await actionDialog({ title, summary: scope + ' ' + summary,
       reasonLabel, reasonRequired, confirmLabel, onConfirm: async ({ reason }) => {
+        if (reportRequired && !await checkReport()) throw new Error(t('ro.reportUnavailable'));
         const options = { method: 'POST' };
         if (body) options.body = body(reason);
         await api(base + path, options);
@@ -2488,6 +2522,7 @@ function bindRollout(m, expId, exp = null) {
       if (!box) return;
       box.innerHTML = renderRollout(e2);
       bindRollout(m, expId, e2);
+      setRolloutReportStatus(m, m.dataset.rolloutReportStatus || 'pending');
     } catch (err) { if (box) box.innerHTML = errBanner(err); }
   };
 
@@ -2498,12 +2533,12 @@ function bindRollout(m, expId, exp = null) {
 
   const resume = $('#ro-resume', m);
   if (resume) resume.onclick = () => decide({ title: t('btn.resume'), summary: t('confirm.resume'),
-    confirmLabel: t('btn.resume'), path: '/resume', success: 'toast.planResumed' });
+    confirmLabel: t('btn.resume'), path: '/resume', success: 'toast.planResumed', requireReport: true });
 
   const adv = $('#ro-advance', m);
   if (adv) adv.onclick = () => decide({ title: t('btn.advance'), summary: t('confirm.advance'),
     reasonLabel: t('prompt.advanceReason'), reasonRequired: false, confirmLabel: t('btn.advance'),
-    path: '/advance', body: reason => ({ reason }), success: 'toast.planAdvanced' });
+    path: '/advance', body: reason => ({ reason }), success: 'toast.planAdvanced', requireReport: true });
 
   const tkOn = $('#ro-takeover-on', m);
   if (tkOn) tkOn.onclick = () => decide({ title: t('btn.takeoverOn'), summary: t('confirm.takeoverOn'),
@@ -2513,7 +2548,7 @@ function bindRollout(m, expId, exp = null) {
   const tkOff = $('#ro-takeover-off', m);
   if (tkOff) tkOff.onclick = () => decide({ title: t('btn.takeoverOff'), summary: t('confirm.takeoverOff'),
     reasonLabel: t('prompt.reasonOptional'), reasonRequired: false, confirmLabel: t('btn.takeoverOff'),
-    path: '/takeover', body: reason => ({ enabled: false, reason }), success: 'toast.takeoverOff' });
+    path: '/takeover', body: reason => ({ enabled: false, reason }), success: 'toast.takeoverOff', requireReport: true });
 
   const editor = $('#ro-steps-editor', m);
   const addStep = $('#ro-add-step', m);
