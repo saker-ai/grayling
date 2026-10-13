@@ -233,6 +233,12 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
 .banner.warn { border-color: var(--amber); background: var(--banner-warn); }
 .banner.ok { border-color: var(--green); background: var(--banner-ok); }
 .banner ul { margin: 6px 0 0; padding-left: 18px; }
+.report-summary { border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: 14px 16px; margin: 10px 0 18px; background: var(--card); }
+.report-summary-blocked { border-left-color: var(--red); background: var(--banner-error); }
+.report-summary-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.report-summary h4 { margin: 0 0 4px; }
+.report-summary p { margin: 10px 0 4px; }
+.report-summary ul { margin: 6px 0 0; padding-left: 20px; }
 
 /* ---------- toasts ---------- */
 #toasts { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 8px; z-index: 50; max-width: 440px; }

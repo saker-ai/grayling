@@ -1398,13 +1398,10 @@ function renderDiagnostics(d) {
 
 function renderReport(box, r) {
   if (r.bandit) { renderBanditReport(box, r); return; }
-  const p = r.primary, d = r.decision || {}, srm = r.srm;
+  const p = r.primary, srm = r.srm;
   const window = r.window;
   box.innerHTML =
-    (r.healthy
-      ? '<div class="banner ok">' + esc(t('report.healthy', { epoch: r.epoch, state: r.state })) + '</div>'
-      : '<div class="banner err"><b>' + esc(t('report.unhealthy')) + '</b><ul>' +
-        (r.healthIssues || []).map(i => '<li>' + esc(i) + '</li>').join('') + '</ul></div>') +
+    renderReportSummary(r) +
     metricReferenceSummary(r) +
     renderDiagnostics(r.diagnostics) +
     '<div class="row">' + chip(r.minRuntimeSatisfied ? t('chip.minRuntimeOk') : t('chip.minRuntimeNo'), r.minRuntimeSatisfied ? 'green' : 'amber') +
@@ -1502,13 +1499,25 @@ function renderReport(box, r) {
       ? '<ul class="plain">' + r.guardrails.map(g =>
         '<li>' + chip(g.breached ? t('chip.breached') : t('chip.ok'), g.breached ? 'red' : 'green') +
         ' <span class="mono">' + esc(g.Metric ?? g.metric ?? '—') + '</span> <span class="muted">' + esc(g.Detail ?? g.detail ?? '') + '</span></li>').join('') + '</ul>'
-      : '<div class="muted">' + esc(t('misc.none')) + '</div>') +
-    '<h4>' + esc(t('report.decision')) + '</h4>' +
-    '<div>' + chip(String(d.verdict || '—').toUpperCase(), VERDICT_CHIP[d.verdict] || 'gray') + '</div>' +
-    '<ul class="plain">' + (d.reasons || []).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' +
+      : '<div class="muted">' + esc(t('misc.none')) + '</div>');
+}
+
+function renderReportSummary(r) {
+  const d = r.decision || {};
+  const reasons = [...(r.healthIssues || []), ...(d.reasons || [])];
+  const verdict = String(d.verdict || 'hold').toUpperCase();
+  return '<section class="report-summary ' + (r.healthy ? '' : 'report-summary-blocked') + '" aria-label="' +
+    esc(t('report.decisionSnapshot')) + '">' +
+    '<div class="report-summary-head"><div><h4>' + esc(t('report.decisionSnapshot')) + '</h4>' +
+    '<div class="muted">' + esc(t('report.generatedAt')) + ': ' + esc(r.generatedAt || '—') +
+    ' · ' + esc(t('report.watermark')) + ': ' + esc(r.window?.watermark || '—') + '</div></div>' +
+    chip(verdict, r.healthy ? (VERDICT_CHIP[d.verdict] || 'gray') : 'amber') + '</div>' +
+    '<p>' + esc(r.healthy ? t('report.healthy', { epoch: r.epoch, state: r.state }) : t('report.unhealthy')) + '</p>' +
+    (reasons.length ? '<ul>' + reasons.map(reason => '<li>' + esc(reason) + '</li>').join('') + '</ul>' : '') +
     ((d.guardrailBreaches || []).length
       ? '<div class="banner warn">' + esc(t('report.breaches')) + '<ul>' + d.guardrailBreaches.map(gb =>
-        '<li><span class="mono">' + esc(gb.metric) + '</span> — ' + esc(gb.detail || '') + '</li>').join('') + '</ul></div>' : '');
+        '<li><span class="mono">' + esc(gb.metric) + '</span> — ' + esc(gb.detail || '') + '</li>').join('') + '</ul></div>' : '') +
+    '</section>';
 }
 
 function renderBanditReport(box, r) {

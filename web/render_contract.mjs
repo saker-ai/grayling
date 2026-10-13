@@ -46,7 +46,8 @@ function render(report) {
 }
 
 const base = {
-  healthy: true, epoch: 1, state: 'running', minRuntimeSatisfied: true, analysisMethod: 'welch',
+  healthy: true, epoch: 1, state: 'running', generatedAt: '2026-10-03T00:00:00Z',
+  minRuntimeSatisfied: true, analysisMethod: 'welch',
   primaryAttributionWindow: 3_600_000_000_000,
   window: { version: 'utc-exposure-v1', start: '2026-10-01T00:00:00Z', end: '2026-10-02T00:00:00Z',
     watermark: '2026-10-02T00:00:00Z', complete: true, backend: 'postgresql-raw', recomputable: true },
@@ -64,6 +65,9 @@ let html = render({
   bayesian: { mean: { probBSuperior: 0.99, expectedLossB: 0.0001, credibleLow: 0.1, credibleHigh: 0.3 } },
 });
 assert(html.includes('Sequential'), 'sequential heading missing');
+assert(html.indexOf('Decision snapshot') < html.indexOf('Analysis window (UTC)') &&
+  html.includes('2026-10-03T00:00:00Z') && html.includes('primary significantly better'),
+  'decision summary must lead with current verdict, reasons, generation time and watermark');
 assert(html.includes('Analysis window (UTC)') && html.includes('Data watermark') &&
   html.includes('utc-exposure-v1') && html.includes('2026-10-02T00:00:00Z'), 'window metadata missing');
 assert(html.includes('anytime-valid p'), 'sequential anytime-valid p missing');
@@ -76,6 +80,9 @@ assert(html.includes('separate from frequentist'), 'bayesian separation note mis
 const incomplete = render({ ...base, healthy: false, healthIssues: ['watermark pending'],
   window: { ...base.window, complete: false, issues: ['watermark pending'] } });
 assert(incomplete.includes('Incomplete') && incomplete.includes('watermark pending'), 'incomplete window reason missing');
+assert(incomplete.includes('report-summary-blocked') &&
+  incomplete.indexOf('watermark pending') < incomplete.indexOf('Analysis window (UTC)'),
+  'unhealthy report must show the blocking reason before technical detail');
 
 const delivery = render({ ...base, healthy: false, healthIssues: ['delivery skew'],
   diagnostics: { assignmentSrm: { healthy: true, pValue: 0.8 },
