@@ -7,6 +7,19 @@ import (
 	"time"
 )
 
+type failNextMetricCommit struct {
+	Persistence
+	fail bool
+}
+
+func (p *failNextMetricCommit) Commit(data *Data, changes *ChangeSet) error {
+	if p.fail {
+		p.fail = false
+		return errors.New("injected persistence outage")
+	}
+	return p.Persistence.Commit(data, changes)
+}
+
 func testMetricDefinition(workspaceID string) *MetricDefinition {
 	return &MetricDefinition{
 		WorkspaceID:       workspaceID,
@@ -190,5 +203,70 @@ func TestExperimentFreezesPublishedMetricReferences(t *testing.T) {
 	newExperiment.PrimaryMetricRef = &primary
 	if _, err := store.CreateExperiment(newExperiment); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("deprecated version accepted: %v", err)
+	}
+}
+
+func TestMetricApprovalAndPublishCommitTogether(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := store.CreateWorkspace("metrics", "Metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	analyst, err := store.CreateToken(TokenAdmin, "analyst", RoleAnalyst, ws.ID, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := store.CreateToken(TokenAdmin, "owner", RoleOwner, ws.ID, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := store.CreateMetricDefinition(testMetricDefinition(ws.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := MetricRef{Key: def.Key, Version: def.Version}
+	approval, err := store.RequestApproval(Approval{WorkspaceID: ws.ID, Action: "metric.publish",
+		Object: def.Key + "/v1", PayloadHash: def.Hash, BaseRevision: def.Version,
+		Reason: "publish reviewed metric", SubmittedBy: "analyst", SubmittedTokenID: analyst.Token.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ApproveChange(approval.ID, "owner", owner.Token.ID, "reviewed"); err != nil {
+		t.Fatal(err)
+	}
+	store.persist = &failNextMetricCommit{Persistence: store.persist, fail: true}
+	if _, err := store.PublishMetricDefinitionWithApproval(ws.ID, ref, "owner", approval.ID); err == nil {
+		t.Fatal("injected commit failure was ignored")
+	}
+	unchanged, err := store.GetMetricDefinition(ws.ID, ref)
+	if err != nil || unchanged.Status != MetricDraft {
+		t.Fatalf("draft changed after failure: %+v, %v", unchanged, err)
+	}
+	grant, err := store.GetApproval(approval.ID)
+	if err != nil || grant.State != DraftApproved {
+		t.Fatalf("approval consumed after failure: %+v, %v", grant, err)
+	}
+	if _, err := store.PublishMetricDefinitionWithApproval(ws.ID, ref, "owner", approval.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	published, err := reopened.GetMetricDefinition(ws.ID, ref)
+	if err != nil || published.Status != MetricPublished {
+		t.Fatalf("publish missing after reopen: %+v, %v", published, err)
+	}
+	used, err := reopened.GetApproval(approval.ID)
+	if err != nil || used.State != ApprovalUsed {
+		t.Fatalf("grant missing after reopen: %+v, %v", used, err)
 	}
 }

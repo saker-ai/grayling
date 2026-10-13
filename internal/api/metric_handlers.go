@@ -222,17 +222,13 @@ func (s *Server) handlePublishMetricDefinition(w http.ResponseWriter, r *http.Re
 		writeStoreError(w, err)
 		return
 	}
-	object := fmt.Sprintf("%s/v%d", ref.Key, ref.Version)
-	if _, err := s.Store.UseApproval(req.ApprovalID, ws.ID, "", "metric.publish", object, def.Hash, ref.Version); err != nil {
-		writeStoreError(w, err)
-		return
-	}
 	actor := actorFrom(r)
-	published, err := s.Store.PublishMetricDefinition(ws.ID, ref, actor.Name)
+	published, err := s.Store.PublishMetricDefinitionWithApproval(ws.ID, ref, actor.Name, req.ApprovalID)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
+	object := fmt.Sprintf("%s/v%d", ref.Key, ref.Version)
 	_ = s.Store.Audit(actor.Name, actor.Role, "metric.publish", ws.ID, "", object, def.Hash)
 	writeJSON(w, http.StatusOK, published)
 }

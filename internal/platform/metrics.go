@@ -3,6 +3,7 @@ package platform
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -351,6 +352,59 @@ func (s *Store) PublishMetricDefinition(workspaceID string, ref MetricRef, actor
 	def.PublishedBy = actor
 	s.changes.markDirty(collMetricDefinitions, key)
 	if err := s.commitLocked(); err != nil {
+		return nil, err
+	}
+	return cloneMetricDefinition(def), nil
+}
+
+// PublishMetricDefinitionWithApproval consumes the exact reviewed grant and
+// publishes its draft in one persistence transaction. A failed commit leaves
+// both the definition and grant unchanged.
+func (s *Store) PublishMetricDefinitionWithApproval(workspaceID string, ref MetricRef, actor, approvalID string) (*MetricDefinition, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.changes.empty() {
+		return nil, fmt.Errorf("%w: pending uncommitted store changes", ErrConflict)
+	}
+	key := metricDefinitionKey(workspaceID, ref.Key, ref.Version)
+	def := s.data.MetricDefinitions[key]
+	if def == nil {
+		return nil, fmt.Errorf("%w: metric %s v%d", ErrNotFound, ref.Key, ref.Version)
+	}
+	if def.Status != MetricDraft {
+		return nil, fmt.Errorf("%w: metric version is %s", ErrInvalidState, def.Status)
+	}
+	hash, err := metricDefinitionHash(def)
+	if err != nil || hash != def.Hash {
+		return nil, fmt.Errorf("%w: metric definition hash changed", ErrConflict)
+	}
+	approval := s.data.Approvals[approvalID]
+	if approval == nil {
+		return nil, fmt.Errorf("%w: approval %s", ErrNotFound, approvalID)
+	}
+	token := s.data.Tokens[approval.ApprovedTokenID]
+	if token == nil || token.Revoked || token.Kind != TokenAdmin ||
+		(token.WorkspaceID != "" && token.WorkspaceID != workspaceID) ||
+		(token.Role != RoleOwner && token.Role != RolePublisher) {
+		return nil, fmt.Errorf("%w: approval credential revoked or missing", ErrAccessDenied)
+	}
+	previousApproval := copyApproval(approval)
+	previousDefinition := cloneMetricDefinition(def)
+	object := fmt.Sprintf("%s/v%d", ref.Key, ref.Version)
+	if _, err := s.useApprovalLocked(approvalID, workspaceID, "", "metric.publish", object, def.Hash, ref.Version); err != nil {
+		return nil, err
+	}
+	def.Status = MetricPublished
+	now := s.now()
+	def.PublishedAt = &now
+	def.PublishedBy = actor
+	s.changes.markDirty(collMetricDefinitions, key)
+	if err := s.commitLocked(); err != nil {
+		if !errors.Is(err, ErrConflict) {
+			s.data.Approvals[approvalID] = previousApproval
+			s.data.MetricDefinitions[key] = previousDefinition
+			s.changes = newChangeSet()
+		}
 		return nil, err
 	}
 	return cloneMetricDefinition(def), nil

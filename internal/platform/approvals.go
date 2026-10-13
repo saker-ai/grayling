@@ -136,6 +136,17 @@ func (s *Store) ApproveChange(id, actor, tokenID, note string) (*Approval, error
 func (s *Store) UseApproval(id, workspaceID, environmentID, action, object, hash string, baseRevision int64) (*Approval, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	a, err := s.useApprovalLocked(id, workspaceID, environmentID, action, object, hash, baseRevision)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.commitLocked(); err != nil {
+		return nil, err
+	}
+	return copyApproval(a), nil
+}
+
+func (s *Store) useApprovalLocked(id, workspaceID, environmentID, action, object, hash string, baseRevision int64) (*Approval, error) {
 	a := s.data.Approvals[id]
 	if a == nil {
 		return nil, fmt.Errorf("%w: approval %s", ErrNotFound, id)
@@ -153,8 +164,5 @@ func (s *Store) UseApproval(id, workspaceID, environmentID, action, object, hash
 	a.State = ApprovalUsed
 	a.UsedAt = &now
 	s.changes.markDirty(collApprovals, id)
-	if err := s.commitLocked(); err != nil {
-		return nil, err
-	}
-	return copyApproval(a), nil
+	return a, nil
 }
