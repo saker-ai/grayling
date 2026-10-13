@@ -180,6 +180,15 @@ var pgMigrations = []pgMigration{
         heartbeat_at timestamptz NOT NULL DEFAULT clock_timestamp()
     );
     CREATE INDEX control_replica_cursors_heartbeat_idx ON control_replica_cursors(heartbeat_at)`},
+	{10, `CREATE TABLE metric_definitions (
+        workspace_id text NOT NULL,
+        key text NOT NULL,
+        version bigint NOT NULL,
+        status text NOT NULL,
+        doc jsonb NOT NULL,
+        PRIMARY KEY (workspace_id, key, version)
+    );
+    CREATE INDEX metric_definitions_workspace_status_idx ON metric_definitions(workspace_id, status, key)`},
 }
 
 const pgSchemaV1 = `
@@ -1041,6 +1050,19 @@ func (p *pgPersistence) commitDirty(ctx context.Context, tx pgx.Tx, data *Data, 
                      doc = EXCLUDED.doc, updated_at = EXCLUDED.updated_at`,
 					e.ID, e.WorkspaceID, e.EnvironmentID, e.FlagKey, e.Epoch, string(e.State),
 					doc, e.CreatedAt, e.UpdatedAt)
+			case collMetricDefinitions:
+				def := data.MetricDefinitions[key]
+				if def == nil {
+					return fmt.Errorf("platform: dirty metric definition %q absent", key)
+				}
+				doc, err := json.Marshal(def)
+				if err != nil {
+					return err
+				}
+				batch.Queue(`INSERT INTO metric_definitions (workspace_id, key, version, status, doc)
+                    VALUES ($1,$2,$3,$4,$5)
+                    ON CONFLICT (workspace_id,key,version) DO UPDATE SET status=EXCLUDED.status, doc=EXCLUDED.doc`,
+					def.WorkspaceID, def.Key, def.Version, string(def.Status), doc)
 			case collAIResources:
 				ws, env, typ, logical, err := splitScope4(key)
 				if err != nil {
@@ -1887,6 +1909,9 @@ func (p *pgPersistence) loadOnce() (*Data, error) {
 	if err := p.loadExperiments(ctx, d); err != nil {
 		return nil, err
 	}
+	if err := p.loadMetricDefinitions(ctx, d); err != nil {
+		return nil, err
+	}
 	if err := p.loadEvents(ctx, d); err != nil {
 		return nil, err
 	}
@@ -2227,6 +2252,26 @@ func (p *pgPersistence) loadExperiments(ctx context.Context, d *Data) error {
 			return fmt.Errorf("platform: parse experiment: %w", err)
 		}
 		d.Experiments[e.ID] = e
+	}
+	return rows.Err()
+}
+
+func (p *pgPersistence) loadMetricDefinitions(ctx context.Context, d *Data) error {
+	rows, err := p.pool.Query(ctx, `SELECT doc FROM metric_definitions ORDER BY workspace_id, key, version`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var doc []byte
+		if err := rows.Scan(&doc); err != nil {
+			return err
+		}
+		def := &MetricDefinition{}
+		if err := json.Unmarshal(doc, def); err != nil {
+			return fmt.Errorf("platform: parse metric definition: %w", err)
+		}
+		d.MetricDefinitions[metricDefinitionKey(def.WorkspaceID, def.Key, def.Version)] = def
 	}
 	return rows.Err()
 }

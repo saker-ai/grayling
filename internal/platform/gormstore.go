@@ -61,6 +61,14 @@ type databaseMetric struct {
 	Payload  []byte `gorm:"not null"`
 }
 
+type databaseMetricDefinition struct {
+	WorkspaceID string `gorm:"primaryKey;index:idx_metric_definition_list,priority:1"`
+	Key         string `gorm:"primaryKey;index:idx_metric_definition_list,priority:3"`
+	Version     int64  `gorm:"primaryKey"`
+	Status      string `gorm:"not null;index:idx_metric_definition_list,priority:2"`
+	Payload     []byte `gorm:"not null"`
+}
+
 type databaseLease struct {
 	ID             int64     `gorm:"primaryKey"`
 	Holder         string    `gorm:"not null"`
@@ -171,7 +179,7 @@ func newGORMStore(ctx context.Context, dialector gorm.Dialector, dialect string)
 			_ = conn.Close()
 		}()
 	}
-	if err := db.WithContext(ctx).AutoMigrate(&databaseState{}, &databaseEvent{}, &databasePin{}, &databaseToken{}, &databaseMetric{}, &databaseLease{}); err != nil {
+	if err := db.WithContext(ctx).AutoMigrate(&databaseState{}, &databaseEvent{}, &databasePin{}, &databaseToken{}, &databaseMetric{}, &databaseMetricDefinition{}, &databaseLease{}); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("platform: migrate %s: %w", dialect, err)
 	}
@@ -282,6 +290,7 @@ func (p *gormPersistence) Load() (*Data, error) {
 	var row databaseState
 	var recent []databaseEvent
 	var metrics []databaseMetric
+	var definitions []databaseMetricDefinition
 	err := p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if p.dialect == "postgres" {
 			if err := tx.Exec("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ").Error; err != nil {
@@ -292,6 +301,9 @@ func (p *gormPersistence) Load() (*Data, error) {
 			return err
 		}
 		if err := tx.Find(&metrics).Error; err != nil {
+			return err
+		}
+		if err := tx.Find(&definitions).Error; err != nil {
 			return err
 		}
 		return tx.Order("server_time DESC, event_id DESC").Limit(MaxRetainedEvents).Find(&recent).Error
@@ -312,6 +324,14 @@ func (p *gormPersistence) Load() (*Data, error) {
 	}
 	if err := hydrateMetrics(&data, metrics); err != nil {
 		return nil, err
+	}
+	data.MetricDefinitions = make(map[string]*MetricDefinition, len(definitions))
+	for _, row := range definitions {
+		def := &MetricDefinition{}
+		if err := json.Unmarshal(row.Payload, def); err != nil {
+			return nil, fmt.Errorf("platform: decode metric definition %s v%d: %w", row.Key, row.Version, err)
+		}
+		data.MetricDefinitions[metricDefinitionKey(row.WorkspaceID, row.Key, row.Version)] = def
 	}
 	data.Events = nil
 	data.EventIndex = make(map[string]int, len(recent))
@@ -446,6 +466,21 @@ func (p *gormPersistence) Commit(data *Data, ch *ChangeSet) error {
 				return err
 			}
 		}
+		for key := range ch.Dirty[collMetricDefinitions] {
+			def := data.MetricDefinitions[key]
+			if def == nil {
+				return fmt.Errorf("platform: dirty metric definition %q absent", key)
+			}
+			payload, err := json.Marshal(def)
+			if err != nil {
+				return err
+			}
+			row := databaseMetricDefinition{WorkspaceID: def.WorkspaceID, Key: def.Key,
+				Version: def.Version, Status: string(def.Status), Payload: payload}
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&row).Error; err != nil {
+				return err
+			}
+		}
 		committedVersion = current.Version + 1
 		for ordinal, ev := range ch.Events {
 			payload, err := json.Marshal(ev)
@@ -484,6 +519,7 @@ func (p *gormPersistence) Commit(data *Data, ch *ChangeSet) error {
 		persisted.ExposedUnits = nil
 		persisted.SplitExposedUnits = nil
 		persisted.EventCounts = nil
+		persisted.MetricDefinitions = nil
 		if control {
 			persisted.ControlVersion++
 		}

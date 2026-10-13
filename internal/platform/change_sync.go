@@ -330,6 +330,10 @@ func (p *pgPersistence) applyControlObject(ctx context.Context, d *Data, c contr
 			return err
 		}
 		d.Experiments[c.id] = e
+	case collMetricDefinitions:
+		// Metric definitions are infrequent control records. The caller will
+		// reload the authoritative state after this change.
+		return nil
 	case collQuotas:
 		var doc []byte
 		err := p.pool.QueryRow(ctx, `SELECT doc FROM quotas WHERE workspace_id=$1`, c.id).Scan(&doc)

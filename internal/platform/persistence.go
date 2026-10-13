@@ -55,6 +55,7 @@ const (
 	collSegmentState      collection = "segmentState"
 	collManifestRevisions collection = "manifestRevisions"
 	collExperiments       collection = "experiments"
+	collMetricDefinitions collection = "metricDefinitions"
 	collAIResources       collection = "aiResources"
 	collPinnedVersions    collection = "pinnedVersions"
 	collModelAllowlist    collection = "modelAllowlist"

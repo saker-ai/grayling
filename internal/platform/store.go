@@ -56,7 +56,8 @@ type Data struct {
 
 	ManifestRevisions map[string]int64 `json:"manifestRevisions"` // ws/env -> last published manifest revision
 
-	Experiments map[string]*Experiment `json:"experiments"` // by ID
+	Experiments       map[string]*Experiment       `json:"experiments"`                 // by ID
+	MetricDefinitions map[string]*MetricDefinition `json:"metricDefinitions,omitempty"` // workspace/key/version
 
 	Events       []*Event                   `json:"events"`
 	EventIndex   map[string]int             `json:"eventIndex"`   // eventID -> index into Events
@@ -160,6 +161,9 @@ func newStore(p Persistence) (*Store, error) {
 	if d.Approvals == nil {
 		d.Approvals = map[string]*Approval{}
 	}
+	if d.MetricDefinitions == nil {
+		d.MetricDefinitions = map[string]*MetricDefinition{}
+	}
 	needsBootstrap := len(d.HMACKeyRing) == 0
 	s.data = d
 	if err := s.normalizeKeyRing(); err != nil {
@@ -239,6 +243,7 @@ func newData() *Data {
 		NextSegmentRev:    map[string]int64{},
 		ManifestRevisions: map[string]int64{},
 		Experiments:       map[string]*Experiment{},
+		MetricDefinitions: map[string]*MetricDefinition{},
 		EventIndex:        map[string]int{},
 		UnitAggs:          map[string]*UnitAgg{},
 		ExposedUnits:      map[string]map[string]bool{},
