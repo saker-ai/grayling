@@ -7,11 +7,55 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/saker-ai/grayling/internal/platform"
 	"github.com/saker-ai/grayling/pkg/model"
 	"github.com/saker-ai/grayling/test/pgtest"
-	"github.com/jackc/pgx/v5"
 )
+
+func TestReportCarriesFrozenMetricReference(t *testing.T) {
+	store, err := platform.NewStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := store.CreateWorkspace("metrics", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := store.CreateEnvironment(ws.ID, "prod", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := store.CreateMetricDefinition(&platform.MetricDefinition{
+		WorkspaceID: ws.ID, Key: "activation.complete", DisplayName: "Activation completion",
+		Owner: "growth", Source: "collect", EventKeys: []string{"activation_complete"},
+		DedupUnit: "user", AttributionWindow: 7 * 24 * time.Hour,
+		Spec: platform.MetricSpec{Type: "proportion", Direction: "increase"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := platform.MetricRef{Key: def.Key, Version: def.Version}
+	if _, err := store.PublishMetricDefinition(ws.ID, ref, "reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	exp, err := store.CreateExperiment(&platform.Experiment{
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "f", Epoch: 1, Unit: "user_id",
+		Variants: []string{"control", "treatment"}, Proportions: map[string]float64{"control": 50, "treatment": 50},
+		PrimaryMetricRef: &ref, Alpha: 0.05, AnalysisWindow: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := BuildReport(store, exp.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.PrimaryMetricRef == nil || report.PrimaryMetricRef.DefinitionHash != def.Hash ||
+		report.RegistrationVersion != exp.RegistrationVersion {
+		t.Fatalf("report lost frozen reference: %+v", report)
+	}
+}
 
 func TestPostgresReportWindowRecomputesAfterReload(t *testing.T) {
 	dsn := pgtest.DSN(t)

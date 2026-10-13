@@ -284,6 +284,24 @@ func (s *Store) GetMetricDefinition(workspaceID string, ref MetricRef) (*MetricD
 	return cloneMetricDefinition(def), nil
 }
 
+// ValidateFrozenMetricRef verifies a report's registered definition still
+// matches the immutable catalog version. Deprecated versions remain valid for
+// existing experiments; drafts are never valid report sources.
+func (s *Store) ValidateFrozenMetricRef(workspaceID string, ref MetricRef) error {
+	def, err := s.GetMetricDefinition(workspaceID, ref)
+	if err != nil {
+		return err
+	}
+	if def.Status != MetricPublished && def.Status != MetricDeprecated {
+		return fmt.Errorf("%w: metric %s v%d is not a published version", ErrInvalidState, ref.Key, ref.Version)
+	}
+	hash, err := metricDefinitionHash(def)
+	if err != nil || ref.DefinitionHash == "" || hash != def.Hash || ref.DefinitionHash != def.Hash {
+		return fmt.Errorf("%w: metric %s v%d differs from frozen definition", ErrConflict, ref.Key, ref.Version)
+	}
+	return nil
+}
+
 // ListMetricDefinitions lists every version in a workspace, newest first.
 func (s *Store) ListMetricDefinitions(workspaceID string) []*MetricDefinition {
 	s.mu.RLock()

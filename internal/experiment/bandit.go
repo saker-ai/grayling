@@ -54,9 +54,12 @@ func BuildBanditReport(store *platform.Store, exp *platform.Experiment, now time
 func replayBanditReport(exp *platform.Experiment, events []*platform.Event, now time.Time) *Report {
 	watermark := now.UTC().Add(-exp.Bandit.FeedbackDelay)
 	windowStart := exp.CreatedAt
-	if exp.StartedAt != nil { windowStart = *exp.StartedAt }
+	if exp.StartedAt != nil {
+		windowStart = *exp.StartedAt
+	}
 	rep := &Report{ExperimentID: exp.ID, Epoch: exp.Epoch, FlagKey: exp.FlagKey,
 		State: exp.State, GeneratedAt: now.UTC(), AnalysisMethod: "bandit-beta-bernoulli",
+		RegistrationVersion: exp.RegistrationVersion, PrimaryMetricRef: exp.PrimaryMetricRef,
 		Control: exp.Variants[0], Treatment: exp.Variants[1],
 		Window: platform.AnalysisWindowStatus{Version: "bandit-feedback-v1", Start: windowStart,
 			End: now.UTC(), Watermark: watermark, Backend: "raw-events", Recomputable: true, Complete: true}}

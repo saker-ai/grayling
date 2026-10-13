@@ -152,6 +152,14 @@ func TestExperimentFreezesPublishedMetricReferences(t *testing.T) {
 		t.Fatalf("metric reference not frozen: %+v", created)
 	}
 	version := created.RegistrationVersion
+	if err := store.ValidateFrozenMetricRef(ws.ID, *created.PrimaryMetricRef); err != nil {
+		t.Fatalf("frozen definition invalid: %v", err)
+	}
+	wrong := *created.PrimaryMetricRef
+	wrong.DefinitionHash = "sha256:wrong"
+	if err := store.ValidateFrozenMetricRef(ws.ID, wrong); !errors.Is(err, ErrConflict) {
+		t.Fatalf("mismatched definition hash accepted: %v", err)
+	}
 	created.PrimaryMetricRef.Key = "tampered"
 	created.Guardrails[0].MetricRef.Key = "tampered"
 	reread, err := store.GetExperiment(created.ID)
@@ -160,6 +168,9 @@ func TestExperimentFreezesPublishedMetricReferences(t *testing.T) {
 	}
 	if _, err := store.DeprecateMetricDefinition(ws.ID, primary); err != nil {
 		t.Fatal(err)
+	}
+	if err := store.ValidateFrozenMetricRef(ws.ID, *reread.PrimaryMetricRef); err != nil {
+		t.Fatalf("deprecated definition must remain reportable: %v", err)
 	}
 	newExperiment := baseP5Experiment(ws.ID, env.ID, MetricSpec{})
 	newExperiment.Epoch = 2

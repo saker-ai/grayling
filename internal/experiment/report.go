@@ -65,11 +65,13 @@ type Report struct {
 	Sequential *stats.SequentialResult `json:"sequential,omitempty"`
 	// Bayesian is the posterior / expected-loss / probability-of-superiority
 	// view (mean or proportion family depending on the metric type).
-	Bayesian            *BayesianSection `json:"bayesian,omitempty"`
-	Bandit              *BanditSection   `json:"bandit,omitempty"`
-	RegistrationVersion string           `json:"registrationVersion,omitempty"`
-	Holm                *HolmSection     `json:"holm,omitempty"`
-	Journeys            []JourneySection `json:"journeys,omitempty"`
+	Bayesian            *BayesianSection     `json:"bayesian,omitempty"`
+	Bandit              *BanditSection       `json:"bandit,omitempty"`
+	RegistrationVersion string               `json:"registrationVersion,omitempty"`
+	PrimaryMetricRef    *platform.MetricRef  `json:"primaryMetricRef,omitempty"`
+	GuardrailMetricRefs []platform.MetricRef `json:"guardrailMetricRefs,omitempty"`
+	Holm                *HolmSection         `json:"holm,omitempty"`
+	Journeys            []JourneySection     `json:"journeys,omitempty"`
 }
 
 // BayesianSection carries the Bayesian posterior summary, kept structurally
@@ -128,8 +130,24 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	for _, g := range exp.Guardrails {
 		registeredJourney = registeredJourney || g.Type == "funnel" || g.Type == "retention"
 	}
-	if err != nil || ((exp.HolmFamily != nil || registeredJourney) && version != exp.RegistrationVersion) {
+	hasMetricRefs := exp.PrimaryMetricRef != nil
+	for _, g := range exp.Guardrails {
+		hasMetricRefs = hasMetricRefs || g.MetricRef != nil
+	}
+	if err != nil || ((exp.HolmFamily != nil || registeredJourney || hasMetricRefs) && version != exp.RegistrationVersion) {
 		return nil, fmt.Errorf("experiment %s registration contract differs from persisted version", experimentID)
+	}
+	if exp.PrimaryMetricRef != nil {
+		if err := store.ValidateFrozenMetricRef(exp.WorkspaceID, *exp.PrimaryMetricRef); err != nil {
+			return nil, fmt.Errorf("experiment %s primary metric: %w", experimentID, err)
+		}
+	}
+	for _, guard := range exp.Guardrails {
+		if guard.MetricRef != nil {
+			if err := store.ValidateFrozenMetricRef(exp.WorkspaceID, *guard.MetricRef); err != nil {
+				return nil, fmt.Errorf("experiment %s guardrail metric: %w", experimentID, err)
+			}
+		}
 	}
 	if exp.AllocationMode == "bandit" {
 		rep, err := BuildBanditReport(store, exp, now)
@@ -149,6 +167,7 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		}
 		return &Report{ExperimentID: exp.ID, Epoch: exp.Epoch, FlagKey: exp.FlagKey, State: exp.State,
 			GeneratedAt: now.UTC(), AnalysisMethod: "bandit-beta-bernoulli", Healthy: false,
+			RegistrationVersion: exp.RegistrationVersion, PrimaryMetricRef: exp.PrimaryMetricRef,
 			HealthIssues: []string{section.FreezeReason}, Bandit: section,
 			Decision: stats.Decision{Verdict: stats.VerdictHold}}, nil
 	}
@@ -168,6 +187,12 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		AnalysisMethod: exp.AnalysisMethod, Alpha: exp.Alpha, MDE: exp.MDE,
 		Control: control, Treatment: treatment, Window: window,
 		RegistrationVersion: exp.RegistrationVersion,
+		PrimaryMetricRef:    exp.PrimaryMetricRef,
+	}
+	for _, guard := range exp.Guardrails {
+		if guard.MetricRef != nil {
+			rep.GuardrailMetricRefs = append(rep.GuardrailMetricRefs, *guard.MetricRef)
+		}
 	}
 	if window.Backend == "postgresql-raw" {
 		rep.HealthIssues = append(rep.HealthIssues, window.Issues...)

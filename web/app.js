@@ -1104,6 +1104,13 @@ async function viewExpDetail(m) {
   bindRollout(m, id);
 }
 
+function metricReferenceSummary(r) {
+  const ref = r.primaryMetricRef;
+  return '<div class="muted">' + esc(t('report.metricVersion')) + ': ' +
+    (ref ? '<span class="mono">' + esc(ref.key) + ' v' + esc(ref.version) + ' · ' + esc(shortHash(ref.definitionHash)) + '</span>' :
+      esc(t('report.legacyInline'))) + '</div>';
+}
+
 function renderReport(box, r) {
   if (r.bandit) { renderBanditReport(box, r); return; }
   const p = r.primary, d = r.decision || {}, srm = r.srm;
@@ -1113,6 +1120,7 @@ function renderReport(box, r) {
       ? '<div class="banner ok">' + esc(t('report.healthy', { epoch: r.epoch, state: r.state })) + '</div>'
       : '<div class="banner err"><b>' + esc(t('report.unhealthy')) + '</b><ul>' +
         (r.healthIssues || []).map(i => '<li>' + esc(i) + '</li>').join('') + '</ul></div>') +
+    metricReferenceSummary(r) +
     '<div class="row">' + chip(r.minRuntimeSatisfied ? t('chip.minRuntimeOk') : t('chip.minRuntimeNo'), r.minRuntimeSatisfied ? 'green' : 'amber') +
     ' ' + chip(r.analysisMethod || '—', 'gray') + '</div>' +
     (window ? '<h4>' + esc(t('report.window')) + '</h4>' +
@@ -1221,7 +1229,7 @@ function renderBanditReport(box, r) {
   const b = r.bandit;
   box.innerHTML =
     '<div class="banner ' + (r.healthy ? 'ok' : 'err') + '"><b>' + esc(t('report.banditTitle')) + '</b> · ' +
-    esc(b.frozen ? t('report.banditFrozen') : t('report.banditActive')) + '</div>' +
+    esc(b.frozen ? t('report.banditFrozen') : t('report.banditActive')) + '</div>' + metricReferenceSummary(r) +
     '<p class="muted">' + esc(t('report.banditNoFixed')) + '</p>' +
     '<div>' + esc(t('exp.policyVersion')) + ': <span class="mono">' + esc(b.policyVersion) +
     '</span> · state: <span class="mono">' + esc(b.stateVersion) + '</span> · ' +

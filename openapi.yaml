@@ -3982,6 +3982,11 @@ components:
         registrationVersion:
           type: string
           description: 预注册决策契约版本，与创建审计相同。
+        primaryMetricRef:
+          $ref: "#/components/schemas/MetricRef"
+        guardrailMetricRefs:
+          type: array
+          items: {$ref: "#/components/schemas/MetricRef"}
         holm:
           $ref: "#/components/schemas/HolmSection"
     HolmComparison:
