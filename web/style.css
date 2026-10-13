@@ -230,6 +230,14 @@ table.grid { min-width: 620px; }
 .flag-rule .field select, .flag-rule .field input { min-width: 0; width: 100%; }
 .flag-rule textarea { width: 100%; }
 .flag-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(85px, 1fr)); gap: 8px; flex: 1; }
+.approval-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 12px; }
+.approval-item { margin: 0; min-width: 0; }
+.approval-item p { margin: 8px 0 0; }
+.approval-item .row-link { overflow-wrap: anywhere; }
+.approval-detail { min-width: 0; }
+dl.approval-facts { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 8px 16px; }
+dl.approval-facts dt { color: var(--muted); }
+dl.approval-facts dd { margin: 0; overflow-wrap: anywhere; }
 .segment-structured h4 { margin: 16px 0 8px; }
 .segment-condition { display: flex; align-items: end; gap: 8px; margin: 8px 0; }
 .segment-condition > .field { min-width: 0; }
@@ -331,6 +339,8 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
   .segment-condition > .field, .segment-condition > .field:first-child,
   .segment-condition > .field:nth-child(2), .segment-condition > .field.grow { flex: 1 1 100%; }
   .segment-condition > button { margin-bottom: 4px; }
+  dl.approval-facts { grid-template-columns: 1fr; gap: 3px; }
+  dl.approval-facts dd { margin-bottom: 9px; }
   .flag-record { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; }
   table.grid.diagnostic-table { display: none; }
   .diagnostic-cards { display: grid; gap: 10px; margin: 10px 0; }

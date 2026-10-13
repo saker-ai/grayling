@@ -5,8 +5,9 @@ import assert from 'node:assert/strict';
 const code = fs.readFileSync(new URL('./i18n.js', import.meta.url), 'utf8') + '\n' +
   fs.readFileSync(new URL('./flag_editor.js', import.meta.url), 'utf8') + '\n' +
   fs.readFileSync(new URL('./segment_editor.js', import.meta.url), 'utf8') + '\n' +
+  fs.readFileSync(new URL('./approvals.js', import.meta.url), 'utf8') + '\n' +
   fs.readFileSync(new URL('./app.js', import.meta.url), 'utf8') + '\n' +
-  ';globalThis.x = { S, can, gateActions, updateCapabilities, refreshCapabilities, errMsg, errBanner, ApiError, VIEWS, I18N, setLang, route, registerI18nHooks };';
+  ';globalThis.x = { S, can, gateActions, updateCapabilities, refreshCapabilities, errMsg, errBanner, ApiError, VIEWS, I18N, setLang, route, registerI18nHooks, approvalAction, renderApprovalDetail };';
 const element = () => {
   const classes = new Set();
   return { innerHTML: '', textContent: '', value: '', dataset: {},
@@ -98,17 +99,21 @@ const approvals = [
   { id: 'a2', state: 'approved', action: 'ai.pin', object: 'prompt/p1', environmentId: 'prod', submittedBy: 'alice' },
 ];
 S.ws = 'acme';
+S.actorName = 'bob';
 responses.set('/api/v1/admin/workspaces/acme/approvals', approvals);
 responses.set('/api/v1/admin/workspaces/acme/audit?limit=200', []);
 for (const [role, wantApprove, wantExecute] of [['viewer', false, false], ['analyst', false, false], ['publisher', true, true], ['owner', true, true]]) {
   S.capabilities = { permissions: Object.fromEntries(byRole[role].map(p => [p, true])) };
-  root.nodes.clear();
-  await VIEWS.audit(root);
-  const html = root.querySelector('#approval-box').innerHTML;
-  assert.equal(html.includes('data-appr='), wantApprove, `${role} approval action`);
-  assert.equal(html.includes('data-exec='), wantExecute, `${role} execution action`);
-  assert(html.includes('submitted') && html.includes('approved'), 'approval states visible after reload');
+  assert.equal(sandbox.x.approvalAction(approvals[0]) === 'review', wantApprove, `${role} approval action`);
+  assert.equal(sandbox.x.approvalAction(approvals[1]) === 'execute', wantExecute, `${role} execution action`);
+  S.approvalFilter = 'all';
+  await VIEWS.approvals(root);
+  assert(root.innerHTML.includes('submitted') && root.innerHTML.includes('approved'), 'approval states visible after reload');
 }
+S.capabilities = { permissions: { 'flag.approve': true, 'flag.publish': true } };
+S.actorName = 'alice';
+assert.equal(sandbox.x.approvalAction(approvals[0]), '', 'requester must not approve own request');
+assert(sandbox.x.renderApprovalDetail(approvals[0]).includes('different person'), 'self review explanation');
 for (const [status, english, chinese] of [
   [403, 'Access denied', '无权操作'], [409, 'Conflict', '发生冲突'], [429, 'Request limited', '请求受限'],
 ]) {

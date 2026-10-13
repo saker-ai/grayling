@@ -181,6 +181,7 @@ const S = {
   globalCapabilities: null,
   flagKey: null, flagNew: false,
   segKey: null, segDrafts: [],
+  approvalID: null, approvalFilter: 'pending', actorName: '',
   expId: null, expCreate: false, expTab: 'summary',
   wizardDirty: false,
   metricRef: null, metricQuery: '', metricStatus: '', metricCursor: '',
@@ -377,6 +378,7 @@ function consoleHash() {
   }
   if (S.view === 'experiments' && S.expCreate) parts.push('~new');
   if (S.view === 'metrics' && S.metricRef) parts.push(S.metricRef.key, String(S.metricRef.version));
+  if (S.view === 'approvals' && S.approvalID) parts.push(S.approvalID);
   return '#/' + parts.map(encodeURIComponent).join('/');
 }
 
@@ -391,7 +393,7 @@ function restoreConsoleHash(hash) {
   S.ws = parts[1] === '~' ? '' : parts[1];
   S.env = parts[2] === '~' ? '' : parts[2];
   S.view = parts[3];
-  S.flagKey = S.segKey = S.expId = S.metricRef = null;
+  S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = null;
   S.expCreate = false;
   S.expTab = 'summary';
   if (S.view === 'flags' && parts[4]) S.flagKey = parts[4];
@@ -406,6 +408,7 @@ function restoreConsoleHash(hash) {
   if (S.view === 'metrics' && parts[4] && /^[1-9]\d*$/.test(parts[5] || '')) {
     S.metricRef = { key: parts[4], version: Number(parts[5]) };
   }
+  if (S.view === 'approvals' && parts[4]) S.approvalID = parts[4];
   S.deepLinkRequested = true;
   S.deepLinkDenied = false;
   return true;
@@ -510,6 +513,7 @@ async function signOut() {
   }
   cookieSession = false;
   memoryToken = '';
+  S.actorName = '';
   S.booted = false;
   $('#auth-token').value = '';
   showAuth('');
@@ -546,6 +550,8 @@ async function loadEnvs() {
 }
 
 async function boot() {
+  const session = await api('/api/v1/admin/session');
+  S.actorName = session.name || '';
   await loadWorkspaces();
   S.deepLinkRequested = false;
   $('#auth').classList.add('hidden');
@@ -2373,48 +2379,11 @@ async function viewAudit(m) {
     '<div class="view-head"><h2>' + esc(t('audit.title')) + '</h2>' +
     '<label class="inline">' + esc(t('audit.limit')) + ' <select id="a-limit">' +
     [25, 50, 100].map(n => '<option' + (n === S.auditLimit ? ' selected' : '') + '>' + n + '</option>').join('') +
-    '</select></label><form id="a-search-form" class="inline-search"><input id="a-search" type="search" maxlength="128" value="' + esc(S.auditQuery) + '" placeholder="' + esc(t('audit.search')) + '" aria-label="' + esc(t('audit.search')) + '"><button class="btn sm" type="submit">' + esc(t('audit.searchButton')) + '</button></form></div><section class="card"><h3>' + esc(t('approval.inbox')) + '</h3><div id="approval-box"></div></section>' +
+    '</select></label><form id="a-search-form" class="inline-search"><input id="a-search" type="search" maxlength="128" value="' + esc(S.auditQuery) + '" placeholder="' + esc(t('audit.search')) + '" aria-label="' + esc(t('audit.search')) + '"><button class="btn sm" type="submit">' + esc(t('audit.searchButton')) + '</button></form></div>' +
     '<div id="a-box"><p class="muted">' + esc(t('misc.loading')) + '</p></div>';
   let loadSeq = 0;
   const load = async () => {
     const seq = ++loadSeq;
-    const approvalData = await api(wsPath() + '/approvals');
-    const approvals = Array.isArray(approvalData) ? approvalData : [];
-    $('#approval-box', m).innerHTML = '<table class="grid"><thead><tr><th>' + esc(t('th.time')) + '</th><th>' + esc(t('th.action')) + '</th>' +
-      '<th>' + esc(t('th.object')) + '</th><th>' + esc(t('th.state')) + '</th><th>' + esc(t('approval.impact')) +
-      '</th><th>' + esc(t('approval.rollback')) + '</th><th>' + esc(t('approval.guardrails')) + '</th><th>' + esc(t('th.actions')) + '</th></tr></thead><tbody>' +
-      (approvals.map(a => '<tr><td>' + esc(fmtTime(a.submittedAt)) + '</td><td>' + esc(a.action) + '<div class="mono">' + esc(shortHash(a.payloadHash)) + '</div></td>' +
-        '<td>' + esc(a.object) + '<div class="muted">' + esc(a.environmentId) + ' · r' + esc(a.baseRevision) + '</div></td>' +
-        '<td>' + chip(a.state, DRAFT_CHIP[a.state] || 'gray') + '<div>' + esc(a.submittedBy) + ' → ' + esc(a.approvedBy || '—') + '</div>' +
-        '<div class="muted">' + esc(fmtTime(a.expiresAt)) + '</div></td><td>' + esc(a.impact) + '</td><td>' + esc(a.rollbackTarget) +
-        '</td><td>' + esc(a.guardrails) + '</td><td>' +
-        (can('flag.approve') && a.state === 'submitted' ? '<button class="btn sm" data-appr="' + esc(a.id) + '">' + esc(t('btn.approve')) + '</button>' : '') +
-        (can('flag.publish') && a.state === 'approved' && a.action !== 'breakglass.review' ? '<button class="btn sm primary" data-exec="' + esc(a.id) + '">' + esc(t('approval.execute')) + '</button>' : '') +
-        '</td></tr>').join('') || '<tr><td colspan="8" class="muted">' + esc(t('approval.none')) + '</td></tr>') + '</tbody></table>';
-    $('#approval-box', m).onclick = async ev => {
-      const btn = ev.target.closest('[data-appr], [data-exec]');
-      if (!btn) return;
-      const a = approvals.find(x => x.id === (btn.dataset.appr || btn.dataset.exec));
-      if (!a) return;
-      if (btn.dataset.appr) {
-        if (!can('flag.approve')) return;
-        const approval = await actionDialog({ title: t('btn.approve'), summary: t('approval.confirmReview', { action: a.action, object: a.object }),
-          preview: reviewPreview({ targetEnvironment: a.environmentId, risk: a.risk, baseRevision: a.baseRevision,
-            estimatedAffected: a.impact, rollbackTarget: a.rollbackTarget, guardrails: a.guardrails, proposedHash: a.payloadHash }, 'action-review-preview'),
-          reasonLabel: t('prompt.approvalReason'), confirmLabel: t('btn.approve') });
-        if (!approval) return;
-        run(() => api(wsPath() + '/approvals/' + encodeURIComponent(a.id) + '/approve',
-          { method: 'POST', body: { note: approval.reason } }), t('approval.reviewed'));
-      } else {
-        if (!can('flag.publish')) return;
-        const approval = await actionDialog({ title: t('approval.execute'), summary: t('approval.confirmExecute', { action: a.action, object: a.object }),
-          preview: reviewPreview({ targetEnvironment: a.environmentId, risk: a.risk, baseRevision: a.baseRevision,
-            estimatedAffected: a.impact, rollbackTarget: a.rollbackTarget, guardrails: a.guardrails, proposedHash: a.payloadHash }, 'action-review-preview'),
-          confirmLabel: t('approval.execute') });
-        if (!approval) return;
-        run(() => executeApproval(a), t('approval.executed'));
-      }
-    };
     const cursor = S.auditCursors[S.auditPage] || 0;
     const params = 'limit=' + (S.auditLimit + 1) + '&q=' + encodeURIComponent(S.auditQuery) +
       (cursor ? '&before=' + encodeURIComponent(cursor) : '');
@@ -2750,6 +2719,7 @@ Object.assign(VIEWS, {
   debug: viewDebug,
   tokens: viewTokens,
   quotas: viewQuotas,
+  approvals: viewApprovals,
   audit: viewAudit,
   ai: viewAI,
 });
@@ -2841,7 +2811,7 @@ function init() {
       if (!confirmLeaveEditor()) return;
       S.view = b.dataset.view;
       S.deepLinkDenied = false;
-      S.flagKey = S.segKey = S.expId = S.metricRef = null;
+      S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = null;
       S.flagNew = S.expCreate = S.wizardDirty = false;
       $('#nav').classList.remove('mobile-open');
       $('#btn-menu').setAttribute('aria-expanded', 'false');
@@ -2857,7 +2827,7 @@ function init() {
     S.globalCapabilities = null;
     updateCapabilities();
     S.env = '';
-    S.flagKey = S.segKey = S.expId = S.metricRef = null;
+    S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = null;
     S.expCreate = S.wizardDirty = false;
     localStorage.setItem('golab_ws', S.ws);
     try { await loadEnvs(); await refreshCapabilities(); } catch (e) { reportError(e); }
@@ -2869,7 +2839,7 @@ function init() {
     S.env = ev.target.value;
     S.deepLinkDenied = false;
     S.deepLinkRequested = false;
-    S.flagKey = S.segKey = S.expId = S.metricRef = null;
+    S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = null;
     S.expCreate = S.wizardDirty = false;
     localStorage.setItem('golab_env', S.env);
     route();

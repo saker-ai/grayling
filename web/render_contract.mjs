@@ -16,6 +16,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const code = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'flag_editor.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'segment_editor.js'), 'utf8') + '\n' +
+  fs.readFileSync(path.join(__dirname, 'approvals.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 
 const el = () => ({
@@ -37,7 +38,7 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderApprovalDetail = renderApprovalDetail;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
 
 const structuredFlag = sandbox.__renderFlagStructured({ type: 'bool',
@@ -57,6 +58,12 @@ assert(structuredSegment.includes('data-seg-op') && structuredSegment.includes('
   'structured Segment editor must render conditions and escape user content');
 assert(sandbox.__lintSegment({ key: 'audience', constraints: [{ field: 'country', op: 'regex', value: '[' }],
   segments: [] }).length > 0, 'invalid Segment regex must be reported');
+const approvalDetail = sandbox.__renderApprovalDetail({ id: 'a1', state: 'submitted',
+  action: 'flag.rollback', object: '<img src=x>', submittedBy: 'alice',
+  reason: '<script>alert(1)</script>', payload: '{"revision":3}' });
+assert(!approvalDetail.includes('<script>') && !approvalDetail.includes('<img') &&
+  approvalDetail.includes('&lt;script&gt;') && approvalDetail.includes('revision'),
+  'approval detail must escape request data and show proposed operation input');
 
 const flagDiff = sandbox.__renderFlagDiff(
   { revision: 4, content: { type: 'bool', variations: { safe: false, launch: true }, disable: false } },
