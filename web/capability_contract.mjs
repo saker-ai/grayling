@@ -24,6 +24,7 @@ const sandbox = {
     querySelectorAll() { return []; }, createElement: element, body: { appendChild() {} } },
   localStorage: { getItem() { return null; }, setItem() {} },
   navigator: { language: 'en-US' }, location: { origin: 'http://localhost' },
+  history: { pushState() {} },
   setTimeout() {}, clearInterval() {}, console,
   fetch: async path => {
     const body = responses.get(path) ?? [];

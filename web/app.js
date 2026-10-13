@@ -156,6 +156,7 @@ const S = {
   segKey: null, segDrafts: [],
   expId: null, expCreate: false,
   metricRef: null, metricQuery: '', metricStatus: '', metricCursor: '',
+  deepLinkRequested: false, deepLinkDenied: false,
   auditLimit: 50,
   auditQuery: '', auditCursors: [0], auditPage: 0,
   aiAvailable: true,
@@ -325,8 +326,50 @@ function actionDialog({ title, summary, preview = '', reasonLabel = '', reasonRe
 const VIEWS = {}; // populated at the bottom of each view section
 let routeEpoch = 0;
 
+function consoleHash() {
+  const parts = ['console', S.ws || '~', S.env || '~', S.view];
+  if (S.view === 'flags' && S.flagKey) parts.push(S.flagKey);
+  if (S.view === 'segments' && S.segKey) parts.push(S.segKey);
+  if (S.view === 'experiments' && S.expId) parts.push(S.expId);
+  if (S.view === 'experiments' && S.expCreate) parts.push('~new');
+  if (S.view === 'metrics' && S.metricRef) parts.push(S.metricRef.key, String(S.metricRef.version));
+  return '#/' + parts.map(encodeURIComponent).join('/');
+}
+
+function restoreConsoleHash(hash) {
+  if (!hash.startsWith('#/console/')) return false;
+  let parts;
+  try { parts = hash.slice(2).split('/').map(decodeURIComponent); }
+  catch { return false; }
+  if (parts.length < 4 || parts[0] !== 'console' || !Object.hasOwn(VIEWS, parts[3])) return false;
+  S.ws = parts[1] === '~' ? '' : parts[1];
+  S.env = parts[2] === '~' ? '' : parts[2];
+  S.view = parts[3];
+  S.flagKey = S.segKey = S.expId = S.metricRef = null;
+  S.expCreate = false;
+  if (S.view === 'flags' && parts[4]) S.flagKey = parts[4];
+  if (S.view === 'segments' && parts[4]) S.segKey = parts[4];
+  if (S.view === 'experiments' && parts[4]) {
+    if (parts[4] === '~new') S.expCreate = true;
+    else S.expId = parts[4];
+  }
+  if (S.view === 'metrics' && parts[4] && /^[1-9]\d*$/.test(parts[5] || '')) {
+    S.metricRef = { key: parts[4], version: Number(parts[5]) };
+  }
+  S.deepLinkRequested = true;
+  S.deepLinkDenied = false;
+  return true;
+}
+
+function syncConsoleHash() {
+  if (!S.booted || S.deepLinkDenied) return;
+  const target = consoleHash();
+  if (location.hash !== target) history.pushState(null, '', target);
+}
+
 async function route() {
   const epoch = ++routeEpoch;
+  syncConsoleHash();
   if (S.timer) { clearInterval(S.timer); S.timer = null; }
   $$('#nav button').forEach(b => {
     const active = b.dataset.view === S.view;
@@ -334,6 +377,10 @@ async function route() {
     if (active) b.setAttribute?.('aria-current', 'page'); else b.removeAttribute?.('aria-current');
   });
   const m = $('#main');
+  if (S.deepLinkDenied) {
+    m.innerHTML = '<div class="banner err" role="alert">' + esc(t('err.deepLinkDenied')) + '</div>';
+    return;
+  }
   m.innerHTML = '<p class="muted">' + esc(t('misc.loading')) + '</p>';
   // Keep async views detached until their data belongs to the current route.
   // A slower request must never replace a newer editor or its unsaved work.
@@ -423,7 +470,10 @@ async function loadWorkspaces() {
   sel.innerHTML = S.workspaces.map(w =>
     '<option value="' + esc(w.slug) + '">' + esc(w.name || w.slug) + ' (' + esc(w.slug) + ')</option>').join('') ||
     '<option value="">' + esc(t('select.noneCreate')) + '</option>';
-  if (!S.workspaces.some(w => w.slug === S.ws)) S.ws = S.workspaces.length ? S.workspaces[0].slug : '';
+  if (!S.workspaces.some(w => w.slug === S.ws)) {
+    if (S.deepLinkRequested && S.ws) S.deepLinkDenied = true;
+    S.ws = S.workspaces.length ? S.workspaces[0].slug : '';
+  }
   localStorage.setItem('golab_ws', S.ws);
   sel.value = S.ws;
   await loadEnvs();
@@ -436,13 +486,17 @@ async function loadEnvs() {
   sel.innerHTML = S.envs.map(v =>
     '<option value="' + esc(v.slug) + '">' + esc(v.name || v.slug) + ' (' + esc(v.slug) + ')</option>').join('') ||
     '<option value="">' + esc(t('select.noneCreate')) + '</option>';
-  if (!S.envs.some(v => v.slug === S.env)) S.env = S.envs.length ? S.envs[0].slug : '';
+  if (!S.envs.some(v => v.slug === S.env)) {
+    if (S.deepLinkRequested && S.env) S.deepLinkDenied = true;
+    S.env = S.envs.length ? S.envs[0].slug : '';
+  }
   localStorage.setItem('golab_env', S.env);
   sel.value = S.env;
 }
 
 async function boot() {
   await loadWorkspaces();
+  S.deepLinkRequested = false;
   $('#auth').classList.add('hidden');
   $('#app').classList.remove('hidden');
   S.booted = true;
@@ -2099,6 +2153,7 @@ function registerI18nHooks() {
 }
 
 function init() {
+  restoreConsoleHash(location.hash || '');
   applyTheme();
   $('#sel-theme').onchange = ev => {
     localStorage.setItem(THEME_KEY, ev.target.value);
@@ -2128,6 +2183,7 @@ function init() {
       }
       if (!confirmLeaveEditor()) return;
       S.view = b.dataset.view;
+      S.deepLinkDenied = false;
       S.flagKey = S.segKey = S.expId = S.metricRef = null;
       S.flagNew = S.expCreate = false;
       $('#nav').classList.remove('mobile-open');
@@ -2138,6 +2194,8 @@ function init() {
   $('#sel-ws').onchange = async ev => {
     if (!confirmLeaveEditor()) { ev.target.value = S.ws; return; }
     S.ws = ev.target.value;
+    S.deepLinkDenied = false;
+    S.deepLinkRequested = false;
     S.capabilities = null;
     S.globalCapabilities = null;
     updateCapabilities();
@@ -2151,6 +2209,8 @@ function init() {
   $('#sel-env').onchange = ev => {
     if (!confirmLeaveEditor()) { ev.target.value = S.env; return; }
     S.env = ev.target.value;
+    S.deepLinkDenied = false;
+    S.deepLinkRequested = false;
     S.flagKey = S.segKey = S.expId = S.metricRef = null;
     localStorage.setItem('golab_env', S.env);
     route();
@@ -2198,6 +2258,12 @@ function init() {
       ev.preventDefault();
       ev.returnValue = '';
     }
+  });
+  window.addEventListener('popstate', async () => {
+    if (!restoreConsoleHash(location.hash || '') || !S.booted) return;
+    await loadWorkspaces();
+    S.deepLinkRequested = false;
+    await route();
   });
 }
 
