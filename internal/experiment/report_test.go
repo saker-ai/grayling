@@ -539,3 +539,43 @@ func TestReportRejectsNonTwoArm(t *testing.T) {
 		t.Fatal("three-arm report must be rejected in v1")
 	}
 }
+
+func TestReportEvidenceVersionTracksAnalysisWithoutClockChurn(t *testing.T) {
+	now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	window := platform.AnalysisWindowStatus{Version: "utc-exposure-v1", Start: now.Add(-time.Hour),
+		End: now.Add(time.Hour), Watermark: now.Add(-72 * time.Hour), Complete: true,
+		Backend: "postgresql-raw", Recomputable: true}
+	base := &Report{ExperimentID: "exp-1", Epoch: 1, GeneratedAt: now, Window: window,
+		PerVariant:  []VariantReport{{Variant: "control", RandomizedUnits: 10}},
+		Diagnostics: &Diagnostics{GeneratedAt: now, Window: window},
+		Bandit:      &BanditSection{FeedbackWatermark: now.Add(-time.Hour)},
+		Journeys:    []JourneySection{{Metric: "retention", Watermark: window.Watermark}}}
+	initial, err := reportEvidenceVersion(base)
+	if err != nil || initial == "" {
+		t.Fatalf("initial version: %q, %v", initial, err)
+	}
+	later := *base
+	later.GeneratedAt = now.Add(time.Minute)
+	later.Window.Watermark = window.Watermark.Add(time.Minute)
+	later.Diagnostics = &Diagnostics{GeneratedAt: later.GeneratedAt, Window: later.Window}
+	later.Bandit = &BanditSection{FeedbackWatermark: now}
+	later.Journeys = []JourneySection{{Metric: "retention", Watermark: later.Window.Watermark}}
+	stable, err := reportEvidenceVersion(&later)
+	if err != nil || stable != initial {
+		t.Fatalf("clock-only changes altered evidence version: %q → %q, %v", initial, stable, err)
+	}
+	later.PerVariant = []VariantReport{{Variant: "control", RandomizedUnits: 11}}
+	changed, err := reportEvidenceVersion(&later)
+	if err != nil || changed == initial {
+		t.Fatalf("new randomized unit did not change evidence version: %q → %q, %v", initial, changed, err)
+	}
+	later.PerVariant = base.PerVariant
+	later.Window.Complete = false
+	changed, err = reportEvidenceVersion(&later)
+	if err != nil || changed == initial {
+		t.Fatalf("health window change did not change evidence version: %q → %q, %v", initial, changed, err)
+	}
+	if !base.GeneratedAt.Equal(now) || !base.Window.Watermark.Equal(window.Watermark) {
+		t.Fatal("version calculation mutated the source report")
+	}
+}

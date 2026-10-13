@@ -13,8 +13,13 @@
 package experiment
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	jsonv1 "encoding/json"
+	json "encoding/json/v2"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -31,6 +36,7 @@ type Report struct {
 	FlagKey                  string                        `json:"flagKey"`
 	State                    model.ExperimentState         `json:"state"`
 	GeneratedAt              time.Time                     `json:"generatedAt"`
+	EvidenceVersion          string                        `json:"evidenceVersion"`
 	Window                   platform.AnalysisWindowStatus `json:"window"`
 	PrimaryAttributionWindow time.Duration                 `json:"primaryAttributionWindow,omitzero"`
 	ExposureMode             string                        `json:"exposureMode,omitempty"`
@@ -124,6 +130,49 @@ type PrimaryResult struct {
 // returned with Healthy=false and verdict hold instead of an error when
 // possible, so the console can render progress.
 func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Report, error) {
+	report, err := buildReport(store, experimentID, now)
+	if err != nil {
+		return nil, err
+	}
+	version, err := reportEvidenceVersion(report)
+	if err != nil {
+		return nil, fmt.Errorf("experiment %s evidence version: %w", experimentID, err)
+	}
+	report.EvidenceVersion = version
+	return report, nil
+}
+
+// reportEvidenceVersion fingerprints decision evidence while excluding clocks
+// that can advance without changing the analysis population or outcome.
+func reportEvidenceVersion(report *Report) (string, error) {
+	snapshot := *report
+	snapshot.GeneratedAt = time.Time{}
+	snapshot.EvidenceVersion = ""
+	snapshot.Window.Watermark = time.Time{}
+	if report.Diagnostics != nil {
+		diagnostics := *report.Diagnostics
+		diagnostics.GeneratedAt = time.Time{}
+		diagnostics.Window.Watermark = time.Time{}
+		snapshot.Diagnostics = &diagnostics
+	}
+	if report.Bandit != nil {
+		bandit := *report.Bandit
+		bandit.FeedbackWatermark = time.Time{}
+		snapshot.Bandit = &bandit
+	}
+	snapshot.Journeys = slices.Clone(report.Journeys)
+	for i := range snapshot.Journeys {
+		snapshot.Journeys[i].Watermark = time.Time{}
+	}
+	encoded, err := json.Marshal(&snapshot, jsonv1.DefaultOptionsV1(), json.Deterministic(true))
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256(encoded)
+	return "sha256:" + hex.EncodeToString(hash[:]), nil
+}
+
+func buildReport(store *platform.Store, experimentID string, now time.Time) (*Report, error) {
 	exp, err := store.GetExperiment(experimentID)
 	if err != nil {
 		return nil, err

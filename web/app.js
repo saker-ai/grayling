@@ -140,6 +140,8 @@ async function downloadReport(path, format) {
 }
 
 function errMsg(e) {
+  if (e.code === 'report_changed') return t('ro.reportChanged');
+  if (e.code === 'report_unavailable') return t('ro.reportUnavailable');
   if (e.status === 403) return t('err.denied403');
   if (e.status === 409) return t('err.conflict409');
   if (e.status === 429) return t('err.limited429');
@@ -2487,22 +2489,24 @@ function setRolloutReportStatus(m, status) {
 function bindRollout(m, expId, exp = null) {
   const base = '/api/v1/admin/experiments/' + encodeURIComponent(expId) + '/release-plan';
   const plan = exp?.releasePlan;
-  const checkReport = async () => {
+  const checkReport = async (notify = true) => {
     try {
-      await api('/api/v1/admin/experiments/' + encodeURIComponent(expId) + '/report');
+      const report = await api('/api/v1/admin/experiments/' + encodeURIComponent(expId) + '/report');
+      if (!report?.evidenceVersion) throw new Error(t('ro.reportVersionMissing'));
       setRolloutReportStatus(m, 'ready');
-      return true;
+      return report;
     } catch (err) {
       setRolloutReportStatus(m, err.status === 403 ? 'restricted' : 'unavailable');
-      reportError(err);
-      return false;
+      if (notify) reportError(err);
+      return null;
     }
   };
   const decide = async ({ title, summary, reasonLabel = '', reasonRequired = true,
     confirmLabel, path, body, success, requireReport = false }) => {
     if (!confirmLeaveEditor()) return;
     const reportRequired = requireReport && !['draft', 'reviewed', 'scheduled'].includes(exp?.state);
-    if (reportRequired && !await checkReport()) return;
+    let openedReport = reportRequired ? await checkReport() : null;
+    if (reportRequired && !openedReport) return;
     let latest;
     try { latest = await api('/api/v1/admin/experiments/' + encodeURIComponent(expId)); }
     catch (e) { reportError(e); return; }
@@ -2516,12 +2520,34 @@ function bindRollout(m, expId, exp = null) {
     const step = current.steps?.[current.currentStep];
     const scope = t('ro.actionScope', { id: expId, env: S.env || '—',
       step: step?.name || '—', ratio: step?.ratio ?? '—' });
+    const reportEvidence = report => renderReportSummary(report) +
+      '<p class="muted"><strong>' + esc(t('ro.reportEvidenceVersion')) + ':</strong> ' +
+      '<span class="mono">' + esc(report.evidenceVersion) + '</span></p>';
+    const preview = openedReport ? '<div id="ro-report-evidence">' + reportEvidence(openedReport) + '</div>' : '';
     const accepted = await actionDialog({ title, summary: scope + ' ' + summary,
-      reasonLabel, reasonRequired, confirmLabel, onConfirm: async ({ reason }) => {
-        if (reportRequired && !await checkReport()) throw new Error(t('ro.reportUnavailable'));
+      preview, reasonLabel, reasonRequired, confirmLabel, onConfirm: async ({ reason }) => {
+        if (reportRequired) {
+          const currentReport = await checkReport(false);
+          if (!currentReport) throw new ApiError(0, 'report_unavailable', t('ro.reportUnavailable'));
+          if (currentReport.evidenceVersion !== openedReport.evidenceVersion) {
+            openedReport = currentReport;
+            const evidence = $('#ro-report-evidence');
+            if (evidence) evidence.innerHTML = reportEvidence(currentReport);
+            throw new ApiError(0, 'report_changed', t('ro.reportChanged'));
+          }
+        }
         const options = { method: 'POST' };
-        if (body) options.body = body(reason);
-        await api(base + path, options);
+        if (body || reportRequired) {
+          options.body = body ? body(reason) : {};
+          if (reportRequired) options.body.expectedReportVersion = openedReport.evidenceVersion;
+        }
+        try { await api(base + path, options); }
+        catch (err) {
+          if (err.status === 409 && reportRequired) {
+            await checkReport(false);
+          }
+          throw err;
+        }
         toast(t(success));
       } });
     if (accepted) route();

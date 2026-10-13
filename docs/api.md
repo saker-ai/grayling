@@ -90,7 +90,7 @@
 
 新建 `onRender` 实验时还需填写 `exposureTrigger`（何时实际展示或生效）和 `integrationOwner`（接入负责人）。两项随实验预注册，修改触发点或责任人需注册新 epoch。
 
-报告可由 `GET /api/v1/admin/experiments/{id}/report/export?format=json|csv` 下载；与报告读取使用同一 `report.read` 权限，调用时重新计算当前快照，不缓存。JSON 包含工作空间、环境和完整报告；CSV 每个变体一行，包含注册版本、主指标版本与 hash、分析窗口版本、生成时间、水位、健康状态、结论及聚合样本与指标值，不含单元级事实。CSV 中可能由用户控制的文本按电子表格公式规则转义。
+报告可由 `GET /api/v1/admin/experiments/{id}/report/export?format=json|csv` 下载；与报告读取使用同一 `report.read` 权限，调用时重新计算当前快照，不缓存。JSON 包含工作空间、环境和完整报告；CSV 每个变体一行，包含注册版本、主指标版本与 hash、分析窗口版本、生成时间、`evidence_version`、水位、健康状态、结论及聚合样本与指标值，不含单元级事实。CSV 中可能由用户控制的文本按电子表格公式规则转义。报告的 `evidenceVersion` 是决策证据的稳定 SHA-256 指纹：单纯重新生成报告或时钟水位移动不会变更版本，数据、健康状态或结论变化会变更版本。客户端需把最近核对的版本用于人工放量写操作。
 
 创建返回的 `registrationVersion` 是含 epoch、变体、主指标、护栏、家族、alpha 与假设的 SHA-256 指纹；创建审计含版本及家族，报告重复输出版本。API 无修改假设或家族成员的端点；需变更须注册新 epoch。报告发现注册内容与版本不一致时拒绝生成，防止看数后静默改族。`holm.comparisons` 按注册顺序展示 `rawP`、`adjustedP`、`effectiveAlpha`、`rank`（按原始 p 排序，1 起）、`rejected`、差值与**未调整**的单项 CI。Holm 按排序后 `alpha/(m-rank+1)` 逐步拒绝，调整 p 值取前缀最大值并截断到 1；等 p 值按注册顺序稳定排序。缺失任何成员的有效检验时整个家族不给确认性判定，报告 hold。所有成员调整后显著且方向有利才 ship；任一调整后显著且方向不利则 rollback；SRM、护栏、最短运行时间和最小样本门仍优先执行。固定样本 p 值不可用于反复偷看后的提前成功宣告。
 
@@ -122,9 +122,11 @@
 | `POST /api/v1/admin/experiments/{id}/release-plan` | 预注册计划 `{steps:[{name, ratio, minRuntime(ns), observationWindow(ns), autoAdvance}], approvalId}`；ratio 必须严格递增 ∈(0,100]，minRuntime>0；实验须处于 reviewed/scheduled/running；计划唯一（重复创建 409） |
 | `GET /api/v1/admin/experiments/{id}/release-plan` | 计划详情 + 动作历史（每个自动/手动动作都记录 actor 与原因） |
 | `POST .../release-plan/pause` | `{reason}` 必填；armed/running → paused，引擎停手 |
-| `POST .../release-plan/resume` | paused → running（**步骤时钟重置**：干预后须重新服满观察窗）；已起跑的运行中实验要求当前报告可构建，否则 409；从未起跑的计划回到 armed |
-| `POST .../release-plan/advance` | `{reason}` 人工推进下一步（最后一步则完成计划）；要求当前报告可构建，否则 409；不被报告 verdict 拦截（人工发布决策），verdict 记入历史 |
-| `POST .../release-plan/takeover` | `{enabled, reason}` 人工接管开关：开启后引擎对该计划不做任何自动动作；运行中实验关闭人工接管前要求当前报告可构建，否则 409 |
+| `POST .../release-plan/resume` | `{expectedReportVersion}`；paused → running（**步骤时钟重置**：干预后须重新服满观察窗）；已起跑的运行中实验要求报告可构建且证据版本匹配，否则 409；从未起跑的计划可发送 `{}` 回到 armed |
+| `POST .../release-plan/advance` | `{reason, expectedReportVersion}` 人工推进下一步（最后一步则完成计划）；报告不可构建或证据版本已变更返回 409；不被报告 verdict 拦截（人工发布决策），verdict 记入历史 |
+| `POST .../release-plan/takeover` | `{enabled, reason, expectedReportVersion}` 人工接管开关：开启后引擎对该计划不做任何自动动作；运行中实验关闭人工接管前要求报告可构建且证据版本匹配，否则 409；开启时可省略版本 |
+
+需要报告版本的操作若缺少 `expectedReportVersion` 返回 400；版本过期返回 409，计划保持原状态。人工推进、已起跑计划的恢复、关闭人工接管会把所依据的报告版本写入计划历史和审计。暂停与开启人工接管不等待报告可用。客户端遇到 409 应重新读取报告并要求操作者复核，不应自动以新版本重试。
 
 引擎语义（全部动作幂等，先记状态后发布、失败下一 tick 收敛修复）：
 

@@ -71,7 +71,7 @@ func reportCSV(exp *platform.Experiment, report *experiment.Report) ([]byte, err
 		"workspace_id", "environment_id", "experiment_id", "epoch", "registration_version",
 		"primary_metric_key", "primary_metric_version", "primary_metric_hash", "analysis_window_version",
 		"primary_attribution_window_ns",
-		"generated_at", "window_start", "window_end", "watermark", "recomputable", "complete",
+		"generated_at", "evidence_version", "window_start", "window_end", "watermark", "recomputable", "complete",
 		"healthy", "health_issues", "verdict", "variant", "exposed_units", "randomized_units",
 		"exposures", "converted_units", "primary_value",
 	}}
@@ -87,7 +87,8 @@ func reportCSV(exp *platform.Experiment, report *experiment.Report) ([]byte, err
 			strconv.FormatInt(report.Epoch, 10), csvCell(report.RegistrationVersion),
 			csvCell(metricKey), metricVersion, csvCell(metricHash), csvCell(report.Window.Version),
 			strconv.FormatInt(int64(report.PrimaryAttributionWindow), 10),
-			report.GeneratedAt.Format(time.RFC3339Nano), report.Window.Start.Format(time.RFC3339Nano),
+			report.GeneratedAt.Format(time.RFC3339Nano), report.EvidenceVersion,
+			report.Window.Start.Format(time.RFC3339Nano),
 			report.Window.End.Format(time.RFC3339Nano), report.Window.Watermark.Format(time.RFC3339Nano),
 			strconv.FormatBool(report.Window.Recomputable), strconv.FormatBool(report.Window.Complete),
 			strconv.FormatBool(report.Healthy), csvCell(strings.Join(report.HealthIssues, " | ")),

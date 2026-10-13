@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"github.com/saker-ai/grayling/internal/admin"
 	"github.com/saker-ai/grayling/internal/api"
 	"github.com/saker-ai/grayling/internal/configstore"
+	"github.com/saker-ai/grayling/internal/experiment"
 	"github.com/saker-ai/grayling/internal/platform"
 	"github.com/saker-ai/grayling/internal/rollout"
 	"github.com/saker-ai/grayling/pkg/bucketing"
@@ -189,7 +191,7 @@ func TestMultiReplicaPlanStartTakeoverAndManualAdvance(t *testing.T) {
 		t.Fatalf("takeover: %d", code)
 	}
 	if code := h.do("POST", "/api/v1/admin/experiments/"+expID+"/release-plan/advance",
-		h.owner, map[string]any{"reason": "operator decided"}, nil); code != http.StatusOK {
+		h.owner, map[string]any{"reason": "operator decided", "expectedReportVersion": h.reportVersion(t, expID)}, nil); code != http.StatusOK {
 		t.Fatalf("manual advance: %d", code)
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -714,6 +716,18 @@ func (h *harness) getPlan(t *testing.T, expID string) platform.ReleasePlan {
 	return plan
 }
 
+func (h *harness) reportVersion(t *testing.T, expID string) string {
+	t.Helper()
+	report, err := experiment.BuildReport(h.store, expID, h.fakeNow)
+	if err != nil {
+		t.Fatalf("build report: %v", err)
+	}
+	if report.EvidenceVersion == "" {
+		t.Fatal("report has no evidence version")
+	}
+	return report.EvidenceVersion
+}
+
 func (h *harness) getExperiment(t *testing.T, expID string) platform.Experiment {
 	t.Helper()
 	var exp platform.Experiment
@@ -1044,7 +1058,7 @@ func TestRolloutPausesOnSRM(t *testing.T) {
 	// Operator resume → running again with a RESTARTED step clock: an
 	// immediate tick must not advance even though wall time passed.
 	if code := h.do("POST", "/api/v1/admin/experiments/"+expID+"/release-plan/resume",
-		h.owner, nil, nil); code != http.StatusOK {
+		h.owner, map[string]any{"expectedReportVersion": h.reportVersion(t, expID)}, nil); code != http.StatusOK {
 		t.Fatalf("resume: %d", code)
 	}
 	plan = h.getPlan(t, expID)
@@ -1162,7 +1176,7 @@ func TestRolloutManualTakeoverPauseAdvance(t *testing.T) {
 
 	// Manual advance works during takeover (it IS the human action).
 	if code := h.do("POST", "/api/v1/admin/experiments/"+expID+"/release-plan/advance",
-		h.owner, map[string]any{"reason": "operator decided"}, nil); code != http.StatusOK {
+		h.owner, map[string]any{"reason": "operator decided", "expectedReportVersion": h.reportVersion(t, expID)}, nil); code != http.StatusOK {
 		t.Fatalf("manual advance: %d", code)
 	}
 	plan = h.getPlan(t, expID)
@@ -1179,7 +1193,7 @@ func TestRolloutManualTakeoverPauseAdvance(t *testing.T) {
 
 	// Takeover OFF + pause: engine inert again while paused.
 	if code := h.do("POST", "/api/v1/admin/experiments/"+expID+"/release-plan/takeover",
-		h.owner, map[string]any{"enabled": false}, nil); code != http.StatusOK {
+		h.owner, map[string]any{"enabled": false, "expectedReportVersion": h.reportVersion(t, expID)}, nil); code != http.StatusOK {
 		t.Fatalf("takeover off: %d", code)
 	}
 	if code := h.do("POST", "/api/v1/admin/experiments/"+expID+"/release-plan/pause",
@@ -1195,7 +1209,7 @@ func TestRolloutManualTakeoverPauseAdvance(t *testing.T) {
 
 	// Resume + dwell + healthy ship data → engine completes the final step.
 	if code := h.do("POST", "/api/v1/admin/experiments/"+expID+"/release-plan/resume",
-		h.owner, nil, nil); code != http.StatusOK {
+		h.owner, map[string]any{"expectedReportVersion": h.reportVersion(t, expID)}, nil); code != http.StatusOK {
 		t.Fatalf("resume: %d", code)
 	}
 	h.feedTraffic(t, expID, 1000, 400, 0.3, 0.1, nil)
@@ -1253,8 +1267,11 @@ func TestOperatorActionsRequireAvailableReport(t *testing.T) {
 		}
 	}
 	base := "/api/v1/admin/experiments/" + expID + "/release-plan"
+	beforeFailureVersion := h.reportVersion(t, expID)
 	setMissingMetric(true)
-	if code := h.do("POST", base+"/advance", h.owner, map[string]any{"reason": "override"}, nil); code != http.StatusConflict {
+	if code := h.do("POST", base+"/advance", h.owner, map[string]any{
+		"reason": "override", "expectedReportVersion": beforeFailureVersion,
+	}, nil); code != http.StatusConflict {
 		t.Fatalf("manual advance with unavailable report: %d", code)
 	}
 	if plan := h.getPlan(t, expID); plan.CurrentStep != 0 {
@@ -1263,13 +1280,17 @@ func TestOperatorActionsRequireAvailableReport(t *testing.T) {
 	if code := h.do("POST", base+"/pause", h.owner, map[string]any{"reason": "investigate"}, nil); code != http.StatusOK {
 		t.Fatalf("pause should remain available: %d", code)
 	}
-	if code := h.do("POST", base+"/resume", h.owner, nil, nil); code != http.StatusConflict {
+	if code := h.do("POST", base+"/resume", h.owner, map[string]any{
+		"expectedReportVersion": beforeFailureVersion,
+	}, nil); code != http.StatusConflict {
 		t.Fatalf("resume with unavailable report: %d", code)
 	}
 	if code := h.do("POST", base+"/takeover", h.owner, map[string]any{"enabled": true, "reason": "freeze"}, nil); code != http.StatusOK {
 		t.Fatalf("manual takeover should remain available: %d", code)
 	}
-	if code := h.do("POST", base+"/takeover", h.owner, map[string]any{"enabled": false}, nil); code != http.StatusConflict {
+	if code := h.do("POST", base+"/takeover", h.owner, map[string]any{
+		"enabled": false, "expectedReportVersion": beforeFailureVersion,
+	}, nil); code != http.StatusConflict {
 		t.Fatalf("return to automatic control with unavailable report: %d", code)
 	}
 	if plan := h.getPlan(t, expID); plan.State != platform.ReleasePlanPaused || !plan.ManualOverride {
@@ -1277,13 +1298,19 @@ func TestOperatorActionsRequireAvailableReport(t *testing.T) {
 	}
 
 	setMissingMetric(false)
-	if code := h.do("POST", base+"/resume", h.owner, nil, nil); code != http.StatusOK {
+	if code := h.do("POST", base+"/resume", h.owner, map[string]any{
+		"expectedReportVersion": h.reportVersion(t, expID),
+	}, nil); code != http.StatusOK {
 		t.Fatalf("resume after report recovery: %d", code)
 	}
-	if code := h.do("POST", base+"/takeover", h.owner, map[string]any{"enabled": false}, nil); code != http.StatusOK {
+	if code := h.do("POST", base+"/takeover", h.owner, map[string]any{
+		"enabled": false, "expectedReportVersion": h.reportVersion(t, expID),
+	}, nil); code != http.StatusOK {
 		t.Fatalf("return to automatic control after recovery: %d", code)
 	}
-	if code := h.do("POST", base+"/advance", h.owner, map[string]any{"reason": "operator decision"}, nil); code != http.StatusOK {
+	if code := h.do("POST", base+"/advance", h.owner, map[string]any{
+		"reason": "operator decision", "expectedReportVersion": h.reportVersion(t, expID),
+	}, nil); code != http.StatusOK {
 		t.Fatalf("manual advance after report recovery: %d", code)
 	}
 	plan := h.getPlan(t, expID)
@@ -1299,6 +1326,88 @@ func TestOperatorActionsRequireAvailableReport(t *testing.T) {
 	}
 	if !foundAudit {
 		t.Fatal("manual advance lacks audit record")
+	}
+}
+
+func TestOperatorActionsRejectChangedReportEvidence(t *testing.T) {
+	h := newHarness(t)
+	expID := h.runningExperiment(t, "report-version", nil)
+	h.createPlan(t, expID,
+		step{Name: "canary", Ratio: 20, MinRuntime: int64(time.Hour)},
+		step{Name: "full", Ratio: 100, MinRuntime: int64(time.Hour)})
+	h.tick()
+	base := "/api/v1/admin/experiments/" + expID + "/release-plan"
+	openedVersion := h.reportVersion(t, expID)
+	h.feedTraffic(t, expID, 0, 200, 0.3, 0.1, nil)
+	currentVersion := h.reportVersion(t, expID)
+	if currentVersion == openedVersion {
+		t.Fatal("new exposure data did not change report evidence version")
+	}
+	if code := h.do("POST", base+"/advance", h.owner, map[string]any{"reason": "old report"}, nil); code != http.StatusBadRequest {
+		t.Fatalf("missing report version: %d", code)
+	}
+	if code := h.do("POST", base+"/advance", h.owner, map[string]any{
+		"reason": "old report", "expectedReportVersion": openedVersion,
+	}, nil); code != http.StatusConflict {
+		t.Fatalf("advance with stale evidence: %d", code)
+	}
+	if plan := h.getPlan(t, expID); plan.CurrentStep != 0 {
+		t.Fatalf("stale advance changed plan: %+v", plan)
+	}
+	if code := h.do("POST", base+"/pause", h.owner, map[string]any{"reason": "review new data"}, nil); code != http.StatusOK {
+		t.Fatalf("pause: %d", code)
+	}
+	if code := h.do("POST", base+"/resume", h.owner, map[string]any{
+		"expectedReportVersion": openedVersion,
+	}, nil); code != http.StatusConflict {
+		t.Fatalf("resume with stale evidence: %d", code)
+	}
+	if code := h.do("POST", base+"/takeover", h.owner, map[string]any{
+		"enabled": true, "reason": "reviewing",
+	}, nil); code != http.StatusOK {
+		t.Fatalf("manual takeover: %d", code)
+	}
+	if code := h.do("POST", base+"/takeover", h.owner, map[string]any{
+		"enabled": false, "expectedReportVersion": openedVersion,
+	}, nil); code != http.StatusConflict {
+		t.Fatalf("return to automatic control with stale evidence: %d", code)
+	}
+	if plan := h.getPlan(t, expID); plan.State != platform.ReleasePlanPaused || !plan.ManualOverride {
+		t.Fatalf("stale actions changed pause or takeover: %+v", plan)
+	}
+	if code := h.do("POST", base+"/resume", h.owner, map[string]any{
+		"expectedReportVersion": currentVersion,
+	}, nil); code != http.StatusOK {
+		t.Fatalf("resume with current evidence: %d", code)
+	}
+	if code := h.do("POST", base+"/takeover", h.owner, map[string]any{
+		"enabled": false, "expectedReportVersion": h.reportVersion(t, expID),
+	}, nil); code != http.StatusOK {
+		t.Fatalf("return to automatic control with current evidence: %d", code)
+	}
+	plan := h.getPlan(t, expID)
+	for _, action := range []string{"manual.resume", "manual.takeover_off"} {
+		found := false
+		for _, event := range plan.History {
+			if event.Action == action && strings.Contains(event.Detail, "report evidence version: "+currentVersion) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s history lacks current report evidence version", action)
+		}
+	}
+	for _, action := range []string{"release_plan.resume", "release_plan.takeover"} {
+		found := false
+		for _, entry := range h.store.AuditList(h.ws.ID, 50) {
+			if entry.Action == action && entry.Object == expID &&
+				strings.Contains(entry.Detail, `"reportEvidenceVersion":"`+currentVersion+`"`) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s audit lacks current report evidence version", action)
+		}
 	}
 }
 
@@ -1327,7 +1436,8 @@ func TestRolloutAutoAdvanceFalseHoldsAtBoundary(t *testing.T) {
 	}
 	// Operator completes the final... first step manually.
 	if code := h.do("POST", "/api/v1/admin/experiments/"+expID+"/release-plan/advance",
-		h.owner, map[string]any{"reason": "gate passed, operator confirms"}, nil); code != http.StatusOK {
+		h.owner, map[string]any{"reason": "gate passed, operator confirms",
+			"expectedReportVersion": h.reportVersion(t, expID)}, nil); code != http.StatusOK {
 		t.Fatalf("manual advance: %d", code)
 	}
 	if plan := h.getPlan(t, expID); plan.CurrentStep != 1 {

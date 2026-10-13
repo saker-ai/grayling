@@ -99,7 +99,14 @@ func (s *Server) handlePauseReleasePlan(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleResumeReleasePlan(w http.ResponseWriter, r *http.Request) {
-	exp, err := s.Rollout.Resume(actorFrom(r), r.PathValue("id"))
+	var req struct {
+		ExpectedReportVersion string `json:"expectedReportVersion"`
+	}
+	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	exp, err := s.Rollout.Resume(actorFrom(r), r.PathValue("id"), req.ExpectedReportVersion)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -109,10 +116,14 @@ func (s *Server) handleResumeReleasePlan(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleAdvanceReleasePlan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Reason string `json:"reason"`
+		Reason                string `json:"reason"`
+		ExpectedReportVersion string `json:"expectedReportVersion"`
 	}
-	_ = decodeJSON(r, &req, maxAdminBodyBytes) // body optional
-	exp, err := s.Rollout.AdvanceNow(actorFrom(r), r.PathValue("id"), req.Reason)
+	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	exp, err := s.Rollout.AdvanceNow(actorFrom(r), r.PathValue("id"), req.Reason, req.ExpectedReportVersion)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -124,14 +135,15 @@ func (s *Server) handleAdvanceReleasePlan(w http.ResponseWriter, r *http.Request
 // takes no automatic action on the plan.
 func (s *Server) handleTakeoverReleasePlan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Enabled bool   `json:"enabled"`
-		Reason  string `json:"reason"`
+		Enabled               bool   `json:"enabled"`
+		Reason                string `json:"reason"`
+		ExpectedReportVersion string `json:"expectedReportVersion"`
 	}
 	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	exp, err := s.Rollout.SetManualOverride(actorFrom(r), r.PathValue("id"), req.Enabled, req.Reason)
+	exp, err := s.Rollout.SetManualOverride(actorFrom(r), r.PathValue("id"), req.Enabled, req.Reason, req.ExpectedReportVersion)
 	if err != nil {
 		writeStoreError(w, err)
 		return

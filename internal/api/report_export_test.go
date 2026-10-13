@@ -71,15 +71,16 @@ func TestExperimentReportExportScopeAndFormats(t *testing.T) {
 		WorkspaceID   string `json:"workspaceId"`
 		EnvironmentID string `json:"environmentId"`
 		Report        struct {
-			ExperimentID string `json:"experimentId"`
-			Epoch        int64  `json:"epoch"`
+			ExperimentID    string `json:"experimentId"`
+			Epoch           int64  `json:"epoch"`
+			EvidenceVersion string `json:"evidenceVersion"`
 		} `json:"report"`
 	}
 	if err := json.Unmarshal(jsonResp.Body.Bytes(), &exported); err != nil {
 		t.Fatal(err)
 	}
 	if exported.WorkspaceID != ws.ID || exported.EnvironmentID != env.ID ||
-		exported.Report.ExperimentID != exp.ID || exported.Report.Epoch != exp.Epoch {
+		exported.Report.ExperimentID != exp.ID || exported.Report.Epoch != exp.Epoch || exported.Report.EvidenceVersion == "" {
 		t.Fatalf("wrong export scope: %+v", exported)
 	}
 	csvResp := call("?format=csv", viewer.Secret)
@@ -96,8 +97,9 @@ func TestExperimentReportExportScopeAndFormats(t *testing.T) {
 	if len(rows) != 3 || len(rows[0]) != len(rows[1]) || len(rows[0]) != len(rows[2]) {
 		t.Fatalf("CSV shape = %v", rows)
 	}
-	if rows[1][0] != ws.ID || rows[1][1] != env.ID || rows[1][2] != exp.ID ||
-		rows[1][19] != "control" || rows[2][19] != "treatment" {
+	if rows[0][11] != "evidence_version" || rows[1][11] == "" ||
+		rows[1][0] != ws.ID || rows[1][1] != env.ID || rows[1][2] != exp.ID ||
+		rows[1][20] != "control" || rows[2][20] != "treatment" {
 		t.Fatalf("CSV scope/variants = %v", rows)
 	}
 }

@@ -1690,11 +1690,17 @@ paths:
   "/api/v1/admin/experiments/{id}/release-plan/resume":
     post:
       tags: [release-plans]
-      summary: 恢复计划（paused→running）。无请求体。
-      description: 已起跑的运行中实验要求当前报告可构建；否则返回 409，计划保持暂停。未起跑的计划恢复到 armed。
+      summary: 恢复计划（paused→running）
+      description: 已起跑的运行中实验要求提交当前报告的 expectedReportVersion；报告不可构建或证据已变更时返回 409，计划保持暂停。未起跑的计划恢复到 armed。
       operationId: resumeReleasePlan
       parameters:
         - $ref: "#/components/parameters/ExperimentIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResumeReleasePlanRequest"
       responses:
         "200":
           description: 恢复后的计划。
@@ -1710,6 +1716,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "429":
           $ref: "#/components/responses/RateLimited"
         "500":
@@ -1717,17 +1725,17 @@ paths:
   "/api/v1/admin/experiments/{id}/release-plan/advance":
     post:
       tags: [release-plans]
-      summary: 人工推进到下一步骤（body 可选）
-      description: 当前报告必须可构建；否则返回 409，不推进计划。报告 verdict 不限制具备发布权限的人工决策，当前 verdict 记入计划历史。
+      summary: 人工推进到下一步骤
+      description: 必须提交当前报告的 expectedReportVersion；报告不可构建或证据已变更时返回 409，不推进计划。报告 verdict 不限制具备发布权限的人工决策，当前 verdict 记入计划历史。
       operationId: advanceReleasePlan
       parameters:
         - $ref: "#/components/parameters/ExperimentIdPath"
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ReasonRequest"
+              $ref: "#/components/schemas/AdvanceReleasePlanRequest"
       responses:
         "200":
           description: 推进后的计划。
@@ -1743,6 +1751,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "429":
           $ref: "#/components/responses/RateLimited"
         "500":
@@ -1751,7 +1761,7 @@ paths:
     post:
       tags: [release-plans]
       summary: 人工接管开关（enabled=true 时引擎不做任何自动动作）
-      description: 运行中实验关闭人工接管前要求当前报告可构建；否则返回 409。开启人工接管不受报告可用性限制。
+      description: 运行中实验关闭人工接管前要求提交当前报告的 expectedReportVersion；报告不可构建或证据已变更时返回 409。开启人工接管不受报告可用性限制。
       operationId: takeoverReleasePlan
       parameters:
         - $ref: "#/components/parameters/ExperimentIdPath"
@@ -4315,6 +4325,27 @@ components:
           description: true = 人工接管（引擎停止自动动作）；false = 交还引擎。
         reason:
           type: string
+        expectedReportVersion:
+          type: string
+          description: 运行中实验关闭人工接管时必填；取自最近核对的报告 evidenceVersion。
+    ResumeReleasePlanRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        expectedReportVersion:
+          type: string
+          description: 已起跑的运行中实验必填；取自最近核对的报告 evidenceVersion。
+    AdvanceReleasePlanRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedReportVersion]
+      properties:
+        reason:
+          type: string
+        expectedReportVersion:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+          description: 最近核对的报告 evidenceVersion。
     Report:
       type: object
       description: >-
@@ -4329,6 +4360,7 @@ components:
         - flagKey
         - state
         - generatedAt
+        - evidenceVersion
         - analysisMethod
         - alpha
         - mde
@@ -4351,6 +4383,10 @@ components:
         generatedAt:
           type: string
           format: date-time
+        evidenceVersion:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+          description: 对决策证据的稳定指纹。生成时间及仅因时钟移动的水位不改变版本；数据、健康状态或结论变化会改变版本。
         window:
           $ref: "#/components/schemas/AnalysisWindowStatus"
         primaryAttributionWindow:

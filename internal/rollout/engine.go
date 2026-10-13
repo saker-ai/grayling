@@ -544,11 +544,17 @@ func (e *Engine) pause(exp *platform.Experiment, now time.Time, reason string, s
 // Manual operations (admin API surface; actor-attributed and audited)
 // ---------------------------------------------------------------------------
 
-func (e *Engine) reportForOperatorAction(experimentID string) (*experiment.Report, error) {
+func (e *Engine) reportForOperatorAction(experimentID, expectedVersion string) (*experiment.Report, error) {
+	if expectedVersion == "" {
+		return nil, fmt.Errorf("%w: expected report evidence version is required", platform.ErrValidation)
+	}
 	report, err := experiment.BuildReport(e.Store, experimentID, e.now())
 	if err != nil {
 		e.Logger.Printf("rollout: report unavailable for operator action on %s: %v", experimentID, err)
 		return nil, fmt.Errorf("%w: current experiment report unavailable", platform.ErrInvalidState)
+	}
+	if report.EvidenceVersion != expectedVersion {
+		return nil, fmt.Errorf("%w: report evidence changed; refresh and confirm again", platform.ErrConflict)
 	}
 	return report, nil
 }
@@ -592,7 +598,7 @@ func (e *Engine) Pause(actor admin.Actor, experimentID, reason string) (*platfor
 // after an intervention the full pre-registered observation window must
 // elapse on clean data before the gate may fire again (§10.3: peeking on
 // contaminated data is not a valid analysis point).
-func (e *Engine) Resume(actor admin.Actor, experimentID string) (*platform.Experiment, error) {
+func (e *Engine) Resume(actor admin.Actor, experimentID, expectedReportVersion string) (*platform.Experiment, error) {
 	release, err := e.lockPlan(experimentID)
 	if err != nil {
 		return nil, err
@@ -605,11 +611,14 @@ func (e *Engine) Resume(actor admin.Actor, experimentID string) (*platform.Exper
 	if err := admin.Authorize(actor, exp.WorkspaceID, admin.PermFlagPublish); err != nil {
 		return nil, err
 	}
+	var reportVersion string
 	if exp.State == model.ExperimentRunning && exp.ReleasePlan != nil &&
 		exp.ReleasePlan.State == platform.ReleasePlanPaused && exp.ReleasePlan.StepStartedAt != nil {
-		if _, err := e.reportForOperatorAction(experimentID); err != nil {
+		report, err := e.reportForOperatorAction(experimentID, expectedReportVersion)
+		if err != nil {
 			return nil, err
 		}
+		reportVersion = report.EvidenceVersion
 	}
 	now := e.now()
 	out, err := e.Store.UpdateReleasePlan(experimentID, func(p *platform.ReleasePlan) error {
@@ -624,21 +633,25 @@ func (e *Engine) Resume(actor admin.Actor, experimentID string) (*platform.Exper
 			p.StepStartedAt = &started // fresh observation window
 		}
 		p.PausedReason = ""
+		detail := "step clock restarted"
+		if reportVersion != "" {
+			detail += "; report evidence version: " + reportVersion
+		}
 		p.AppendHistory(platform.PlanEvent{At: now, Actor: actor.Name,
-			Action: "manual.resume", Step: p.CurrentStep, Detail: "step clock restarted"})
+			Action: "manual.resume", Step: p.CurrentStep, Detail: detail})
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	e.audit(exp, "release_plan.resume", map[string]any{"by": actor.Name})
+	e.audit(exp, "release_plan.resume", map[string]any{"by": actor.Name, "reportEvidenceVersion": reportVersion})
 	return out, nil
 }
 
 // SetManualOverride flips the 人工接管开关. While enabled the engine takes no
 // automatic action on this plan; while disabled automatic operation resumes
 // from the recorded state.
-func (e *Engine) SetManualOverride(actor admin.Actor, experimentID string, enabled bool, reason string) (*platform.Experiment, error) {
+func (e *Engine) SetManualOverride(actor admin.Actor, experimentID string, enabled bool, reason, expectedReportVersion string) (*platform.Experiment, error) {
 	release, err := e.lockPlan(experimentID)
 	if err != nil {
 		return nil, err
@@ -651,10 +664,13 @@ func (e *Engine) SetManualOverride(actor admin.Actor, experimentID string, enabl
 	if err := admin.Authorize(actor, exp.WorkspaceID, admin.PermFlagPublish); err != nil {
 		return nil, err
 	}
+	var reportVersion string
 	if !enabled && exp.State == model.ExperimentRunning && exp.ReleasePlan != nil && exp.ReleasePlan.ManualOverride {
-		if _, err := e.reportForOperatorAction(experimentID); err != nil {
+		report, err := e.reportForOperatorAction(experimentID, expectedReportVersion)
+		if err != nil {
 			return nil, err
 		}
+		reportVersion = report.EvidenceVersion
 	}
 	now := e.now()
 	out, err := e.Store.UpdateReleasePlan(experimentID, func(p *platform.ReleasePlan) error {
@@ -666,14 +682,19 @@ func (e *Engine) SetManualOverride(actor admin.Actor, experimentID string, enabl
 		if enabled {
 			action = "manual.takeover_on"
 		}
+		detail := reason
+		if reportVersion != "" {
+			detail += "; report evidence version: " + reportVersion
+		}
 		p.AppendHistory(platform.PlanEvent{At: now, Actor: actor.Name,
-			Action: action, Step: p.CurrentStep, Detail: reason})
+			Action: action, Step: p.CurrentStep, Detail: detail})
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	e.audit(exp, "release_plan.takeover", map[string]any{"enabled": enabled, "reason": reason, "by": actor.Name})
+	e.audit(exp, "release_plan.takeover", map[string]any{"enabled": enabled, "reason": reason, "by": actor.Name,
+		"reportEvidenceVersion": reportVersion})
 	return out, nil
 }
 
@@ -682,7 +703,7 @@ func (e *Engine) SetManualOverride(actor admin.Actor, experimentID string, enabl
 // publish decision: it is not gated by the report verdict, but a report must
 // be available. Its verdict is recorded for traceability (§9: 任何信号不得绕过
 // 发布权限 — the caller needs publish permission).
-func (e *Engine) AdvanceNow(actor admin.Actor, experimentID, reason string) (*platform.Experiment, error) {
+func (e *Engine) AdvanceNow(actor admin.Actor, experimentID, reason, expectedReportVersion string) (*platform.Experiment, error) {
 	release, err := e.lockPlan(experimentID)
 	if err != nil {
 		return nil, err
@@ -702,11 +723,12 @@ func (e *Engine) AdvanceNow(actor admin.Actor, experimentID, reason string) (*pl
 	if plan == nil || plan.State != platform.ReleasePlanRunning {
 		return nil, fmt.Errorf("%w: plan must be running to advance", platform.ErrInvalidState)
 	}
-	report, err := e.reportForOperatorAction(experimentID)
+	report, err := e.reportForOperatorAction(experimentID, expectedReportVersion)
 	if err != nil {
 		return nil, err
 	}
-	verdictNote := fmt.Sprintf("; gate verdict at advance: %s", report.Decision.Verdict)
+	verdictNote := fmt.Sprintf("; gate verdict at advance: %s; report evidence version: %s",
+		report.Decision.Verdict, report.EvidenceVersion)
 	now := e.now()
 	final := plan.CurrentStep == len(plan.Steps)-1
 	if final {
@@ -719,7 +741,8 @@ func (e *Engine) AdvanceNow(actor admin.Actor, experimentID, reason string) (*pl
 		if err != nil {
 			return nil, err
 		}
-		e.audit(exp, "release_plan.manual_complete", map[string]any{"reason": reason, "by": actor.Name})
+		e.audit(exp, "release_plan.manual_complete", map[string]any{"reason": reason, "by": actor.Name,
+			"reportEvidenceVersion": report.EvidenceVersion})
 		return out, nil
 	}
 	next := plan.CurrentStep + 1
@@ -742,7 +765,8 @@ func (e *Engine) AdvanceNow(actor admin.Actor, experimentID, reason string) (*pl
 		return nil, fmt.Errorf("step recorded but republish failed (engine/operator retry converges): %w", err)
 	}
 	e.audit(exp, "release_plan.manual_advance", map[string]any{
-		"step": next, "ratio": plan.Steps[next].Ratio, "reason": reason, "by": actor.Name})
+		"step": next, "ratio": plan.Steps[next].Ratio, "reason": reason, "by": actor.Name,
+		"reportEvidenceVersion": report.EvidenceVersion})
 	return out, nil
 }
 

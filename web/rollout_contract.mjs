@@ -36,6 +36,7 @@ const fetchCalls = [];
 let currentExperiment = null;
 let reportUnavailable = false;
 let reportFetches = 0;
+let reportVersion = 'sha256:report-v1';
 const sandbox = {
   document: {
     addEventListener() {}, createElement: el,
@@ -62,7 +63,9 @@ const sandbox = {
       return Promise.resolve(reportUnavailable
         ? { ok: false, status: 503, statusText: 'report unavailable',
           text: () => Promise.resolve('{"error":{"message":"report unavailable"}}') }
-        : { ok: true, status: 200, text: () => Promise.resolve('{"healthy":false}') });
+        : { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ healthy: false,
+          evidenceVersion: reportVersion, decision: { verdict: 'hold' }, generatedAt: '2026-10-13T00:00:00Z',
+          window: { watermark: '2026-10-10T00:00:00Z' } })) });
     }
     fetchCalls.push({ url, opts });
     return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('{}') });
@@ -341,10 +344,11 @@ const withPlan = over => ({ id: 'exp-1', state: 'running', releasePlan: { ...bas
   await tick();
   assert.strictEqual(fetchCalls.length, 1);
   assert.strictEqual(fetchCalls[0].url, '/api/v1/admin/experiments/exp-1/release-plan/advance');
-  assert.deepStrictEqual(JSON.parse(fetchCalls[0].opts.body), { reason: 'approved in change meeting' });
+  assert.deepStrictEqual(JSON.parse(fetchCalls[0].opts.body),
+    { reason: 'approved in change meeting', expectedReportVersion: reportVersion });
 }
 
-// 11. resume on a paused plan: confirm, and NO request body.
+// 11. resume on a paused plan: confirmation carries the reviewed report version.
 {
   const { root } = renderState(withPlan({ state: 'paused', pausedReason: 'operator hold' }));
   sandbox.__confirm = false; fetchCalls.length = 0;
@@ -356,7 +360,7 @@ const withPlan = over => ({ id: 'exp-1', state: 'running', releasePlan: { ...bas
   await tick();
   assert.strictEqual(fetchCalls.length, 1);
   assert.strictEqual(fetchCalls[0].url, '/api/v1/admin/experiments/exp-1/release-plan/resume');
-  assert.strictEqual(fetchCalls[0].opts.body, undefined, 'resume must send no body');
+  assert.deepStrictEqual(JSON.parse(fetchCalls[0].opts.body), { expectedReportVersion: reportVersion });
 }
 
 // 12. takeover OFF: confirm + optional reason → POST /takeover {enabled:false}.
@@ -367,7 +371,8 @@ const withPlan = over => ({ id: 'exp-1', state: 'running', releasePlan: { ...bas
   await tick();
   assert.strictEqual(fetchCalls.length, 1);
   assert.strictEqual(fetchCalls[0].url, '/api/v1/admin/experiments/exp-1/release-plan/takeover');
-  assert.deepStrictEqual(JSON.parse(fetchCalls[0].opts.body), { enabled: false, reason: 'incident closed' });
+  assert.deepStrictEqual(JSON.parse(fetchCalls[0].opts.body),
+    { enabled: false, reason: 'incident closed', expectedReportVersion: reportVersion });
 }
 
 // 13. A plan that advanced after rendering must be refreshed before an
@@ -413,4 +418,26 @@ const withPlan = over => ({ id: 'exp-1', state: 'running', releasePlan: { ...bas
   assert(reportFetches > 0, 'advance must re-read the report before showing confirmation');
 }
 
-console.log('rollout UI DOM contract: all assertions passed (8 plan states + report safety gate + action flows)');
+// 15. Evidence changing while the confirmation is open requires another
+// explicit review. The first confirmation must not send a rollout mutation.
+{
+  const { root } = renderState(withPlan());
+  const priorDialog = sandbox.actionDialog;
+  let conflict;
+  fetchCalls.length = 0;
+  reportVersion = 'sha256:report-v1';
+  sandbox.actionDialog = async options => {
+    reportVersion = 'sha256:report-v2';
+    try { await options.onConfirm({ reason: 'operator reviewed prior evidence' }); }
+    catch (err) { conflict = err; }
+    return null;
+  };
+  root._stubs.get('ro-advance').onclick();
+  await tick();
+  assert.strictEqual(conflict?.code, 'report_changed', 'changed evidence must require a fresh confirmation');
+  assert.strictEqual(fetchCalls.length, 0, 'changed evidence must not POST a rollout mutation');
+  sandbox.actionDialog = priorDialog;
+  reportVersion = 'sha256:report-v1';
+}
+
+console.log('rollout UI DOM contract: all assertions passed (8 plan states + report safety gate + evidence confirmation + action flows)');
