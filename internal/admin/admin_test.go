@@ -239,9 +239,54 @@ func TestOptimisticLocking(t *testing.T) {
 	if _, err := f.svc.SaveFlagDraft(f.publisher, f.ws.ID, f.env.ID, stale, platform.RiskNormal, 1); !errors.Is(err, platform.ErrConflict) {
 		t.Fatalf("stale base must conflict: %v", err)
 	}
-	// Saving against base 0 (no lock intent) or current revision succeeds.
+	latest, err := f.svc.GetFlagView(f.publisher, f.ws.ID, f.env.ID, "lock", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.SaveFlagDraft(f.publisher, f.ws.ID, f.env.ID, stale,
+		platform.RiskNormal, 0, latest.DraftHash); !errors.Is(err, platform.ErrConflict) {
+		t.Fatalf("checked save cannot bypass published revision lock with base 0: %v", err)
+	}
+	// Saving against the current revision succeeds.
 	if _, err := f.svc.SaveFlagDraft(f.publisher, f.ws.ID, f.env.ID, stale, platform.RiskNormal, 2); err != nil {
 		t.Fatalf("save at current base: %v", err)
+	}
+}
+
+func TestFlagDraftHashPreventsSameRevisionOverwrite(t *testing.T) {
+	f := newFixture(t)
+	first := testFlag("shared")
+	if _, err := f.svc.SaveFlagDraft(f.publisher, f.ws.ID, f.env.ID, first,
+		platform.RiskNormal, 0, ""); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+	if _, err := f.svc.SaveFlagDraft(f.publisher2, f.ws.ID, f.env.ID, first,
+		platform.RiskNormal, 0, ""); !errors.Is(err, platform.ErrConflict) {
+		t.Fatalf("editor who saw no draft must not overwrite new draft: %v", err)
+	}
+	view, err := f.svc.GetFlagView(f.publisher2, f.ws.ID, f.env.ID, first.Key, false)
+	if err != nil || view.DraftHash == "" {
+		t.Fatalf("draft fingerprint missing: %+v, %v", view, err)
+	}
+	second := testFlag("shared")
+	second.Bucketing.Salt = "bob"
+	if _, err := f.svc.SaveFlagDraft(f.publisher2, f.ws.ID, f.env.ID, second,
+		platform.RiskNormal, 0, view.DraftHash); err != nil {
+		t.Fatalf("second editor save: %v", err)
+	}
+	stale := testFlag("shared")
+	stale.Bucketing.Salt = "alice"
+	if _, err := f.svc.SaveFlagDraft(f.publisher, f.ws.ID, f.env.ID, stale,
+		platform.RiskNormal, 0, view.DraftHash); !errors.Is(err, platform.ErrConflict) {
+		t.Fatalf("stale draft fingerprint must conflict: %v", err)
+	}
+	latest, err := f.svc.GetFlagView(f.publisher, f.ws.ID, f.env.ID, first.Key, false)
+	if err != nil || latest.Draft.Content.Bucketing.Salt != "bob" || latest.DraftHash == view.DraftHash {
+		t.Fatalf("stale save overwrote editor B: %+v, %v", latest, err)
+	}
+	if _, err := f.svc.SaveFlagDraft(f.publisher, f.ws.ID, f.env.ID, stale,
+		platform.RiskNormal, 0, latest.DraftHash); err != nil {
+		t.Fatalf("save after reading latest draft: %v", err)
 	}
 }
 

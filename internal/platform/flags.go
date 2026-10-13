@@ -25,6 +25,19 @@ func draftHash(content any, risk Risk, deleted bool, baseRevision int64) (string
 	return model.HashBytes(raw), nil
 }
 
+// FlagDraftFingerprint identifies the complete saved draft state seen by an
+// editor. An empty fingerprint means no draft existed at read time.
+func FlagDraftFingerprint(d *FlagDraft) (string, error) {
+	if d == nil {
+		return "", nil
+	}
+	raw, err := model.CanonicalJSON(d)
+	if err != nil {
+		return "", fmt.Errorf("flag draft fingerprint: %w", err)
+	}
+	return model.HashBytes(raw), nil
+}
+
 // VerifyFlagApproval checks the exact reviewed bytes and current base revision.
 func (s *Store) VerifyFlagApproval(d *FlagDraft) error {
 	if d.State != DraftApproved || d.ApprovalExpiresAt == nil || !s.now().Before(*d.ApprovalExpiresAt) {
@@ -74,10 +87,12 @@ func scopeKey(workspaceID, environmentID string) string {
 // ---------------------------------------------------------------------------
 
 // SaveFlagDraft creates or updates the working draft. baseRevision enforces
-// optimistic locking (§11: 乐观锁 revision): when baseRevision > 0 it must
-// equal the revision the editor loaded, otherwise ErrConflict.
+// optimistic locking (§11: 乐观锁 revision): checked saves require both the
+// published revision and complete draft fingerprint to match the editor's
+// snapshot. Internal callers without a fingerprint retain the revision check
+// when baseRevision > 0.
 func (s *Store) SaveFlagDraft(workspaceID, environmentID string, content *model.Flag,
-	risk Risk, actor string, baseRevision int64) (*FlagDraft, error) {
+	risk Risk, actor string, baseRevision int64, expectedDraftHash ...string) (*FlagDraft, error) {
 
 	if content == nil {
 		return nil, fmt.Errorf("%w: nil flag content", ErrValidation)
@@ -100,13 +115,22 @@ func (s *Store) SaveFlagDraft(workspaceID, environmentID string, content *model.
 	scope := flagScopeKey(workspaceID, environmentID, content.Key)
 
 	existing := s.data.FlagDrafts[scope]
+	if len(expectedDraftHash) > 0 {
+		actual, err := FlagDraftFingerprint(existing)
+		if err != nil {
+			return nil, err
+		}
+		if actual != expectedDraftHash[0] {
+			return nil, fmt.Errorf("%w: flag draft changed since it was read; reload and merge", ErrConflict)
+		}
+	}
 	if existing == nil {
 		// New flag: quota check on distinct published+draft keys.
 		if s.countFlagsLocked(workspaceID, environmentID) >= q.MaxFlags {
 			return nil, fmt.Errorf("%w: max %d flags in workspace", ErrQuotaExceeded, q.MaxFlags)
 		}
 	}
-	if baseRevision > 0 {
+	if baseRevision > 0 || len(expectedDraftHash) > 0 {
 		current := s.data.CurrentFlagRev[scope]
 		if baseRevision != current {
 			return nil, fmt.Errorf("%w: draft is based on revision %d but current is %d; reload and reapply",

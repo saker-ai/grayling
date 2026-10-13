@@ -34,8 +34,8 @@
 
 | 端点（前缀 `/api/v1/admin/workspaces/{ws}/environments/{env}`） | 说明 |
 |---|---|
-| `GET /flags` / `GET /flags/{key}` | 列表 / 详情（含草稿、当前 revision、历史） |
-| `PUT /flags/{key}/draft` | 保存草稿 `{content:<Flag DSL>, risk:"normal"\|"high", baseRevision}`；`content.key` 必须等于 `{key}`；`baseRevision>0` 时启用乐观锁（409 冲突） |
+| `GET /flags` / `GET /flags/{key}` | 列表 / 详情（含草稿、`draftHash`、当前 revision、历史）；`draftHash` 是下一次保存的草稿并发令牌 |
+| `PUT /flags/{key}/draft` | 保存草稿 `{content:<Flag DSL>, risk:"normal"\|"high", baseRevision, expectedDraftHash}`；`content.key` 必须等于 `{key}`。两个并发令牌均必填：`baseRevision` 等于当前已发布版本（无发布版时 0），`expectedDraftHash` 原样取自 GET 详情的 `draftHash`（无草稿时空字符串）；任一状态变化返回 409，需读取最新版本并合并 |
 | `POST /flags/{key}/submit` / `approve` / `reject` | 评审流（submit 必填 `{reason}`；approve 可带 `{note}`） |
 | `POST /flags/{key}/publish` | `{note}` 必填；发布已批准草稿 → `{flagRevision, manifestRevision, hash, dataId}` |
 | `POST /flags/{key}/rollback` | `{revision, reason, approvalId}` 计划回滚；owner 可用 `{revision, reason, emergency:true}` 紧急回滚，生成事后复核记录 |

@@ -62,6 +62,55 @@ func TestSQLiteStoreRoundtripAndDedup(t *testing.T) {
 	}
 }
 
+func TestSQLiteFlagDraftFingerprintSurvivesRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "draft.sqlite")
+	store, err := NewSQLiteStore(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := store.CreateWorkspace("draft-hash", "Draft hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := store.CreateEnvironment(ws.ID, "dev", "Development")
+	if err != nil {
+		t.Fatal(err)
+	}
+	flag := testFlag("shared")
+	draft, err := store.SaveFlagDraft(ws.ID, env.ID, flag, RiskNormal, "alice", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := FlagDraftFingerprint(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewSQLiteStore(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	loaded, err := reopened.GetFlagDraft(ws.ID, env.ID, flag.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := FlagDraftFingerprint(loaded)
+	if err != nil || after != before {
+		t.Fatalf("draft fingerprint changed across restart: %q → %q, %v", before, after, err)
+	}
+	updated := testFlag("shared")
+	updated.Disable = true
+	if _, err := reopened.SaveFlagDraft(ws.ID, env.ID, updated, RiskNormal, "bob", 0, before); err != nil {
+		t.Fatalf("save with reloaded fingerprint: %v", err)
+	}
+	if _, err := reopened.SaveFlagDraft(ws.ID, env.ID, flag, RiskNormal, "alice", 0, before); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale fingerprint after restart must conflict: %v", err)
+	}
+}
+
 func TestSQLiteMemoryStore(t *testing.T) {
 	store, err := NewSQLiteStore(t.Context(), ":memory:")
 	if err != nil {

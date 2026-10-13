@@ -658,8 +658,9 @@ paths:
       summary: 保存 flag 草稿
       description: >-
         `content.key` 必须等于路径 `{key}`（改名在 v1 是删除+新建，不是草稿
-        操作）。`baseRevision > 0` 时启用乐观锁：目标 revision 已被别人推进 →
-        409 conflict。高风险（risk=high）草稿的提交人不能自批。
+        操作）。`baseRevision` 必填且必须等于当前已发布 revision（无发布版时为 0）；
+        `expectedDraftHash` 必填，来自 GET 详情的 `draftHash`，无草稿时传空字符串。
+        同一 revision 下草稿被别人修改也返回 409 conflict。高风险（risk=high）草稿的提交人不能自批。
       operationId: saveFlagDraft
       parameters:
         - $ref: "#/components/parameters/WsPath"
@@ -3461,12 +3462,15 @@ components:
     FlagView:
       type: object
       description: 控制台读模型：草稿 + 已发布状态。
-      required: [key, currentRevision]
+      required: [key, draftHash, currentRevision]
       properties:
         key:
           type: string
         draft:
           $ref: "#/components/schemas/FlagDraft"
+        draftHash:
+          type: string
+          description: 已保存草稿状态指纹；无草稿时为空字符串，保存时作为 expectedDraftHash 原样回传。
         preview:
           $ref: "#/components/schemas/ReviewPreview"
         currentRevision:
@@ -3497,7 +3501,7 @@ components:
     SaveFlagDraftRequest:
       type: object
       additionalProperties: false
-      required: [content]
+      required: [content, baseRevision, expectedDraftHash]
       properties:
         content:
           allOf:
@@ -3509,7 +3513,10 @@ components:
         baseRevision:
           type: integer
           format: int64
-          description: ">0 启用乐观锁；落后于当前 revision → 409 conflict。"
+          description: 必须等于当前已发布 revision；无发布版时传 0，落后时返回 409 conflict。
+        expectedDraftHash:
+          type: string
+          description: 从 FlagView.draftHash 读取；无草稿时传空字符串。草稿状态变化 → 409 conflict。
     SaveSegmentDraftRequest:
       type: object
       additionalProperties: false

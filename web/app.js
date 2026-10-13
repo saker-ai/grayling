@@ -818,7 +818,8 @@ function renderFlagSaveConflict(latest, local) {
         emptyLabel: t('flags.conflictNoChanges') }) +
     (latest.draft ? '<details class="flag-diff-item"><summary>' + esc(t('flags.conflictRemoteDraft')) +
       '</summary><pre class="pre small">' + esc(JSON.stringify(latest.draft.content, null, 2)) +
-      '</pre></details>' : '');
+      '</pre></details>' : '') +
+    '<button class="btn" type="button" id="flag-conflict-ack">' + esc(t('flags.conflictAcknowledge')) + '</button>';
 }
 
 async function viewFlagDetail(m) {
@@ -877,6 +878,7 @@ async function viewFlagDetail(m) {
 }
 
 function bindFlagDetail(m, key, kp, f) {
+  let savedDraftHash = f?.draftHash || '';
   $('#flag-back', m).onclick = () => { if (!confirmLeaveEditor()) return; S.flagKey = null; S.flagNew = false; route(); };
   // Returns parsed content, or null (with toast) when invalid.
   const readJSON = () => {
@@ -904,7 +906,8 @@ function bindFlagDetail(m, key, kp, f) {
     try {
       await api(kp + '/draft', {
         method: 'PUT',
-        body: { content, risk: $('#flag-risk', m).value, baseRevision: Number($('#flag-base', m).value || 0) },
+        body: { content, risk: $('#flag-risk', m).value, baseRevision: Number($('#flag-base', m).value || 0),
+          expectedDraftHash: savedDraftHash },
       });
       S.editorBaseline = editorValue();
       toast(t('toast.draftSaved'));
@@ -915,6 +918,12 @@ function bindFlagDetail(m, key, kp, f) {
           const latest = await api(kp);
           $('#flag-saved-diff', m).innerHTML = renderFlagDiff(latest.current, latest.draft);
           $('#flag-conflict', m).innerHTML = renderFlagSaveConflict(latest, content);
+          $('#flag-conflict-ack', m).onclick = () => {
+            savedDraftHash = latest.draftHash || '';
+            $('#flag-base', m).value = latest.currentRevision || 0;
+            $('#flag-conflict', m).innerHTML = '<div class="banner ok">' +
+              esc(t('flags.conflictAccepted')) + '</div>';
+          };
           $('#flag-conflict', m).scrollIntoView({ block: 'start', behavior: 'smooth' });
         } catch (refreshErr) {
           $('#flag-conflict', m).innerHTML = errBanner(refreshErr);

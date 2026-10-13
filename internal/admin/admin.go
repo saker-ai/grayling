@@ -128,7 +128,7 @@ func (s *Service) resolveEnv(workspaceID, environmentID string, actor Actor, per
 
 // SaveFlagDraft validates, quota-checks and stores the working draft.
 func (s *Service) SaveFlagDraft(actor Actor, workspaceID, environmentID string,
-	content *model.Flag, risk platform.Risk, baseRevision int64) (*platform.FlagDraft, error) {
+	content *model.Flag, risk platform.Risk, baseRevision int64, expectedDraftHash ...string) (*platform.FlagDraft, error) {
 
 	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagWrite)
 	if err != nil {
@@ -151,7 +151,8 @@ func (s *Service) SaveFlagDraft(actor Actor, workspaceID, environmentID string,
 		return nil, fmt.Errorf("%w: flag document is %d bytes, max %d",
 			platform.ErrQuotaExceeded, len(raw), q.MaxFlagBytes)
 	}
-	draft, err := s.Store.SaveFlagDraft(env.WorkspaceID, env.ID, content, risk, actor.Name, baseRevision)
+	draft, err := s.Store.SaveFlagDraft(env.WorkspaceID, env.ID, content, risk, actor.Name,
+		baseRevision, expectedDraftHash...)
 	if err != nil {
 		return nil, err
 	}
@@ -835,6 +836,7 @@ func (s *Service) PublishSegmentContext(ctx context.Context, actor Actor, worksp
 type FlagView struct {
 	Key             string                   `json:"key"`
 	Draft           *platform.FlagDraft      `json:"draft,omitempty"`
+	DraftHash       string                   `json:"draftHash"`
 	CurrentRevision int64                    `json:"currentRevision"`
 	Current         *platform.FlagRevision   `json:"current,omitempty"`
 	Revisions       []*platform.FlagRevision `json:"revisions,omitempty"`
@@ -850,6 +852,10 @@ func (s *Service) GetFlagView(actor Actor, workspaceID, environmentID, key strin
 	view := &FlagView{Key: key}
 	if d, err := s.Store.GetFlagDraft(env.WorkspaceID, env.ID, key); err == nil {
 		view.Draft = d
+		view.DraftHash, err = platform.FlagDraftFingerprint(d)
+		if err != nil {
+			return nil, err
+		}
 	}
 	view.CurrentRevision = s.Store.CurrentFlagRevision(env.WorkspaceID, env.ID, key)
 	if view.CurrentRevision > 0 {
@@ -875,7 +881,11 @@ func (s *Service) ListFlags(actor Actor, workspaceID, environmentID string) ([]*
 	}
 	byKey := map[string]*FlagView{}
 	for _, d := range s.Store.ListFlagDrafts(env.WorkspaceID, env.ID) {
-		byKey[d.Key] = &FlagView{Key: d.Key, Draft: d}
+		hash, err := platform.FlagDraftFingerprint(d)
+		if err != nil {
+			return nil, err
+		}
+		byKey[d.Key] = &FlagView{Key: d.Key, Draft: d, DraftHash: hash}
 	}
 	for key, cur := range s.Store.CurrentFlagContents(env.WorkspaceID, env.ID) {
 		v, ok := byKey[key]

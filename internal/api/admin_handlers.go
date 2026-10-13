@@ -344,9 +344,10 @@ func (s *Server) handleGetFlag(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 	actor := actorFrom(r)
 	var req struct {
-		Content      *model.Flag   `json:"content"`
-		Risk         platform.Risk `json:"risk"`
-		BaseRevision int64         `json:"baseRevision"`
+		Content           *model.Flag   `json:"content"`
+		Risk              platform.Risk `json:"risk"`
+		BaseRevision      *int64        `json:"baseRevision"`
+		ExpectedDraftHash *string       `json:"expectedDraftHash"`
 	}
 	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
 		writeStoreError(w, err)
@@ -354,6 +355,14 @@ func (s *Server) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Content == nil {
 		writeError(w, http.StatusBadRequest, "validation_failed", "content required")
+		return
+	}
+	if req.ExpectedDraftHash == nil {
+		writeError(w, http.StatusBadRequest, "validation_failed", "expectedDraftHash required; use empty string when no draft exists")
+		return
+	}
+	if req.BaseRevision == nil {
+		writeError(w, http.StatusBadRequest, "validation_failed", "baseRevision required; use 0 when no published revision exists")
 		return
 	}
 	// Path key is authoritative: a body key mismatch is a client bug, not
@@ -365,7 +374,7 @@ func (s *Server) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft, err := s.Admin.SaveFlagDraft(actor, r.PathValue("ws"), r.PathValue("env"),
-		req.Content, req.Risk, req.BaseRevision)
+		req.Content, req.Risk, *req.BaseRevision, *req.ExpectedDraftHash)
 	if err != nil {
 		writeStoreError(w, err)
 		return
