@@ -3545,7 +3545,7 @@ components:
       type: object
       description: >-
         实验主指标预注册。v1 支持 proportion 与 mean；P5（§10.3）新增 ratio、
-        quantile 与 CUPED（带协变量的方差缩减 mean）。ratio/quantile/CUPED 的
+        quantile、funnel、retention 与 CUPED（带协变量的方差缩减 mean）。ratio/quantile/CUPED 的
         额外字段在此声明，均可预注册选用，SRM/护栏阻断对其同样生效。
       required: [key, type, direction]
       properties:
@@ -3553,7 +3553,7 @@ components:
           type: string
         type:
           type: string
-          enum: [proportion, mean, ratio, quantile]
+          enum: [proportion, mean, ratio, quantile, funnel, retention]
         direction:
           type: string
           enum: [increase, decrease]
@@ -3579,6 +3579,27 @@ components:
         covariateKey:
           type: string
           description: CUPED 实验前协变量 metric key（仅 mean 指标；设置且有配对数据时报告用 CUPED 调整检验）。
+        funnel:
+          $ref: "#/components/schemas/FunnelSpec"
+        retention:
+          $ref: "#/components/schemas/RetentionSpec"
+    FunnelSpec:
+      type: object
+      additionalProperties: false
+      required: [steps, dedupUnit, stepTimeout]
+      properties:
+        steps: {type: array, minItems: 2, maxItems: 32, items: {type: string}}
+        dedupUnit: {type: string, enum: [user, session]}
+        stepTimeout: {type: integer, format: int64, description: 纳秒。}
+    RetentionSpec:
+      type: object
+      additionalProperties: false
+      required: [returnKey, day, timezone]
+      properties:
+        cohortKey: {type: string}
+        returnKey: {type: string}
+        day: {type: integer, enum: [1, 7]}
+        timezone: {type: string}
     GuardrailSpec:
       type: object
       description: 运营护栏规则，与主指标统计显著性分开评估。
@@ -3590,7 +3611,7 @@ components:
           type: string
         type:
           type: string
-          enum: [proportion, mean]
+          enum: [proportion, mean, funnel, retention]
         direction:
           type: string
           enum: [increase, decrease]
@@ -3602,6 +3623,10 @@ components:
           type: integer
           format: int64
           description: 样本低于此值不判违约（数据不足）。
+        funnel:
+          $ref: "#/components/schemas/FunnelSpec"
+        retention:
+          $ref: "#/components/schemas/RetentionSpec"
     BanditSpec:
       type: object
       required: [policyVersion, strategy, priorAlpha, priorBeta, feedbackDelay]
