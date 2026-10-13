@@ -32,8 +32,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godeps/grayling/internal/configstore"
-	"github.com/godeps/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/configstore"
+	"github.com/saker-ai/grayling/internal/platform"
 	gonacosai "github.com/godeps/gonacos/pkg/ai"
 )
 

@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/model"
 	grpcsrv "github.com/godeps/gonacos/pkg/protocol/grpc"
 	"golang.org/x/net/http2"
 )

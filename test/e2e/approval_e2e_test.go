@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/godeps/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/platform"
 )
 
 func TestApprovalAPIRejectsScopeSelfEditAndRevocation(t *testing.T) {

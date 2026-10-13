@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 func snapshotJSON(t *testing.T, rev int64, flags map[string]*model.Flag) []byte {

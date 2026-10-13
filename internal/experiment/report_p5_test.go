@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // newExpP5 pre-registers an experiment with an arbitrary MetricSpec (ratio,

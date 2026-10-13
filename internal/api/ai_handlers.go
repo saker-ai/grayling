@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/godeps/grayling/internal/admin"
-	aisvc "github.com/godeps/grayling/internal/ai"
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/internal/admin"
+	aisvc "github.com/saker-ai/grayling/internal/ai"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // SetAI attaches the AI resource gate. When unset, all AI endpoints answer

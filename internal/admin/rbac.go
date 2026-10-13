@@ -7,7 +7,7 @@ package admin
 import (
 	"fmt"
 
-	"github.com/godeps/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/platform"
 )
 
 // Actor is the authenticated principal of one admin request. The API layer

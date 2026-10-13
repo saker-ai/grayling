@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/pkg/bucketing"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/bucketing"
+	"github.com/saker-ai/grayling/pkg/model"
 	gconfig "github.com/godeps/gonacos/pkg/config"
 )
 

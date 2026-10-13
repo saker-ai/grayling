@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/internal/proxy"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/proxy"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 func newProxyFront(t *testing.T, h *harness) *httptest.Server {

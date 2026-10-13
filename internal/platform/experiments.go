@@ -11,7 +11,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // validExperimentTransitions is the state machine of §5.3:

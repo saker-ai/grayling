@@ -7,8 +7,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // ReviewPreview is the evidence shown before an approval or publication.

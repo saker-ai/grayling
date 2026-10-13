@@ -9,9 +9,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/pkg/bucketing"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/pkg/bucketing"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // CreateExperiment registers the pre-registered analysis contract (§5.3).

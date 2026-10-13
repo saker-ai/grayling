@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/godeps/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/platform"
 )
 
 func TestQuotaAdminReadWriteAndPersistence(t *testing.T) {

@@ -35,7 +35,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // GatewayConfig configures the forwardAuth evaluation endpoint. The proxy

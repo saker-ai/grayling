@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/godeps/grayling/internal/configstore"
+	"github.com/saker-ai/grayling/internal/configstore"
 	"github.com/nacos-group/nacos-sdk-go/v2/vo"
 )
 

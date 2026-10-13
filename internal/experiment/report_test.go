@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/pkg/model"
-	"github.com/godeps/grayling/test/pgtest"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/pkg/model"
+	"github.com/saker-ai/grayling/test/pgtest"
 	"github.com/jackc/pgx/v5"
 )
 

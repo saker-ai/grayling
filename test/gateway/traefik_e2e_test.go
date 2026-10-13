@@ -49,11 +49,11 @@ import (
 	"testing"
 	"time"
 
-	gw "github.com/godeps/grayling/internal/gateway"
-	"github.com/godeps/grayling/pkg/bucketing"
-	"github.com/godeps/grayling/pkg/model"
-	"github.com/godeps/grayling/test/redistest"
-	"github.com/godeps/grayling/test/traefiktest"
+	gw "github.com/saker-ai/grayling/internal/gateway"
+	"github.com/saker-ai/grayling/pkg/bucketing"
+	"github.com/saker-ai/grayling/pkg/model"
+	"github.com/saker-ai/grayling/test/redistest"
+	"github.com/saker-ai/grayling/test/traefiktest"
 )
 
 // ---------------------------------------------------------------------------

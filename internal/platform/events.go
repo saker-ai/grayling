@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // EventMetricTotals aggregates accepted events for one credential scope.

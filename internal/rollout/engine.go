@@ -44,11 +44,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godeps/grayling/internal/admin"
-	"github.com/godeps/grayling/internal/experiment"
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/internal/stats"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/internal/admin"
+	"github.com/saker-ai/grayling/internal/experiment"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/stats"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // EngineActor is the system identity every automatic action is audited

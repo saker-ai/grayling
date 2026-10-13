@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godeps/grayling/internal/configstore"
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/pkg/evaluation"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/internal/configstore"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/pkg/evaluation"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // Listener is notified after a manifest revision becomes readable. The API

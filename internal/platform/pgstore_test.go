@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/pkg/model"
-	"github.com/godeps/grayling/test/pgtest"
+	"github.com/saker-ai/grayling/pkg/model"
+	"github.com/saker-ai/grayling/test/pgtest"
 )
 
 // openPGStore opens a PostgreSQL-backed store against a real server

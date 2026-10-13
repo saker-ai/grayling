@@ -5,8 +5,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/godeps/grayling/pkg/evaluation"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/evaluation"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // split5050Doc is a valid gff flag with a 50/50 percentage default rule —

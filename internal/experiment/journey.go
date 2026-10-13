@@ -5,8 +5,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/internal/stats"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/stats"
 )
 
 // JourneyArm exposes a rate's exact population and exclusions. Immature

@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	gw "github.com/godeps/grayling/internal/gateway"
+	gw "github.com/saker-ai/grayling/internal/gateway"
 )
 
 const k8sNamespace = "golab-issue12"

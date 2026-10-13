@@ -9,9 +9,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/godeps/grayling/internal/configstore"
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/internal/recovery"
+	"github.com/saker-ai/grayling/internal/configstore"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/recovery"
 )
 
 // runHMACRotation is an offline operation. The caller never starts listeners

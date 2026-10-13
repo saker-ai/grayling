@@ -6,12 +6,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	aisvc "github.com/godeps/grayling/internal/ai"
-	"github.com/godeps/grayling/internal/api"
-	"github.com/godeps/grayling/internal/configstore"
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/pkg/bucketing"
-	"github.com/godeps/grayling/pkg/model"
+	aisvc "github.com/saker-ai/grayling/internal/ai"
+	"github.com/saker-ai/grayling/internal/api"
+	"github.com/saker-ai/grayling/internal/configstore"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/pkg/bucketing"
+	"github.com/saker-ai/grayling/pkg/model"
 	gonacosai "github.com/godeps/gonacos/pkg/ai"
 	gconfig "github.com/godeps/gonacos/pkg/config"
 )

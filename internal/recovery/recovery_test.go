@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 func TestRecoveryGateRejectsPartialAndWrongKey(t *testing.T) {

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/godeps/grayling/internal/nativeauth"
-	"github.com/godeps/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/nativeauth"
+	"github.com/saker-ai/grayling/internal/platform"
 )
 
 // authorizeNativeConfig derives the only readable Nacos namespace from the

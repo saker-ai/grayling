@@ -18,14 +18,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godeps/grayling/internal/ai"
-	"github.com/godeps/grayling/internal/api"
-	"github.com/godeps/grayling/internal/configstore"
-	"github.com/godeps/grayling/internal/nacos"
-	"github.com/godeps/grayling/internal/nativeauth"
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/internal/recovery"
-	"github.com/godeps/grayling/web"
+	"github.com/saker-ai/grayling/internal/ai"
+	"github.com/saker-ai/grayling/internal/api"
+	"github.com/saker-ai/grayling/internal/configstore"
+	"github.com/saker-ai/grayling/internal/nacos"
+	"github.com/saker-ai/grayling/internal/nativeauth"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/recovery"
+	"github.com/saker-ai/grayling/web"
 	"github.com/godeps/gonacos/pkg/server"
 )
 

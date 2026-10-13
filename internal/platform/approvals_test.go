@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/test/pgtest"
+	"github.com/saker-ai/grayling/test/pgtest"
 )
 
 func approvalFixture(t *testing.T, s *Store) Approval {

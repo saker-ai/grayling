@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/godeps/grayling/internal/stats"
+	"github.com/saker-ai/grayling/internal/stats"
 )
 
 // ---------------------------------------------------------------------------

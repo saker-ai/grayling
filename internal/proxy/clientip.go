@@ -47,7 +47,7 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // parseTrustedProxyCIDRs parses the comma-separated TrustedProxyCIDRs

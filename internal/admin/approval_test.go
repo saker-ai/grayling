@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/platform"
 )
 
 func TestDraftApprovalRejectsSelfChangeExpiryAndRevocation(t *testing.T) {

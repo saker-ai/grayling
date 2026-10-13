@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/test/pgtest"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/test/pgtest"
 )
 
 func TestRolloutLeaseTakeoverAndFencing(t *testing.T) {

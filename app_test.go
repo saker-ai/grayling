@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling"
+	"github.com/saker-ai/grayling"
 )
 
 func TestEmbeddedAppCanBeMountedAndRestarted(t *testing.T) {

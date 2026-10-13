@@ -3,8 +3,8 @@ package experiment
 import (
 	"fmt"
 
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/internal/stats"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/stats"
 )
 
 // HolmComparison exposes the fixed-sample result for a registered hypothesis.

@@ -47,7 +47,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/godeps/grayling/internal/proxy"
+	"github.com/saker-ai/grayling/internal/proxy"
 )
 
 func main() {

@@ -23,8 +23,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/godeps/grayling/internal/nacos"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/internal/nacos"
+	"github.com/saker-ai/grayling/pkg/model"
 	"github.com/godeps/gonacos/pkg/config"
 )
 

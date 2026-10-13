@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/godeps/grayling/internal/configstore"
-	"github.com/godeps/grayling/internal/nacos"
-	"github.com/godeps/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/configstore"
+	"github.com/saker-ai/grayling/internal/nacos"
+	"github.com/saker-ai/grayling/internal/platform"
 )
 
 func TestExternalNacosConfigAndAI(t *testing.T) {

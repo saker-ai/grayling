@@ -3,7 +3,7 @@ package evaluation
 import (
 	"fmt"
 
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // BoolVariation resolves a bool flag. On any failure (missing flag, type

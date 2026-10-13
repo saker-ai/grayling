@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/godeps/grayling/internal/stats"
+	"github.com/saker-ai/grayling/internal/stats"
 )
 
 // Decision-gate glue (docs/技术方案.md §10.4: judge 作为护栏指标接入决策门；校准

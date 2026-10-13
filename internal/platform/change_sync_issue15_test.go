@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/pkg/model"
-	"github.com/godeps/grayling/test/pgtest"
+	"github.com/saker-ai/grayling/pkg/model"
+	"github.com/saker-ai/grayling/test/pgtest"
 )
 
 func TestPGScopedFlagSegmentSync(t *testing.T) {

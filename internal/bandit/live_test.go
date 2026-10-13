@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 func TestLiveDistributionAndAssignment(t *testing.T) {

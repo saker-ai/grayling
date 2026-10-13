@@ -41,9 +41,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/godeps/grayling/internal/bandit"
-	"github.com/godeps/grayling/pkg/bucketing"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/internal/bandit"
+	"github.com/saker-ai/grayling/pkg/bucketing"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // Evaluator evaluates flags from one immutable, pre-validated snapshot.

@@ -35,13 +35,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/internal/api"
-	"github.com/godeps/grayling/internal/configstore"
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/pkg/bucketing"
-	"github.com/godeps/grayling/pkg/evaluation"
-	"github.com/godeps/grayling/pkg/model"
-	"github.com/godeps/grayling/pkg/sdk"
+	"github.com/saker-ai/grayling/internal/api"
+	"github.com/saker-ai/grayling/internal/configstore"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/pkg/bucketing"
+	"github.com/saker-ai/grayling/pkg/evaluation"
+	"github.com/saker-ai/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/sdk"
 	gconfig "github.com/godeps/gonacos/pkg/config"
 )
 

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/internal/stats"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/stats"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // BanditSection is an adaptive-allocation report. It deliberately has no

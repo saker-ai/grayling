@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/godeps/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/platform"
 )
 
 const (

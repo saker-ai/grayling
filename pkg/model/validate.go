@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/godeps/grayling/pkg/bucketing"
+	"github.com/saker-ai/grayling/pkg/bucketing"
 )
 
 // KeyPattern constrains flag/segment keys so they can be embedded in gonacos

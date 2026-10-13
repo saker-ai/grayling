@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/internal/experiment"
-	"github.com/godeps/grayling/internal/platform"
+	"github.com/saker-ai/grayling/internal/experiment"
+	"github.com/saker-ai/grayling/internal/platform"
 )
 
 func TestBanditTickPublishesFeedbackAndRemoteRouting(t *testing.T) {

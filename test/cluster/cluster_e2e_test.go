@@ -69,11 +69,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/pkg/bucketing"
-	"github.com/godeps/grayling/pkg/model"
-	"github.com/godeps/grayling/test/pgtest"
-	"github.com/godeps/grayling/test/redistest"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/pkg/bucketing"
+	"github.com/saker-ai/grayling/pkg/model"
+	"github.com/saker-ai/grayling/test/pgtest"
+	"github.com/saker-ai/grayling/test/redistest"
 )
 
 func TestRolloutLeaderProcessFailover(t *testing.T) {

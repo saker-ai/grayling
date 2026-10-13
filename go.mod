@@ -1,4 +1,4 @@
-module github.com/godeps/grayling
+module github.com/saker-ai/grayling
 
 go 1.27.0
 

@@ -53,8 +53,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godeps/grayling/pkg/model"
-	"github.com/godeps/grayling/pkg/sdk"
+	"github.com/saker-ai/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/sdk"
 	of "github.com/open-feature/go-sdk/openfeature"
 )
 

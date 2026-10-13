@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/godeps/grayling/internal/admin"
-	"github.com/godeps/grayling/internal/experiment"
-	"github.com/godeps/grayling/internal/gffimport"
-	"github.com/godeps/grayling/internal/platform"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/internal/admin"
+	"github.com/saker-ai/grayling/internal/experiment"
+	"github.com/saker-ai/grayling/internal/gffimport"
+	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // maxAdminBodyBytes bounds admin request payloads (§11: 单 flag 大小限额 is

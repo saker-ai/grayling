@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/grayling/test/pgtest"
+	"github.com/saker-ai/grayling/test/pgtest"
 )
 
 func freePort(t *testing.T) int {

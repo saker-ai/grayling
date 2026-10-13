@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/godeps/grayling/pkg/bucketing"
-	"github.com/godeps/grayling/pkg/model"
+	"github.com/saker-ai/grayling/pkg/bucketing"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // realisticYAML exercises variations, defaultRule percentage, targeting with
