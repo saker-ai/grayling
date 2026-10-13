@@ -308,6 +308,7 @@ function promptForm(title, fields, submitLabel, onSubmit) {
     } else { inp = document.createElement('input'); inp.type = f.type || 'text'; }
     inp.name = f.name;
     inp.value = f.value ?? '';
+    if (f.required) inp.required = true;
     if (f.placeholder) inp.placeholder = f.placeholder;
     w.appendChild(inp);
     body.appendChild(w);
@@ -329,6 +330,9 @@ function promptForm(title, fields, submitLabel, onSubmit) {
   ov.addEventListener('click', ev => { if (ev.target === ov) close(); });
   $('[data-x="ok"]', ov).onclick = async () => {
     const ok = $('[data-x="ok"]', ov);
+    $$('input, textarea', ov).filter(el => el.required).forEach(el => { el.value = el.value.trim(); });
+    const invalid = $$('input, select, textarea', ov).find(el => !el.reportValidity());
+    if (invalid) { invalid.focus(); return; }
     ok.disabled = true;
     const vals = {};
     for (const f of fields) vals[f.name] = body.querySelector('[name="' + f.name + '"]').value;
@@ -772,11 +776,11 @@ async function viewFlags(m) {
   };
   $('.list-search', m).oninput = applyFilter;
   $('#flag-status-filter', m).onchange = applyFilter;
-  $('#flag-new', m).onclick = () => {
-    const key = (prompt(t('prompt.newFlagKey')) || '').trim();
-    if (!key) return;
-    S.flagKey = key; S.flagNew = true; route();
-  };
+  $('#flag-new', m).onclick = () => promptForm(t('flags.new'), [
+    { name: 'key', label: t('prompt.newFlagKey'), required: true },
+  ], t('btn.create'), ({ key }) => {
+    S.flagKey = key.trim(); S.flagNew = true; route();
+  });
   m.addEventListener('click', ev => {
     const tr = ev.target.closest('[data-flag]');
     if (tr) { S.flagKey = tr.dataset.flag; S.flagNew = false; route(); }
@@ -1006,22 +1010,36 @@ function bindFlagDetail(m, key, kp, f) {
     }
   };
   $('#flag-submit', m).onclick = () => {
-    const reason = prompt(t('approval.reason'), '');
-    if (!reason) { toast(t('toast.reasonRequired'), false); return; }
-    run(() => api(kp + '/submit', { method: 'POST', body: { reason } }), t('toast.draftSubmitted'));
+    if (!confirmLeaveEditor()) return;
+    promptForm(t('btn.submit'), [{ name: 'reason', label: t('approval.reason'), required: true }],
+      t('btn.submit'), async ({ reason }) => {
+        await api(kp + '/submit', { method: 'POST', body: { reason } });
+        toast(t('toast.draftSubmitted'));
+        route();
+      });
   };
   $('#flag-approve', m).onclick = () => {
-    const note = prompt(t('prompt.approveNote'), '') || '';
-    run(() => api(kp + '/approve', { method: 'POST', body: { note } }), t('toast.draftApproved'));
+    if (!confirmLeaveEditor()) return;
+    promptForm(t('btn.approve'), [{ name: 'note', label: t('prompt.approveNote') }],
+      t('btn.approve'), async ({ note }) => {
+        await api(kp + '/approve', { method: 'POST', body: { note } });
+        toast(t('toast.draftApproved'));
+        route();
+      });
   };
   $('#flag-reject', m).onclick = () => {
-    const note = prompt(t('prompt.rejectReason'), '') || '';
-    run(() => api(kp + '/reject', { method: 'POST', body: { note } }), t('toast.draftRejected'));
+    if (!confirmLeaveEditor()) return;
+    promptForm(t('btn.reject'), [{ name: 'note', label: t('prompt.rejectReason'), required: true }],
+      t('btn.reject'), async ({ note }) => {
+        await api(kp + '/reject', { method: 'POST', body: { note } });
+        toast(t('toast.draftRejected'));
+        route();
+      });
   };
   $('#flag-publish', m).onclick = async () => {
     const approval = await actionDialog({ title: t('btn.publish'), summary: t('action.flagSummary', { key }),
-      preview: reviewPreview(f?.preview, 'action-review-preview') + renderFlagDiff(f?.current, draft),
-      reasonLabel: t('prompt.publishNote'), reasonRequired: false, confirmLabel: t('btn.publish') });
+      preview: reviewPreview(f?.preview, 'action-review-preview') + renderFlagDiff(f?.current, f?.draft),
+      reasonLabel: t('prompt.publishNote'), confirmLabel: t('btn.publish') });
     if (!approval) return;
     run(() => api(kp + '/publish', { method: 'POST', body: { note: approval.reason } }),
       r => t('toast.published', { flag: r && r.flagRevision, manifest: r && r.manifestRevision }));
@@ -1099,11 +1117,11 @@ async function viewSegments(m) {
     (S.segDrafts.length ? '' : '<p class="muted mobile-empty">' + esc(t('seg.empty')) + '</p>') +
     '<p class="muted hidden" data-list-no-match>' + esc(t('list.noMatch')) + '</p>';
   bindListSearch(m);
-  $('#seg-new', m).onclick = () => {
-    const key = (prompt(t('prompt.newSegKey')) || '').trim();
-    if (!key) return;
-    S.segKey = key; route();
-  };
+  $('#seg-new', m).onclick = () => promptForm(t('seg.new'), [
+    { name: 'key', label: t('prompt.newSegKey'), required: true },
+  ], t('btn.create'), ({ key }) => {
+    S.segKey = key.trim(); route();
+  });
   m.addEventListener('click', ev => {
     const tr = ev.target.closest('[data-seg]');
     if (tr) { S.segKey = tr.dataset.seg; route(); }
@@ -1241,7 +1259,7 @@ async function viewSegmentDetail(m) {
   $('#seg-approve', m).onclick = () => run(() => api(kp + '/approve', { method: 'POST', body: {} }), t('toast.segApproved'));
   $('#seg-publish', m).onclick = async () => {
     const approval = await actionDialog({ title: t('btn.publish'), summary: t('action.flagSummary', { key }),
-      preview: reviewPreview(preview, 'action-review-preview'), reasonLabel: t('prompt.publishNote'), reasonRequired: false, confirmLabel: t('btn.publish') });
+      preview: reviewPreview(preview, 'action-review-preview'), reasonLabel: t('prompt.publishNote'), confirmLabel: t('btn.publish') });
     if (!approval) return;
     run(() => api(kp + '/publish', { method: 'POST', body: { note: approval.reason } }), t('toast.segPublished'));
   };
