@@ -2046,6 +2046,20 @@ Object.assign(VIEWS, {
 // ---------------------------------------------------------------------------
 // i18n chrome — static DOM text, language switch, in-place re-render
 // ---------------------------------------------------------------------------
+const THEME_KEY = 'grayling_theme';
+function themePreference() {
+  const saved = localStorage.getItem(THEME_KEY);
+  return saved === 'light' || saved === 'dark' ? saved : 'system';
+}
+function applyTheme() {
+  const preference = themePreference();
+  const resolved = preference === 'system'
+    ? (window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+    : preference;
+  if (document.documentElement) document.documentElement.dataset.theme = resolved;
+  const selector = $('#sel-theme');
+  if (selector) selector.value = preference;
+}
 // applyStaticI18n refreshes every index.html node carrying data-i18n /
 // data-i18n-ph / data-i18n-title from the active catalog (no page reload).
 function applyStaticI18n() {
@@ -2085,6 +2099,14 @@ function registerI18nHooks() {
 }
 
 function init() {
+  applyTheme();
+  $('#sel-theme').onchange = ev => {
+    localStorage.setItem(THEME_KEY, ev.target.value);
+    applyTheme();
+  };
+  window.matchMedia?.('(prefers-color-scheme: light)').addEventListener?.('change', () => {
+    if (themePreference() === 'system') applyTheme();
+  });
   registerI18nHooks();
   applyStaticI18n();
   bindLangSwitch();

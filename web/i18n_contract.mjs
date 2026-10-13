@@ -30,7 +30,7 @@ const indexHTML = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const code = i18nCode + '\n' + appCode;
 
 const BRIDGE = '\n;globalThis.__x = { I18N, t, setLang, detectLang, localeFor, fmtTime, fmtDurNs,' +
-  ' S, VIEWS, route, renderReport, renderRollout, lintFlag, applyStaticI18n, bindLangSwitch, registerI18nHooks };';
+  ' S, VIEWS, route, renderReport, renderRollout, lintFlag, applyStaticI18n, bindLangSwitch, registerI18nHooks, applyTheme, themePreference };';
 
 // --- sandbox factory --------------------------------------------------------
 // Rich element stub: tolerates property writes, records classList.toggle and
@@ -80,6 +80,7 @@ function makeSandbox({ storedLang, navLang } = {}) {
   const sandbox = {
     URLSearchParams,
     document: {
+      documentElement: { dataset: {} },
       addEventListener() {},
       createElement: () => el(),
       querySelector(sel) {
@@ -107,6 +108,7 @@ function makeSandbox({ storedLang, navLang } = {}) {
     },
     confirm: () => true,
     prompt: () => 'reason',
+    matchMedia: () => ({ matches: true }),
   };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
@@ -214,6 +216,13 @@ assert.strictEqual(makeSandbox({ navLang: 'zh-TW' }).x.I18N.lang, 'zh', 'zh-TW �
 assert.strictEqual(makeSandbox({ navLang: 'en-US' }).x.I18N.lang, 'en', 'en-US → en');
 assert.strictEqual(makeSandbox({ navLang: 'fr-FR' }).x.I18N.lang, 'en', 'non-zh → en');
 assert.strictEqual(makeSandbox({}).x.I18N.lang, 'en', 'no navigator.language → en');
+
+const themed = makeSandbox();
+themed.x.applyTheme();
+assert.strictEqual(themed.sandbox.document.documentElement.dataset.theme, 'light', 'system theme follows media');
+themed.store.set('grayling_theme', 'dark');
+themed.x.applyTheme();
+assert.strictEqual(themed.sandbox.document.documentElement.dataset.theme, 'dark', 'saved theme overrides media');
 
 // ===========================================================================
 // 2. Bilingual view sweep — sampled strings hit each language, layout IDs are

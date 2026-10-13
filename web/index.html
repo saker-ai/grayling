@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GoLab Admin</title>
+<title>Grayling Console</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
 
 <div id="auth" class="auth-wrap hidden">
   <div class="auth-card">
-    <h1>GoLab <span data-i18n="auth.subtitle">admin console</span></h1>
+    <h1>Grayling <span data-i18n="auth.subtitle">admin console</span></h1>
     <p class="muted" data-i18n="auth.hint">Enter the configured admin password or an admin token.</p>
     <label class="field"><span data-i18n="auth.urlLabel">Server base URL</span>
       <input id="auth-url" data-i18n-ph="auth.urlPh" placeholder="blank = same origin (relative paths)" spellcheck="false"></label>
@@ -25,7 +25,7 @@
 <div id="app" class="app hidden">
   <aside class="sidebar">
     <div class="brand-row">
-      <div class="brand">GoLab <span data-i18n="brand.sub">admin</span></div>
+      <div class="brand">Grayling <span data-i18n="brand.sub">admin</span></div>
       <button class="btn sm menu-toggle" id="btn-menu" type="button" aria-controls="nav" aria-expanded="false" data-i18n="nav.menu">Menu</button>
     </div>
     <nav id="nav" aria-label="Primary">
@@ -56,6 +56,7 @@
       <label class="inline"><span data-i18n="top.environment">Environment</span> <select id="sel-env"></select></label>
       <button class="btn sm" id="btn-new-env" data-i18n-title="top.newEnv" title="New environment">+</button>
       <span id="conn-info" class="conn muted"></span>
+      <label class="inline"><span data-i18n="top.theme">Theme</span> <select id="sel-theme" aria-label="Theme"><option value="system" data-i18n="theme.system">System</option><option value="light" data-i18n="theme.light">Light</option><option value="dark" data-i18n="theme.dark">Dark</option></select></label>
       <span class="lang-switch" id="lang-switch">
         <button class="btn sm" id="lang-zh" type="button" data-i18n="lang.zh"></button>
         <button class="btn sm" id="lang-en" type="button" data-i18n="lang.en"></button>
