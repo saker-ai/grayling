@@ -38,7 +38,7 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderExpDecisionHero = renderExpDecisionHero; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
 
 const structuredFlag = sandbox.__renderFlagStructured({ type: 'bool',
@@ -156,6 +156,11 @@ assert(bindConflict.includes('source changed') && bindConflict.includes('Current
   '409 binding recovery must show the latest changed prerequisites');
 assert(sandbox.__renderBindConflict({ currentRevision: 2 }, null).includes('could not be loaded'),
   '409 binding recovery must explain failed reload');
+assert(sandbox.__renderExpDecisionHero(null, 'reviewed').includes('No experiment results yet'),
+  'pre-launch experiment must not be presented as an unhealthy result');
+const unavailableHero = sandbox.__renderExpDecisionHero({ healthy: true, generatedAt: 'old-time' }, 'running', new Error('offline'));
+assert(unavailableHero.includes('Current analysis is unavailable') && !unavailableHero.includes('Report healthy'),
+  'failed refresh must not present an older report as a current healthy decision');
 
 function render(report) {
   const box = {};

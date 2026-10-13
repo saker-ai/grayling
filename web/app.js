@@ -1838,6 +1838,8 @@ async function viewExpDetail(m) {
         ' (' + esc(h.control) + ' → ' + esc(h.treatment) + ')</li>').join('') + '</ul>' : '') +
     '</section>';
   m.innerHTML = heading +
+    '<div class="exp-decision" id="exp-decision" role="status" aria-live="polite">' +
+    renderExpDecisionHero(null, e.state) + '</div>' +
     '<div class="cols exp-detail-cols"><section class="card"><h3>' + esc(t('exp.lifecycle')) + '</h3>' +
       '<div class="bind-readiness" id="exp-bind-check" role="status">' + esc(t('exp.bindCheckLoading')) + '</div>' +
       '<div class="row actions" style="border:0;padding:0;margin:0">' +
@@ -1921,24 +1923,33 @@ async function viewExpDetail(m) {
     act('/transition', { to, reason }, t('toast.transitioned', { to }));
   };
   let lastReport = null;
-  const loadReport = async () => {
+  let reportDetailOpen = false;
+  let reportRequest = 0;
+  const loadReport = async (showDetail = false) => {
     const box = $('#report-box', m);
     if (!box) return false;
+    if (showDetail) reportDetailOpen = true;
+    const request = ++reportRequest;
     try {
       const report = await api(p + '/report');
-      if (S.expId !== id || S.view !== 'experiments') return false;
+      if (S.expId !== id || S.view !== 'experiments' || request !== reportRequest) return false;
       lastReport = report;
-      renderReport(box, report);
+      $('#exp-decision', m).innerHTML = renderExpDecisionHero(report, e.state);
+      if (reportDetailOpen) renderReport(box, report);
       return true;
     } catch (err) {
-      if (lastReport) {
-        renderReport(box, lastReport);
-        box.innerHTML = '<div class="banner warn" role="status">' + esc(t('report.stale')) + '</div>' + errBanner(err) + box.innerHTML;
-      } else box.innerHTML = errBanner(err);
+      if (request !== reportRequest) return false;
+      $('#exp-decision', m).innerHTML = renderExpDecisionHero(lastReport, e.state, err);
+      if (reportDetailOpen) {
+        if (lastReport) {
+          renderReport(box, lastReport);
+          box.innerHTML = '<div class="banner warn" role="status">' + esc(t('report.stale')) + '</div>' + errBanner(err) + box.innerHTML;
+        } else box.innerHTML = errBanner(err);
+      }
       return false;
     }
   };
-  $('#exp-report', m).onclick = loadReport;
+  $('#exp-report', m).onclick = () => loadReport(true);
   if (can('report.read')) {
     for (const format of ['csv', 'json']) {
       $('#exp-export-' + format, m).onclick = async () => {
@@ -1973,7 +1984,19 @@ async function viewExpDetail(m) {
     failures = 0;
     if (autoRefresh) poll();
   };
+  if (can('report.read') && !['draft', 'reviewed', 'scheduled'].includes(e.state)) loadReport();
   bindRollout(m, id, e);
+}
+
+function renderExpDecisionHero(report, state, error = null) {
+  if (error) return '<div class="banner warn">' + esc(t('exp.reportUnavailable')) + '</div>' +
+    (report ? '<p class="muted">' + esc(t('report.stale')) + ' · ' + esc(t('report.generatedAt')) + ': ' +
+      esc(fmtTime(report.generatedAt)) + '</p>' : '');
+  if (report) return renderReportSummary(report);
+  if (['draft', 'reviewed', 'scheduled'].includes(state)) {
+    return '<div class="banner">' + esc(t('exp.awaitingStart')) + '</div>';
+  }
+  return '<div class="banner">' + esc(t(can('report.read') ? 'exp.reportLoading' : 'exp.reportRestricted')) + '</div>';
 }
 
 function metricReferenceSummary(r) {
@@ -2221,8 +2244,9 @@ function renderReportSummary(r) {
   return '<section class="report-summary ' + (r.healthy ? '' : 'report-summary-blocked') + '" aria-label="' +
     esc(t('report.decisionSnapshot')) + '">' +
     '<div class="report-summary-head"><div><h4>' + esc(t('report.decisionSnapshot')) + '</h4>' +
-    '<div class="muted">' + esc(t('report.generatedAt')) + ': ' + esc(r.generatedAt || '—') +
-    ' · ' + esc(t('report.watermark')) + ': ' + esc(r.window?.watermark || '—') + '</div></div>' +
+    '<div class="muted">' + esc(t('report.generatedAt')) + ': <time title="' + esc(r.generatedAt || '') + '">' +
+    esc(fmtTime(r.generatedAt)) + '</time> · ' + esc(t('report.watermark')) + ': <time title="' +
+    esc(r.window?.watermark || '') + '">' + esc(fmtTime(r.window?.watermark)) + '</time></div></div>' +
     chip(verdict, r.healthy ? (VERDICT_CHIP[d.verdict] || 'gray') : 'amber') + '</div>' +
     '<p>' + esc(r.healthy ? t('report.healthy', { epoch: r.epoch, state: r.state }) : t('report.unhealthy')) + '</p>' +
     (reasons.length ? '<ul>' + reasons.map(reason => '<li>' + esc(reason) + '</li>').join('') + '</ul>' : '') +
