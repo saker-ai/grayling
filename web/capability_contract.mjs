@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 
 const code = fs.readFileSync(new URL('./i18n.js', import.meta.url), 'utf8') + '\n' +
   fs.readFileSync(new URL('./flag_editor.js', import.meta.url), 'utf8') + '\n' +
+  fs.readFileSync(new URL('./segment_editor.js', import.meta.url), 'utf8') + '\n' +
   fs.readFileSync(new URL('./app.js', import.meta.url), 'utf8') + '\n' +
   ';globalThis.x = { S, can, gateActions, updateCapabilities, refreshCapabilities, errMsg, errBanner, ApiError, VIEWS, I18N, setLang, route, registerI18nHooks };';
 const element = () => {

@@ -230,6 +230,14 @@ table.grid { min-width: 620px; }
 .flag-rule .field select, .flag-rule .field input { min-width: 0; width: 100%; }
 .flag-rule textarea { width: 100%; }
 .flag-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(85px, 1fr)); gap: 8px; flex: 1; }
+.segment-structured h4 { margin: 16px 0 8px; }
+.segment-condition { display: flex; align-items: end; gap: 8px; margin: 8px 0; }
+.segment-condition > .field { min-width: 0; }
+.segment-condition > .field:first-child { flex: 1 1 28%; }
+.segment-condition > .field:nth-child(2) { flex: 0 1 150px; }
+.segment-condition > .field.grow { flex: 2 1 35%; }
+.segment-condition input, .segment-condition select { width: 100%; }
+.segment-structured > .field { margin-top: 12px; }
 table.grid tr[hidden] { display: none; }
 .row-link { border: 0; background: none; padding: 2px 0; color: var(--accent); font: inherit; cursor: pointer; text-align: left; }
 .row-link:hover { text-decoration: underline; }
@@ -319,6 +327,10 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
   .flag-rule .row { align-items: stretch; flex-direction: column; }
   .flag-rule .row > .field, .flag-rule .row > .flag-split { width: 100%; }
   .flag-rule .row > button { align-self: start; }
+  .segment-condition { align-items: stretch; flex-wrap: wrap; }
+  .segment-condition > .field, .segment-condition > .field:first-child,
+  .segment-condition > .field:nth-child(2), .segment-condition > .field.grow { flex: 1 1 100%; }
+  .segment-condition > button { margin-bottom: 4px; }
   .flag-record { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; }
   table.grid.diagnostic-table { display: none; }
   .diagnostic-cards { display: grid; gap: 10px; margin: 10px 0; }

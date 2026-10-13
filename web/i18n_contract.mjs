@@ -27,8 +27,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const i18nCode = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8');
 const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 const flagEditorCode = fs.readFileSync(path.join(__dirname, 'flag_editor.js'), 'utf8');
+const segmentEditorCode = fs.readFileSync(path.join(__dirname, 'segment_editor.js'), 'utf8');
 const indexHTML = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-const code = i18nCode + '\n' + flagEditorCode + '\n' + appCode;
+const code = i18nCode + '\n' + flagEditorCode + '\n' + segmentEditorCode + '\n' + appCode;
 
 const BRIDGE = '\n;globalThis.__x = { I18N, t, setLang, detectLang, localeFor, fmtTime, fmtDurNs,' +
   ' S, VIEWS, route, renderReport, renderRollout, lintFlag, applyStaticI18n, bindLangSwitch, registerI18nHooks, applyTheme, themePreference, consoleHash, restoreConsoleHash };';
@@ -546,6 +547,7 @@ assert(!main.warns.some(w => w.includes('[i18n] missing')), 'console.warn record
   const used = new Set();
   for (const mt of appCode.matchAll(/\bt\('([A-Za-z0-9._-]+)'/g)) used.add(mt[1]);
   for (const mt of flagEditorCode.matchAll(/\bt\('([A-Za-z0-9._-]+)'/g)) used.add(mt[1]);
+  for (const mt of segmentEditorCode.matchAll(/\bt\('([A-Za-z0-9._-]+)'/g)) used.add(mt[1]);
   assert(used.size > 100, 'static extraction should find the migrated keys, got ' + used.size);
   for (const k of used) {
     assert(k in x.I18N.catalogs.en, 'app.js uses key missing from en catalog: ' + k);
@@ -581,6 +583,7 @@ assert(!main.warns.some(w => w.includes('[i18n] missing')), 'console.warn record
   };
   scan('app.js (code + string literals)', stripJsComments(appCode));
   scan('flag_editor.js (code + string literals)', stripJsComments(flagEditorCode));
+  scan('segment_editor.js (code + string literals)', stripJsComments(segmentEditorCode));
   scan('index.html (markup + attributes)', indexHTML.replace(/<!--[\s\S]*?-->/g, ''));
 }
 

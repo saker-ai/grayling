@@ -201,7 +201,11 @@ function editorValue() {
     return JSON.stringify(['flag', flag.value, $('#flag-risk')?.value, $('#flag-base')?.value, fields]);
   }
   const segment = $('#seg-json');
-  if (segment) return JSON.stringify(['segment', segment.value, $('#seg-risk')?.value]);
+  if (segment) {
+    const form = $('#seg-structured');
+    const fields = form ? $$('input, select', form).map(control => control.value) : [];
+    return JSON.stringify(['segment', segment.value, $('#seg-risk')?.value, fields]);
+  }
   return null;
 }
 function confirmLeaveEditor() {
@@ -1100,7 +1104,11 @@ async function viewSegmentDetail(m) {
       ' <span class="muted">' + esc(t('flags.riskMeta', { risk: d.risk || '—', by: d.updatedBy || '—', time: fmtTime(d.updatedAt) })) + '</span>'
       : chip(t('chip.new'), 'gray')) + '</div>' +
     '<section class="card"><h3>' + esc(t('seg.draft')) + '</h3>' +
-    '<textarea id="seg-json" class="json" rows="18" spellcheck="false"></textarea>' +
+    '<div class="row flag-editor-modes" role="group" aria-label="' + esc(t('seg.editorMode')) + '">' +
+      '<button type="button" class="btn sm" id="seg-mode-structured" aria-pressed="true">' + esc(t('flags.editorStructured')) + '</button>' +
+      '<button type="button" class="btn sm" id="seg-mode-json" aria-pressed="false">' + esc(t('flags.editorAdvanced')) + '</button></div>' +
+    '<div id="seg-structured"></div>' +
+    '<div id="seg-advanced" class="hidden"><textarea id="seg-json" class="json" rows="18" spellcheck="false"></textarea></div>' +
     '<div class="row"><button class="btn sm" id="seg-validate">' + esc(t('btn.validateJson')) + '</button><span id="seg-valid" class="muted grow"></span>' +
     '<label class="inline">' + esc(t('label.risk')) + ' <select id="seg-risk"><option value="normal">normal</option><option value="high">high</option></select></label></div>' +
     '<div class="row actions">' +
@@ -1110,16 +1118,22 @@ async function viewSegmentDetail(m) {
     '<button class="btn" id="seg-publish">' + esc(t('btn.publish')) + '</button></div></section>' + reviewPreview(preview);
   $('#seg-json', m).value = JSON.stringify(content, null, 2);
   if (d && d.risk) $('#seg-risk', m).value = d.risk;
+  const structured = bindSegmentStructured(m);
+  if (!can('flag.write')) {
+    $$('input, select, button', $('#seg-structured', m)).forEach(control => { control.disabled = true; });
+    $('#seg-json', m).readOnly = true;
+    $('#seg-risk', m).disabled = true;
+  }
   $('#seg-back', m).onclick = () => { if (!confirmLeaveEditor()) return; S.segKey = null; route(); };
   $('#seg-validate', m).onclick = () => {
+    if (!structured.valid()) return;
     const out = $('#seg-valid', m);
     try {
       const c = JSON.parse($('#seg-json', m).value);
-      const hasRules = c && ((Array.isArray(c.constraints) && c.constraints.length > 0) ||
-        (Array.isArray(c.segments) && c.segments.length > 0));
-      out.className = (c && c.key === key && hasRules) ? 'ok-text grow' : 'warn-text grow';
+      const issues = lintSegment(c);
+      out.className = (c && c.key === key && !issues.length) ? 'ok-text grow' : 'warn-text grow';
       out.textContent = !c || c.key !== key ? t('validate.keyShould', { key }) :
-        !hasRules ? t('validate.segmentNonEmpty') : t('validate.valid');
+        issues.length ? issues.join(' · ') : t('validate.valid');
     } catch (e) { out.className = 'err-text grow'; out.textContent = t('validate.invalidJson', { msg: e.message }); }
   };
   const readJSON = () => {
@@ -1127,13 +1141,12 @@ async function viewSegmentDetail(m) {
     try { c = JSON.parse($('#seg-json', m).value); }
     catch (e) { toast(t('toast.invalidJson', { msg: e.message }), false); return null; }
     if (!c || c.key !== key) { toast(t('toast.keyMismatch', { key }), false); return null; }
-    if (!((Array.isArray(c.constraints) && c.constraints.length > 0) ||
-      (Array.isArray(c.segments) && c.segments.length > 0))) {
-      toast(t('validate.segmentNonEmpty'), false); return null;
-    }
+    const issues = lintSegment(c);
+    if (issues.length) { toast(issues.join(' · '), false); return null; }
     return c;
   };
   $('#seg-save', m).onclick = () => {
+    if (!structured.valid()) return;
     const content2 = readJSON();
     if (!content2) return;
     run(() => api(kp + '/draft', { method: 'PUT', body: { content: content2, risk: $('#seg-risk', m).value } }), t('toast.segSaved'), true);

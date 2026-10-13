@@ -15,6 +15,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // The sandbox has no golab_lang and no navigator.language → en (default).
 const code = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'flag_editor.js'), 'utf8') + '\n' +
+  fs.readFileSync(path.join(__dirname, 'segment_editor.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 
 const el = () => ({
@@ -36,7 +37,7 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
 
 const structuredFlag = sandbox.__renderFlagStructured({ type: 'bool',
@@ -49,6 +50,13 @@ assert(structuredFlag.includes('Percentage split') && structuredFlag.includes('d
 assert(sandbox.__lintFlag({ type: 'bool', variations: { control: 'false' },
   defaultRule: { variation: 'control' }, targeting: {} }).length >= 2,
   'JSON advanced mode must report invalid value types and rule shape without throwing');
+const structuredSegment = sandbox.__renderSegmentStructured({ key: 'audience',
+  constraints: [{ field: '<img src=x>', op: 'eq', value: 'CN' }], segments: ['staff'] });
+assert(structuredSegment.includes('data-seg-op') && structuredSegment.includes('staff') &&
+  !structuredSegment.includes('<img') && structuredSegment.includes('&lt;img'),
+  'structured Segment editor must render conditions and escape user content');
+assert(sandbox.__lintSegment({ key: 'audience', constraints: [{ field: 'country', op: 'regex', value: '[' }],
+  segments: [] }).length > 0, 'invalid Segment regex must be reported');
 
 const flagDiff = sandbox.__renderFlagDiff(
   { revision: 4, content: { type: 'bool', variations: { safe: false, launch: true }, disable: false } },
