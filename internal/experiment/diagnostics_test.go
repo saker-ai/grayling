@@ -3,6 +3,7 @@ package experiment
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -127,5 +128,75 @@ func TestOnRenderReportHoldsForUnexposedAssignments(t *testing.T) {
 	}
 	if report.Healthy || report.Decision.Verdict != "hold" {
 		t.Fatalf("unreviewed delivery gap must hold: healthy=%t verdict=%s", report.Healthy, report.Decision.Verdict)
+	}
+}
+
+func TestDiagnosticsReplaysSQLiteAssignmentsAfterRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "diagnostics.sqlite")
+	store, err := platform.NewSQLiteStore(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := store.CreateWorkspace("diagnostics", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := store.CreateEnvironment(ws.ID, "prod", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := store.CreateExperiment(&platform.Experiment{
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "flag", Epoch: 1,
+		Unit: "user_id", ExposureMode: "onRender",
+		Variants:    []string{"control", "treatment"},
+		Proportions: map[string]float64{"control": 50, "treatment": 50},
+		PrimaryMetric: platform.MetricSpec{
+			Key: "conversion", Type: "proportion", Direction: "increase",
+		},
+		Alpha: 0.05, AnalysisWindow: 24 * time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.TransitionExperiment(exp.ID, model.ExperimentReviewed, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.TransitionExperiment(exp.ID, model.ExperimentRunning, "test"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	unit := store.HashUnit(ws.ID, "private-user")
+	assignment := &platform.Event{
+		EventID: "asg-sqlite", WorkspaceID: ws.ID, EnvironmentID: env.ID,
+		ExperimentID: exp.ID, Epoch: exp.Epoch, Type: platform.EventAssignment,
+		FlagKey: exp.FlagKey, FlagRevision: 1, Variant: "control",
+		UnitHash: unit, Source: "split", ClientTime: now, ServerTime: now,
+	}
+	exposure := *assignment
+	exposure.EventID = "exp-sqlite"
+	exposure.Type = platform.EventExposure
+	if result, err := store.IngestEvents([]*platform.Event{assignment, &exposure}); err != nil || result.Accepted != 2 {
+		t.Fatalf("ingest: %+v, %v", result, err)
+	}
+	before, err := BuildDiagnostics(store, exp.ID, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := platform.NewSQLiteStore(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	after, err := BuildDiagnostics(reopened, exp.ID, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.PerVariant[0] != after.PerVariant[0] ||
+		after.PerVariant[0].Assignments != 1 || after.PerVariant[0].Exposures != 1 ||
+		after.Window.Backend != "sqlite-raw" {
+		t.Fatalf("raw replay changed diagnostics: before=%+v after=%+v", before, after)
 	}
 }
