@@ -2,6 +2,7 @@ package platform
 
 import (
 	"errors"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -115,5 +116,88 @@ func TestPGApprovalRoundtrip(t *testing.T) {
 	loaded, err = a.GetApproval(request.ID)
 	if err != nil || loaded.State != ApprovalUsed {
 		t.Fatalf("cross-replica use: %+v %v", loaded, err)
+	}
+	rejection, err := a.RequestApproval(Approval{WorkspaceID: request.WorkspaceID,
+		EnvironmentID: request.EnvironmentID, Action: "ai.pin", Object: "prompt/other",
+		PayloadHash: "hash-v2", Reason: "candidate", SubmittedBy: "alice", SubmittedTokenID: "tok-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.RejectChange(rejection.ID, "bob", "tok-b", "not ready"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = b.GetApproval(rejection.ID)
+	if err != nil || loaded.State != ApprovalRejected || loaded.RejectionReason != "not ready" {
+		t.Fatalf("cross-replica rejection: %+v %v", loaded, err)
+	}
+}
+
+func TestRejectApprovalPreventsUseAndPersists(t *testing.T) {
+	s, err := NewStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.RequestApproval(approvalFixture(t, s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RejectChange(a.ID, "alice", "tok-a", "self"); !errors.Is(err, ErrSelfApproval) {
+		t.Fatalf("self rejection: %v", err)
+	}
+	if _, err := s.RejectChange(a.ID, "bob", "tok-b", ""); !errors.Is(err, ErrValidation) {
+		t.Fatalf("empty reason: %v", err)
+	}
+	rejected, err := s.RejectChange(a.ID, "bob", "tok-b", "risk exceeds policy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected.State != ApprovalRejected || rejected.RejectedAt == nil ||
+		rejected.RejectedBy != "bob" || rejected.RejectionReason != "risk exceeds policy" {
+		t.Fatalf("rejected approval: %+v", rejected)
+	}
+	if _, err := s.ApproveChange(a.ID, "carol", "tok-c", "later"); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("approve rejected request: %v", err)
+	}
+	if _, err := s.UseApproval(a.ID, a.WorkspaceID, a.EnvironmentID, a.Action, a.Object,
+		a.PayloadHash, a.BaseRevision); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("use rejected request: %v", err)
+	}
+	if _, err := s.RejectChange(a.ID, "carol", "tok-c", "again"); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("reject twice: %v", err)
+	}
+}
+
+func TestSQLiteRejectedApprovalRoundtrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "approvals.sqlite")
+	store, err := NewSQLiteStore(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := store.RequestApproval(approvalFixture(t, store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RejectChange(a.ID, "bob", "tok-b", "risk exceeds policy"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewSQLiteStore(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := reopened.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	got, err := reopened.GetApproval(a.ID)
+	if err != nil || got.State != ApprovalRejected || got.RejectedAt == nil ||
+		got.RejectedBy != "bob" || got.RejectionReason != "risk exceeds policy" {
+		t.Fatalf("reopened rejection: %+v %v", got, err)
 	}
 }

@@ -32,10 +32,17 @@ type Approval struct {
 	ApprovedAt       *time.Time `json:"approvedAt,omitempty"`
 	ExpiresAt        *time.Time `json:"expiresAt,omitempty"`
 	ReviewNote       string     `json:"reviewNote,omitempty"`
+	RejectedBy       string     `json:"rejectedBy,omitempty"`
+	RejectedTokenID  string     `json:"rejectedTokenId,omitempty"`
+	RejectedAt       *time.Time `json:"rejectedAt,omitempty"`
+	RejectionReason  string     `json:"rejectionReason,omitempty"`
 	UsedAt           *time.Time `json:"usedAt,omitempty"`
 }
 
-const ApprovalUsed DraftState = "used"
+const (
+	ApprovalRejected DraftState = "rejected"
+	ApprovalUsed     DraftState = "used"
+)
 
 func copyApproval(a *Approval) *Approval {
 	out := *a
@@ -50,6 +57,10 @@ func copyApproval(a *Approval) *Approval {
 	if a.UsedAt != nil {
 		v := *a.UsedAt
 		out.UsedAt = &v
+	}
+	if a.RejectedAt != nil {
+		v := *a.RejectedAt
+		out.RejectedAt = &v
 	}
 	return &out
 }
@@ -124,6 +135,34 @@ func (s *Store) ApproveChange(id, actor, tokenID, note string) (*Approval, error
 	a.ApprovedAt = &now
 	expires := now.Add(ApprovalTTL)
 	a.ExpiresAt = &expires
+	s.changes.markDirty(collApprovals, id)
+	if err := s.commitLocked(); err != nil {
+		return nil, err
+	}
+	return copyApproval(a), nil
+}
+
+// RejectChange records a distinct reviewer's reason and prevents any later use.
+func (s *Store) RejectChange(id, actor, tokenID, reason string) (*Approval, error) {
+	if reason == "" {
+		return nil, fmt.Errorf("%w: rejection reason required", ErrValidation)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a := s.data.Approvals[id]
+	if a == nil {
+		return nil, fmt.Errorf("%w: approval %s", ErrNotFound, id)
+	}
+	if a.State != DraftSubmitted {
+		return nil, fmt.Errorf("%w: approval is %s", ErrInvalidState, a.State)
+	}
+	if actor == a.SubmittedBy || tokenID == a.SubmittedTokenID {
+		return nil, ErrSelfApproval
+	}
+	a.State = ApprovalRejected
+	a.RejectedBy, a.RejectedTokenID, a.RejectionReason = actor, tokenID, reason
+	now := s.now()
+	a.RejectedAt = &now
 	s.changes.markDirty(collApprovals, id)
 	if err := s.commitLocked(); err != nil {
 		return nil, err

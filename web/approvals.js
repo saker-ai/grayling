@@ -14,7 +14,18 @@ function approvalAction(approval) {
 }
 
 function approvalStateLabel(approval) {
-  return approvalExpired(approval) ? t('approval.expired') : approval.state;
+  if (approvalExpired(approval)) return t('approval.expired');
+  switch (approval.state) {
+    case 'submitted': return t('approval.state.submitted');
+    case 'approved': return t('approval.state.approved');
+    case 'rejected': return t('approval.state.rejected');
+    case 'used': return t('approval.state.used');
+    default: return approval.state;
+  }
+}
+
+function approvalChipClass(approval) {
+  return approval.state === 'rejected' ? 'red' : DRAFT_CHIP[approval.state] || 'gray';
 }
 
 function renderApprovalList(approvals) {
@@ -33,7 +44,7 @@ function renderApprovalList(approvals) {
     (rows.length ? '<div class="approval-list">' + rows.map(approval =>
       '<article class="card approval-item"><div class="row"><button type="button" class="row-link grow" data-approval-id="' +
       esc(approval.id) + '">' + esc(approval.action) + ' · ' + esc(approval.object) + '</button>' +
-      chip(approvalStateLabel(approval), DRAFT_CHIP[approval.state] || 'gray') + '</div>' +
+      chip(approvalStateLabel(approval), approvalChipClass(approval)) + '</div>' +
       '<p class="muted">' + esc(approval.environmentId || t('misc.none')) + ' · ' +
       esc(approval.submittedBy) + ' · ' + esc(fmtTime(approval.submittedAt)) + '</p>' +
       '<p>' + esc(t('approval.risk')) + ': ' + esc(approval.risk || '—') + ' · ' +
@@ -51,7 +62,7 @@ function renderApprovalDetail(approval) {
   const action = approvalAction(approval);
   return '<div class="view-head"><button type="button" class="btn sm" id="approval-back">' +
     esc(t('approval.back')) + '</button><h2>' + esc(approval.action) + '</h2>' +
-    chip(approvalStateLabel(approval), DRAFT_CHIP[approval.state] || 'gray') + '</div>' +
+    chip(approvalStateLabel(approval), approvalChipClass(approval)) + '</div>' +
     '<section class="card approval-detail"><h3>' + esc(t('approval.reviewObject')) + ': ' + esc(approval.object) + '</h3>' +
     '<dl class="approval-facts"><dt>' + esc(t('approval.environment')) + '</dt><dd>' + esc(approval.environmentId || '—') + '</dd>' +
     '<dt>' + esc(t('approval.risk')) + '</dt><dd>' + esc(approval.risk || '—') + '</dd>' +
@@ -64,7 +75,9 @@ function renderApprovalDetail(approval) {
     '<dt>' + esc(t('approval.guardrails')) + '</dt><dd>' + esc(approval.guardrails || '—') + '</dd>' +
     '<dt>' + esc(t('approval.hash')) + '</dt><dd class="mono">' + esc(approval.payloadHash) + '</dd>' +
     '<dt>' + esc(t('approval.expires')) + '</dt><dd>' + esc(fmtTime(approval.expiresAt)) + '</dd>' +
-    '<dt>' + esc(t('approval.reviewer')) + '</dt><dd>' + esc(approval.approvedBy || '—') + '</dd></dl>' +
+    '<dt>' + esc(t('approval.reviewer')) + '</dt><dd>' + esc(approval.approvedBy || approval.rejectedBy || '—') + '</dd>' +
+    (approval.rejectionReason ? '<dt>' + esc(t('approval.rejectionReason')) + '</dt><dd>' +
+      esc(approval.rejectionReason) + '</dd>' : '') + '</dl>' +
     (payload ? '<h4>' + esc(t('approval.proposedPayload')) + '</h4><pre class="pre">' + esc(payload) + '</pre>' : '') +
     (approval.submittedBy === S.actorName && approval.state === 'submitted'
       ? '<div class="banner info">' + esc(t('approval.selfReview')) + '</div>' : '') +
@@ -72,7 +85,8 @@ function renderApprovalDetail(approval) {
     (action === 'review' ? '<label class="field">' + esc(t('approval.reviewNote')) +
       '<textarea id="approval-note" rows="3"></textarea></label>' : '') +
     '<div id="approval-feedback" role="alert"></div><div class="row actions">' +
-    (action === 'review' ? '<button type="button" class="btn primary" id="approval-review">' + esc(t('btn.approve')) + '</button>' : '') +
+    (action === 'review' ? '<button type="button" class="btn primary" id="approval-review">' + esc(t('btn.approve')) +
+      '</button><button type="button" class="btn danger" id="approval-reject">' + esc(t('approval.reject')) + '</button>' : '') +
     (action === 'execute' ? '<button type="button" class="btn primary" id="approval-execute">' + esc(t('approval.execute')) + '</button>' : '') +
     '</div></section>';
 }
@@ -98,21 +112,25 @@ async function viewApprovals(root) {
   $('#approval-back', root).onclick = () => { S.approvalID = null; route(); };
   const act = async kind => {
     const note = $('#approval-note', root)?.value.trim() || '';
-    if (kind === 'review' && !note) {
+    if ((kind === 'review' || kind === 'reject') && !note) {
       $('#approval-note', root).focus();
       $('#approval-feedback', root).textContent = t('approval.noteRequired');
       return;
     }
-    const confirmation = await actionDialog({ title: kind === 'review' ? t('btn.approve') : t('approval.execute'),
-      summary: t(kind === 'review' ? 'approval.confirmReview' : 'approval.confirmExecute',
+    const confirmation = await actionDialog({ title: kind === 'review' ? t('btn.approve') :
+      kind === 'reject' ? t('approval.reject') : t('approval.execute'),
+      summary: t(kind === 'review' ? 'approval.confirmReview' :
+        kind === 'reject' ? 'approval.confirmReject' : 'approval.confirmExecute',
         { action: approval.action, object: approval.object }),
       preview: reviewPreview({ targetEnvironment: approval.environmentId, risk: approval.risk,
         baseRevision: approval.baseRevision, estimatedAffected: approval.impact,
         rollbackTarget: approval.rollbackTarget, guardrails: approval.guardrails,
         proposedHash: approval.payloadHash }, 'action-review-preview'),
-      confirmLabel: kind === 'review' ? t('btn.approve') : t('approval.execute') });
+      confirmLabel: kind === 'review' ? t('btn.approve') :
+        kind === 'reject' ? t('approval.reject') : t('approval.execute') });
     if (!confirmation) return;
-    const button = kind === 'review' ? $('#approval-review', root) : $('#approval-execute', root);
+    const button = kind === 'review' ? $('#approval-review', root) :
+      kind === 'reject' ? $('#approval-reject', root) : $('#approval-execute', root);
     button.disabled = true;
     try {
       const latest = (await api(wsPath() + '/approvals')).find(item => item.id === approval.id);
@@ -124,8 +142,12 @@ async function viewApprovals(root) {
       if (kind === 'review') {
         await api(wsPath() + '/approvals/' + encodeURIComponent(approval.id) + '/approve',
           { method: 'POST', body: { note } });
+      } else if (kind === 'reject') {
+        await api(wsPath() + '/approvals/' + encodeURIComponent(approval.id) + '/reject',
+          { method: 'POST', body: { reason: note } });
       } else await executeApproval(approval);
-      toast(t(kind === 'review' ? 'approval.reviewed' : 'approval.executed'));
+      toast(t(kind === 'review' ? 'approval.reviewed' :
+        kind === 'reject' ? 'approval.rejected' : 'approval.executed'));
       route();
     } catch (error) {
       $('#approval-feedback', root).textContent = errMsg(error);
@@ -133,5 +155,6 @@ async function viewApprovals(root) {
     } finally { button.disabled = false; }
   };
   if ($('#approval-review', root)) $('#approval-review', root).onclick = () => act('review');
+  if ($('#approval-reject', root)) $('#approval-reject', root).onclick = () => act('reject');
   if ($('#approval-execute', root)) $('#approval-execute', root).onclick = () => act('execute');
 }

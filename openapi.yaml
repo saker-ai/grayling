@@ -2415,6 +2415,36 @@ paths:
                 $ref: "#/components/schemas/Approval"
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+  "/api/v1/admin/workspaces/{ws}/approvals/{id}/reject":
+    post:
+      tags: [workspaces]
+      summary: 异人拒绝待审批申请并记录原因
+      operationId: rejectChange
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: 已拒绝的审批记录。被拒绝的授权不能执行。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Approval"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
   "/api/v1/admin/workspaces/{ws}/environments/{env}/approvals":
     post:
       tags: [workspaces]
@@ -2702,7 +2732,7 @@ components:
         rollbackTarget: { type: string }
         guardrails: { type: string }
         payload: { type: string, description: 非敏感操作参数；AI 原始内容不保存。 }
-        state: { type: string, enum: [submitted, approved, used] }
+        state: { type: string, enum: [submitted, approved, rejected, used] }
         submittedBy: { type: string }
         submittedTokenId: { type: string }
         submittedAt: { type: string, format: date-time }
@@ -2711,6 +2741,10 @@ components:
         approvedAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time }
         reviewNote: { type: string }
+        rejectedBy: { type: string }
+        rejectedTokenId: { type: string }
+        rejectedAt: { type: string, format: date-time }
+        rejectionReason: { type: string }
         usedAt: { type: string, format: date-time }
     ReviewPreview:
       type: object

@@ -212,6 +212,46 @@ func (s *Server) handleApproveChange(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
+func (s *Server) handleRejectChange(w http.ResponseWriter, r *http.Request) {
+	actor := actorFrom(r)
+	ws, err := s.Store.GetWorkspace(r.PathValue("ws"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	a, err := s.Store.GetApproval(r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if a.WorkspaceID != ws.ID {
+		writeStoreError(w, platform.ErrAccessDenied)
+		return
+	}
+	if err := admin.Authorize(actor, ws.ID, admin.PermFlagApprove); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	a, err = s.Store.RejectChange(a.ID, actor.Name, actor.TokenID, strings.TrimSpace(req.Reason))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := s.Store.Audit(actor.Name+" ("+actor.TokenID+")", actor.Role, "approval.reject",
+		a.WorkspaceID, a.EnvironmentID, a.ID,
+		fmt.Sprintf(`{"action":%q,"object":%q,"hash":%q,"reason":%q}`, a.Action, a.Object, a.PayloadHash, a.RejectionReason)); err != nil {
+		s.logger.Printf("record approval rejection audit: %v", err)
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
 func (s *Server) useApproval(actor admin.Actor, id, wsID, envID, action, object string, payload any, base int64) error {
 	a, err := s.Store.GetApproval(id)
 	if err != nil {

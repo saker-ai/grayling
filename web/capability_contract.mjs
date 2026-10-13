@@ -108,12 +108,18 @@ for (const [role, wantApprove, wantExecute] of [['viewer', false, false], ['anal
   assert.equal(sandbox.x.approvalAction(approvals[1]) === 'execute', wantExecute, `${role} execution action`);
   S.approvalFilter = 'all';
   await VIEWS.approvals(root);
-  assert(root.innerHTML.includes('submitted') && root.innerHTML.includes('approved'), 'approval states visible after reload');
+  assert(root.innerHTML.includes('Awaiting review') && root.innerHTML.includes('Approved'),
+    'localized approval states visible after reload');
 }
 S.capabilities = { permissions: { 'flag.approve': true, 'flag.publish': true } };
 S.actorName = 'alice';
 assert.equal(sandbox.x.approvalAction(approvals[0]), '', 'requester must not approve own request');
 assert(sandbox.x.renderApprovalDetail(approvals[0]).includes('different person'), 'self review explanation');
+S.actorName = 'bob';
+assert(sandbox.x.renderApprovalDetail(approvals[0]).includes('id="approval-reject"'),
+  'eligible reviewer can reject with a reason');
+assert(!sandbox.x.renderApprovalDetail({ ...approvals[0], state: 'rejected', rejectionReason: 'too risky' })
+  .includes('id="approval-reject"'), 'rejected request cannot be reviewed again');
 for (const [status, english, chinese] of [
   [403, 'Access denied', '无权操作'], [409, 'Conflict', '发生冲突'], [429, 'Request limited', '请求受限'],
 ]) {
