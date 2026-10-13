@@ -30,6 +30,14 @@ export * from "./types.ts";
 
 export class GolabError extends Error {}
 
+class CollectRejected extends GolabError {
+  readonly count: number;
+  constructor(count: number, message: string) {
+    super(message);
+    this.count = count;
+  }
+}
+
 export interface Options {
   baseUrl: string;
   /** SDK-scope credential; workspace/environment derive from it server-side. */
@@ -207,6 +215,30 @@ export class GolabClient {
     });
   }
 
+  /** Confirm that an onRender result was actually displayed or applied. */
+  trackEvaluatedExposure(details: EvaluationDetails): void {
+    const exp = details.result.experiment;
+    if (!exp || exp.exposureMode !== "onRender" || !details.result.decisionId) {
+      throw new GolabError("result has no onRender assignment");
+    }
+    if (!this.#opts.collectToken) throw new GolabError("collect token not configured");
+    if (!details.exposureToken || !details.randomizationUnit || !details.expiresAt ||
+      Date.parse(details.expiresAt) <= Date.now()) {
+      throw new GolabError("exposure token is missing or expired; evaluate again");
+    }
+    const flagRevision = /^\d+$/.test(details.result.flagVersion)
+      ? Number(details.result.flagVersion) : 0;
+    if (!this.#enqueue({
+      eventId: `exp-${details.result.decisionId}`,
+      decisionId: details.result.decisionId,
+      exposureToken: details.exposureToken,
+      type: "exposure", experimentId: exp.experimentId, epoch: exp.epoch,
+      flagKey: details.result.flagKey, flagRevision, variant: exp.variant,
+      unit: details.randomizationUnit, source: exp.source,
+      clientTime: new Date().toISOString(),
+    })) throw new GolabError("exposure queue is full");
+  }
+
   /** Manually report an exposure aligned with the collect contract. NOT
    *  needed for remote evaluations (the server records those itself with an
    *  idempotent event ID) — use for assignments made elsewhere. */
@@ -258,6 +290,10 @@ export class GolabClient {
     try {
       await this.#postEvents(batch);
     } catch (err) {
+      if (err instanceof CollectRejected) {
+        this.#stats.eventsDropped += err.count;
+        throw err;
+      }
       this.#queue.push(...batch); // keep for the periodic flusher
       throw new GolabError(`flush failed: ${String(err)}`);
     }
@@ -338,6 +374,7 @@ export class GolabClient {
     this.#stats.evals++;
     const hit = this.#cache.get(cacheKey);
     if (hit && this.status().state !== "STALE" &&
+      (!hit.details.expiresAt || Date.parse(hit.details.expiresAt) > Date.now()) &&
       (this.#revision === null || hit.revision === this.#revision)) {
       this.#stats.cacheHits++;
       return { ...hit.details, fromCache: true };
@@ -364,6 +401,8 @@ export class GolabClient {
       result,
       manifestRevision: Number(body.manifestRevision ?? 0),
       exposureEventId: String(body.exposureEventId ?? ""),
+      exposureToken: String(body.exposureToken ?? ""),
+      expiresAt: String(body.expiresAt ?? ""),
       randomizationUnit: String(body.randomizationUnit ?? ""),
       fromCache: false,
     };
@@ -406,12 +445,13 @@ export class GolabClient {
     };
   }
 
-  #enqueue(event: Record<string, unknown>): void {
+  #enqueue(event: Record<string, unknown>): boolean {
     if (this.#queue.length >= this.#queueCap) {
       this.#stats.eventsDropped++;
-      return;
+      return false;
     }
     this.#queue.push(event);
+    return true;
   }
 
   #drain(max: number): Record<string, unknown>[] {
@@ -423,12 +463,18 @@ export class GolabClient {
     if (batch.length === 0) return;
     try {
       await this.#postEvents(batch);
-    } catch {
+    } catch (err) {
+      if (err instanceof CollectRejected) {
+        this.#stats.eventsDropped += err.count;
+        this.#stats.lastError = `collect flush: ${String(err)}`;
+        this.#opts.onError?.("collect", err);
+        return;
+      }
       await new Promise((r) => setTimeout(r, 500)); // one retry (Go SDK parity)
       try {
         await this.#postEvents(batch);
       } catch (err) {
-        this.#stats.eventsDropped += batch.length;
+        this.#stats.eventsDropped += err instanceof CollectRejected ? err.count : batch.length;
         this.#stats.lastError = `collect flush: ${String(err)}`;
         this.#opts.onError?.("collect", err);
         return;
@@ -437,9 +483,17 @@ export class GolabClient {
     this.#stats.eventsFlushed += batch.length;
   }
 
-  #postEvents(batch: Record<string, unknown>[]): Promise<Record<string, unknown>> {
-    return this.#http<Record<string, unknown>>(
+  async #postEvents(batch: Record<string, unknown>[]): Promise<void> {
+    const result = await this.#http<Record<string, unknown>>(
       "POST", "/api/v1/collect", this.#opts.collectToken!, { events: batch });
+    const rejected = Number(result.rejected ?? 0);
+    if (rejected > 0) {
+      throw new CollectRejected(rejected,
+        `collect rejected ${rejected} events: ${String(result.rejectMessages ?? "")}`);
+    }
+    if (Number(result.accepted ?? 0) + Number(result.duplicates ?? 0) !== batch.length) {
+      throw new GolabError("collect response did not acknowledge every event");
+    }
   }
 
   async #http<T>(method: string, path: string, token: string | undefined,

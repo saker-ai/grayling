@@ -10,7 +10,7 @@ STALE。完整字段与保留窗口见[求值诊断与事件](../../docs/求值�
 
 - **不下发全量快照**——求值走 `POST /api/v1/sdk/eval`（可指向 `cmd/golab-proxy` 独立中继），内部规则/segment/AI 内容永不出服务端，适合浏览器伴随服务、Node 后端与边缘运行时。
 - **配置缓存 + 轮询**——结果按 (flagKey, 规范化 context) 缓存；后台轮询 `GET /api/v1/sdk/revision`（仅 revision 数字的受限投影），revision 变化即整表失效；eval 响应携带 `manifestRevision` 联动失效。
-- **曝光由服务端记录**——远程求值进入实验时服务端自动落幂等曝光；转化由 SDK 按 collect 契约批量上报（独立 collect 凭证、队列 + 定时 flush + 一次重试 + 丢弃计数）。
+- **按曝光模式采集**——`onDecision` 求值时服务端落幂等曝光；`onRender` 只记录分配，实际展示后调用 `trackEvaluatedExposure(details)`。短时凭据过期后需重新求值；采集被拒会报错或进入错误回调。
 - **失败绝不猜测**——传输/鉴权/类型错误一律返回调用方默认值 + `failed` Result（`FLAG_NOT_FOUND`/`TYPE_MISMATCH`/`MISSING_BUCKET_KEY`/`ERROR`）。
 - 零运行时依赖：只用 Node ≥ 22.6 内建能力（`fetch`、`node:crypto`）；源码即 TypeScript（Node 原生 type-stripping 直接运行）。
 
@@ -30,7 +30,9 @@ const { value, details } = await client.boolVariation(
   "checkout-router", false, { attributes: { user_id: uid, tenant: "acme" } });
 
 if (details.result.experiment) {
-  // 已进入实验：曝光已由服务端记录（details.exposureEventId 可观测）
+  if (details.result.experiment.exposureMode === "onRender") {
+    client.trackEvaluatedExposure(details); // 页面或服务端动作已实际生效
+  }
   client.trackConversion(details, "conversion", 1, { sessionId });
 }
 
@@ -38,7 +40,7 @@ await client.flush();   // 立即上报排队事件
 await client.close();
 ```
 
-其他 API：`stringVariation` / `numberVariation` / `jsonVariation`、`trackExposure`（外部决策曝光回填）、`syncRevision()`、`status()`。
+其他 API：`stringVariation` / `numberVariation` / `jsonVariation`、`trackExposure`（旧式外部决策曝光回填，仅适用于 onDecision）、`syncRevision()`、`status()`。
 
 `src/bucketing.ts` 提供 `golab-fnv1a-10000-v1` 的纯 TS 实现（BigInt FNV-1a 64），与 Go 参考实现共享同一组黄金向量，测试逐条校验——用于离线复算/分析，客户端求值不依赖它。
 

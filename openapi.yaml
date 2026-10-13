@@ -1983,14 +1983,12 @@ paths:
   "/api/v1/sdk/eval":
     post:
       tags: [sdk]
-      summary: 远程求值（进入实验时服务端自动落幂等曝光）
+      summary: 远程求值（按实验曝光模式记录分配或曝光）
       description: >-
-        服务端求值并在结果进入 running 实验 split 时自行记录曝光（远端客户端
-        不可信，不能自报曝光）。曝光 eventId 对
-        (experiment, epoch, unit, variant) 确定性生成，重复远程求值幂等。
-        响应中的 exposureEventId/randomizationUnit 仅在落了曝光时出现
-        （omitempty）；randomizationUnit 回显的是调用方自己上下文里的规范
-        单元字符串，供转化事件对齐同一 unit 哈希。
+        onDecision 直接记录幂等曝光；onRender 只记录分配并返回 15 分钟内
+        有效的不透明 exposureToken，实际展示后用 collect 凭证上报曝光。
+        token 绑定作用域、实验、epoch、flag revision、单位和变体。
+        randomizationUnit 回显调用方上下文中的规范单元字符串。
       operationId: evaluateSDK
       requestBody:
         required: true
@@ -2230,14 +2228,16 @@ paths:
   "/api/v1/collect":
     post:
       tags: [collect]
-      summary: 批量上报曝光/转化事件（collect 凭证）
+      summary: 批量上报分配、曝光和转化事件（collect 凭证）
       description: >-
         events[].unit 必填明文：服务端做租户内 HMAC-SHA256 伪名化后存储，
         原始 unit 不落盘；缺 unit 的事件跳过并计入 rejected（无随机化单元
         即无归因）。eventId 幂等去重，重复计入 duplicates。epoch 与实验注册
         不符、clientTime 迟到超 72h 或超前 5min → rejected（附原因）。
         批量条数与字节上限来自工作空间配额；超限 → 400 batch_too_large。
-        空 events 数组返回全零结果。
+        本地 SDK 的 assignment 携带 evaluation context，服务端以当前已发布
+        快照重新求值；同批后续 onRender 曝光据此确认分配。远程求值的
+        onRender 曝光须携带 exposureToken。空 events 数组返回全零结果。
       operationId: collectEvents
       requestBody:
         required: true
@@ -2958,6 +2958,9 @@ components:
         epoch:
           type: integer
           format: int64
+        exposureMode:
+          type: string
+          enum: [onDecision, onRender]
         layer:
           type: string
           description: 互斥层 ID（空 = 无层）。
@@ -3132,6 +3135,9 @@ components:
           format: int64
         variant:
           type: string
+        exposureMode:
+          type: string
+          enum: [onDecision, onRender]
         source:
           type: string
           description: 到达该臂的方式；bandit 为自适应概率分流，split 为注册固定比例。
@@ -3175,7 +3181,7 @@ components:
           type: string
         trackEvents:
           type: boolean
-          description: true 且带 experiment 时应上报曝光。
+          description: true 且带 experiment 时应按 exposureMode 记录分配或曝光。
         experiment:
           $ref: "#/components/schemas/Exposure"
         bucket:
@@ -3694,6 +3700,10 @@ components:
           type: string
           enum: [fixed-split, bandit]
           description: 缺省 fixed-split；bandit 必须注册 bandit 策略。
+        exposureMode:
+          type: string
+          enum: [onDecision, onRender]
+          description: 缺省 onDecision；onRender 在实际展示后显式上报曝光。
         bandit:
           $ref: "#/components/schemas/BanditSpec"
         primaryMetric:
@@ -4828,6 +4838,13 @@ components:
           description: >-
             服务端落下曝光时返回（omitempty）：对
             (experiment, epoch, unit, variant) 确定性生成，重复求值幂等。
+        exposureToken:
+          type: string
+          description: onRender 的加密认证凭据；实际展示后通过 collect 上报。
+        expiresAt:
+          type: string
+          format: date-time
+          description: exposureToken 的到期时间。
         randomizationUnit:
           type: string
           description: >-
@@ -4848,7 +4865,7 @@ components:
       type: object
       additionalProperties: false
       description: >-
-        一条曝光/转化事件。unit 必填明文（服务端 HMAC 伪名化，原值不落盘）；
+        一条分配/曝光/转化事件。unit 必填明文（服务端 HMAC 伪名化，原值不落盘）；
         缺 unit 的事件被跳过并计入 rejected。
       required: [eventId, type, experimentId, epoch, variant, unit, clientTime]
       properties:
@@ -4858,9 +4875,12 @@ components:
         decisionId:
           type: string
           description: 关联原始求值、曝光及转化；缺省时事件仍按原有规则处理。
+        exposureToken:
+          type: string
+          description: 远程 onRender 曝光必须携带的不透明凭据。
         type:
           type: string
-          enum: [exposure, conversion]
+          enum: [assignment, exposure, conversion]
         experimentId:
           type: string
         epoch:
@@ -4897,6 +4917,9 @@ components:
           type: string
           format: date-time
           description: 迟到超 72h 或超前 5min → rejected。
+        context:
+          $ref: "#/components/schemas/EvaluationContext"
+          description: 仅本地 SDK assignment 使用；只在服务端重算，不写入事件账本。
     CollectRequest:
       type: object
       additionalProperties: false

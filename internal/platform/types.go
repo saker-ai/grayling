@@ -273,6 +273,7 @@ type Experiment struct {
 	// AllocationMode is fixed-split (the legacy default) or bandit.
 	AllocationMode   string          `json:"allocationMode,omitempty"`
 	Bandit           *BanditSpec     `json:"bandit,omitempty"`
+	ExposureMode     string          `json:"exposureMode,omitempty"` // onDecision | onRender
 	PrimaryMetricRef *MetricRef      `json:"primaryMetricRef,omitempty"`
 	PrimaryMetric    MetricSpec      `json:"primaryMetric"`
 	Guardrails       []GuardrailSpec `json:"guardrails,omitempty"`
@@ -400,6 +401,7 @@ func (p *ReleasePlan) AppendHistory(ev PlanEvent) {
 type EventType string
 
 const (
+	EventAssignment EventType = "assignment"
 	EventExposure   EventType = "exposure"
 	EventConversion EventType = "conversion"
 )

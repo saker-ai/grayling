@@ -10,7 +10,7 @@ STALE。完整字段与保留窗口见[求值诊断与事件](../../docs/求值�
 
 - **不下发全量快照**——求值走 `POST /api/v1/sdk/eval`（可指向 `cmd/golab-proxy` 独立中继），内部规则/segment/AI 内容永不出服务端，适合脚本、Web 后端薄客户端与边缘运行时。
 - **配置缓存 + 轮询**——结果按 (flagKey, context) 缓存；后台轮询 `GET /api/v1/sdk/revision`（仅 revision 数字的受限投影），revision 变化即整表失效；每次 eval 响应也携带 `manifestRevision`，活跃客户端即使轮询失败也能收敛。
-- **曝光由服务端记录**——远程求值进入实验时服务端自动落幂等曝光（确定性 event ID）；转化事件由 SDK 按 collect 契约批量上报（独立 collect 凭证，事件队列 + 定期 flush + 一次重试 + 丢弃计数）。
+- **按曝光模式采集**——`onDecision` 求值时服务端落幂等曝光；`onRender` 只记录分配，实际展示后调用 `track_evaluated_exposure(details)`。短时凭据过期后需重新求值；采集被拒会报错或进入错误回调。
 - **失败绝不猜测**——传输/鉴权/类型错误一律返回调用方默认值，`Result.failed=True` 且带 reason/errorCode（`FLAG_NOT_FOUND`/`TYPE_MISMATCH`/`MISSING_BUCKET_KEY`/`ERROR`）。
 - 纯标准库（`urllib`/`threading`），Python ≥ 3.9，无第三方运行时依赖。
 
@@ -37,7 +37,8 @@ value, details = client.bool_variation(
     "checkout-router", False, attributes={"user_id": uid, "tenant": "acme"})
 
 if details.result.experiment is not None:
-    # 已进入实验：曝光已由服务端记录（details.exposure_event_id 可观测）
+    if details.result.experiment.exposure_mode == "onRender":
+        client.track_evaluated_exposure(details)  # 页面或服务端动作已实际生效
     client.track_conversion(details, "conversion", 1.0, session_id=sess)
 
 client.flush()   # 立即上报排队事件（close() 也会 flush）
@@ -45,7 +46,7 @@ client.close()
 ```
 
 其他 API：`string_variation` / `number_variation` / `json_variation`、
-`track_exposure`（外部决策的曝光回填，对齐 collect 契约）、`sync_revision()`（显式新鲜度探测）、`status()`（revision/缓存命中/错误/事件计数观测）。
+`track_exposure`（旧式外部决策曝光回填，仅适用于 onDecision）、`sync_revision()`（显式新鲜度探测）、`status()`（revision/缓存命中/错误/事件计数观测）。
 
 `golab_sdk.bucketing` 提供 `golab-fnv1a-10000-v1` 的纯 Python 实现，用于离线复算/分析——与 Go 参考实现共享同一组黄金向量（`pkg/bucketing/testdata/golden_vectors.json`），测试逐条校验。
 

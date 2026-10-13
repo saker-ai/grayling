@@ -278,6 +278,9 @@ func (p *gormPersistence) eventDelta(ctx context.Context, after, controlVersion 
 func metricKeysForEvent(ev *Event) []string {
 	scope := fmt.Sprintf("%s/%s/%s/%d/%s", ev.WorkspaceID, ev.EnvironmentID,
 		ev.ExperimentID, ev.Epoch, ev.Variant)
+	if ev.Type == EventAssignment {
+		return []string{scope + "/assignment"}
+	}
 	if ev.Type == EventExposure {
 		return []string{scope + "/exposure", scope + "/" + ev.UnitHash}
 	}
@@ -408,6 +411,24 @@ func (p *gormPersistence) KnownEventIDs(ids []string) (map[string]bool, error) {
 		known[id] = true
 	}
 	return known, nil
+}
+
+func (p *gormPersistence) lookupAcceptedEvent(eventID string) (Event, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var row databaseEvent
+	err := p.db.WithContext(ctx).First(&row, "event_id = ?", eventID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return Event{}, false, nil
+	}
+	if err != nil {
+		return Event{}, false, err
+	}
+	var ev Event
+	if err := json.Unmarshal(row.Payload, &ev); err != nil {
+		return Event{}, false, err
+	}
+	return ev, true, nil
 }
 
 func (p *gormPersistence) Commit(data *Data, ch *ChangeSet) error {
@@ -594,10 +615,7 @@ func (p *gormPersistence) putMetric(tx *gorm.DB, category, key string, value any
 func (p *gormPersistence) commitEventMetric(tx *gorm.DB, ev *Event) error {
 	scope := fmt.Sprintf("%s/%s/%s/%d/%s", ev.WorkspaceID, ev.EnvironmentID,
 		ev.ExperimentID, ev.Epoch, ev.Variant)
-	kind := "exposure"
-	if ev.Type == EventConversion {
-		kind = "conversion"
-	}
+	kind := string(ev.Type)
 	countKey := scope + "/" + kind
 	raw, err := p.metricValue(tx, "count", countKey)
 	if err != nil {
@@ -620,6 +638,9 @@ func (p *gormPersistence) commitEventMetric(tx *gorm.DB, ev *Event) error {
 		if ev.Source == "split" {
 			return p.putMetric(tx, "split", key, true)
 		}
+		return nil
+	}
+	if ev.Type == EventAssignment {
 		return nil
 	}
 	key := scope + "/" + ev.UnitHash + "/" + ev.MetricKey

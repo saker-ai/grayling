@@ -50,6 +50,9 @@ func (s *Store) CreateExperiment(exp *Experiment) (*Experiment, error) {
 	if exp.AllocationMode == "" {
 		exp.AllocationMode = "fixed-split"
 	}
+	if exp.ExposureMode == "" {
+		exp.ExposureMode = "onDecision"
+	}
 	if exp.AnalysisMethod == "" && (exp.PrimaryMetric.Type == "funnel" || exp.PrimaryMetric.Type == "retention") {
 		exp.AnalysisMethod = "two-proportion-z"
 	}
@@ -200,6 +203,9 @@ func validateJourney(typ string, funnel *FunnelSpec, retention *RetentionSpec) e
 }
 
 func validateExperimentInvariants(exp *Experiment) error {
+	if exp.ExposureMode != "onDecision" && exp.ExposureMode != "onRender" {
+		return fmt.Errorf("%w: exposureMode must be onDecision or onRender", ErrValidation)
+	}
 	if exp.AllocationMode != "" && exp.AllocationMode != "fixed-split" && exp.AllocationMode != "bandit" {
 		return fmt.Errorf("%w: unknown allocation mode %q", ErrValidation, exp.AllocationMode)
 	}
@@ -410,6 +416,7 @@ func ExperimentRegistrationVersion(exp *Experiment) (string, error) {
 		AnalysisWindow   time.Duration
 		Hypothesis       string
 		AnalysisMethod   string
+		ExposureMode     string `json:"ExposureMode,omitempty"`
 	}{
 		FlagKey: exp.FlagKey, FlagRevision: exp.FlagRevision, Epoch: exp.Epoch,
 		Unit: exp.Unit, Layer: exp.Layer, LayerSlot: exp.LayerSlot, Eligibility: exp.Eligibility,
@@ -419,6 +426,7 @@ func ExperimentRegistrationVersion(exp *Experiment) (string, error) {
 		Power: exp.Power, MDE: exp.MDE, MinSamplePerArm: exp.MinSamplePerArm,
 		MinRuntime: exp.MinRuntime, AnalysisWindow: exp.AnalysisWindow,
 		Hypothesis: exp.Hypothesis, AnalysisMethod: exp.AnalysisMethod,
+		ExposureMode: exp.ExposureMode,
 	}
 	b, err := json.Marshal(contract)
 	if err != nil {

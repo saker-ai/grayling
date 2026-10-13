@@ -31,16 +31,38 @@ func (s *Store) EventMetricTotals(workspaceID, environmentID string) (exposures,
 	return exposures, conversions
 }
 
-// HasAcceptedEvent checks the recent raw-event window after ingestion.
+// HasAcceptedEvent checks the accepted fact ledger after ingestion.
 func (s *Store) HasAcceptedEvent(eventID, workspaceID, environmentID string, eventType EventType) bool {
+	_, ok := s.AcceptedEvent(eventID, workspaceID, environmentID, eventType)
+	return ok
+}
+
+// AcceptedEvent returns a copy of an accepted fact in the caller's scope.
+func (s *Store) AcceptedEvent(eventID, workspaceID, environmentID string, eventType EventType) (Event, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	idx, ok := s.data.EventIndex[eventID]
-	if !ok || idx < 0 || idx >= len(s.data.Events) {
-		return false
+	if ok && idx >= 0 && idx < len(s.data.Events) {
+		ev := *s.data.Events[idx]
+		if ev.WorkspaceID == workspaceID && ev.EnvironmentID == environmentID && ev.Type == eventType {
+			return ev, true
+		}
+		return Event{}, false
 	}
-	ev := s.data.Events[idx]
-	return ev.WorkspaceID == workspaceID && ev.EnvironmentID == environmentID && ev.Type == eventType
+	reader, ok := s.persist.(interface {
+		lookupAcceptedEvent(string) (Event, bool, error)
+	})
+	if !ok {
+		return Event{}, false
+	}
+	ev, found, err := reader.lookupAcceptedEvent(eventID)
+	if err != nil || !found {
+		return Event{}, false
+	}
+	if ev.WorkspaceID != workspaceID || ev.EnvironmentID != environmentID || ev.Type != eventType {
+		return Event{}, false
+	}
+	return ev, true
 }
 
 // IngestResult reports what happened to one event batch (§10.1: 服务端去重、
@@ -210,6 +232,8 @@ func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
 	// within ONE batch counts as duplicate, not as a second exposure.
 	candidates := make([]*Event, 0, len(events))
 	seen := make(map[string]bool, len(events))
+	assignments := make(map[string]*Event)
+	batchExposures := make(map[string]bool)
 	for _, ev := range events {
 		if err := s.validateEventLocked(ev, now); err != nil {
 			res.Rejected++
@@ -225,6 +249,50 @@ func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
 		if seen[ev.EventID] {
 			res.Duplicates++
 			continue
+		}
+		exp := s.data.Experiments[ev.ExperimentID]
+		if exp.ExposureMode == "onRender" {
+			scope := fmt.Sprintf("%s/%s/%s/%d/%s", ev.WorkspaceID, ev.EnvironmentID,
+				ev.ExperimentID, ev.Epoch, ev.Variant)
+			if ev.Type == EventExposure {
+				decisionID, ok := strings.CutPrefix(ev.EventID, "exp-")
+				assignmentID := "asg-" + decisionID
+				assignment := assignments[assignmentID]
+				if assignment == nil {
+					if idx, exists := s.data.EventIndex[assignmentID]; exists && idx >= 0 && idx < len(s.data.Events) {
+						assignment = s.data.Events[idx]
+					} else if reader, available := s.persist.(interface {
+						lookupAcceptedEvent(string) (Event, bool, error)
+					}); available {
+						if stored, found, err := reader.lookupAcceptedEvent(assignmentID); err == nil && found {
+							assignment = &stored
+						}
+					}
+				}
+				if !ok || decisionID == "" || assignment == nil || assignment.Type != EventAssignment ||
+					assignment.WorkspaceID != ev.WorkspaceID || assignment.EnvironmentID != ev.EnvironmentID ||
+					assignment.ExperimentID != ev.ExperimentID || assignment.Epoch != ev.Epoch ||
+					assignment.FlagKey != ev.FlagKey || assignment.FlagRevision != ev.FlagRevision ||
+					assignment.Variant != ev.Variant || assignment.UnitHash != ev.UnitHash {
+					res.Rejected++
+					if len(res.RejectMsgs) < 20 {
+						res.RejectMsgs = append(res.RejectMsgs, ev.EventID+": assignment_mismatch")
+					}
+					continue
+				}
+				batchExposures[scope+"/"+ev.UnitHash] = true
+			}
+			if ev.Type == EventConversion && !batchExposures[scope+"/"+ev.UnitHash] &&
+				!s.data.ExposedUnits[scope][ev.UnitHash] {
+				res.Rejected++
+				if len(res.RejectMsgs) < 20 {
+					res.RejectMsgs = append(res.RejectMsgs, ev.EventID+": missing_exposure")
+				}
+				continue
+			}
+			if ev.Type == EventAssignment {
+				assignments[ev.EventID] = ev
+			}
 		}
 		seen[ev.EventID] = true
 		if ev.SessionID != "" {
@@ -294,10 +362,7 @@ func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
 			})
 		}
 		for countKey, ev := range touchedCounts {
-			kind := "exposure"
-			if ev.Type == EventConversion {
-				kind = "conversion"
-			}
+			kind := string(ev.Type)
 			s.changes.Counts = append(s.changes.Counts, CountUpsert{
 				WorkspaceID: ev.WorkspaceID, EnvironmentID: ev.EnvironmentID,
 				ExperimentID: ev.ExperimentID, Epoch: ev.Epoch,
@@ -342,7 +407,7 @@ func (s *Store) validateEventLocked(ev *Event, now time.Time) error {
 		return fmt.Errorf("event_id required (idempotency)")
 	}
 	switch ev.Type {
-	case EventExposure, EventConversion:
+	case EventAssignment, EventExposure, EventConversion:
 	default:
 		return fmt.Errorf("unknown event type %q", ev.Type)
 	}
@@ -432,6 +497,9 @@ func (s *Store) appendEventLocked(ev *Event) (aggKey, countKey string) {
 	expScope := fmt.Sprintf("%s/%s/%s/%d/%s", ev.WorkspaceID, ev.EnvironmentID,
 		ev.ExperimentID, ev.Epoch, ev.Variant)
 	switch ev.Type {
+	case EventAssignment:
+		s.data.EventCounts[expScope+"/assignment"]++
+		return "", expScope + "/assignment"
 	case EventExposure:
 		set, ok := s.data.ExposedUnits[expScope]
 		if !ok {
@@ -665,7 +733,7 @@ func (s *Store) ExposureLedgerForUnit(workspaceID, unitHash string, limit int) [
 func (e *Experiment) ExperimentBinding() *model.ExperimentBinding {
 	b := &model.ExperimentBinding{
 		ID: e.ID, Epoch: e.Epoch, Layer: e.Layer, LayerSlot: e.LayerSlot,
-		Eligibility: e.Eligibility, State: e.State,
+		Eligibility: e.Eligibility, State: e.State, ExposureMode: e.ExposureMode,
 	}
 	if e.AllocationMode == "bandit" && e.Bandit != nil {
 		b.Bandit = &model.BanditBinding{

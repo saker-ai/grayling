@@ -363,3 +363,49 @@ test("revision projection stays minimal", async () => {
     assert.equal(denied.status, 403);
   } finally { await client.close(); }
 });
+
+test("onRender records assignment before explicit exposure", async () => {
+  const key = "ts-render";
+  await server.publishFlag(env.ws, env.env, {
+    schemaVersion: 1, key, type: "string", fields: ["user_id"],
+    bucketing: { algorithm: "golab-fnv1a-10000-v1", unit: "user_id", salt: "ts-render-salt" },
+    variations: { control: "c", treatment: "t" },
+    defaultRule: { variation: "control" },
+    targeting: [{ name: "split", percentage: { control: 50, treatment: 50 } }],
+  });
+  const exp = await server.expect("POST",
+    `/api/v1/admin/workspaces/${env.ws}/environments/${env.env}/experiments`, 201,
+    server.ownerToken, {
+      flagKey: key, unit: "user_id", exposureMode: "onRender",
+      variants: ["control", "treatment"], proportions: { control: 50, treatment: 50 },
+      primaryMetric: { key: "conversion", type: "proportion", direction: "increase" },
+      alpha: 0.05, analysisWindow: 7 * 24 * 3600 * 1e9, minSamplePerArm: 5,
+    });
+  await server.expect("POST", `/api/v1/admin/experiments/${exp.id}/review`, 200,
+    server.ownerToken, { note: "render test" });
+  await server.expect("POST", `/api/v1/admin/experiments/${exp.id}/bind`, 200, server.ownerToken);
+  await server.expect("POST", `/api/v1/admin/workspaces/${env.ws}/environments/${env.env}/flags/${key}/approve`,
+    200, env.publisherToken, { note: "approve" });
+  await server.expect("POST", `/api/v1/admin/workspaces/${env.ws}/environments/${env.env}/flags/${key}/publish`,
+    200, server.ownerToken, { note: "publish" });
+  await server.expect("POST", `/api/v1/admin/experiments/${exp.id}/transition`, 200,
+    server.ownerToken, { to: "running", reason: "launch" });
+
+  const client = makeClient();
+  try {
+    const before = await server.expect("GET", "/api/v1/sdk/metrics", 200, env.sdkToken);
+    const result = await client.stringVariation(key, "?", { attributes: { user_id: "ts-render-user" } });
+    assert.equal(result.details.result.experiment?.exposureMode, "onRender");
+    assert.equal(result.details.exposureEventId, "");
+    assert.ok(result.details.exposureToken);
+    assert.throws(() => client.trackEvaluatedExposure({
+      ...result.details, expiresAt: new Date(Date.now() - 1000).toISOString(),
+    }), GolabError);
+    const pending = await server.expect("GET", "/api/v1/sdk/metrics", 200, env.sdkToken);
+    assert.equal(pending.exposures, before.exposures);
+    client.trackEvaluatedExposure(result.details);
+    assert.equal(await client.flush(), 1);
+    const after = await server.expect("GET", "/api/v1/sdk/metrics", 200, env.sdkToken);
+    assert.equal(after.exposures, before.exposures + 1);
+  } finally { await client.close(); }
+});

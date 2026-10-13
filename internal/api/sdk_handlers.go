@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -184,10 +185,12 @@ type evalRequest struct {
 }
 
 type evalResponse struct {
-	Result     model.Result `json:"result"`
-	Value      any          `json:"value"`
-	Revision   int64        `json:"manifestRevision"`
-	ExposureID string       `json:"exposureEventId,omitempty"`
+	Result        model.Result `json:"result"`
+	Value         any          `json:"value"`
+	Revision      int64        `json:"manifestRevision"`
+	ExposureID    string       `json:"exposureEventId,omitempty"`
+	ExposureToken string       `json:"exposureToken,omitempty"`
+	ExpiresAt     *time.Time   `json:"expiresAt,omitempty"`
 	// RandomizationUnit echoes the canonical unit string the server-side
 	// exposure was attributed to (present only when an exposure was
 	// recorded). Remote-evaluation SDKs need it to report CONVERSIONS that
@@ -270,14 +273,20 @@ func (s *Server) handleSDKEval(w http.ResponseWriter, r *http.Request) {
 	resp := evalResponse{Value: res.Value, Revision: revision}
 	diagnostic := model.DecisionDiagnostic{ExposureStatus: "none"}
 
-	// Server-side exposure capture: remote clients (browsers, thin
-	// services) cannot be trusted to report exposures, so the server
-	// records them itself when the evaluation enrolled the unit in a
-	// running experiment. The event ID is deterministic per
-	// (experiment, epoch, unit, variant) which makes repeated remote evals
-	// idempotent — unique-unit analytics are unaffected (§10.1).
+	// onDecision records a server-side exposure. onRender records an
+	// assignment and returns a short-lived claim for explicit exposure.
 	if res.TrackEvents && res.Experiment != nil {
-		if id, unit := s.recordRemoteExposure(tok, env, snapshot, req, res); id != "" {
+		if res.Experiment.ExposureMode == "onRender" {
+			ticket, unit, expires, err := s.recordRemoteAssignment(env, snapshot, req, res)
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
+			resp.ExposureToken = ticket
+			resp.RandomizationUnit = unit
+			resp.ExpiresAt = &expires
+			diagnostic.ExposureStatus = "pending"
+		} else if id, unit := s.recordRemoteExposure(tok, env, snapshot, req, res); id != "" {
 			resp.ExposureID = id
 			resp.RandomizationUnit = unit
 			res.ExposureEventID = id
@@ -384,6 +393,53 @@ func (s *Server) recordRemoteExposure(tok *platform.Token, env *platform.Environ
 	return eventID, unitStr
 }
 
+func (s *Server) recordRemoteAssignment(env *platform.Environment, snapshot *model.Snapshot,
+	req evalRequest, res model.Result) (string, string, time.Time, error) {
+	flag := snapshot.Flags[res.FlagKey]
+	if flag == nil || flag.Bucketing == nil || res.Experiment == nil {
+		return "", "", time.Time{}, fmt.Errorf("%w: missing experiment binding", platform.ErrInvalidState)
+	}
+	raw, ok := req.Context.Field(flag.Bucketing.Unit)
+	if !ok {
+		return "", "", time.Time{}, fmt.Errorf("%w: missing randomization unit", platform.ErrValidation)
+	}
+	unit, ok := evaluation.CanonicalUnitString(raw)
+	if !ok {
+		return "", "", time.Time{}, fmt.Errorf("%w: invalid randomization unit", platform.ErrValidation)
+	}
+	exp, err := s.Store.GetExperiment(res.Experiment.ExperimentID)
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	if exp.ExposureMode != "onRender" || exp.Epoch != res.Experiment.Epoch || exp.WorkspaceID != env.WorkspaceID || exp.EnvironmentID != env.ID {
+		return "", "", time.Time{}, fmt.Errorf("%w: experiment assignment changed", platform.ErrConflict)
+	}
+	unitHash := s.Store.HashUnit(env.WorkspaceID, unit)
+	revision := flagRevisionIn(snapshot, res.FlagKey)
+	ticket, expires, err := s.Store.SignExposureTicket(platform.ExposureTicket{
+		WorkspaceID: env.WorkspaceID, EnvironmentID: env.ID, ExperimentID: exp.ID, Epoch: exp.Epoch,
+		FlagKey: res.FlagKey, FlagRevision: revision, Variant: res.Experiment.Variant,
+		UnitHash: unitHash, Source: res.Experiment.Source, DecisionID: res.DecisionID,
+		PolicyVersion: res.Experiment.PolicyVersion, StateVersion: res.Experiment.StateVersion,
+		AllocationProbability: res.Experiment.AllocationProbability,
+	})
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	result, err := s.Store.IngestEvents([]*platform.Event{{
+		EventID: "asg-" + res.DecisionID, WorkspaceID: env.WorkspaceID, EnvironmentID: env.ID,
+		Type: platform.EventAssignment, ExperimentID: exp.ID, Epoch: exp.Epoch,
+		FlagKey: res.FlagKey, FlagRevision: revision, Variant: res.Experiment.Variant,
+		UnitHash: unitHash, Source: res.Experiment.Source,
+		PolicyVersion: res.Experiment.PolicyVersion, StateVersion: res.Experiment.StateVersion,
+		AllocationProbability: res.Experiment.AllocationProbability, ClientTime: time.Now().UTC(),
+	}})
+	if err != nil || result.Accepted+result.Duplicates != 1 {
+		return "", "", time.Time{}, fmt.Errorf("%w: assignment could not be recorded: %v", platform.ErrInvalidState, err)
+	}
+	return ticket, unit, expires, nil
+}
+
 func flagRevisionIn(snapshot *model.Snapshot, key string) int64 {
 	if f, ok := snapshot.Flags[key]; ok && f.Version != "" {
 		var rev int64
@@ -399,24 +455,26 @@ func flagRevisionIn(snapshot *model.Snapshot, key string) int64 {
 // ---------------------------------------------------------------------------
 
 type collectEventDTO struct {
-	EventID               string    `json:"eventId"`
-	DecisionID            string    `json:"decisionId,omitempty"`
-	Type                  string    `json:"type"`
-	ExperimentID          string    `json:"experimentId"`
-	Epoch                 int64     `json:"epoch"`
-	FlagKey               string    `json:"flagKey"`
-	FlagRevision          int64     `json:"flagRevision"`
-	Variant               string    `json:"variant"`
-	Unit                  string    `json:"unit"` // plaintext; HMAC'd server-side, never stored
-	Source                string    `json:"source"`
-	PolicyVersion         string    `json:"policyVersion,omitempty"`
-	StateVersion          int64     `json:"stateVersion,omitempty"`
-	AllocationProbability float64   `json:"allocationProbability,omitempty"`
-	MetricKey             string    `json:"metricKey"`
-	Value                 float64   `json:"value"`
-	SessionID             string    `json:"sessionId"`
-	TaskID                string    `json:"taskId"`
-	ClientTime            time.Time `json:"clientTime"`
+	EventID               string                   `json:"eventId"`
+	DecisionID            string                   `json:"decisionId,omitempty"`
+	ExposureToken         string                   `json:"exposureToken,omitempty"`
+	Type                  string                   `json:"type"`
+	ExperimentID          string                   `json:"experimentId"`
+	Epoch                 int64                    `json:"epoch"`
+	FlagKey               string                   `json:"flagKey"`
+	FlagRevision          int64                    `json:"flagRevision"`
+	Variant               string                   `json:"variant"`
+	Unit                  string                   `json:"unit"` // plaintext; HMAC'd server-side, never stored
+	Source                string                   `json:"source"`
+	PolicyVersion         string                   `json:"policyVersion,omitempty"`
+	StateVersion          int64                    `json:"stateVersion,omitempty"`
+	AllocationProbability float64                  `json:"allocationProbability,omitempty"`
+	MetricKey             string                   `json:"metricKey"`
+	Value                 float64                  `json:"value"`
+	SessionID             string                   `json:"sessionId"`
+	TaskID                string                   `json:"taskId"`
+	ClientTime            time.Time                `json:"clientTime"`
+	Context               *model.EvaluationContext `json:"context,omitempty"`
 }
 
 type collectRequest struct {
@@ -455,6 +513,11 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 
 	events := make([]*platform.Event, 0, len(req.Events))
 	skippedNoUnit := 0
+	skippedAssignments := 0
+	skippedInvalidTicket := 0
+	experimentCache := make(map[string]*platform.Experiment)
+	localAssignments := make(map[string]*platform.Event)
+	tokenErrors := make([]string, 0)
 	for _, dto := range req.Events {
 		if dto.Unit == "" {
 			// No unit → no attribution; reject loudly instead of storing
@@ -472,6 +535,105 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 			PolicyVersion: dto.PolicyVersion, StateVersion: dto.StateVersion,
 			AllocationProbability: dto.AllocationProbability,
 			SessionID:             dto.SessionID, TaskID: dto.TaskID, ClientTime: dto.ClientTime.UTC(),
+		}
+		exp := experimentCache[dto.ExperimentID]
+		if exp == nil {
+			exp, _ = s.Store.GetExperiment(dto.ExperimentID)
+			if exp != nil {
+				experimentCache[dto.ExperimentID] = exp
+			}
+		}
+		if ev.Type == platform.EventAssignment {
+			if dto.DecisionID == "" || dto.EventID != "asg-"+dto.DecisionID || dto.Context == nil ||
+				exp == nil || exp.ExposureMode != "onRender" || s.Config == nil {
+				skippedAssignments++
+				continue
+			}
+			evaluator, snapshot, _, err := s.evaluatorFor(r.Context(), env)
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
+			if exp.AllocationMode == "bandit" {
+				// Local SDKs evaluate the registered fixed split; the remote
+				// evaluator enables adaptive bandit policy separately.
+				evaluator, err = evaluation.NewEvaluator(snapshot)
+				if err != nil {
+					writeStoreError(w, err)
+					return
+				}
+			}
+			flag := snapshot.Flags[dto.FlagKey]
+			if flag == nil || flag.Bucketing == nil || flagRevisionIn(snapshot, dto.FlagKey) != dto.FlagRevision {
+				skippedAssignments++
+				continue
+			}
+			raw, found := dto.Context.Field(flag.Bucketing.Unit)
+			unit, valid := evaluation.CanonicalUnitString(raw)
+			decision := evaluator.Evaluate(dto.FlagKey, *dto.Context)
+			if !found || !valid || unit != dto.Unit || !decision.TrackEvents || decision.Experiment == nil ||
+				decision.Experiment.ExperimentID != dto.ExperimentID || decision.Experiment.Epoch != dto.Epoch ||
+				decision.Experiment.Variant != dto.Variant || decision.Experiment.Source != dto.Source ||
+				decision.Experiment.PolicyVersion != dto.PolicyVersion || decision.Experiment.StateVersion != dto.StateVersion ||
+				decision.Experiment.AllocationProbability != dto.AllocationProbability ||
+				decision.Experiment.ExposureMode != "onRender" || dto.ClientTime.IsZero() {
+				skippedAssignments++
+				continue
+			}
+			localAssignments[dto.DecisionID] = ev
+		}
+		if ev.Type == platform.EventExposure && exp != nil && exp.ExposureMode == "onRender" {
+			if dto.ExposureToken == "" {
+				assignment := localAssignments[dto.DecisionID]
+				if assignment == nil {
+					stored, found := s.Store.AcceptedEvent("asg-"+dto.DecisionID, env.WorkspaceID, env.ID, platform.EventAssignment)
+					if found {
+						assignment = &stored
+					}
+				}
+				if dto.DecisionID == "" || dto.EventID != "exp-"+dto.DecisionID || assignment == nil ||
+					assignment.ExperimentID != ev.ExperimentID || assignment.Epoch != ev.Epoch ||
+					assignment.FlagKey != ev.FlagKey || assignment.FlagRevision != ev.FlagRevision ||
+					assignment.Variant != ev.Variant || assignment.UnitHash != ev.UnitHash || assignment.Source != ev.Source ||
+					assignment.PolicyVersion != ev.PolicyVersion || assignment.StateVersion != ev.StateVersion ||
+					assignment.AllocationProbability != ev.AllocationProbability || ev.ClientTime.Before(assignment.ClientTime) {
+					skippedInvalidTicket++
+					if len(tokenErrors) < 20 {
+						tokenErrors = append(tokenErrors, "assignment_mismatch")
+					}
+					continue
+				}
+			} else {
+				ticket, err := s.Store.VerifyExposureTicket(dto.ExposureToken)
+				code := "invalid_exposure_token"
+				if errors.Is(err, platform.ErrInvalidState) {
+					code = "expired_exposure_token"
+				}
+				if err == nil && (ticket.WorkspaceID != env.WorkspaceID || ticket.EnvironmentID != env.ID ||
+					ticket.ExperimentID != ev.ExperimentID || ticket.Epoch != ev.Epoch || ticket.FlagKey != ev.FlagKey ||
+					ticket.FlagRevision != ev.FlagRevision || ticket.Variant != ev.Variant || ticket.UnitHash != ev.UnitHash ||
+					dto.DecisionID != ticket.DecisionID) {
+					code = "assignment_mismatch"
+					err = platform.ErrConflict
+				}
+				if err == nil && !s.Store.HasAcceptedEvent("asg-"+ticket.DecisionID,
+					env.WorkspaceID, env.ID, platform.EventAssignment) {
+					code = "assignment_mismatch"
+					err = platform.ErrConflict
+				}
+				if err != nil {
+					skippedInvalidTicket++
+					if len(tokenErrors) < 20 {
+						tokenErrors = append(tokenErrors, code)
+					}
+					continue
+				}
+				ev.EventID = "exp-" + ticket.DecisionID
+				ev.Source = ticket.Source
+				ev.PolicyVersion = ticket.PolicyVersion
+				ev.StateVersion = ticket.StateVersion
+				ev.AllocationProbability = ticket.AllocationProbability
+			}
 		}
 		// Older SDKs know only the registered percentage rule. Record their
 		// assignment as an explicit fixed fallback with known propensity.
@@ -496,7 +658,11 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 			if dto.DecisionID == "" || dto.Unit == "" {
 				continue
 			}
-			if !s.Store.HasAcceptedEvent(dto.EventID, env.WorkspaceID, env.ID, platform.EventType(dto.Type)) {
+			acceptedID := dto.EventID
+			if dto.Type == "exposure" && dto.ExposureToken != "" {
+				acceptedID = "exp-" + dto.DecisionID
+			}
+			if !s.Store.HasAcceptedEvent(acceptedID, env.WorkspaceID, env.ID, platform.EventType(dto.Type)) {
 				continue
 			}
 			d, ok := s.decisions[dto.DecisionID]
@@ -532,8 +698,12 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 		msgs = append(msgs, fmt.Sprintf(
 			"%d events skipped: missing unit (no attribution without a randomization unit)", skippedNoUnit))
 	}
+	if skippedAssignments > 0 {
+		msgs = append(msgs, fmt.Sprintf("%d assignment facts rejected: local decision could not be verified", skippedAssignments))
+	}
+	msgs = append(msgs, tokenErrors...)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accepted": res.Accepted, "duplicates": res.Duplicates,
-		"rejected": res.Rejected + skippedNoUnit, "rejectMessages": msgs,
+		"rejected": res.Rejected + skippedNoUnit + skippedAssignments + skippedInvalidTicket, "rejectMessages": msgs,
 	})
 }

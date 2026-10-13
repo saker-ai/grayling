@@ -67,14 +67,15 @@ type compiledFlag struct {
 }
 
 type compiledExperiment struct {
-	id          string
-	epoch       int64
-	layer       string
-	layerSlot   *model.BucketRange
-	eligBuckets int // 0..10000; 10000 = everyone enrolled
-	running     bool
-	bandit      *model.BanditBinding
-	banditProb  []float64
+	id           string
+	epoch        int64
+	layer        string
+	layerSlot    *model.BucketRange
+	eligBuckets  int // 0..10000; 10000 = everyone enrolled
+	running      bool
+	exposureMode string
+	bandit       *model.BanditBinding
+	banditProb   []float64
 }
 
 // needsGatingBucket reports whether layer or eligibility checks will hash.
@@ -168,12 +169,13 @@ func (e *Evaluator) compileFlag(f *model.Flag) (*compiledFlag, error) {
 		eligBuckets := int(math.Floor(elig*100 + 0.5))
 		eligBuckets = max(0, min(bucketing.Buckets, eligBuckets))
 		cf.exp = &compiledExperiment{
-			id:          f.Experiment.ID,
-			epoch:       f.Experiment.Epoch,
-			layer:       f.Experiment.Layer,
-			layerSlot:   f.Experiment.LayerSlot,
-			eligBuckets: eligBuckets,
-			running:     f.Experiment.State == model.ExperimentRunning,
+			id:           f.Experiment.ID,
+			epoch:        f.Experiment.Epoch,
+			layer:        f.Experiment.Layer,
+			layerSlot:    f.Experiment.LayerSlot,
+			eligBuckets:  eligBuckets,
+			running:      f.Experiment.State == model.ExperimentRunning,
+			exposureMode: f.Experiment.ExposureMode,
 		}
 		if b := f.Experiment.Bandit; b != nil {
 			cf.exp.bandit = b
@@ -390,7 +392,7 @@ func (e *Evaluator) finish(cf *compiledFlag, rule *compiledRule, ctx model.Evalu
 		base.TrackEvents = true
 		base.Experiment = &model.Exposure{
 			ExperimentID: cf.exp.id, Epoch: cf.exp.epoch,
-			Variant: name, Source: source,
+			Variant: name, Source: source, ExposureMode: cf.exp.exposureMode,
 		}
 		if cf.exp.bandit != nil {
 			base.Experiment.PolicyVersion = cf.exp.bandit.PolicyVersion

@@ -90,8 +90,9 @@ const (
 
 // ExperimentBinding ties a flag revision to an experiment epoch.
 type ExperimentBinding struct {
-	ID    string `yaml:"id" json:"id"`
-	Epoch int64  `yaml:"epoch" json:"epoch"`
+	ID           string `yaml:"id" json:"id"`
+	Epoch        int64  `yaml:"epoch" json:"epoch"`
+	ExposureMode string `yaml:"exposureMode,omitempty" json:"exposureMode,omitempty"`
 	// Bandit is an immutable published policy snapshot. Older SDKs ignore it
 	// and use the registered percentage rule as the safe fixed split.
 	Bandit *BanditBinding `yaml:"bandit,omitempty" json:"bandit,omitempty"`
@@ -324,6 +325,7 @@ type Exposure struct {
 	ExperimentID string `json:"experimentId"`
 	Epoch        int64  `json:"epoch"`
 	Variant      string `json:"variant"`
+	ExposureMode string `json:"exposureMode,omitempty"`
 	// Source is how the arm was reached: "split", "targeting" or "default".
 	// Analysis filters on this because only "split" arms are randomized
 	// (SRM applies to the randomized population).

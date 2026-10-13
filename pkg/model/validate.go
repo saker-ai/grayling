@@ -179,6 +179,9 @@ func ValidateFlag(f *Flag, segments map[string]*Segment) error {
 
 func validateExperimentBinding(f *Flag, verr *ValidationError) {
 	exp := f.Experiment
+	if exp.ExposureMode != "" && exp.ExposureMode != "onDecision" && exp.ExposureMode != "onRender" {
+		verr.add("experiment.exposureMode must be onDecision or onRender")
+	}
 	if b := exp.Bandit; b != nil {
 		if b.PolicyVersion == "" || (b.Strategy != "thompson" && b.Strategy != "epsilon-greedy") ||
 			len(b.Variants) < 2 || len(b.Variants) != len(b.Trials) || len(b.Variants) != len(b.Successes) ||

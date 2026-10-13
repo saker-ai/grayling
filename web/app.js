@@ -955,7 +955,9 @@ async function viewExpCreate(m) {
       '<label class="field">' + esc(t('exp.layer')) + '<input id="x-layer"></label>' +
       '<label class="field">' + esc(t('exp.elig')) + '<input id="x-elig" type="number" step="1" min="0" max="100"></label>' +
 	  '<label class="field">' + esc(t('exp.allocationMode')) + '<select id="x-mode"><option value="fixed-split">fixed-split</option><option value="bandit">bandit</option></select></label>' +
+      '<label class="field">' + esc(t('exp.exposureMode')) + '<select id="x-exposure-mode"><option value="onDecision">' + esc(t('exp.onDecision')) + '</option><option value="onRender">' + esc(t('exp.onRender')) + '</option></select></label>' +
     '</div>' +
+    '<p class="muted" id="x-exposure-help">' + esc(t('exp.onDecisionHelp')) + '</p>' +
     '<h4>' + t('exp.variantsHead') + '</h4>' +
     '<div id="x-vars"></div><button class="btn sm" id="x-add-var">' + esc(t('exp.addVariant')) + '</button>' +
     '<h4>' + esc(t('exp.primaryMetric')) + '</h4>' +
@@ -1040,6 +1042,9 @@ async function viewExpCreate(m) {
     syncMetricAdv();
   };
 	$('#x-mode', m).onchange = ev => { $('#x-bandit', m).style.display = ev.target.value === 'bandit' ? '' : 'none'; };
+  $('#x-exposure-mode', m).onchange = ev => {
+    $('#x-exposure-help', m).textContent = t(ev.target.value === 'onRender' ? 'exp.onRenderHelp' : 'exp.onDecisionHelp');
+  };
   $('#x-add-guard', m).onclick = () => {
     const row = document.createElement('div');
     row.className = 'vrow';
@@ -1104,6 +1109,7 @@ async function viewExpCreate(m) {
       minRuntime: Math.round(Number($('#x-minruntime', m).value) * NS_HOUR),
       analysisWindow: Math.round(Number($('#x-window', m).value) * NS_DAY),
       hypothesis: $('#x-hyp', m).value.trim(),
+      exposureMode: $('#x-exposure-mode', m).value,
     };
     const selectedMetric = publishedMetrics.find(d => d.key + '/v' + d.version === $('#x-mref', m).value);
     if (selectedMetric) body.primaryMetricRef = { key: selectedMetric.key, version: selectedMetric.version };
@@ -1154,6 +1160,7 @@ async function viewExpDetail(m) {
       '<tr><th>' + esc(t('exp.minSampleArm')) + '</th><td>' + esc(e.minSamplePerArm) + '</td></tr>' +
       '<tr><th>' + esc(t('exp.minRuntime')) + '</th><td>' + esc(fmtDurNs(e.minRuntime)) + '</td></tr>' +
       '<tr><th>' + esc(t('exp.window')) + '</th><td>' + esc(fmtDurNs(e.analysisWindow)) + '</td></tr>' +
+      '<tr><th>' + esc(t('exp.exposureMode')) + '</th><td>' + esc(t(e.exposureMode === 'onRender' ? 'exp.onRender' : 'exp.onDecision')) + '</td></tr>' +
       '<tr><th>' + esc(t('exp.method')) + '</th><td>' + esc(e.analysisMethod || '—') + '</td></tr>' +
 	  '<tr><th>' + esc(t('exp.allocationMode')) + '</th><td>' + esc(e.allocationMode || 'fixed-split') +
 	  (e.bandit ? ' · ' + esc(e.bandit.policyVersion) + ' · ' + esc(e.bandit.strategy) : '') + '</td></tr>' +

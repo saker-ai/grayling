@@ -132,3 +132,49 @@ def test_collect_requires_collect_audience(env):
     with pytest.raises(urllib.error.HTTPError) as ei:
         urllib.request.urlopen(req, timeout=10)
     assert ei.value.code == 403
+
+
+def test_on_render_requires_explicit_exposure(env):
+    key = "py-render"
+    env.server.publish_flag(env.ws, env.env, {
+        "schemaVersion": 1, "key": key, "type": "string", "fields": ["user_id"],
+        "bucketing": {"algorithm": "golab-fnv1a-10000-v1", "unit": "user_id", "salt": "py-render-salt"},
+        "variations": {"control": "c", "treatment": "t"},
+        "defaultRule": {"variation": "control"},
+        "targeting": [{"name": "split", "percentage": {"control": 50, "treatment": 50}}],
+    })
+    _, exp = env.server.request(
+        "POST", f"/api/v1/admin/workspaces/{env.ws}/environments/{env.env}/experiments",
+        env.server.owner_token, {
+            "flagKey": key, "unit": "user_id", "exposureMode": "onRender",
+            "variants": ["control", "treatment"],
+            "proportions": {"control": 50, "treatment": 50},
+            "primaryMetric": {"key": "conversion", "type": "proportion", "direction": "increase"},
+            "alpha": 0.05, "analysisWindow": 7 * 24 * 3600 * 10**9, "minSamplePerArm": 5,
+        }, expect=201)
+    env.server.request("POST", f"/api/v1/admin/experiments/{exp['id']}/review",
+                       env.server.owner_token, {"note": "render test"}, expect=200)
+    env.server.request("POST", f"/api/v1/admin/experiments/{exp['id']}/bind",
+                       env.server.owner_token, None, expect=200)
+    base = f"/api/v1/admin/workspaces/{env.ws}/environments/{env.env}/flags/{key}"
+    env.server.request("POST", base + "/approve", env.publisher_token,
+                       {"note": "approve"}, expect=200)
+    env.server.request("POST", base + "/publish", env.server.owner_token,
+                       {"note": "publish"}, expect=200)
+    env.server.request("POST", f"/api/v1/admin/experiments/{exp['id']}/transition",
+                       env.server.owner_token, {"to": "running", "reason": "launch"}, expect=200)
+
+    with make_client(env) as client:
+        _, before = env.server.request("GET", "/api/v1/sdk/metrics", env.sdk_token, expect=200)
+        _, details = client.string_variation(key, "?", attributes={"user_id": "py-render-user"})
+        assert details.result.experiment.exposure_mode == "onRender"
+        assert details.exposure_event_id == "" and details.exposure_token
+        from dataclasses import replace
+        with pytest.raises(Exception):
+            client.track_evaluated_exposure(replace(details, expires_at="2000-01-01T00:00:00Z"))
+        _, pending = env.server.request("GET", "/api/v1/sdk/metrics", env.sdk_token, expect=200)
+        assert pending["exposures"] == before["exposures"]
+        client.track_evaluated_exposure(details)
+        assert client.flush() == 1
+        _, after = env.server.request("GET", "/api/v1/sdk/metrics", env.sdk_token, expect=200)
+        assert after["exposures"] == before["exposures"] + 1

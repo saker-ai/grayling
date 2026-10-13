@@ -17,6 +17,7 @@ export interface Exposure {
   variant: string;
   /** split | targeting | default — only "split" is randomized. */
   source: string;
+  exposureMode?: "onDecision" | "onRender";
 }
 
 /** One evaluation outcome (mirrors model.Result). Failed results carry the
@@ -48,6 +49,8 @@ export interface EvaluationDetails {
   manifestRevision: number;
   /** Deterministic server-side exposure event ID ("" when not enrolled). */
   exposureEventId: string;
+  exposureToken?: string;
+  expiresAt?: string;
   /** Canonical randomization unit the exposure was attributed to. */
   randomizationUnit: string;
   fromCache: boolean;

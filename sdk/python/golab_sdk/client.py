@@ -47,6 +47,12 @@ class GolabError(Exception):
     """
 
 
+class _CollectRejected(GolabError):
+    def __init__(self, count: int, message: str) -> None:
+        super().__init__(message)
+        self.count = count
+
+
 @dataclass
 class Options:
     """Client configuration. Durations are seconds (float)."""
@@ -91,6 +97,15 @@ def _utc_now_rfc3339() -> str:
         .isoformat(timespec="milliseconds")
         .replace("+00:00", "Z")
     )
+
+
+def _token_unexpired(expires_at: str) -> bool:
+    if not expires_at:
+        return True
+    try:
+        return datetime.fromisoformat(expires_at.replace("Z", "+00:00")) > datetime.now(timezone.utc)
+    except (ValueError, TypeError):
+        return False
 
 
 def _canonical_context(ctx: EvaluationContext) -> str:
@@ -209,6 +224,32 @@ class GolabClient:
             "clientTime": _utc_now_rfc3339(),
         })
 
+    def track_evaluated_exposure(self, details: EvaluationDetails) -> None:
+        """Confirm that an onRender result was actually displayed or applied."""
+        result = details.result
+        exp = result.experiment
+        if exp is None or exp.exposure_mode != "onRender" or not result.decision_id:
+            raise GolabError("result has no onRender assignment")
+        if not self._opts.collect_token:
+            raise GolabError("collect token not configured")
+        try:
+            expiry = datetime.fromisoformat(details.expires_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise GolabError("exposure token is missing or invalid; evaluate again") from exc
+        if not details.exposure_token or not details.randomization_unit or expiry <= datetime.now(timezone.utc):
+            raise GolabError("exposure token is missing or expired; evaluate again")
+        revision = int(result.flag_version) if result.flag_version.isdigit() else 0
+        if not self._enqueue({
+            "eventId": f"exp-{result.decision_id}",
+            "decisionId": result.decision_id,
+            "exposureToken": details.exposure_token,
+            "type": "exposure", "experimentId": exp.experiment_id, "epoch": exp.epoch,
+            "flagKey": result.flag_key, "flagRevision": revision,
+            "variant": exp.variant, "unit": details.randomization_unit,
+            "source": exp.source, "clientTime": _utc_now_rfc3339(),
+        }):
+            raise GolabError("exposure queue is full")
+
     def track_exposure(self, experiment_id: str, epoch: int, flag_key: str,
                        variant: str, unit: str, *, source: str = "split",
                        flag_revision: int = 0) -> None:
@@ -277,6 +318,10 @@ class GolabClient:
                 with self._lock:
                     self._stats.events_flushed += len(batch)
                 return len(batch)
+            except _CollectRejected as exc:
+                with self._lock:
+                    self._stats.events_dropped += exc.count
+                raise
             except Exception:
                 if time.monotonic() >= deadline:
                     # Re-queue what we could not deliver, then fail loudly.
@@ -361,7 +406,8 @@ class GolabClient:
             entry = self._cache.get(cache_key)
             stale = (self._last_success and time.monotonic() - self._last_success >
                      self._opts.max_staleness)
-            if entry is not None and not stale and (known is None or entry.revision == known):
+            token_valid = entry is None or _token_unexpired(entry.details.expires_at)
+            if entry is not None and not stale and token_valid and (known is None or entry.revision == known):
                 self._stats.cache_hits += 1
                 cached = EvaluationDetails(
                     value=entry.details.value,
@@ -369,6 +415,8 @@ class GolabClient:
                     manifest_revision=entry.details.manifest_revision,
                     exposure_event_id=entry.details.exposure_event_id,
                     randomization_unit=entry.details.randomization_unit,
+                    exposure_token=entry.details.exposure_token,
+                    expires_at=entry.details.expires_at,
                     from_cache=True,
                 )
                 return cached
@@ -395,6 +443,8 @@ class GolabClient:
             manifest_revision=int(body.get("manifestRevision", 0)),
             exposure_event_id=body.get("exposureEventId", "") or "",
             randomization_unit=body.get("randomizationUnit", "") or "",
+            exposure_token=body.get("exposureToken", "") or "",
+            expires_at=body.get("expiresAt", "") or "",
         )
 
         with self._lock:
@@ -461,6 +511,13 @@ class GolabClient:
             return
         try:
             self._post_events(batch)
+        except _CollectRejected as exc:
+            with self._lock:
+                self._stats.events_dropped += exc.count
+                self._stats.last_error = f"collect flush: {exc}"
+            if self._opts.on_error:
+                self._opts.on_error("collect", exc)
+            return
         except Exception:
             # One retry after a short pause (Go SDK parity), then drop with
             # a counter — events must never accumulate without bound.
@@ -469,7 +526,8 @@ class GolabClient:
                 self._post_events(batch)
             except Exception as exc:
                 with self._lock:
-                    self._stats.events_dropped += len(batch)
+                    self._stats.events_dropped += (exc.count if isinstance(exc, _CollectRejected)
+                                                   else len(batch))
                     self._stats.last_error = f"collect flush: {exc}"
                 if self._opts.on_error:
                     self._opts.on_error("collect", exc)
@@ -486,19 +544,28 @@ class GolabClient:
                 break
         return batch
 
-    def _enqueue(self, event: Dict[str, Any]) -> None:
+    def _enqueue(self, event: Dict[str, Any]) -> bool:
         try:
             self._events.put_nowait(event)
             with self._lock:
                 self._stats.events_queued += 1
+            return True
         except queue.Full:
             with self._lock:
                 self._stats.events_dropped += 1
+            return False
 
     def _post_events(self, batch: "list[Dict[str, Any]]") -> Dict[str, Any]:
-        return self._http_json("POST", "/api/v1/collect",
-                               token=self._opts.collect_token,
-                               payload={"events": batch})
+        result = self._http_json("POST", "/api/v1/collect",
+                                 token=self._opts.collect_token,
+                                 payload={"events": batch})
+        rejected = int(result.get("rejected", 0))
+        if rejected:
+            raise _CollectRejected(rejected, f"collect rejected {rejected} events: "
+                                   f"{result.get('rejectMessages', [])}")
+        if int(result.get("accepted", 0)) + int(result.get("duplicates", 0)) != len(batch):
+            raise GolabError("collect response did not acknowledge every event")
+        return result
 
     def _http_json(self, method: str, path: str, *, token: str,
                    payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

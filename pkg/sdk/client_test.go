@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/saker-ai/grayling/pkg/evaluation"
 	"github.com/saker-ai/grayling/pkg/model"
 )
 
@@ -254,5 +255,41 @@ func TestLocalDecisionDiagnostic(t *testing.T) {
 		}
 	default:
 		t.Fatal("missing sampled event")
+	}
+}
+
+func TestLocalOnRenderQueuesAssignmentThenExplicitExposure(t *testing.T) {
+	flag := &model.Flag{SchemaVersion: model.SchemaVersion, Key: "f", Version: "1", Type: model.FlagBool,
+		Bucketing: &model.Bucketing{Algorithm: "golab-fnv1a-10000-v1", Unit: "user_id", Salt: "test"},
+		Fields:    []string{"user_id"}, Variations: map[string]any{"a": false, "b": true},
+		DefaultRule: &model.Rule{Variation: "a"},
+		Targeting:   []model.Rule{{Percentage: map[string]float64{"a": 50, "b": 50}}},
+		Experiment:  &model.ExperimentBinding{ID: "exp", Epoch: 1, ExposureMode: "onRender", State: model.ExperimentRunning},
+	}
+	snapshot := &model.Snapshot{SchemaVersion: model.SchemaVersion, Workspace: "ws", Environment: "env",
+		GeneratedAt: time.Now().UTC(), Flags: map[string]*model.Flag{"f": flag}}
+	evaluator, err := evaluation.NewEvaluator(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{opts: Options{CollectToken: "collect", MaxStaleness: time.Hour},
+		state:     &clientState{snapshot: snapshot, evaluator: evaluator, fetchedAt: time.Now()},
+		decisions: make(map[string]model.DecisionDiagnostic), decisionUnits: make(map[string]string),
+		exposures: make(chan *collectEvent, 2)}
+	ctx := model.EvaluationContext{Attributes: map[string]any{"user_id": "user-1"}}
+	result := client.Evaluate("f", ctx)
+	if !result.TrackEvents || result.Experiment == nil || result.ExposureEventID != "" {
+		t.Fatalf("result: %+v", result)
+	}
+	assignment := <-client.exposures
+	if assignment.Type != "assignment" || assignment.Context == nil || assignment.Unit != "user-1" {
+		t.Fatalf("assignment: %+v", assignment)
+	}
+	if err := client.TrackExposure(result); err != nil {
+		t.Fatal(err)
+	}
+	exposure := <-client.exposures
+	if exposure.Type != "exposure" || exposure.EventID != "exp-"+result.DecisionID || exposure.DecisionID != assignment.DecisionID {
+		t.Fatalf("exposure: %+v", exposure)
 	}
 }

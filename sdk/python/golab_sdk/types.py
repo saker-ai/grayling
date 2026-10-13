@@ -36,6 +36,7 @@ class Exposure:
     epoch: int
     variant: str
     source: str  # split | targeting | default
+    exposure_mode: str = "onDecision"
 
     @classmethod
     def from_wire(cls, raw: Dict[str, Any]) -> "Exposure":
@@ -44,6 +45,7 @@ class Exposure:
             epoch=int(raw.get("epoch", 0)),
             variant=raw.get("variant", ""),
             source=raw.get("source", ""),
+            exposure_mode=raw.get("exposureMode", "onDecision") or "onDecision",
         )
 
 
@@ -114,4 +116,6 @@ class EvaluationDetails:
     manifest_revision: int = 0
     exposure_event_id: str = ""
     randomization_unit: str = ""
+    exposure_token: str = ""
+    expires_at: str = ""
     from_cache: bool = False

@@ -1691,6 +1691,31 @@ func (p *pgPersistence) KnownEventIDs(ids []string) (map[string]bool, error) {
 	return out, rows.Err()
 }
 
+func (p *pgPersistence) lookupAcceptedEvent(eventID string) (Event, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), pgLoadTimeout)
+	defer cancel()
+	var ev Event
+	var typ string
+	err := p.pool.QueryRow(ctx, `SELECT event_id, workspace_id, environment_id, type,
+        experiment_id, epoch, flag_key, flag_revision, variant, unit_hash, session_id,
+        task_id, source, metric_key, value, client_time, server_time,
+        policy_version, state_version, allocation_probability
+        FROM events WHERE event_id=$1 ORDER BY server_time DESC LIMIT 1`, eventID).Scan(
+		&ev.EventID, &ev.WorkspaceID, &ev.EnvironmentID, &typ,
+		&ev.ExperimentID, &ev.Epoch, &ev.FlagKey, &ev.FlagRevision, &ev.Variant,
+		&ev.UnitHash, &ev.SessionID, &ev.TaskID, &ev.Source, &ev.MetricKey,
+		&ev.Value, &ev.ClientTime, &ev.ServerTime,
+		&ev.PolicyVersion, &ev.StateVersion, &ev.AllocationProbability)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Event{}, false, nil
+	}
+	if err != nil {
+		return Event{}, false, err
+	}
+	ev.Type = EventType(typ)
+	return ev, true, nil
+}
+
 // analysisEvents reads a consistent raw-event snapshot and the independently
 // maintained event_counts ledger for the same experiment epoch.
 func (p *pgPersistence) analysisEvents(exp *Experiment, now time.Time) ([]*Event, int64, int64, bool, error) {

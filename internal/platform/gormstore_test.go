@@ -420,3 +420,60 @@ func TestGORMPostgresConcurrentDistinctEvents(t *testing.T) {
 		t.Fatalf("unique exposure count: %v", counts)
 	}
 }
+
+func TestSQLiteAssignmentDoesNotCountAsExposure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "assignments.sqlite")
+	store, err := NewSQLiteStore(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := store.CreateWorkspace("assignments", "Assignments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := store.CreateEnvironment(ws.ID, "prod", "Production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := store.CreateExperiment(&Experiment{
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "flag", Unit: "user_id",
+		Epoch: 1, ExposureMode: "onRender", Variants: []string{"a", "b"},
+		Proportions:   map[string]float64{"a": 50, "b": 50},
+		PrimaryMetric: MetricSpec{Key: "conv", Type: "proportion", Direction: "increase"},
+		Alpha:         0.05, AnalysisWindow: 24 * time.Hour, MinSamplePerArm: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := store.HashUnit(ws.ID, "user-1")
+	assignment := &Event{EventID: "asg-dec-1", WorkspaceID: ws.ID, EnvironmentID: env.ID,
+		Type: EventAssignment, ExperimentID: exp.ID, Epoch: 1, FlagKey: exp.FlagKey,
+		Variant: "a", UnitHash: unit, Source: "split", ClientTime: time.Now().UTC()}
+	if got, err := store.IngestEvents([]*Event{assignment}); err != nil || got.Accepted != 1 {
+		t.Fatalf("ingest assignment: %+v %v", got, err)
+	}
+	if total, _ := store.EventMetricTotals(ws.ID, env.ID); total != 0 {
+		t.Fatalf("assignment counted as exposure: %d", total)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewSQLiteStore(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if _, ok := reopened.AcceptedEvent(assignment.EventID, ws.ID, env.ID, EventAssignment); !ok {
+		t.Fatal("assignment fact was not replayed")
+	}
+	reopened.mu.Lock()
+	reopened.data.Events = nil
+	reopened.data.EventIndex = map[string]int{}
+	reopened.mu.Unlock()
+	if _, ok := reopened.AcceptedEvent(assignment.EventID, ws.ID, env.ID, EventAssignment); !ok {
+		t.Fatal("durable assignment lookup failed after working-set eviction")
+	}
+	if total, _ := reopened.EventMetricTotals(ws.ID, env.ID); total != 0 {
+		t.Fatalf("replayed assignment counted as exposure: %d", total)
+	}
+}

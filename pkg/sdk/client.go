@@ -559,9 +559,7 @@ func (c *Client) Evaluate(flagKey string, evalCtx model.EvaluationContext) model
 	}
 	res := state.evaluator.Evaluate(flagKey, evalCtx)
 	res = c.annotate(state, res)
-	if res.TrackEvents && res.Experiment != nil {
-		c.queueExposure(state.snapshot, evalCtx, res)
-	}
+	c.captureExperimentDecision(state.snapshot, evalCtx, res)
 	return res
 }
 
@@ -592,7 +590,7 @@ func (c *Client) annotate(state *clientState, res model.Result) model.Result {
 		}
 		res.SnapshotAgeMillis = max(0, time.Since(generated).Milliseconds())
 	}
-	if res.TrackEvents && res.Experiment != nil {
+	if res.TrackEvents && res.Experiment != nil && (state == nil || shouldAutoRecordExposure(state.snapshot, res)) {
 		res.ExposureEventID = "exp-" + res.DecisionID
 	}
 	c.evalCount.Add(1)
@@ -628,9 +626,7 @@ func (c *Client) BoolVariation(flagKey string, evalCtx model.EvaluationContext, 
 	}
 	v, res := state.evaluator.BoolVariation(flagKey, evalCtx, def)
 	res = c.annotate(state, res)
-	if res.TrackEvents && res.Experiment != nil {
-		c.queueExposure(state.snapshot, evalCtx, res)
-	}
+	c.captureExperimentDecision(state.snapshot, evalCtx, res)
 	return v, res
 }
 
@@ -644,9 +640,7 @@ func (c *Client) StringVariation(flagKey string, evalCtx model.EvaluationContext
 	}
 	v, res := state.evaluator.StringVariation(flagKey, evalCtx, def)
 	res = c.annotate(state, res)
-	if res.TrackEvents && res.Experiment != nil {
-		c.queueExposure(state.snapshot, evalCtx, res)
-	}
+	c.captureExperimentDecision(state.snapshot, evalCtx, res)
 	return v, res
 }
 
@@ -660,9 +654,7 @@ func (c *Client) NumberVariation(flagKey string, evalCtx model.EvaluationContext
 	}
 	v, res := state.evaluator.NumberVariation(flagKey, evalCtx, def)
 	res = c.annotate(state, res)
-	if res.TrackEvents && res.Experiment != nil {
-		c.queueExposure(state.snapshot, evalCtx, res)
-	}
+	c.captureExperimentDecision(state.snapshot, evalCtx, res)
 	return v, res
 }
 
@@ -676,10 +668,29 @@ func (c *Client) JSONVariation(flagKey string, evalCtx model.EvaluationContext, 
 	}
 	v, res := state.evaluator.JSONVariation(flagKey, evalCtx, def)
 	res = c.annotate(state, res)
-	if res.TrackEvents && res.Experiment != nil {
-		c.queueExposure(state.snapshot, evalCtx, res)
-	}
+	c.captureExperimentDecision(state.snapshot, evalCtx, res)
 	return v, res
+}
+
+func shouldAutoRecordExposure(snapshot *model.Snapshot, res model.Result) bool {
+	if !res.TrackEvents || res.Experiment == nil || snapshot == nil {
+		return false
+	}
+	flag := snapshot.Flags[res.FlagKey]
+	return flag != nil && flag.Experiment != nil && flag.Experiment.ExposureMode != "onRender"
+}
+
+func (c *Client) captureExperimentDecision(snapshot *model.Snapshot, evalCtx model.EvaluationContext, res model.Result) {
+	if !res.TrackEvents || res.Experiment == nil {
+		return
+	}
+	if res.Experiment.ExposureMode == "onRender" {
+		c.queueAssignment(snapshot, evalCtx, res)
+		return
+	}
+	if shouldAutoRecordExposure(snapshot, res) {
+		c.queueExposure(snapshot, evalCtx, res)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -687,24 +698,25 @@ func (c *Client) JSONVariation(flagKey string, evalCtx model.EvaluationContext, 
 // ---------------------------------------------------------------------------
 
 type collectEvent struct {
-	EventID               string    `json:"eventId"`
-	DecisionID            string    `json:"decisionId,omitempty"`
-	Type                  string    `json:"type"`
-	ExperimentID          string    `json:"experimentId"`
-	Epoch                 int64     `json:"epoch"`
-	FlagKey               string    `json:"flagKey"`
-	FlagRevision          int64     `json:"flagRevision"`
-	Variant               string    `json:"variant"`
-	Unit                  string    `json:"unit"`
-	Source                string    `json:"source"`
-	PolicyVersion         string    `json:"policyVersion,omitempty"`
-	StateVersion          int64     `json:"stateVersion,omitempty"`
-	AllocationProbability float64   `json:"allocationProbability,omitempty"`
-	MetricKey             string    `json:"metricKey,omitempty"`
-	Value                 float64   `json:"value,omitempty"`
-	SessionID             string    `json:"sessionId,omitempty"`
-	TaskID                string    `json:"taskId,omitempty"`
-	ClientTime            time.Time `json:"clientTime"`
+	EventID               string                   `json:"eventId"`
+	DecisionID            string                   `json:"decisionId,omitempty"`
+	Type                  string                   `json:"type"`
+	ExperimentID          string                   `json:"experimentId"`
+	Epoch                 int64                    `json:"epoch"`
+	FlagKey               string                   `json:"flagKey"`
+	FlagRevision          int64                    `json:"flagRevision"`
+	Variant               string                   `json:"variant"`
+	Unit                  string                   `json:"unit"`
+	Source                string                   `json:"source"`
+	PolicyVersion         string                   `json:"policyVersion,omitempty"`
+	StateVersion          int64                    `json:"stateVersion,omitempty"`
+	AllocationProbability float64                  `json:"allocationProbability,omitempty"`
+	MetricKey             string                   `json:"metricKey,omitempty"`
+	Value                 float64                  `json:"value,omitempty"`
+	SessionID             string                   `json:"sessionId,omitempty"`
+	TaskID                string                   `json:"taskId,omitempty"`
+	ClientTime            time.Time                `json:"clientTime"`
+	Context               *model.EvaluationContext `json:"context,omitempty"`
 }
 
 func randomEventID(prefix string) string {
@@ -771,6 +783,98 @@ func (c *Client) queueExposure(snapshot *model.Snapshot, evalCtx model.Evaluatio
 	default:
 		c.droppedExposures.Add(1)
 		c.setExposureStatus(res.DecisionID, "dropped")
+	}
+}
+
+// queueAssignment sends the local decision and its evaluation context to the
+// server for re-evaluation. The context is used only in transit; the event
+// ledger retains the pseudonymized unit and decision metadata.
+func (c *Client) queueAssignment(snapshot *model.Snapshot, evalCtx model.EvaluationContext, res model.Result) {
+	if c.opts.CollectToken == "" {
+		c.droppedExposures.Add(1)
+		c.setExposureStatus(res.DecisionID, "dropped")
+		return
+	}
+	flag := snapshot.Flags[res.FlagKey]
+	if flag == nil || flag.Bucketing == nil {
+		c.setExposureStatus(res.DecisionID, "dropped")
+		return
+	}
+	raw, ok := evalCtx.Field(flag.Bucketing.Unit)
+	if !ok {
+		c.setExposureStatus(res.DecisionID, "dropped")
+		return
+	}
+	unit, ok := evaluation.CanonicalUnitString(raw)
+	if !ok {
+		c.setExposureStatus(res.DecisionID, "dropped")
+		return
+	}
+	var revision int64
+	_, _ = fmt.Sscanf(flag.Version, "%d", &revision)
+	ev := &collectEvent{
+		EventID: "asg-" + res.DecisionID, DecisionID: res.DecisionID,
+		Type: "assignment", ExperimentID: res.Experiment.ExperimentID,
+		Epoch: res.Experiment.Epoch, FlagKey: res.FlagKey, FlagRevision: revision,
+		Variant: res.Experiment.Variant, Unit: unit, Source: res.Experiment.Source,
+		PolicyVersion: res.Experiment.PolicyVersion, StateVersion: res.Experiment.StateVersion,
+		AllocationProbability: res.Experiment.AllocationProbability,
+		ClientTime:            time.Now().UTC(), Context: &evalCtx,
+	}
+	select {
+	case c.exposures <- ev:
+		c.mu.Lock()
+		c.decisionUnits[res.DecisionID] = unit
+		d := c.decisions[res.DecisionID]
+		d.ExposureStatus = "pending"
+		c.decisions[res.DecisionID] = d
+		c.mu.Unlock()
+	default:
+		c.droppedExposures.Add(1)
+		c.setExposureStatus(res.DecisionID, "dropped")
+	}
+}
+
+// TrackExposure records actual use of a previously evaluated onRender result.
+// The decision must still be in this client's bounded registry.
+func (c *Client) TrackExposure(decision model.Result) error {
+	if decision.Experiment == nil || decision.Experiment.ExposureMode != "onRender" {
+		return errors.New("sdk: decision is not an onRender experiment")
+	}
+	return c.TrackExposureByDecisionID(decision.DecisionID)
+}
+
+// TrackExposureByDecisionID queues a stable, idempotent exposure for a local
+// assignment. Call it only after the feature was actually rendered or applied.
+func (c *Client) TrackExposureByDecisionID(decisionID string) error {
+	c.mu.RLock()
+	d, ok := c.decisions[decisionID]
+	unit := c.decisionUnits[decisionID]
+	c.mu.RUnlock()
+	if !ok || unit == "" || d.Result.Experiment == nil || d.Result.Experiment.ExposureMode != "onRender" {
+		return errors.New("sdk: no pending onRender assignment for decision")
+	}
+	if c.opts.CollectToken == "" {
+		return errors.New("sdk: collect token not configured")
+	}
+	res := d.Result
+	var revision int64
+	_, _ = fmt.Sscanf(res.FlagVersion, "%d", &revision)
+	ev := &collectEvent{
+		EventID: "exp-" + decisionID, DecisionID: decisionID, Type: "exposure",
+		ExperimentID: res.Experiment.ExperimentID, Epoch: res.Experiment.Epoch,
+		FlagKey: res.FlagKey, FlagRevision: revision, Variant: res.Experiment.Variant,
+		Unit: unit, Source: res.Experiment.Source,
+		PolicyVersion: res.Experiment.PolicyVersion, StateVersion: res.Experiment.StateVersion,
+		AllocationProbability: res.Experiment.AllocationProbability, ClientTime: time.Now().UTC(),
+	}
+	select {
+	case c.exposures <- ev:
+		c.setExposureStatus(decisionID, "queued")
+		return nil
+	default:
+		c.droppedExposures.Add(1)
+		return errors.New("sdk: exposure queue full")
 	}
 }
 
@@ -913,6 +1017,13 @@ send:
 		return
 	}
 	if err := c.postEvents(ctx, batch); err != nil {
+		var rejected *collectRejection
+		if errors.As(err, &rejected) {
+			c.opts.Logger.Printf("sdk: collection rejected %d of %d events: %v", rejected.count, len(batch), err)
+			c.droppedExposures.Add(int64(rejected.count))
+			c.markBatchExposure(batch, "rejected_or_partial")
+			return
+		}
 		select {
 		case <-time.After(500 * time.Millisecond):
 		case <-ctx.Done():
@@ -926,14 +1037,27 @@ send:
 		}
 		if err := c.postEvents(ctx, batch); err != nil {
 			c.opts.Logger.Printf("sdk: exposure flush failed twice, dropping %d events: %v", len(batch), err)
-			c.droppedExposures.Add(int64(len(batch)))
-			c.markBatchExposure(batch, "dropped")
+			var rejected *collectRejection
+			if errors.As(err, &rejected) {
+				c.droppedExposures.Add(int64(rejected.count))
+				c.markBatchExposure(batch, "rejected_or_partial")
+			} else {
+				c.droppedExposures.Add(int64(len(batch)))
+				c.markBatchExposure(batch, "dropped")
+			}
 			return
 		}
 	}
 	c.flushedExposures.Add(int64(len(batch)))
 	c.markBatchExposure(batch, "submitted")
 }
+
+type collectRejection struct {
+	count   int
+	message string
+}
+
+func (e *collectRejection) Error() string { return e.message }
 
 func (c *Client) markBatchExposure(batch []*collectEvent, status string) {
 	for _, ev := range batch {
@@ -963,6 +1087,21 @@ func (c *Client) postEvents(ctx context.Context, batch []*collectEvent) error {
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("collect HTTP %d", resp.StatusCode)
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	var result struct {
+		Accepted   int      `json:"accepted"`
+		Duplicates int      `json:"duplicates"`
+		Rejected   int      `json:"rejected"`
+		Messages   []string `json:"rejectMessages"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&result); err != nil {
+		return fmt.Errorf("sdk: decode collect response: %w", err)
+	}
+	if result.Rejected > 0 {
+		return &collectRejection{count: result.Rejected,
+			message: fmt.Sprintf("collect rejected %d events: %s", result.Rejected, strings.Join(result.Messages, "; "))}
+	}
+	if result.Accepted+result.Duplicates != len(batch) {
+		return fmt.Errorf("sdk: collect acknowledged %d of %d events", result.Accepted+result.Duplicates, len(batch))
+	}
 	return nil
 }
