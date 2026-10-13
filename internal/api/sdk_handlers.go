@@ -512,17 +512,21 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	events := make([]*platform.Event, 0, len(req.Events))
+	results := make([]platform.EventResult, len(req.Events))
+	eventIndexes := make([]int, 0, len(req.Events))
 	skippedNoUnit := 0
 	skippedAssignments := 0
 	skippedInvalidTicket := 0
 	experimentCache := make(map[string]*platform.Experiment)
 	localAssignments := make(map[string]*platform.Event)
 	tokenErrors := make([]string, 0)
-	for _, dto := range req.Events {
+	for i, dto := range req.Events {
+		results[i].EventID = dto.EventID
 		if dto.Unit == "" {
 			// No unit → no attribution; reject loudly instead of storing
 			// anonymous noise (§6).
 			skippedNoUnit++
+			results[i].Status, results[i].Code = "rejected", "missing_unit"
 			continue
 		}
 		ev := &platform.Event{
@@ -547,6 +551,7 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 			if dto.DecisionID == "" || dto.EventID != "asg-"+dto.DecisionID || dto.Context == nil ||
 				exp == nil || exp.ExposureMode != "onRender" || s.Config == nil {
 				skippedAssignments++
+				results[i].Status, results[i].Code = "rejected", "assignment_mismatch"
 				continue
 			}
 			evaluator, snapshot, _, err := s.evaluatorFor(r.Context(), env)
@@ -566,6 +571,7 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 			flag := snapshot.Flags[dto.FlagKey]
 			if flag == nil || flag.Bucketing == nil || flagRevisionIn(snapshot, dto.FlagKey) != dto.FlagRevision {
 				skippedAssignments++
+				results[i].Status, results[i].Code = "rejected", "assignment_mismatch"
 				continue
 			}
 			raw, found := dto.Context.Field(flag.Bucketing.Unit)
@@ -578,6 +584,7 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 				decision.Experiment.AllocationProbability != dto.AllocationProbability ||
 				decision.Experiment.ExposureMode != "onRender" || dto.ClientTime.IsZero() {
 				skippedAssignments++
+				results[i].Status, results[i].Code = "rejected", "assignment_mismatch"
 				continue
 			}
 			localAssignments[dto.DecisionID] = ev
@@ -598,6 +605,7 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 					assignment.PolicyVersion != ev.PolicyVersion || assignment.StateVersion != ev.StateVersion ||
 					assignment.AllocationProbability != ev.AllocationProbability || ev.ClientTime.Before(assignment.ClientTime) {
 					skippedInvalidTicket++
+					results[i].Status, results[i].Code = "rejected", "assignment_mismatch"
 					if len(tokenErrors) < 20 {
 						tokenErrors = append(tokenErrors, "assignment_mismatch")
 					}
@@ -623,6 +631,7 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 				}
 				if err != nil {
 					skippedInvalidTicket++
+					results[i].Status, results[i].Code = "rejected", code
 					if len(tokenErrors) < 20 {
 						tokenErrors = append(tokenErrors, code)
 					}
@@ -646,11 +655,16 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		events = append(events, ev)
+		eventIndexes = append(eventIndexes, i)
 	}
 	res, err := s.Store.IngestEvents(events)
 	if err != nil {
 		writeStoreError(w, err)
 		return
+	}
+	for i, item := range res.Results {
+		item.EventID = req.Events[eventIndexes[i]].EventID
+		results[eventIndexes[i]] = item
 	}
 	if res.Accepted > 0 || res.Duplicates > 0 {
 		s.decisionMu.Lock()
@@ -705,5 +719,6 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accepted": res.Accepted, "duplicates": res.Duplicates,
 		"rejected": res.Rejected + skippedNoUnit + skippedAssignments + skippedInvalidTicket, "rejectMessages": msgs,
+		"results": results,
 	})
 }

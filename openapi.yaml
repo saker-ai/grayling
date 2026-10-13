@@ -5030,3 +5030,22 @@ components:
           description: 拒绝原因（无拒绝时可能缺省或为 null）。
           items:
             type: string
+        results:
+          type: array
+          description: 与请求 events 顺序一致的逐事件结果；空批次可能省略。
+          items:
+            $ref: "#/components/schemas/CollectEventResult"
+    CollectEventResult:
+      type: object
+      required: [eventId, status]
+      properties:
+        eventId:
+          type: string
+          description: 请求中的 eventId；服务端规范化后的曝光 ID 不会替换该值。
+        status:
+          type: string
+          enum: [accepted, duplicate, rejected]
+        code:
+          type: string
+          description: duplicate 或 rejected 时提供固定机器码。除 HTTP 5xx/429 整批失败外，逐事件 rejected 不应原样重试。
+          enum: [duplicate_event, invalid_event, unknown_experiment, stale_epoch, assignment_mismatch, missing_exposure, missing_unit, invalid_exposure_token, expired_exposure_token, late_event, future_event]

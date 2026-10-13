@@ -164,7 +164,7 @@ Flag 可使用 `targetingKey` 或 `user_id` 做稳定分流；二者均由上游
 - `eventId` 幂等去重；重复计入 `duplicates`。
 - epoch 与实验注册不符、clientTime 超出 72h 迟到窗口或超前 5min → `rejected`（带原因）。
 - 缺 unit 的事件跳过并计入 rejected（无随机化单元即无归因）。
-- 响应：`{accepted, duplicates, rejected, rejectMessages}`。
+- 响应：`{accepted, duplicates, rejected, rejectMessages, results}`。`results` 与请求事件顺序一致，每项包含请求中的 `eventId`、`status`（`accepted`/`duplicate`/`rejected`）和失败时的固定 `code`。部分成功返回 HTTP 200；`duplicate` 表示同一事实已被接收，`rejected` 表示该事件需修正后才能再提交。HTTP 5xx/429 为整批失败，可用原 `eventId` 重试。
 - 批量与字节上限来自工作空间配额；超限 400 `batch_too_large`。
 
 ## 独立 proxy（cmd/golab-proxy）

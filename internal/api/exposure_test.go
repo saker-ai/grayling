@@ -86,17 +86,23 @@ func TestRemoteOnRenderExposureRequiresRecordedAssignment(t *testing.T) {
 	conversion.MetricKey, conversion.Value = "complete", 1
 	if got := call(conversion); got["rejected"] != float64(1) {
 		t.Fatalf("conversion before exposure accepted: %+v", got)
+	} else if results := got["results"].([]any); results[0].(map[string]any)["code"] != "missing_exposure" {
+		t.Fatalf("missing exposure result: %+v", got)
 	}
 	bad := event
 	bad.Unit = "someone-else"
 	if got := call(bad); got["rejected"] != float64(1) {
 		t.Fatalf("mismatched unit accepted: %+v", got)
+	} else if results := got["results"].([]any); results[0].(map[string]any)["code"] != "assignment_mismatch" {
+		t.Fatalf("assignment result: %+v", got)
 	}
 	if got := call(event); got["accepted"] != float64(1) {
 		t.Fatalf("valid exposure rejected: %+v", got)
 	}
 	if got := call(event); got["duplicates"] != float64(1) {
 		t.Fatalf("retry not idempotent: %+v", got)
+	} else if results := got["results"].([]any); results[0].(map[string]any)["code"] != "duplicate_event" {
+		t.Fatalf("duplicate result: %+v", got)
 	}
 	if got := call(conversion); got["accepted"] != float64(1) {
 		t.Fatalf("conversion after exposure rejected: %+v", got)
@@ -172,7 +178,9 @@ func TestLocalOnRenderAssignmentAndExposureBatch(t *testing.T) {
 	assignment.EventID, assignment.Type, assignment.Context = "asg-dec-local", "assignment", &ctx
 	exposure := base
 	exposure.EventID, exposure.Type = "exp-dec-local", "exposure"
-	payload, err := json.Marshal(collectRequest{Events: []collectEventDTO{assignment, exposure}})
+	missingUnit := base
+	missingUnit.EventID, missingUnit.Type, missingUnit.Unit = "missing-unit", "conversion", ""
+	payload, err := json.Marshal(collectRequest{Events: []collectEventDTO{assignment, missingUnit, exposure}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,8 +195,12 @@ func TestLocalOnRenderAssignmentAndExposureBatch(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Accepted != 2 || got.Rejected != 0 {
+	if got.Accepted != 2 || got.Rejected != 1 {
 		t.Fatalf("batch: %+v", got)
+	}
+	if len(got.Results) != 3 || got.Results[0].Status != "accepted" ||
+		got.Results[1].Code != "missing_unit" || got.Results[2].Status != "accepted" {
+		t.Fatalf("ordered results: %+v", got.Results)
 	}
 	if total, _ := store.EventMetricTotals(ws.ID, env.ID); total != 1 {
 		t.Fatalf("exposure total %d", total)

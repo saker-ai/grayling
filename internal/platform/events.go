@@ -68,10 +68,19 @@ func (s *Store) AcceptedEvent(eventID, workspaceID, environmentID string, eventT
 // IngestResult reports what happened to one event batch (§10.1: 服务端去重、
 // 处理迟到数据).
 type IngestResult struct {
-	Accepted   int      `json:"accepted"`
-	Duplicates int      `json:"duplicates"`
-	Rejected   int      `json:"rejected"`
-	RejectMsgs []string `json:"rejectMessages,omitempty"`
+	Accepted   int           `json:"accepted"`
+	Duplicates int           `json:"duplicates"`
+	Rejected   int           `json:"rejected"`
+	RejectMsgs []string      `json:"rejectMessages,omitempty"`
+	Results    []EventResult `json:"results,omitempty"`
+}
+
+// EventResult is ordered like the submitted batch. Codes are fixed values so
+// callers can handle failures without parsing diagnostic text.
+type EventResult struct {
+	EventID string `json:"eventId"`
+	Status  string `json:"status"`
+	Code    string `json:"code,omitempty"`
 }
 
 // AnalysisWindowStatus records the versioned UTC population rule used by a
@@ -223,7 +232,7 @@ func (s *Store) IngestEvents(events []*Event) (IngestResult, error) {
 }
 
 func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
-	res := IngestResult{}
+	res := IngestResult{Results: make([]EventResult, len(events))}
 	if len(events) == 0 {
 		return res, nil
 	}
@@ -236,23 +245,30 @@ func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
 	// preserves the historical intra-batch dedup: a repeated event ID
 	// within ONE batch counts as duplicate, not as a second exposure.
 	candidates := make([]*Event, 0, len(events))
+	candidateIndexes := make([]int, 0, len(events))
 	seen := make(map[string]bool, len(events))
 	assignments := make(map[string]*Event)
 	batchExposures := make(map[string]bool)
-	for _, ev := range events {
-		if err := s.validateEventLocked(ev, now); err != nil {
+	for i, ev := range events {
+		if ev != nil {
+			res.Results[i].EventID = ev.EventID
+		}
+		if code := s.validateEventLocked(ev, now); code != "" {
 			res.Rejected++
+			res.Results[i].Status, res.Results[i].Code = "rejected", code
 			if len(res.RejectMsgs) < 20 {
-				res.RejectMsgs = append(res.RejectMsgs, fmt.Sprintf("%s: %v", ev.EventID, err))
+				res.RejectMsgs = append(res.RejectMsgs, code)
 			}
 			continue
 		}
 		if _, dup := s.data.EventIndex[ev.EventID]; dup {
 			res.Duplicates++
+			res.Results[i].Status, res.Results[i].Code = "duplicate", "duplicate_event"
 			continue
 		}
 		if seen[ev.EventID] {
 			res.Duplicates++
+			res.Results[i].Status, res.Results[i].Code = "duplicate", "duplicate_event"
 			continue
 		}
 		exp := s.data.Experiments[ev.ExperimentID]
@@ -280,8 +296,9 @@ func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
 					assignment.FlagKey != ev.FlagKey || assignment.FlagRevision != ev.FlagRevision ||
 					assignment.Variant != ev.Variant || assignment.UnitHash != ev.UnitHash {
 					res.Rejected++
+					res.Results[i].Status, res.Results[i].Code = "rejected", "assignment_mismatch"
 					if len(res.RejectMsgs) < 20 {
-						res.RejectMsgs = append(res.RejectMsgs, ev.EventID+": assignment_mismatch")
+						res.RejectMsgs = append(res.RejectMsgs, "assignment_mismatch")
 					}
 					continue
 				}
@@ -290,8 +307,9 @@ func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
 			if ev.Type == EventConversion && !batchExposures[scope+"/"+ev.UnitHash] &&
 				!s.data.ExposedUnits[scope][ev.UnitHash] {
 				res.Rejected++
+				res.Results[i].Status, res.Results[i].Code = "rejected", "missing_exposure"
 				if len(res.RejectMsgs) < 20 {
-					res.RejectMsgs = append(res.RejectMsgs, ev.EventID+": missing_exposure")
+					res.RejectMsgs = append(res.RejectMsgs, "missing_exposure")
 				}
 				continue
 			}
@@ -312,6 +330,7 @@ func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
 			ev = &copy
 		}
 		candidates = append(candidates, ev)
+		candidateIndexes = append(candidateIndexes, i)
 	}
 
 	// Pass 2: backends with a durable dedup ledger (PostgreSQL event_index)
@@ -327,14 +346,19 @@ func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
 			return res, fmt.Errorf("platform: dedup ledger: %w", err)
 		}
 		filtered := candidates[:0]
-		for _, ev := range candidates {
+		filteredIndexes := candidateIndexes[:0]
+		for i, ev := range candidates {
 			if known[ev.EventID] {
 				res.Duplicates++
+				idx := candidateIndexes[i]
+				res.Results[idx].Status, res.Results[idx].Code = "duplicate", "duplicate_event"
 				continue
 			}
 			filtered = append(filtered, ev)
+			filteredIndexes = append(filteredIndexes, candidateIndexes[i])
 		}
 		candidates = filtered
+		candidateIndexes = filteredIndexes
 	}
 
 	// Pass 3: apply. touchedAggs/touchedCounts remember which absolute
@@ -342,10 +366,11 @@ func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
 	// (replay-idempotent upserts, never blind deltas).
 	touchedAggs := map[string]*Event{}
 	touchedCounts := map[string]*Event{}
-	for _, ev := range candidates {
+	for i, ev := range candidates {
 		ev.ServerTime = now
 		aggKey, countKey := s.appendEventLocked(ev)
 		res.Accepted++
+		res.Results[candidateIndexes[i]].Status = "accepted"
 		s.changes.Events = append(s.changes.Events, ev)
 		if aggKey != "" {
 			touchedAggs[aggKey] = ev
@@ -385,9 +410,12 @@ func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
 			// A second replica may have won the ledger race after our initial
 			// KnownEventIDs read. The committed ledger is authoritative.
 			accepted := 0
-			for _, ev := range candidates {
+			for i, ev := range candidates {
 				if pg.acceptedEventIDs()[ev.EventID] {
 					accepted++
+				} else {
+					idx := candidateIndexes[i]
+					res.Results[idx].Status, res.Results[idx].Code = "duplicate", "duplicate_event"
 				}
 			}
 			if accepted < res.Accepted {
@@ -404,59 +432,58 @@ func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
 	return res, nil
 }
 
-func (s *Store) validateEventLocked(ev *Event, now time.Time) error {
+func (s *Store) validateEventLocked(ev *Event, now time.Time) string {
 	if ev == nil {
-		return fmt.Errorf("nil event")
+		return "invalid_event"
 	}
 	if ev.EventID == "" {
-		return fmt.Errorf("event_id required (idempotency)")
+		return "invalid_event"
 	}
 	switch ev.Type {
 	case EventAssignment, EventExposure, EventConversion:
 	default:
-		return fmt.Errorf("unknown event type %q", ev.Type)
+		return "invalid_event"
 	}
 	if ev.WorkspaceID == "" || ev.EnvironmentID == "" {
-		return fmt.Errorf("workspace/environment required")
+		return "invalid_event"
 	}
 	if ev.ExperimentID == "" || ev.Variant == "" || ev.UnitHash == "" {
-		return fmt.Errorf("experimentId, variant and unitHash required")
+		return "invalid_event"
 	}
 	exp, ok := s.data.Experiments[ev.ExperimentID]
 	if !ok {
-		return fmt.Errorf("unknown experiment %q", ev.ExperimentID)
+		return "unknown_experiment"
 	}
 	if exp.WorkspaceID != ev.WorkspaceID || exp.EnvironmentID != ev.EnvironmentID {
-		return fmt.Errorf("experiment %q does not belong to this workspace/environment", ev.ExperimentID)
+		return "unknown_experiment"
 	}
 	if ev.Epoch != exp.Epoch {
-		return fmt.Errorf("epoch %d does not match experiment epoch %d (mixed epochs are rejected, §10.1)",
-			ev.Epoch, exp.Epoch)
+		return "stale_epoch"
 	}
 	if exp.AllocationMode == "bandit" && ev.Type == EventExposure {
 		if ev.PolicyVersion != "" && ev.PolicyVersion != exp.Bandit.PolicyVersion {
-			return fmt.Errorf("exposure policy version %q does not match registered %q", ev.PolicyVersion, exp.Bandit.PolicyVersion)
+			return "assignment_mismatch"
 		}
 		if ev.Source == "bandit" && (ev.PolicyVersion == "" || ev.StateVersion <= 0 ||
 			ev.AllocationProbability <= 0 || ev.AllocationProbability > 1 || math.IsNaN(ev.AllocationProbability)) {
-			return fmt.Errorf("bandit exposure requires versioned allocation probability")
+			return "invalid_event"
 		}
 	}
 	if ev.Type == EventConversion && ev.MetricKey == "" {
-		return fmt.Errorf("conversion events require metricKey")
+		return "invalid_event"
 	}
 	// Late-data window: clientTime older than the retention bound or in the
 	// future beyond skew is rejected — reports must be able to state a
 	// complete window (§10.2 data-health conditions).
 	if !ev.ClientTime.IsZero() {
 		if ev.ClientTime.Before(now.Add(-maxLateWindow)) {
-			return fmt.Errorf("clientTime %s beyond max late window %s", ev.ClientTime, maxLateWindow)
+			return "late_event"
 		}
 		if ev.ClientTime.After(now.Add(futureSkew)) {
-			return fmt.Errorf("clientTime %s too far in the future", ev.ClientTime)
+			return "future_event"
 		}
 	}
-	return nil
+	return ""
 }
 
 // appendEventLocked stores the event and updates aggregates. Caller holds mu.

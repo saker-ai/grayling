@@ -473,6 +473,10 @@ func TestEventDedupAndUnitAggregation(t *testing.T) {
 	if res2.Accepted != 1 || res2.Duplicates != 2 {
 		t.Fatalf("dedup broken: %+v", res2)
 	}
+	if len(res2.Results) != 3 || res2.Results[0].Code != "duplicate_event" ||
+		res2.Results[1].Code != "duplicate_event" || res2.Results[2].Status != "accepted" {
+		t.Fatalf("dedup results: %+v", res2.Results)
+	}
 	// Per-unit aggregate: count=3, sum=12 → unit mean 4.
 	agg := store.MetricAggregate(ws.ID, env.ID, exp.ID, exp.Epoch, "conversion")
 	ua := agg["control"]
@@ -489,6 +493,9 @@ func TestEventDedupAndUnitAggregation(t *testing.T) {
 	}
 	if res3.Accepted != 0 || res3.Rejected != 1 {
 		t.Fatalf("epoch mismatch must reject: %+v", res3)
+	}
+	if len(res3.Results) != 1 || res3.Results[0].Code != "stale_epoch" {
+		t.Fatalf("epoch result: %+v", res3.Results)
 	}
 	// Far-past client time rejected.
 	old := mk("c5", 1)
