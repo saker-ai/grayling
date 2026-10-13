@@ -55,7 +55,8 @@ function renderApprovalList(approvals) {
 
 function renderApprovalComparison(approval, comparison) {
   if (!comparison) return '<div class="banner warn">' + esc(t('approval.comparisonUnavailable')) + '</div>';
-  if (!comparison.available) return (comparison.stale ? '<div class="banner warn" role="alert">' +
+  const actionable = approval.state === 'submitted' || approval.state === 'approved';
+  if (!comparison.available) return (actionable && comparison.stale ? '<div class="banner warn" role="alert">' +
     esc(t('approval.comparisonStale')) + '</div>' : '') + '<div class="banner info">' +
     esc(t(comparison.reason === 'content_not_retained' ? 'approval.contentNotRetained' :
       'approval.comparisonUnsupported')) + '</div>';
@@ -70,7 +71,7 @@ function renderApprovalComparison(approval, comparison) {
   const fields = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(field =>
     flagDiffValue(before[field]) !== flagDiffValue(after[field]));
   return '<section class="approval-comparison"><h4>' + esc(t('approval.comparison')) + '</h4>' +
-    (comparison.stale ? '<div class="banner warn" role="alert">' + esc(t('approval.comparisonStale')) + '</div>' : '') +
+    (actionable && comparison.stale ? '<div class="banner warn" role="alert">' + esc(t('approval.comparisonStale')) + '</div>' : '') +
     '<p class="muted">' + esc(approval.action === 'flag.rollback' ? t('approval.comparisonVersions', {
       a: comparison.beforeRevision, b: comparison.afterRevision }) :
       t('approval.releasePlanBase', { n: comparison.beforeRevision })) + '</p>' +

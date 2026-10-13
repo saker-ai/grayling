@@ -855,10 +855,10 @@ function renderFlagDiff(current, draft, options = {}) {
   };
   const keys = Object.keys(labels).filter(key => flagDiffValue(before[key]) !== flagDiffValue(after[key]));
   return '<section class="card"><h3>' + esc(title) + '</h3>' +
-    '<p class="muted">' + esc(t('flags.diffBase', { revision: current?.revision || 0 })) + '</p>' +
+    (options.hideBase ? '' : '<p class="muted">' + esc(t('flags.diffBase', { revision: current?.revision || 0 })) + '</p>') +
     (keys.length ? '<div class="flag-diff-list">' + keys.map(key =>
       '<details class="flag-diff-item"><summary>' + esc(labels[key]) + '</summary>' +
-      '<div class="flag-diff-values"><div><strong>' + esc(t('flags.diffBefore')) +
+      '<div class="flag-diff-values"><div><strong>' + esc(options.beforeLabel || t('flags.diffBefore')) +
       '</strong><pre class="pre small">' + esc(flagDiffValue(before[key])) + '</pre></div>' +
       '<div><strong>' + esc(options.afterLabel || t('flags.diffAfter')) + '</strong><pre class="pre small">' +
       esc(flagDiffValue(after[key])) + '</pre></div></div></details>').join('') + '</div>'
@@ -871,9 +871,10 @@ function renderFlagSaveConflict(latest, local) {
     renderFlagDiff(latest.current, { content: local },
       { title: t('flags.conflictCompare'), afterLabel: t('flags.conflictLocal'),
         emptyLabel: t('flags.conflictNoChanges') }) +
-    (latest.draft ? '<details class="flag-diff-item"><summary>' + esc(t('flags.conflictRemoteDraft')) +
-      '</summary><pre class="pre small">' + esc(JSON.stringify(latest.draft.content, null, 2)) +
-      '</pre></details>' : '') +
+    (latest.draft ? renderFlagDiff({ content: latest.draft.content }, { content: local },
+      { title: t('flags.conflictCompareDraft'), beforeLabel: t('flags.conflictRemoteDraft'),
+        afterLabel: t('flags.conflictLocal'), hideBase: true,
+        emptyLabel: t('flags.conflictNoDraftChanges') }) : '') +
     '<button class="btn" type="button" id="flag-conflict-ack">' + esc(t('flags.conflictAcknowledge')) + '</button>';
 }
 

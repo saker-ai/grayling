@@ -90,9 +90,12 @@ const approvalComparison = sandbox.__renderApprovalComparison({ action: 'flag.ro
 assert(approvalComparison.includes('Published Flag r2') && approvalComparison.includes('Variations') &&
   approvalComparison.includes('&lt;script&gt;') &&
   !approvalComparison.includes('<script>'), 'approval comparison must show escaped before and after values');
-assert(sandbox.__renderApprovalComparison({ action: 'flag.rollback' },
+assert(sandbox.__renderApprovalComparison({ action: 'flag.rollback', state: 'approved' },
   { available: true, stale: true, beforeRevision: 2, afterRevision: 1, before: {}, after: {} })
   .includes('source changed'), 'stale approval must display its changed baseline');
+assert(!sandbox.__renderApprovalComparison({ action: 'flag.rollback', state: 'executed' },
+  { available: true, stale: true, beforeRevision: 2, afterRevision: 1, before: {}, after: {} })
+  .includes('source changed'), 'completed rollback must not be presented as an unexecutable request');
 const aiDetail = sandbox.__renderAIResourceDetail({ resource: { type: 'prompt', logicalId: '<img src=x>',
   physicalId: 'physical', owner: 'owner', createdAt: '2026-10-13T10:00:00Z' },
 pins: [{ version: 'v2', digest: '<script>', pinnedBy: 'owner', pinnedAt: '2026-10-13T10:00:00Z' }],
@@ -117,8 +120,10 @@ const conflict = sandbox.__renderFlagSaveConflict({ currentRevision: 5,
   draft: { content: { type: 'bool', variations: { safe: true } } } },
 { type: 'bool', variations: { safe: '<svg/onload=alert(1)>' } });
 assert(conflict.includes('Published revision is now r5') && conflict.includes('Your unsaved input') &&
+  conflict.includes('Your input vs latest server draft') &&
+  conflict.includes('Saving after acknowledgement replaces that server draft') &&
   conflict.includes('Latest saved draft on the server') && !conflict.includes('<svg'),
-  '409 conflict review must show current, remote draft and escaped local input');
+  '409 conflict review must compare remote and local drafts, disclose replacement and escape input');
 
 const flagRows = [
   { key: 'published', current: { publishedAt: '2026-10-13T10:00:00Z' } },
