@@ -106,4 +106,29 @@ func TestSegmentDependenciesAPIRequiresScopedRead(t *testing.T) {
 	if !result.DraftMatched || result.PublishedMatched != nil || result.PublishedRevision != 0 {
 		t.Fatalf("draft-only sample preview: %+v", result)
 	}
+	historyPath := "/api/v1/admin/workspaces/audiences/environments/prod/segments/staff/history"
+	historyCall := func(secret string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, historyPath, nil)
+		req.Header.Set("Authorization", "Bearer "+secret)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, req)
+		return response
+	}
+	if got := historyCall(outsider.Secret); got.Code != http.StatusForbidden {
+		t.Fatalf("cross-workspace history: %d %s", got.Code, got.Body.String())
+	}
+	historyResponse := historyCall(viewer.Secret)
+	if historyResponse.Code != http.StatusOK {
+		t.Fatalf("viewer history: %d %s", historyResponse.Code, historyResponse.Body.String())
+	}
+	var history struct {
+		CurrentRevision int64 `json:"currentRevision"`
+		Revisions       []any `json:"revisions"`
+	}
+	if err := json.Unmarshal(historyResponse.Body.Bytes(), &history); err != nil {
+		t.Fatal(err)
+	}
+	if history.CurrentRevision != 0 || history.Revisions == nil || len(history.Revisions) != 0 {
+		t.Fatalf("draft-only history: %+v", history)
+	}
 }

@@ -2533,6 +2533,23 @@ paths:
                 $ref: "#/components/schemas/SegmentMatchPreview"
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/history":
+    get:
+      tags: [segments]
+      summary: 查询 Segment 当前生效版本与保留的不可变发布历史
+      operationId: listSegmentHistory
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/SegmentKeyPath"
+      responses:
+        "200":
+          description: 按 revision 降序的保留版本；新分群返回空列表。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentHistory"
+        "403": { $ref: "#/components/responses/Forbidden" }
   "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/emergency-disable":
     post:
       tags: [flags]
@@ -2826,6 +2843,27 @@ components:
                 type: array
                 items: { type: string }
                 description: 从 Flag 直接引用的 Segment 到目标 Segment 的路径。
+    SegmentHistory:
+      type: object
+      required: [currentRevision, revisions]
+      properties:
+        currentRevision: { type: integer, format: int64, description: 当前生效版本；0 表示未发布。 }
+        revisions:
+          type: array
+          description: 保留的不可变发布版本，按 revision 降序排列。
+          items:
+            type: object
+            required: [workspaceId, environmentId, key, revision, content, hash, dataId, publishedAt, publishedBy]
+            properties:
+              workspaceId: { type: string }
+              environmentId: { type: string }
+              key: { type: string }
+              revision: { type: integer, format: int64 }
+              content: { $ref: "#/components/schemas/Segment" }
+              hash: { type: string }
+              dataId: { type: string }
+              publishedAt: { type: string, format: date-time }
+              publishedBy: { type: string }
     SegmentMatchPreview:
       type: object
       required: [draftMatched, publishedRevision]

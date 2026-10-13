@@ -38,7 +38,7 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
 
 const structuredFlag = sandbox.__renderFlagStructured({ type: 'bool',
@@ -62,6 +62,15 @@ const dependencies = sandbox.__renderSegmentDependencies({ segmentRevision: 2,
   flags: [{ key: '<img src=x>', revision: 7, via: ['nested', 'staff'] }] });
 assert(dependencies.includes('nested → staff') && !dependencies.includes('<img') &&
   dependencies.includes('&lt;img'), 'dependency index must show the reference path and escape keys');
+const segmentHistory = sandbox.__renderSegmentHistory({ currentRevision: 2, revisions: [
+  { revision: 2, content: { schemaVersion: 1, constraints: [{ field: 'country', op: 'eq', value: '<img src=x>' }], segments: [] },
+    hash: 'new', publishedAt: '2026-10-13T10:00:00Z', publishedBy: 'owner' },
+  { revision: 1, content: { schemaVersion: 1, constraints: [{ field: 'country', op: 'eq', value: 'CN' }], segments: [] },
+    hash: 'old', publishedAt: '2026-10-12T10:00:00Z', publishedBy: 'owner' },
+] });
+assert(segmentHistory.includes('r1') && segmentHistory.includes('r2') &&
+  segmentHistory.includes('Conditions') && segmentHistory.includes('&lt;img') &&
+  !segmentHistory.includes('<img'), 'Segment history must compare retained versions and escape content');
 assert(sandbox.__renderSegmentMatchForm().includes('seg-match-context') &&
   sandbox.__renderSegmentMatchResult({ draftMatched: true, publishedMatched: false, publishedRevision: 2 })
     .includes('Published Segment r2'), 'sample match preview must show both versions');

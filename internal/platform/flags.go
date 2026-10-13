@@ -698,6 +698,17 @@ func (s *Store) CurrentSegmentRevision(workspaceID, environmentID, key string) i
 	return s.data.CurrentSegmentRev[flagScopeKey(workspaceID, environmentID, key)]
 }
 
+// ListSegmentRevisions returns immutable published revisions newest first.
+func (s *Store) ListSegmentRevisions(workspaceID, environmentID, key string) []*SegmentRevision {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	src := s.data.SegmentRevisions[flagScopeKey(workspaceID, environmentID, key)]
+	out := make([]*SegmentRevision, len(src))
+	copy(out, src)
+	sort.Slice(out, func(i, j int) bool { return out[i].Revision > out[j].Revision })
+	return out
+}
+
 // CurrentSegmentContents returns key → current revision for the manifest.
 func (s *Store) CurrentSegmentContents(workspaceID, environmentID string) map[string]*SegmentRevision {
 	s.mu.RLock()

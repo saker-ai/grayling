@@ -113,6 +113,23 @@ func (s *Service) GetSegmentPreview(actor Actor, workspaceID, environmentID, key
 	return p, nil
 }
 
+// SegmentHistory contains retained published revisions and the revision in force.
+type SegmentHistory struct {
+	CurrentRevision int64                       `json:"currentRevision"`
+	Revisions       []*platform.SegmentRevision `json:"revisions"`
+}
+
+func (s *Service) GetSegmentHistory(actor Actor, workspaceID, environmentID, key string) (*SegmentHistory, error) {
+	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagRead)
+	if err != nil {
+		return nil, err
+	}
+	return &SegmentHistory{
+		CurrentRevision: s.Store.CurrentSegmentRevision(env.WorkspaceID, env.ID, key),
+		Revisions:       s.Store.ListSegmentRevisions(env.WorkspaceID, env.ID, key),
+	}, nil
+}
+
 // SegmentDependencies reports published flags whose active rules reference a
 // segment, including references through other published segments.
 type SegmentDependencies struct {

@@ -75,6 +75,7 @@
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/preview` | 已覆盖 | 分段列表/详情：草稿、预览、审批、发布 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/dependencies` | 已覆盖 | Segment 详情：当前发布 Flag 的直接和嵌套引用 | 管理服务与 API 测试；i18n DOM |
 | `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/match-preview` | 已覆盖 | Segment 详情：样本上下文的草稿与发布版命中对照，无曝光 | 求值器、管理服务和 API 测试；i18n DOM |
+| `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/history` | 已覆盖 | Segment 详情：保留的发布版本、当前生效版本与字段差异 | 管理服务和 API 测试；i18n DOM |
 | `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/emergency-disable` | 已覆盖 | 开关列表/详情：草稿、审批、发布、回滚、删除、导入、紧急禁用 | i18n DOM；API 路由契约 |
 
 ## 横向核对

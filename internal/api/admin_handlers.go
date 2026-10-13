@@ -622,6 +622,15 @@ func (s *Server) handleSegmentDependencies(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) handleSegmentHistory(w http.ResponseWriter, r *http.Request) {
+	result, err := s.Admin.GetSegmentHistory(actorFrom(r), r.PathValue("ws"), r.PathValue("env"), r.PathValue("key"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handleSegmentMatchPreview(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Content *model.Segment          `json:"content"`

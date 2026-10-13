@@ -201,6 +201,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/approve", s.adminOnly(s.handleApproveSegment))
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/preview", s.adminOnly(s.handleSegmentPreview))
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/dependencies", s.adminOnly(s.handleSegmentDependencies))
+	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/history", s.adminOnly(s.handleSegmentHistory))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/match-preview", s.adminOnly(s.handleSegmentMatchPreview))
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/publish", s.adminOnly(s.handlePublishSegment))
 

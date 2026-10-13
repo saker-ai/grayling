@@ -1104,14 +1104,17 @@ async function viewSegmentDetail(m) {
   let preview = null;
   let previewUnavailable = false;
   let dependencies = { segmentRevision: 0, flags: [] };
+  let history = { currentRevision: 0, revisions: [] };
   if (d) {
-    const [previewResult, dependenciesResult] = await Promise.allSettled([
-      api(kp + '/preview'), api(kp + '/dependencies'),
+    const [previewResult, dependenciesResult, historyResult] = await Promise.allSettled([
+      api(kp + '/preview'), api(kp + '/dependencies'), api(kp + '/history'),
     ]);
     if (previewResult.status === 'fulfilled') preview = previewResult.value;
     if (!preview) previewUnavailable = true;
     if (dependenciesResult.status === 'fulfilled') dependencies = dependenciesResult.value;
     else dependencies = null;
+    if (historyResult.status === 'fulfilled') history = historyResult.value;
+    else history = null;
   }
   m.innerHTML =
     '<div class="view-head"><button class="btn sm" id="seg-back">' + esc(t('seg.back')) + '</button>' +
@@ -1134,7 +1137,8 @@ async function viewSegmentDetail(m) {
     '<button class="btn" id="seg-publish"' + (previewUnavailable ? ' disabled' : '') + '>' +
       esc(t('btn.publish')) + '</button></div></section>' +
     (previewUnavailable ? '<div class="banner warn" role="status">' + esc(t('seg.previewUnavailable')) + '</div>' :
-      reviewPreview(preview)) + renderSegmentMatchForm() + renderSegmentDependencies(dependencies);
+      reviewPreview(preview)) + renderSegmentMatchForm() + renderSegmentDependencies(dependencies) +
+      '<div id="seg-history">' + renderSegmentHistory(history) + '</div>';
   $('#seg-json', m).value = JSON.stringify(content, null, 2);
   if (d && d.risk) $('#seg-risk', m).value = d.risk;
   const structured = bindSegmentStructured(m);
@@ -1144,6 +1148,11 @@ async function viewSegmentDetail(m) {
     $('#seg-risk', m).disabled = true;
   }
   $('#seg-back', m).onclick = () => { if (!confirmLeaveEditor()) return; S.segKey = null; route(); };
+  $('#seg-history', m).addEventListener('change', event => {
+    if (event.target.id === 'seg-history-select') {
+      $('#seg-history', m).innerHTML = renderSegmentHistory(history, Number(event.target.value));
+    }
+  });
   m.addEventListener('click', event => {
     const flag = event.target.closest('[data-dependent-flag]');
     if (!flag || !confirmLeaveEditor()) return;

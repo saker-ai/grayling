@@ -49,6 +49,40 @@ function renderSegmentDependencies(data) {
       '<p class="muted">' + esc(t('seg.dependenciesEmpty')) + '</p>') + '</section>';
 }
 
+function renderSegmentHistory(data, compareRevision) {
+  if (!data) return '<div class="banner warn">' + esc(t('seg.historyUnavailable')) + '</div>';
+  const revisions = data.revisions || [];
+  if (!revisions.length) return '<section class="card"><h3>' + esc(t('seg.historyTitle')) +
+    '</h3><p class="muted">' + esc(t('seg.historyEmpty')) + '</p></section>';
+  const current = revisions.find(item => item.revision === data.currentRevision);
+  const previous = revisions.find(item => item.revision !== data.currentRevision);
+  const selected = revisions.find(item => item.revision === compareRevision) || previous || current;
+  const fields = ['schemaVersion', 'constraints', 'segments'];
+  const differences = current && selected ? fields.filter(field =>
+    JSON.stringify(current.content?.[field] ?? null) !== JSON.stringify(selected.content?.[field] ?? null)) : [];
+  return '<section class="card segment-history"><h3>' + esc(t('seg.historyTitle')) + '</h3>' +
+    '<p class="muted">' + esc(t('seg.historyScope', { n: data.currentRevision })) + '</p>' +
+    '<label class="field">' + esc(t('seg.historyCompare')) + '<select id="seg-history-select">' +
+    revisions.map(item => '<option value="' + esc(item.revision) + '"' +
+      (item.revision === selected.revision ? ' selected' : '') + '>r' + esc(item.revision) +
+      ' · ' + esc(fmtTime(item.publishedAt)) + ' · ' + esc(item.publishedBy) + '</option>').join('') +
+    '</select></label>' +
+    (current ? '<p>' + esc(t('seg.historyDiff', { a: selected.revision, b: current.revision })) + '</p>' +
+      (differences.length ? differences.map(field =>
+        '<div class="segment-history-field"><h4>' + esc({ schemaVersion: t('seg.historySchemaVersion'),
+          constraints: t('seg.historyConstraints'), segments: t('seg.historyReferences') }[field]) + '</h4>' +
+        '<div class="flag-diff-values"><div><strong>r' + esc(selected.revision) + '</strong><pre class="pre">' +
+        esc(JSON.stringify(selected.content?.[field] ?? null, null, 2)) + '</pre></div>' +
+        '<div><strong>r' + esc(current.revision) + '</strong><pre class="pre">' +
+        esc(JSON.stringify(current.content?.[field] ?? null, null, 2)) + '</pre></div></div></div>').join('') :
+        '<p class="muted">' + esc(t('seg.historySame')) + '</p>') :
+      '<div class="banner warn">' + esc(t('seg.historyCurrentMissing')) + '</div>') +
+    '<ul class="plain">' + revisions.map(item => '<li>r' + esc(item.revision) +
+      (item.revision === data.currentRevision ? ' · ' + esc(t('seg.historyCurrent')) : '') +
+      ' · ' + esc(fmtTime(item.publishedAt)) + ' · ' + esc(item.publishedBy) +
+      ' · <span class="mono">' + esc(item.hash) + '</span></li>').join('') + '</ul></section>';
+}
+
 function renderSegmentMatchForm() {
   return '<section class="card segment-match"><h3>' + esc(t('seg.matchTitle')) + '</h3>' +
     '<p class="muted">' + esc(t('seg.matchHelp')) + '</p>' +

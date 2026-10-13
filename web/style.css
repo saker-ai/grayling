@@ -214,6 +214,9 @@ table.grid { min-width: 620px; }
 .flag-diff-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
 .flag-diff-values > div { min-width: 0; }
 .flag-diff-values pre { margin: 6px 0 0; }
+.segment-history-field { margin-top: 14px; }
+.segment-history-field h4 { margin: 0; }
+.segment-history .plain { overflow-wrap: anywhere; }
 .modal .flag-diff-values { grid-template-columns: 1fr; }
 .flag-editor-modes { margin-bottom: 12px; }
 .flag-editor-modes [aria-pressed="true"] { background: var(--active); color: var(--active-text); border-color: var(--accent); }
