@@ -88,6 +88,7 @@ def test_collect_dedups_by_event_id(env):
     second = raw_collect(env, [event, dict(event, eventId=event_id + "-x")])
     assert second["accepted"] == 1
     assert second["duplicates"] == 1
+    assert [item["status"] for item in second["results"]] == ["duplicate", "accepted"]
 
 
 def test_collect_rejects_missing_unit_and_bad_epoch(env):
@@ -107,6 +108,18 @@ def test_collect_rejects_missing_unit_and_bad_epoch(env):
     assert res["accepted"] == 0
     assert res["rejected"] == 2
     assert res["rejectMessages"]
+    assert [item["code"] for item in res["results"]] == ["missing_unit", "stale_epoch"]
+
+
+def test_partial_collect_counts_success_and_rejection(env):
+    with make_client(env, exposure_flush_interval=3600) as client:
+        client.track_exposure(env.experiment_id, env.epoch, "py-exp", "control", "partial-ok")
+        client.track_exposure(env.experiment_id, env.epoch + 99, "py-exp", "control", "partial-bad")
+        with pytest.raises(Exception):
+            client.flush()
+        status = client.status()
+        assert status["eventsFlushed"] == 1
+        assert status["eventsDropped"] == 1
 
 
 def test_manual_exposure_reporting(env):

@@ -32,9 +32,14 @@ export class GolabError extends Error {}
 
 class CollectRejected extends GolabError {
   readonly count: number;
-  constructor(count: number, message: string) {
+  readonly accepted: number;
+  readonly results: Array<{ eventId: string; status: string; code?: string }>;
+  constructor(count: number, accepted: number,
+    results: Array<{ eventId: string; status: string; code?: string }>, message: string) {
     super(message);
     this.count = count;
+    this.accepted = accepted;
+    this.results = results;
   }
 }
 
@@ -292,6 +297,7 @@ export class GolabClient {
     } catch (err) {
       if (err instanceof CollectRejected) {
         this.#stats.eventsDropped += err.count;
+        this.#stats.eventsFlushed += err.accepted;
         throw err;
       }
       this.#queue.push(...batch); // keep for the periodic flusher
@@ -466,6 +472,7 @@ export class GolabClient {
     } catch (err) {
       if (err instanceof CollectRejected) {
         this.#stats.eventsDropped += err.count;
+        this.#stats.eventsFlushed += err.accepted;
         this.#stats.lastError = `collect flush: ${String(err)}`;
         this.#opts.onError?.("collect", err);
         return;
@@ -475,6 +482,7 @@ export class GolabClient {
         await this.#postEvents(batch);
       } catch (err) {
         this.#stats.eventsDropped += err instanceof CollectRejected ? err.count : batch.length;
+        if (err instanceof CollectRejected) this.#stats.eventsFlushed += err.accepted;
         this.#stats.lastError = `collect flush: ${String(err)}`;
         this.#opts.onError?.("collect", err);
         return;
@@ -487,12 +495,20 @@ export class GolabClient {
     const result = await this.#http<Record<string, unknown>>(
       "POST", "/api/v1/collect", this.#opts.collectToken!, { events: batch });
     const rejected = Number(result.rejected ?? 0);
-    if (rejected > 0) {
-      throw new CollectRejected(rejected,
-        `collect rejected ${rejected} events: ${String(result.rejectMessages ?? "")}`);
-    }
-    if (Number(result.accepted ?? 0) + Number(result.duplicates ?? 0) !== batch.length) {
+    const accepted = Number(result.accepted ?? 0) + Number(result.duplicates ?? 0);
+    if (accepted + rejected !== batch.length) {
       throw new GolabError("collect response did not acknowledge every event");
+    }
+    const outcomes = Array.isArray(result.results) ? result.results as Array<{
+      eventId: string; status: string; code?: string;
+    }> : [];
+    if (outcomes.length > 0 && (outcomes.length !== batch.length || outcomes.some(
+      (item, index) => item.eventId !== batch[index].eventId))) {
+      throw new GolabError("collect response has misaligned event results");
+    }
+    if (rejected > 0) {
+      throw new CollectRejected(rejected, accepted, outcomes,
+        `collect rejected ${rejected} events: ${String(result.rejectMessages ?? "")}`);
     }
   }
 

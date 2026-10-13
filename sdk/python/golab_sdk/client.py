@@ -48,9 +48,11 @@ class GolabError(Exception):
 
 
 class _CollectRejected(GolabError):
-    def __init__(self, count: int, message: str) -> None:
+    def __init__(self, count: int, accepted: int, results: list[dict[str, Any]], message: str) -> None:
         super().__init__(message)
         self.count = count
+        self.accepted = accepted
+        self.results = results
 
 
 @dataclass
@@ -321,6 +323,7 @@ class GolabClient:
             except _CollectRejected as exc:
                 with self._lock:
                     self._stats.events_dropped += exc.count
+                    self._stats.events_flushed += exc.accepted
                 raise
             except Exception:
                 if time.monotonic() >= deadline:
@@ -514,6 +517,7 @@ class GolabClient:
         except _CollectRejected as exc:
             with self._lock:
                 self._stats.events_dropped += exc.count
+                self._stats.events_flushed += exc.accepted
                 self._stats.last_error = f"collect flush: {exc}"
             if self._opts.on_error:
                 self._opts.on_error("collect", exc)
@@ -528,6 +532,8 @@ class GolabClient:
                 with self._lock:
                     self._stats.events_dropped += (exc.count if isinstance(exc, _CollectRejected)
                                                    else len(batch))
+                    if isinstance(exc, _CollectRejected):
+                        self._stats.events_flushed += exc.accepted
                     self._stats.last_error = f"collect flush: {exc}"
                 if self._opts.on_error:
                     self._opts.on_error("collect", exc)
@@ -560,11 +566,17 @@ class GolabClient:
                                  token=self._opts.collect_token,
                                  payload={"events": batch})
         rejected = int(result.get("rejected", 0))
-        if rejected:
-            raise _CollectRejected(rejected, f"collect rejected {rejected} events: "
-                                   f"{result.get('rejectMessages', [])}")
-        if int(result.get("accepted", 0)) + int(result.get("duplicates", 0)) != len(batch):
+        accepted = int(result.get("accepted", 0)) + int(result.get("duplicates", 0))
+        if accepted + rejected != len(batch):
             raise GolabError("collect response did not acknowledge every event")
+        outcomes = result.get("results") or []
+        if outcomes and (len(outcomes) != len(batch) or any(
+                item.get("eventId") != event.get("eventId")
+                for item, event in zip(outcomes, batch))):
+            raise GolabError("collect response has misaligned event results")
+        if rejected:
+            raise _CollectRejected(rejected, accepted, outcomes, f"collect rejected {rejected} events: "
+                                   f"{result.get('rejectMessages', [])}")
         return result
 
     def _http_json(self, method: str, path: str, *, token: str,

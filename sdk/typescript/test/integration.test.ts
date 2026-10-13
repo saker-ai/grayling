@@ -322,6 +322,8 @@ test("collect contract: dedup by eventId, unit required, epoch mismatch rejected
   const second = await collect([event, { ...event, eventId: `${eventId}-x` }]);
   assert.equal(second.accepted, 1);
   assert.equal(second.duplicates, 1);
+  assert.deepEqual(second.results.map((item: { status: string }) => item.status),
+    ["duplicate", "accepted"]);
 
   const rejected = await collect([
     { ...event, eventId: `${eventId}-nounit`, unit: "" },
@@ -330,10 +332,23 @@ test("collect contract: dedup by eventId, unit required, epoch mismatch rejected
   assert.equal(rejected.accepted, 0);
   assert.equal(rejected.rejected, 2);
   assert.ok(rejected.rejectMessages?.length > 0);
+  assert.deepEqual(rejected.results.map((item: { code: string }) => item.code),
+    ["missing_unit", "stale_epoch"]);
 
   // The SDK token is the wrong audience for /collect (403).
   const wrong = await env.server.request("POST", "/api/v1/collect", env.sdkToken, { events: [] });
   assert.equal(wrong.status, 403);
+});
+
+test("partial collect counts successful and rejected events", async () => {
+  const client = makeClient({ exposureFlushIntervalMs: 3_600_000 });
+  try {
+    client.trackExposure(env.experimentId, env.epoch, "ts-exp", "control", "partial-ok");
+    client.trackExposure(env.experimentId, env.epoch + 99, "ts-exp", "control", "partial-bad");
+    await assert.rejects(client.flush(), GolabError);
+    assert.equal(client.status().eventsFlushed, 1);
+    assert.equal(client.status().eventsDropped, 1);
+  } finally { await client.close(); }
 });
 
 test("manual exposure reporting via collect contract", async () => {
