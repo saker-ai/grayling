@@ -143,6 +143,8 @@ function errMsg(e) {
   if (e.status === 403) return t('err.denied403');
   if (e.status === 409) return t('err.conflict409');
   if (e.status === 429) return t('err.limited429');
+  if (e.code === 'network') return t('err.networkRetry');
+  if (e.status >= 500 && e.status !== 501) return t('err.server5xx', { status: e.status });
   let m = '[' + (e.code || 'error') + '] ' + (e.message || e);
   if (e.status === 423) m += t('err.revoked423');
   if (e.status === 501) m += t('err.notEnabled501');
@@ -340,7 +342,8 @@ function promptForm(title, fields, submitLabel, onSubmit) {
   };
 }
 
-function actionDialog({ title, summary, preview = '', reasonLabel = '', reasonRequired = true, confirmLabel = '' }) {
+function actionDialog({ title, summary, preview = '', reasonLabel = '', reasonRequired = true,
+  confirmLabel = '', onConfirm = null }) {
   return new Promise(resolve => {
     const ov = document.createElement('div');
     const previousFocus = document.activeElement;
@@ -348,22 +351,42 @@ function actionDialog({ title, summary, preview = '', reasonLabel = '', reasonRe
     ov.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="action-title" aria-describedby="action-summary">' +
       '<h3 id="action-title">' + esc(title) + '</h3><p id="action-summary">' + esc(summary) + '</p>' + preview +
       (reasonLabel ? '<label class="field">' + esc(reasonLabel) + '<textarea id="action-reason" rows="3"' + (reasonRequired ? ' required' : '') + '></textarea></label>' : '') +
+      '<div id="action-feedback" role="alert"></div>' +
       '<div class="modal-foot"><button class="btn" id="action-cancel" type="button">' + esc(t('btn.cancel')) + '</button>' +
       '<button class="btn danger" id="action-confirm" type="button">' + esc(confirmLabel || t('btn.ok')) + '</button></div></div>';
-    const finish = value => { ov.remove(); previousFocus?.focus?.(); resolve(value); };
-    $('#action-cancel', ov).onclick = () => finish(null);
-    ov.addEventListener('click', ev => { if (ev.target === ov) finish(null); });
+    let busy = false;
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      ov.remove(); previousFocus?.focus?.(); resolve(value);
+    };
+    $('#action-cancel', ov).onclick = () => { if (!busy) finish(null); };
+    ov.addEventListener('click', ev => { if (ev.target === ov && !busy) finish(null); });
     ov.addEventListener('keydown', ev => {
-      if (ev.key === 'Escape') { ev.preventDefault(); finish(null); }
+      if (ev.key === 'Escape') { ev.preventDefault(); if (!busy) finish(null); }
       if (ev.key === 'Tab') {
         const controls = $$('summary, textarea, button', ov);
         if (ev.shiftKey && document.activeElement === controls[0]) { ev.preventDefault(); controls.at(-1).focus(); }
         else if (!ev.shiftKey && document.activeElement === controls.at(-1)) { ev.preventDefault(); controls[0].focus(); }
       }
     });
-    $('#action-confirm', ov).onclick = () => {
+    $('#action-confirm', ov).onclick = async () => {
       const reason = $('#action-reason', ov)?.value.trim() || '';
       if (reasonLabel && reasonRequired && !reason) { $('#action-reason', ov).focus(); return; }
+      if (onConfirm) {
+        const button = $('#action-confirm', ov);
+        busy = true;
+        button.disabled = true;
+        try { await onConfirm({ reason }); }
+        catch (e) {
+          if (e.status === 401) { finish(null); return; }
+          $('#action-feedback', ov).textContent = errMsg(e);
+          button.disabled = false;
+          busy = false;
+          return;
+        }
+      }
       finish({ reason });
     };
     document.body.appendChild(ov);
@@ -1038,12 +1061,14 @@ function bindFlagDetail(m, key, kp, f) {
       });
   };
   $('#flag-publish', m).onclick = async () => {
-    const approval = await actionDialog({ title: t('btn.publish'), summary: t('action.flagSummary', { key }),
+    if (!confirmLeaveEditor()) return;
+    const accepted = await actionDialog({ title: t('btn.publish'), summary: t('action.flagSummary', { key }),
       preview: reviewPreview(f?.preview, 'action-review-preview') + renderFlagDiff(f?.current, f?.draft),
-      reasonLabel: t('prompt.publishNote'), confirmLabel: t('btn.publish') });
-    if (!approval) return;
-    run(() => api(kp + '/publish', { method: 'POST', body: { note: approval.reason } }),
-      r => t('toast.published', { flag: r && r.flagRevision, manifest: r && r.manifestRevision }));
+      reasonLabel: t('prompt.publishNote'), confirmLabel: t('btn.publish'), onConfirm: async ({ reason }) => {
+        const result = await api(kp + '/publish', { method: 'POST', body: { note: reason } });
+        toast(t('toast.published', { flag: result?.flagRevision, manifest: result?.manifestRevision }));
+      } });
+    if (accepted) route();
   };
   $('#flag-delete', m).onclick = async () => {
     const approval = await actionDialog({ title: t('btn.markDeleted'), summary: t('confirm.markDeleted', { key }), confirmLabel: t('btn.markDeleted') });
@@ -1259,10 +1284,14 @@ async function viewSegmentDetail(m) {
   };
   $('#seg-approve', m).onclick = () => run(() => api(kp + '/approve', { method: 'POST', body: {} }), t('toast.segApproved'));
   $('#seg-publish', m).onclick = async () => {
-    const approval = await actionDialog({ title: t('btn.publish'), summary: t('action.flagSummary', { key }),
-      preview: reviewPreview(preview, 'action-review-preview'), reasonLabel: t('prompt.publishNote'), confirmLabel: t('btn.publish') });
-    if (!approval) return;
-    run(() => api(kp + '/publish', { method: 'POST', body: { note: approval.reason } }), t('toast.segPublished'));
+    if (!confirmLeaveEditor()) return;
+    const accepted = await actionDialog({ title: t('btn.publish'), summary: t('action.flagSummary', { key }),
+      preview: reviewPreview(preview, 'action-review-preview'), reasonLabel: t('prompt.publishNote'),
+      confirmLabel: t('btn.publish'), onConfirm: async ({ reason }) => {
+        await api(kp + '/publish', { method: 'POST', body: { note: reason } });
+        toast(t('toast.segPublished'));
+      } });
+    if (accepted) route();
   };
   return Promise.resolve();
 }
@@ -1853,7 +1882,7 @@ async function viewExpDetail(m) {
     failures = 0;
     if (autoRefresh) poll();
   };
-  bindRollout(m, id);
+  bindRollout(m, id, e);
 }
 
 function metricReferenceSummary(r) {
@@ -2245,9 +2274,9 @@ function renderRollout(exp) {
     renderRolloutHistory(plan) +
     '<div class="row actions">' +
       '<button class="btn sm" id="ro-refresh">' + esc(t('btn.refresh')) + '</button>' +
-      (plan.state === 'armed' || plan.state === 'running' ? '<button class="btn" id="ro-pause">' + esc(t('btn.pause')) + '</button>' : '') +
+      (plan.state === 'armed' || plan.state === 'running' ? '<button class="btn danger" id="ro-pause">' + esc(t('btn.pause')) + '</button>' : '') +
       (plan.state === 'paused' ? '<button class="btn primary" id="ro-resume">' + esc(t('btn.resume')) + '</button>' : '') +
-      (plan.state === 'running' ? '<button class="btn" id="ro-advance">' + esc(t('btn.advance')) + '</button>' : '') +
+      (plan.state === 'running' ? '<button class="btn danger" id="ro-advance">' + esc(t('btn.advance')) + '</button>' : '') +
       (active
         ? (plan.manualOverride
           ? '<button class="btn" id="ro-takeover-off">' + esc(t('btn.takeoverOff')) + '</button>'
@@ -2273,8 +2302,34 @@ function rolloutStepRow() {
 
 // bindRollout wires the rendered rollout card. State-conditional buttons are
 // guarded (they exist only in the states where the action is legal server-side).
-function bindRollout(m, expId) {
+function bindRollout(m, expId, exp = null) {
   const base = '/api/v1/admin/experiments/' + encodeURIComponent(expId) + '/release-plan';
+  const plan = exp?.releasePlan;
+  const decide = async ({ title, summary, reasonLabel = '', reasonRequired = true,
+    confirmLabel, path, body, success }) => {
+    if (!confirmLeaveEditor()) return;
+    let latest;
+    try { latest = await api('/api/v1/admin/experiments/' + encodeURIComponent(expId)); }
+    catch (e) { reportError(e); return; }
+    const current = latest?.releasePlan;
+    if (!current || (plan && (current.state !== plan.state || current.currentStep !== plan.currentStep ||
+      current.manualOverride !== plan.manualOverride || current.stepStartedAt !== plan.stepStartedAt))) {
+      toast(t('ro.planChanged'), false);
+      route();
+      return;
+    }
+    const step = current.steps?.[current.currentStep];
+    const scope = t('ro.actionScope', { id: expId, env: S.env || '—',
+      step: step?.name || '—', ratio: step?.ratio ?? '—' });
+    const accepted = await actionDialog({ title, summary: scope + ' ' + summary,
+      reasonLabel, reasonRequired, confirmLabel, onConfirm: async ({ reason }) => {
+        const options = { method: 'POST' };
+        if (body) options.body = body(reason);
+        await api(base + path, options);
+        toast(t(success));
+      } });
+    if (accepted) route();
+  };
 
   const refresh = $('#ro-refresh', m);
   if (refresh) refresh.onclick = async () => {
@@ -2283,47 +2338,33 @@ function bindRollout(m, expId) {
       const e2 = await api('/api/v1/admin/experiments/' + encodeURIComponent(expId));
       if (!box) return;
       box.innerHTML = renderRollout(e2);
-      bindRollout(m, expId);
+      bindRollout(m, expId, e2);
     } catch (err) { if (box) box.innerHTML = errBanner(err); }
   };
 
   const pause = $('#ro-pause', m);
-  if (pause) pause.onclick = () => {
-    if (!confirm(t('confirm.pause'))) return;
-    const reason = prompt(t('prompt.pauseReason'), '');
-    if (!reason) { toast(t('toast.reasonRequired'), false); return; }
-    run(() => api(base + '/pause', { method: 'POST', body: { reason } }), t('toast.planPaused'));
-  };
+  if (pause) pause.onclick = () => decide({ title: t('btn.pause'), summary: t('confirm.pause'),
+    reasonLabel: t('prompt.pauseReason'), confirmLabel: t('btn.pause'),
+    path: '/pause', body: reason => ({ reason }), success: 'toast.planPaused' });
 
   const resume = $('#ro-resume', m);
-  if (resume) resume.onclick = () => {
-    if (!confirm(t('confirm.resume'))) return;
-    run(() => api(base + '/resume', { method: 'POST' }), t('toast.planResumed'));
-  };
+  if (resume) resume.onclick = () => decide({ title: t('btn.resume'), summary: t('confirm.resume'),
+    confirmLabel: t('btn.resume'), path: '/resume', success: 'toast.planResumed' });
 
   const adv = $('#ro-advance', m);
-  if (adv) adv.onclick = () => {
-    if (!confirm(t('confirm.advance'))) return;
-    const reason = prompt(t('prompt.advanceReason'), '') || '';
-    run(() => api(base + '/advance', { method: 'POST', body: { reason } }), t('toast.planAdvanced'));
-  };
+  if (adv) adv.onclick = () => decide({ title: t('btn.advance'), summary: t('confirm.advance'),
+    reasonLabel: t('prompt.advanceReason'), reasonRequired: false, confirmLabel: t('btn.advance'),
+    path: '/advance', body: reason => ({ reason }), success: 'toast.planAdvanced' });
 
   const tkOn = $('#ro-takeover-on', m);
-  if (tkOn) tkOn.onclick = () => {
-    if (!confirm(t('confirm.takeoverOn'))) return;
-    const reason = prompt(t('prompt.takeoverReason'), '');
-    if (!reason) { toast(t('toast.reasonRequired'), false); return; }
-    run(() => api(base + '/takeover', { method: 'POST', body: { enabled: true, reason } }),
-      t('toast.takeoverOn'));
-  };
+  if (tkOn) tkOn.onclick = () => decide({ title: t('btn.takeoverOn'), summary: t('confirm.takeoverOn'),
+    reasonLabel: t('prompt.takeoverReason'), confirmLabel: t('btn.takeoverOn'),
+    path: '/takeover', body: reason => ({ enabled: true, reason }), success: 'toast.takeoverOn' });
 
   const tkOff = $('#ro-takeover-off', m);
-  if (tkOff) tkOff.onclick = () => {
-    if (!confirm(t('confirm.takeoverOff'))) return;
-    const reason = prompt(t('prompt.reasonOptional'), '') || '';
-    run(() => api(base + '/takeover', { method: 'POST', body: { enabled: false, reason } }),
-      t('toast.takeoverOff'));
-  };
+  if (tkOff) tkOff.onclick = () => decide({ title: t('btn.takeoverOff'), summary: t('confirm.takeoverOff'),
+    reasonLabel: t('prompt.reasonOptional'), reasonRequired: false, confirmLabel: t('btn.takeoverOff'),
+    path: '/takeover', body: reason => ({ enabled: false, reason }), success: 'toast.takeoverOff' });
 
   const editor = $('#ro-steps-editor', m);
   const addStep = $('#ro-add-step', m);

@@ -6,9 +6,8 @@
 // markup with the real bindRollout() against a mock root whose querySelector
 // answers ONLY IDs present in the rendered HTML — an unguarded binding to a
 // missing ID throws and fails the contract (same drift protection as
-// render_contract.mjs). Operator actions are click-simulated against recording
-// confirm/prompt/fetch stubs to verify the two-step confirmation (confirm +
-// reason, the flag-rollback style) and the exact path/body of every mutation.
+// render_contract.mjs). Operator actions use a recording dialog stub to verify
+// scope, required reasons, cancellation and the exact request body.
 // Run via `go test ./web/` (which shells to node) or `node web/rollout_contract.mjs`.
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -34,6 +33,7 @@ const el = () => ({
 });
 
 const fetchCalls = [];
+let currentExperiment = null;
 const sandbox = {
   document: {
     addEventListener() {}, createElement: el,
@@ -51,6 +51,10 @@ const sandbox = {
   // No-op timers keep the harness process from lingering on toast fade-outs.
   setInterval: () => 0, clearInterval() {}, setTimeout: () => 0, clearTimeout() {},
   fetch(url, opts) {
+    if (opts.method === 'GET' && url === '/api/v1/admin/experiments/exp-1') {
+      return Promise.resolve({ ok: true, status: 200,
+        text: () => Promise.resolve(JSON.stringify(currentExperiment)) });
+    }
     fetchCalls.push({ url, opts });
     return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('{}') });
   },
@@ -67,6 +71,16 @@ vm.runInNewContext(
 assert.strictEqual(typeof sandbox.__renderRollout, 'function', 'renderRollout() not exposed from app.js');
 assert.strictEqual(typeof sandbox.__bindRollout, 'function', 'bindRollout() not exposed from app.js');
 assert.strictEqual(typeof sandbox.__planNextGate, 'function', 'planNextGate() not exposed from app.js');
+vm.runInNewContext("S.env = 'prod'", sandbox);
+const dialogs = [];
+sandbox.actionDialog = async options => {
+  dialogs.push(options);
+  if (sandbox.__confirm === false) return null;
+  const reason = sandbox.__prompt || '';
+  if (options.reasonLabel && options.reasonRequired !== false && !reason) return null;
+  await options.onConfirm({ reason });
+  return { reason };
+};
 
 const render = exp => {
   const html = sandbox.__renderRollout(exp);
@@ -98,9 +112,10 @@ function makeRoot(html) {
 // renderState renders + binds one plan state; binding throws when a bound ID
 // is missing from the markup.
 function renderState(exp) {
+  currentExperiment = exp;
   const html = render(exp);
   const root = makeRoot(html);
-  sandbox.__bindRollout(root, 'exp-1');
+  sandbox.__bindRollout(root, 'exp-1', exp);
   return { html, root };
 }
 const bound = (root, id) => {
@@ -286,6 +301,9 @@ const withPlan = over => ({ id: 'exp-1', state: 'running', releasePlan: { ...bas
   assert.strictEqual(fetchCalls[0].url, '/api/v1/admin/experiments/exp-1/release-plan/takeover');
   assert.strictEqual(fetchCalls[0].opts.method, 'POST');
   assert.deepStrictEqual(JSON.parse(fetchCalls[0].opts.body), { enabled: true, reason: 'incident INC-42' });
+  assert(dialogs.at(-1).summary.includes('environment prod') &&
+    dialogs.at(-1).summary.includes('ramp-25') && dialogs.at(-1).summary.includes('25%'),
+  'takeover confirmation must identify environment and current rollout step');
 }
 
 // 10. pause / advance on a running plan.
@@ -336,4 +354,17 @@ const withPlan = over => ({ id: 'exp-1', state: 'running', releasePlan: { ...bas
   assert.deepStrictEqual(JSON.parse(fetchCalls[0].opts.body), { enabled: false, reason: 'incident closed' });
 }
 
-console.log('rollout UI DOM contract: all assertions passed (8 plan states + 4 action flows)');
+// 13. A plan that advanced after rendering must be refreshed before an
+// operator can confirm a mutation against the now-stale step.
+{
+  const { root } = renderState(withPlan());
+  currentExperiment = withPlan({ currentStep: 2 });
+  const before = dialogs.length;
+  fetchCalls.length = 0;
+  root._stubs.get('ro-advance').onclick();
+  await tick();
+  assert.strictEqual(dialogs.length, before, 'stale step must not open confirmation');
+  assert.strictEqual(fetchCalls.length, 0, 'stale step must not POST a mutation');
+}
+
+console.log('rollout UI DOM contract: all assertions passed (8 plan states + 5 action flows)');
