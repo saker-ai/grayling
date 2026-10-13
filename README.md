@@ -93,8 +93,9 @@ make license-check
 | Embedding in Go | [Embedding guide](docs/embedding.md) |
 | Storage | [JSON, SQLite, and PostgreSQL](docs/storage.md) |
 | External Nacos | [Setup and limitations](docs/external-nacos.md) |
-| Growth experiments | [Scope](docs/增长实验规划.md) · [Implementation plan](docs/增长实验实施方案.md) (Chinese) |
-| Admin console redesign | [Product and UI/UX implementation plan](docs/Web控制台重设计实施方案.md) (Chinese) |
+| Product and console roadmap | [Complete implementation plan](docs/产品与Web体验完整实施方案.md) (Chinese) |
+| Growth experiments | [Scope](docs/增长实验规划.md) · [Domain implementation plan](docs/增长实验实施方案.md) (Chinese) |
+| Admin console redesign | [UI/UX plan](docs/Web控制台重设计实施方案.md) · [Page specifications](docs/Web控制台页面规格与交付清单.md) (Chinese) |
 | Security | [Threat model](docs/threat-model.md) · [Vulnerability reporting](SECURITY.md) |
 | Design and verification | [Technical design](docs/技术方案.md) · [Implementation record](docs/实施状态.md) |
 

@@ -93,8 +93,9 @@ make license-check
 | 嵌入 Go 服务 | [嵌入指南](docs/embedding.md) |
 | 存储 | [JSON、SQLite 与 PostgreSQL](docs/storage.md) |
 | 外部 Nacos | [配置与限制](docs/external-nacos.md) |
-| 增长实验 | [能力边界与实施规划](docs/增长实验规划.md) · [完整实施方案](docs/增长实验实施方案.md) |
-| Web 控制台重设计 | [产品与 UI/UX 实施方案](docs/Web控制台重设计实施方案.md) |
+| 产品与控制台路线图 | [完整实施方案](docs/产品与Web体验完整实施方案.md) |
+| 增长实验 | [能力边界与实施规划](docs/增长实验规划.md) · [领域实施方案](docs/增长实验实施方案.md) |
+| Web 控制台重设计 | [UI/UX 实施方案](docs/Web控制台重设计实施方案.md) · [逐页交付规格](docs/Web控制台页面规格与交付清单.md) |
 | 安全 | [威胁模型](docs/threat-model.md) · [漏洞报告](SECURITY.md) |
 | 设计和验证 | [技术方案](docs/技术方案.md) · [实施记录](docs/实施状态.md) |
 
