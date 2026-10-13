@@ -151,6 +151,11 @@ func buildAnalysisStore(events []*Event, window AnalysisWindowStatus) *Store {
 	exposures := make(map[unitKey]time.Time)
 	splitExposures := make(map[unitKey]time.Time)
 	for _, ev := range events {
+		if ev.Type == EventAssignment && ev.ClientTime.Before(window.End) {
+			view.appendEventLocked(ev)
+		}
+	}
+	for _, ev := range events {
 		if ev.Type != EventExposure || ev.ClientTime.Before(window.Start) || !ev.ClientTime.Before(window.End) {
 			continue
 		}

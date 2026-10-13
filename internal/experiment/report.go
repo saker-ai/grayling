@@ -32,6 +32,8 @@ type Report struct {
 	State        model.ExperimentState         `json:"state"`
 	GeneratedAt  time.Time                     `json:"generatedAt"`
 	Window       platform.AnalysisWindowStatus `json:"window"`
+	ExposureMode string                        `json:"exposureMode,omitempty"`
+	Diagnostics  *Diagnostics                  `json:"diagnostics,omitempty"`
 
 	AnalysisMethod string  `json:"analysisMethod"`
 	Alpha          float64 `json:"alpha"`
@@ -184,10 +186,16 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	rep := &Report{
 		ExperimentID: exp.ID, Epoch: exp.Epoch, FlagKey: exp.FlagKey,
 		State: exp.State, GeneratedAt: now.UTC(),
+		ExposureMode:   exp.ExposureMode,
 		AnalysisMethod: exp.AnalysisMethod, Alpha: exp.Alpha, MDE: exp.MDE,
 		Control: control, Treatment: treatment, Window: window,
 		RegistrationVersion: exp.RegistrationVersion,
 		PrimaryMetricRef:    exp.PrimaryMetricRef,
+	}
+	if exp.ExposureMode == "onRender" {
+		rep.Diagnostics = buildDiagnostics(exp, analysis.EventsForExperiment(exp.WorkspaceID,
+			exp.EnvironmentID, exp.ID, exp.Epoch, ""), window, now)
+		rep.HealthIssues = append(rep.HealthIssues, rep.Diagnostics.Issues...)
 	}
 	for _, guard := range exp.Guardrails {
 		if guard.MetricRef != nil {
@@ -359,9 +367,13 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	} else {
 		rep.SRM = &srm
 		if !srm.Healthy {
+			pipeline := "assignment pipeline"
+			if exp.ExposureMode == "onRender" {
+				pipeline = "delivery pipeline"
+			}
 			rep.HealthIssues = append(rep.HealthIssues, fmt.Sprintf(
-				"SRM alarm: observed %v vs expected %v (p=%.2g) — assignment pipeline suspect",
-				observed, expected, srm.PValue))
+				"SRM alarm: observed %v vs expected %v (p=%.2g) — %s suspect",
+				observed, expected, srm.PValue, pipeline))
 		}
 	}
 

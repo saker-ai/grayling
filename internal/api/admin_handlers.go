@@ -730,6 +730,25 @@ func (s *Server) handleExperimentReport(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, rep)
 }
 
+func (s *Server) handleExperimentDiagnostics(w http.ResponseWriter, r *http.Request) {
+	actor := actorFrom(r)
+	exp, err := s.Admin.GetExperiment(actor, r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := admin.Authorize(actor, exp.WorkspaceID, admin.PermReportRead); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	diagnostics, err := experiment.BuildDiagnostics(s.Store, exp.ID, time.Now())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, diagnostics)
+}
+
 // ---------------------------------------------------------------------------
 // Debug
 // ---------------------------------------------------------------------------

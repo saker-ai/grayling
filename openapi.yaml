@@ -1411,6 +1411,31 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/Internal"
+  "/api/v1/admin/experiments/{id}/diagnostics":
+    get:
+      tags: [experiments]
+      summary: 实验分配、触达与采集质量诊断
+      description: 返回聚合计数和独立的分配/曝光 SRM，不包含单元标识或决策 ID。
+      operationId: getExperimentDiagnostics
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+      responses:
+        "200":
+          description: 当前 epoch 的聚合诊断。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExperimentDiagnostics"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
   "/api/v1/admin/experiments/{id}/release-plan":
     post:
       tags: [release-plans]
@@ -3937,6 +3962,13 @@ components:
         generatedAt:
           type: string
           format: date-time
+        window:
+          $ref: "#/components/schemas/AnalysisWindowStatus"
+        exposureMode:
+          type: string
+          enum: [onDecision, onRender]
+        diagnostics:
+          $ref: "#/components/schemas/ExperimentDiagnostics"
         analysisMethod:
           type: string
           enum: [welch, two-proportion-z, ratio-delta, quantile, cuped, bandit-beta-bernoulli]
@@ -3999,6 +4031,57 @@ components:
           items: {$ref: "#/components/schemas/MetricRef"}
         holm:
           $ref: "#/components/schemas/HolmSection"
+    AnalysisWindowStatus:
+      type: object
+      required: [version, start, end, watermark, complete, backend, recomputable]
+      properties:
+        version: {type: string}
+        start: {type: string, format: date-time}
+        end: {type: string, format: date-time}
+        watermark: {type: string, format: date-time}
+        complete: {type: boolean}
+        backend: {type: string}
+        recomputable: {type: boolean}
+        issues:
+          type: array
+          items: {type: string}
+    ExperimentFlowVariant:
+      type: object
+      required: [variant, assignments, randomizedAssignments, exposures, randomizedExposures, unexposed, conversions, duplicateExposures]
+      properties:
+        variant: {type: string}
+        assignments: {type: integer, format: int64}
+        randomizedAssignments: {type: integer, format: int64}
+        exposures: {type: integer, format: int64}
+        randomizedExposures: {type: integer, format: int64}
+        unexposed: {type: integer, format: int64}
+        conversions: {type: integer, format: int64}
+        duplicateExposures: {type: integer, format: int64}
+    ExperimentDiagnostics:
+      type: object
+      description: >-
+        当前分析窗口内的聚合流量诊断。onDecision 的历史实验可能没有单独的
+        assignment 事实；SRM 仅在各变体期望计数达到 5 时计算。
+        issues 中的异常阻止 onRender 报告自动推进。拒收原因计数需后续持久化采集结果，
+        本接口当前不返回未经核验的拒收数。
+      required: [experimentId, epoch, exposureMode, generatedAt, window, perVariant, crossVariantUnits, assignmentMismatch]
+      properties:
+        experimentId: {type: string}
+        epoch: {type: integer, format: int64}
+        exposureMode: {type: string, enum: [onDecision, onRender]}
+        generatedAt: {type: string, format: date-time}
+        window: {$ref: "#/components/schemas/AnalysisWindowStatus"}
+        perVariant:
+          type: array
+          items: {$ref: "#/components/schemas/ExperimentFlowVariant"}
+        assignmentSrm: {$ref: "#/components/schemas/SRMResult"}
+        exposureSrm: {$ref: "#/components/schemas/SRMResult"}
+        crossVariantUnits: {type: integer, format: int64}
+        assignmentMismatch: {type: integer, format: int64}
+        lastCollectedAt: {type: string, format: date-time}
+        issues:
+          type: array
+          items: {type: string}
     HolmComparison:
       type: object
       required: [id, metric, control, treatment, rawP, adjustedP, effectiveAlpha, rank, rejected, diff, directedDiff, ciLow, ciHigh]
