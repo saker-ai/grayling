@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Handler serves the embedded console and delegates /api/ requests to api.
+// Handler serves the embedded console and delegates API requests to api.
 // Unknown non-API paths fall back to index.html for client-side routes.
 func Handler(api http.Handler) http.Handler {
 	assets, err := fs.Sub(Assets, ".")
@@ -24,7 +24,7 @@ func Handler(api http.Handler) http.Handler {
 		_, _ = w.Write(indexHTML)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") {
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/v1/") {
 			api.ServeHTTP(w, r)
 			return
 		}

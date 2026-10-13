@@ -27,11 +27,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/godeps/gonacos/pkg/server"
 	golabapp "github.com/saker-ai/grayling"
 	"github.com/saker-ai/grayling/internal/configstore"
 	"github.com/saker-ai/grayling/internal/platform"
 	"github.com/saker-ai/grayling/internal/recovery"
-	"github.com/godeps/gonacos/pkg/server"
 )
 
 func main() {
@@ -45,6 +45,10 @@ func main() {
 		gonacosAddr           = flag.String("gonacos-addr", "127.0.0.1:18848", "gonacos HTTP bind — KEEP LOOPBACK/PRIVATE (§9)")
 		gonacosGRPC           = flag.String("gonacos-grpc-addr", "127.0.0.1:19848", "gonacos gRPC bind — KEEP LOOPBACK/PRIVATE (§9)")
 		nacosURL              = flag.String("nacos-url", "", "external Nacos 3 HTTP origin; empty uses embedded gonacos")
+		openAIUpstreamURL     = flag.String("openai-upstream-url", "", "OpenAI-compatible upstream base URL ending in /v1; enables POST /v1/chat/completions")
+		openAIWorkspace       = flag.String("openai-workspace", "", "fixed workspace for OpenAI-compatible chat")
+		openAIEnvironment     = flag.String("openai-environment", "", "fixed environment for OpenAI-compatible chat")
+		openAIFlagKey         = flag.String("openai-flag-key", "", "published JSON flag governing OpenAI-compatible chat (default: openai-chat)")
 		nativeConfigAuth      = flag.Bool("nacos-native-auth", false, "enable SDK-token-scoped native Nacos config reads; HTTP exposes only SDK login")
 		redisAddr             = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
 		authSecret            = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
@@ -140,7 +144,10 @@ func main() {
 			DataFile: *dataFile, SQLitePath: *sqlitePath, PostgresDSN: *pgDSN,
 			NacosURL: *nacosURL, NacosUsername: os.Getenv("GOLAB_NACOS_USERNAME"),
 			NacosPassword: os.Getenv("GOLAB_NACOS_PASSWORD"), NacosToken: os.Getenv("GOLAB_NACOS_TOKEN"),
-			GonacosAddr: *gonacosAddr, GonacosGRPCAddr: *gonacosGRPC,
+			OpenAIUpstreamURL: *openAIUpstreamURL,
+			OpenAIWorkspace:   *openAIWorkspace, OpenAIEnvironment: *openAIEnvironment,
+			OpenAIFlagKey: *openAIFlagKey,
+			GonacosAddr:   *gonacosAddr, GonacosGRPCAddr: *gonacosGRPC,
 			GonacosRoot: *gonacosRoot, GonacosData: *gonacosData, RedisAddr: *redisAddr,
 			NativeConfigAuth:        *nativeConfigAuth,
 			AllowNonLoopbackGonacos: os.Getenv("GOLAB_ALLOW_NON_LOOPBACK_GONACOS") == "1",

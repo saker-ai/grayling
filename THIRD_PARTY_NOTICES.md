@@ -33,12 +33,12 @@ A release bundle includes the full license and NOTICE texts for every linked mod
 | github.com/yosida95/uritemplate/v3 | v3.0.2 | BSD-3-Clause | LICENSE `0761aadfb1921103752869ee942d4a71bdd54494697684d4b13dc17ad9781191` |
 | github.com/yuin/gopher-lua | v1.1.1 | MIT | LICENSE `260ffdb7a4ba43069407382e611dab0797bcdabad46deb3d25b36af7f8204f66` |
 | go.uber.org/atomic | v1.11.0 | MIT | LICENSE.txt `edbb5a4d165ac69376c765b551c0662ff42bea87e1f1eda85f42ac90c34b09d0` |
-| golang.org/x/crypto | v0.53.0 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
+| golang.org/x/crypto | v0.57.0 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
 | golang.org/x/exp | v0.0.0-20250717185816-542afb5b7346 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
-| golang.org/x/net | v0.56.0 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
+| golang.org/x/net | v0.60.0 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
 | golang.org/x/oauth2 | v0.36.0 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
 | golang.org/x/sync | v0.23.0 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
-| golang.org/x/sys | v0.47.0 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
+| golang.org/x/sys | v0.48.0 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
 | golang.org/x/text | v0.42.0 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
 | golang.org/x/time | v0.12.0 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
 | gopkg.in/yaml.v3 | v3.0.1 | MIT | LICENSE `d18f6323b71b0b768bb5e9616e36da390fbd39369a81807cca352de4e4e6aa0b`<br>NOTICE `f6c2dd3a67b576eafb89b80200b8b1627230bf3821a0c14cb99a22ac19107d00` |

@@ -4,7 +4,7 @@
   "go": [
     {
       "module": "cel.dev/expr",
-      "version": "v0.24.0",
+      "version": "v0.25.2",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -12,6 +12,13 @@
     {
       "module": "cloud.google.com/go",
       "version": "v0.123.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "cloud.google.com/go/auth",
+      "version": "v0.18.2",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -60,28 +67,28 @@
     },
     {
       "module": "github.com/Azure/azure-sdk-for-go/sdk/azcore",
-      "version": "v1.20.0",
+      "version": "v1.23.1",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "github.com/Azure/azure-sdk-for-go/sdk/azidentity",
-      "version": "v1.13.1",
+      "version": "v1.14.1",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "github.com/Azure/azure-sdk-for-go/sdk/internal",
-      "version": "v1.11.2",
+      "version": "v1.12.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "github.com/AzureAD/microsoft-authentication-library-for-go",
-      "version": "v1.6.0",
+      "version": "v1.8.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -102,7 +109,7 @@
     },
     {
       "module": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp",
-      "version": "v1.27.0",
+      "version": "v1.33.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -301,7 +308,7 @@
     },
     {
       "module": "github.com/aws/aws-sdk-go-v2",
-      "version": "v1.42.0",
+      "version": "v1.47.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -315,35 +322,35 @@
     },
     {
       "module": "github.com/aws/aws-sdk-go-v2/config",
-      "version": "v1.32.11",
+      "version": "v1.33.4",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "github.com/aws/aws-sdk-go-v2/credentials",
-      "version": "v1.19.14",
+      "version": "v1.20.4",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "github.com/aws/aws-sdk-go-v2/feature/ec2/imds",
-      "version": "v1.18.21",
+      "version": "v1.20.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "github.com/aws/aws-sdk-go-v2/internal/configsources",
-      "version": "v1.4.29",
+      "version": "v1.5.3",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
-      "version": "v2.7.29",
+      "version": "v2.8.3",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -357,14 +364,14 @@
     },
     {
       "module": "github.com/aws/aws-sdk-go-v2/internal/v4a",
-      "version": "v1.4.22",
+      "version": "v1.5.3",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding",
-      "version": "v1.13.7",
+      "version": "v1.13.19",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -378,7 +385,7 @@
     },
     {
       "module": "github.com/aws/aws-sdk-go-v2/service/internal/presigned-url",
-      "version": "v1.13.21",
+      "version": "v1.14.3",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -399,35 +406,35 @@
     },
     {
       "module": "github.com/aws/aws-sdk-go-v2/service/signin",
-      "version": "v1.0.9",
+      "version": "v1.10.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "github.com/aws/aws-sdk-go-v2/service/sso",
-      "version": "v1.30.15",
+      "version": "v1.38.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "github.com/aws/aws-sdk-go-v2/service/ssooidc",
-      "version": "v1.35.19",
+      "version": "v1.43.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "github.com/aws/aws-sdk-go-v2/service/sts",
-      "version": "v1.41.10",
+      "version": "v1.50.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "github.com/aws/smithy-go",
-      "version": "v1.27.1",
+      "version": "v1.28.1",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -577,7 +584,14 @@
     },
     {
       "module": "github.com/cncf/xds/go",
-      "version": "v0.0.0-20250501225837-2ac532fd4443",
+      "version": "v0.0.0-20260202195803-dba9d589def2",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/coder/websocket",
+      "version": "v1.8.15",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -650,14 +664,14 @@
     },
     {
       "module": "github.com/envoyproxy/go-control-plane",
-      "version": "v0.13.4",
+      "version": "v0.14.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "github.com/envoyproxy/go-control-plane/envoy",
-      "version": "v1.32.4",
+      "version": "v1.37.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -671,7 +685,14 @@
     },
     {
       "module": "github.com/envoyproxy/protoc-gen-validate",
-      "version": "v1.2.1",
+      "version": "v1.3.3",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "github.com/felixge/httpsnoop",
+      "version": "v1.0.4",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -699,7 +720,7 @@
     },
     {
       "module": "github.com/go-jose/go-jose/v4",
-      "version": "v4.0.5",
+      "version": "v4.1.4",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -887,6 +908,13 @@
       "evidence": []
     },
     {
+      "module": "github.com/google/s2a-go",
+      "version": "v0.1.9",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/google/uuid",
       "version": "v1.6.0",
       "runtime": true,
@@ -899,8 +927,15 @@
       ]
     },
     {
+      "module": "github.com/googleapis/enterprise-certificate-proxy",
+      "version": "v0.3.11",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/googleapis/gax-go/v2",
-      "version": "v2.0.5",
+      "version": "v2.17.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -1301,6 +1336,13 @@
       "evidence": []
     },
     {
+      "module": "github.com/openai/openai-go/v3",
+      "version": "v3.73.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "github.com/orcaman/concurrent-map",
       "version": "v0.0.0-20210501183033-44dafcb38ecc",
       "runtime": false,
@@ -1469,7 +1511,7 @@
     },
     {
       "module": "github.com/spiffe/go-spiffe/v2",
-      "version": "v2.5.0",
+      "version": "v2.7.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -1502,7 +1544,7 @@
     },
     {
       "module": "github.com/tidwall/gjson",
-      "version": "v1.18.0",
+      "version": "v1.19.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -1516,7 +1558,7 @@
     },
     {
       "module": "github.com/tidwall/pretty",
-      "version": "v1.2.0",
+      "version": "v1.2.1",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -1595,13 +1637,6 @@
       ]
     },
     {
-      "module": "github.com/zeebo/errs",
-      "version": "v1.4.0",
-      "runtime": false,
-      "license": "NOT_DISTRIBUTED",
-      "evidence": []
-    },
-    {
       "module": "github.com/zeebo/xxh3",
       "version": "v1.1.0",
       "runtime": false,
@@ -1617,49 +1652,56 @@
     },
     {
       "module": "go.opentelemetry.io/auto/sdk",
-      "version": "v1.1.0",
+      "version": "v1.2.1",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "go.opentelemetry.io/contrib/detectors/gcp",
-      "version": "v1.36.0",
+      "version": "v1.44.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
+      "module": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp",
+      "version": "v0.61.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "go.opentelemetry.io/otel",
-      "version": "v1.36.0",
+      "version": "v1.44.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "go.opentelemetry.io/otel/metric",
-      "version": "v1.36.0",
+      "version": "v1.44.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "go.opentelemetry.io/otel/sdk",
-      "version": "v1.36.0",
+      "version": "v1.44.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "go.opentelemetry.io/otel/sdk/metric",
-      "version": "v1.36.0",
+      "version": "v1.44.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "go.opentelemetry.io/otel/trace",
-      "version": "v1.36.0",
+      "version": "v1.44.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -1727,7 +1769,7 @@
     },
     {
       "module": "golang.org/x/crypto",
-      "version": "v0.53.0",
+      "version": "v0.57.0",
       "runtime": true,
       "license": "BSD-3-Clause",
       "evidence": [
@@ -1779,7 +1821,7 @@
     },
     {
       "module": "golang.org/x/net",
-      "version": "v0.56.0",
+      "version": "v0.60.0",
       "runtime": true,
       "license": "BSD-3-Clause",
       "evidence": [
@@ -1815,7 +1857,7 @@
     },
     {
       "module": "golang.org/x/sys",
-      "version": "v0.47.0",
+      "version": "v0.48.0",
       "runtime": true,
       "license": "BSD-3-Clause",
       "evidence": [
@@ -1827,7 +1869,7 @@
     },
     {
       "module": "golang.org/x/term",
-      "version": "v0.44.0",
+      "version": "v0.46.0",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
@@ -1885,6 +1927,13 @@
       "evidence": []
     },
     {
+      "module": "gonum.org/v1/gonum",
+      "version": "v0.17.0",
+      "runtime": false,
+      "license": "NOT_DISTRIBUTED",
+      "evidence": []
+    },
+    {
       "module": "google.golang.org/api",
       "version": "v0.30.0",
       "runtime": false,
@@ -1907,21 +1956,21 @@
     },
     {
       "module": "google.golang.org/genproto/googleapis/api",
-      "version": "v0.0.0-20250528174236-200df99c418a",
+      "version": "v0.0.0-20260526163538-3dc84a4a5aaa",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "google.golang.org/genproto/googleapis/rpc",
-      "version": "v0.0.0-20250818200422-3122310a409c",
+      "version": "v0.0.0-20260526163538-3dc84a4a5aaa",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []
     },
     {
       "module": "google.golang.org/grpc",
-      "version": "v1.74.2",
+      "version": "v1.83.2",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
       "evidence": []

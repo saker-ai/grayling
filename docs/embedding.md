@@ -39,6 +39,7 @@ func main() {
 
     mux := http.NewServeMux()
     mux.Handle("/api/", app.APIHandler())
+    mux.Handle("/v1/", app.APIHandler())
     mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
         _, _ = w.Write([]byte("host ok"))
     })
@@ -65,6 +66,8 @@ func main() {
 ```
 
 如需使用 GoLab 内置控制台，让宿主在根路径挂载 `app.Handler()`；这个 Handler 同时包含 `/api/` 和控制台资源。若宿主已有自己的页面，只挂载 `app.APIHandler()`。控制台静态资源使用根路径，直接把完整 Handler 挂到子路径不能正确加载资源。
+
+如需让 OpenAI 客户端只修改 `baseURL` 即可使用 Chat Completions，设置 `Options.OpenAIUpstreamURL`（以 `/v1` 结尾）、`OpenAIWorkspace`、`OpenAIEnvironment`，并把 `/v1/` 一并挂载到 `app.APIHandler()`。可用 `OpenAIFlagKey` 覆盖默认的 `openai-chat`。该环境需发布含 `modelRef`、`promptRef` 的 JSON Flag，配置模型白名单并固定 Prompt 版本。此端点执行 Flag 求值和撤销校验，客户端原有上游 Bearer API Key 原样传给模型上游。
 
 不设置 `NacosURL` 时，GoLab 在回环地址的随机端口启动内置 gonacos；`app.GonacosAddrs()` 返回实际 HTTP/gRPC 地址。改用外部 Nacos 时，在 `Options` 中设置 `NacosURL` 和 `NacosUsername`/`NacosPassword`，或设置 `NacosToken`。外部模式的数据布局与权限见[外部 Nacos 底座](external-nacos.md)。
 

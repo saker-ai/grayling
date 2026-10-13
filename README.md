@@ -13,6 +13,7 @@ GoLab is a self-hosted platform for feature flags, gradual rollouts, and A/B exp
 - **AI resource control:** versioned prompts, skills, and agent specifications; pinned versions, session-level configuration freeze, digest verification, and emergency revocation.
 - **Clients:** local evaluation with the Go SDK, remote evaluation with Python and TypeScript SDKs, and an OpenFeature Go provider. An optional proxy supports remote evaluation and gateway integration.
 - **Deployment choices:** embedded gonacos or external Nacos 3.2.1+ for configuration distribution; JSON file, pure-Go SQLite, or PostgreSQL for GoLab platform data. The web console is embedded and needs no frontend build.
+- **OpenAI client compatibility:** optionally relay Chat Completions, including SSE streams, to a configured OpenAI-compatible upstream by changing only the client's `baseURL`.
 
 ## Quick start
 
@@ -47,6 +48,10 @@ The root package is importable as `github.com/saker-ai/grayling`. `golab.Start` 
 | Standalone proxy | Remote evaluation, SSE, and event collection relay | [Proxy and API reference](docs/api.md) |
 
 The GoLab API issues separate credentials for administration, SDK reads, and event collection. Do not expose administrative credentials to browser clients.
+
+### OpenAI-compatible Chat Completions
+
+Start with `make run RUN_ARGS='-openai-upstream-url https://api.openai.com/v1 -openai-workspace acme -openai-environment prod'` after creating that workspace, environment, a published JSON flag named `openai-chat`, a pinned prompt, and a model allowlist entry. Point an existing OpenAI client at `http://127.0.0.1:19080/v1`; keep its existing upstream API key and request, including `stream: true`. GoLab evaluates the flag, selects its allowlisted `modelRef`, prepends the pinned `promptRef` as a system message, checks revocation, and forwards the original Bearer key and JSON or SSE response. See [API details](docs/api.md).
 
 ## Architecture
 

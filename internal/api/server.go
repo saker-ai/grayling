@@ -8,8 +8,9 @@
 //	/api/v1/health     liveness
 //
 // Security posture (§9): authentication happens first and the
-// workspace/environment of every request is derived from the presented
-// credential — never from query parameters or body fields. Admin, SDK and
+// workspace/environment of admin, SDK and collect requests is derived from
+// the presented credential — never from query parameters or body fields.
+// Chat Completions uses an operator-fixed workspace/environment. Admin, SDK and
 // collect credentials are distinct audiences and are rejected on each
 // other's endpoints.
 package api
@@ -34,6 +35,7 @@ import (
 	"github.com/saker-ai/grayling/internal/admin"
 	aisvc "github.com/saker-ai/grayling/internal/ai"
 	"github.com/saker-ai/grayling/internal/configstore"
+	"github.com/saker-ai/grayling/internal/openaiproxy"
 	"github.com/saker-ai/grayling/internal/platform"
 	"github.com/saker-ai/grayling/internal/rollout"
 	"github.com/saker-ai/grayling/pkg/model"
@@ -66,7 +68,11 @@ type Server struct {
 	sampledEvents  chan model.EvaluationEvent
 	droppedSamples atomic.Int64
 
-	logger *log.Logger
+	logger            *log.Logger
+	chatCompletions   http.Handler
+	openAIWorkspace   string
+	openAIEnvironment string
+	openAIFlagKey     string
 }
 
 type cachedSnapshot struct {
@@ -78,7 +84,11 @@ type cachedSnapshot struct {
 
 // Options configures server construction.
 type Options struct {
-	Logger *log.Logger
+	Logger            *log.Logger
+	ChatCompletions   http.Handler
+	OpenAIWorkspace   string
+	OpenAIEnvironment string
+	OpenAIFlagKey     string
 	// EvaluationSampleRate enables bounded, safe evaluation telemetry [0,1].
 	EvaluationSampleRate float64
 	// AdminPassword permits a configured password on admin endpoints only.
@@ -103,14 +113,18 @@ func NewServer(store *platform.Store, cfg configstore.Store, opts Options) *Serv
 		rps = 200
 	}
 	s := &Server{
-		Store:         store,
-		Config:        cfg,
-		Hub:           NewSSEHub(),
-		limiter:       newRateLimiter(rps, int(rps)),
-		logger:        opts.Logger,
-		decisions:     make(map[string]scopedDecision),
-		sampleRate:    opts.EvaluationSampleRate,
-		sampledEvents: make(chan model.EvaluationEvent, 256),
+		Store:             store,
+		Config:            cfg,
+		Hub:               NewSSEHub(),
+		limiter:           newRateLimiter(rps, int(rps)),
+		logger:            opts.Logger,
+		chatCompletions:   opts.ChatCompletions,
+		openAIWorkspace:   opts.OpenAIWorkspace,
+		openAIEnvironment: opts.OpenAIEnvironment,
+		openAIFlagKey:     opts.OpenAIFlagKey,
+		decisions:         make(map[string]scopedDecision),
+		sampleRate:        opts.EvaluationSampleRate,
+		sampledEvents:     make(chan model.EvaluationEvent, 256),
 	}
 	if err := s.initConsoleSessionKey(opts.ConsoleSessionSecret); err != nil {
 		panic(fmt.Errorf("initialize console session key: %w", err))
@@ -139,6 +153,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
+	mux.HandleFunc("POST /v1/chat/completions", s.handleChatCompletions)
 	mux.HandleFunc("POST /api/v1/admin/session", s.handleConsoleLogin)
 	mux.HandleFunc("GET /api/v1/admin/session", s.adminOnly(s.handleConsoleSession))
 	mux.HandleFunc("DELETE /api/v1/admin/session", s.handleConsoleLogout)
@@ -223,6 +238,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/collect", s.collectOnly(s.handleCollect))
 
 	return mux
+}
+
+func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
+	if s.chatCompletions == nil {
+		openaiproxy.Disabled(w, r)
+		return
+	}
+	if !s.limiter.allow("openai:" + adminLimiterKey(r)) {
+		w.Header().Set("Retry-After", "1")
+		openaiproxy.RateLimited(w, r)
+		return
+	}
+	s.serveGovernedChat(w, r)
 }
 
 // ---------------------------------------------------------------------------

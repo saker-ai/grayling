@@ -3,6 +3,7 @@ package golab_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -54,6 +55,11 @@ func TestEmbeddedAppCanBeMountedAndRestarted(t *testing.T) {
 	app.Handler().ServeHTTP(console, httptest.NewRequest(http.MethodGet, "/", nil))
 	if console.Code != http.StatusOK || !strings.Contains(console.Body.String(), "<html") {
 		t.Fatalf("console response: %d", console.Code)
+	}
+	disabledChat := httptest.NewRecorder()
+	app.Handler().ServeHTTP(disabledChat, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil))
+	if disabledChat.Code != http.StatusNotImplemented {
+		t.Fatalf("unconfigured Chat Completions status %d", disabledChat.Code)
 	}
 	srv.Close()
 	closeCtx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -116,10 +122,42 @@ func TestStartRejectsConflictingOptions(t *testing.T) {
 		{NacosURL: "http://example.com", NativeConfigAuth: true},
 		{GonacosAddr: "0.0.0.0:1234"},
 		{RecoveryPoint: "point.json", NacosURL: "http://example.com"},
+		{OpenAIUpstreamURL: "https://example.com/not-v1"},
 	} {
 		if app, err := golab.Start(t.Context(), opts); err == nil {
 			_ = app.Close(t.Context())
 			t.Fatalf("expected invalid options: %+v", opts)
 		}
+	}
+}
+
+func TestOpenAICompatibleRouteThroughEmbeddedApp(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer existing-key" {
+			t.Errorf("unexpected upstream request: %s, auth = %q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}]}`)
+	}))
+	defer upstream.Close()
+	app, err := golab.Start(t.Context(), golab.Options{
+		OpenAIUpstreamURL: upstream.URL + "/v1", OpenAIWorkspace: "acme", OpenAIEnvironment: "prod", GonacosData: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := app.Close(closeCtx); err != nil {
+			t.Error(err)
+		}
+	}()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"example","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Authorization", "Bearer existing-key")
+	rec := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("console handler response = %d %q", rec.Code, rec.Body.String())
 	}
 }

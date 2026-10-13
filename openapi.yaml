@@ -10,7 +10,7 @@ info:
 
     ## 认证与受众（三受众互斥）
 
-    所有端点（除健康检查与浏览器会话创建）要求管理凭证：
+    GoLab API 端点（除健康检查与浏览器会话创建）要求管理凭证：
     `Authorization: Bearer <token>`；同源 Web 控制台也可通过 HttpOnly、
     SameSite=Strict 的加密会话 Cookie 访问管理端点。浏览器会话创建要求
     同源 Origin，写请求使用 Cookie 时也要求同源 Origin。
@@ -23,7 +23,12 @@ info:
     | sdk | `glab_sdk_` | `/api/v1/sdk/**` |
     | collect | `glab_collect_` | `/api/v1/collect` |
 
-    租户作用域（workspace/environment）**完全由凭证决定**：任何端点都不接受
+    `POST /v1/chat/completions` 是可选的 OpenAI 兼容入口：客户端原有
+    Bearer API Key 原样传给配置的模型上游，工作空间和环境由服务端固定；
+    此路由执行 Flag 求值、模型白名单、Prompt 解析和撤销校验。
+
+    管理、SDK 与采集端点的租户作用域（workspace/environment）由凭证决定；
+    Chat Completions 的作用域由服务端入口配置固定。任何端点都不接受
     通过 query 参数或 body 字段选择租户。`{ws}`/`{env}` 路径参数接受 slug 或
     服务端生成的内部 ID。管理角色（admin 凭证）：owner、publisher、analyst、
     viewer；高风险草稿禁止提交人自批（403 `self_approval_denied`）。
@@ -97,7 +102,49 @@ tags:
     description: SDK 数据面（sdk 凭证：快照、revision 探针、远程求值、SSE、AI）
   - name: collect
     description: 曝光/转化事件采集（collect 凭证）
+  - name: openai
+    description: 可选的 OpenAI Chat Completions 治理入口（上游 Bearer API Key）
 paths:
+  "/v1/chat/completions":
+    post:
+      tags: [openai]
+      summary: 基于 Flag 和 Prompt 转发 Chat Completions，支持普通响应和 SSE 流
+      operationId: createChatCompletion
+      description: >-
+        需配置 openai-upstream-url、openai-workspace、openai-environment；
+        服务端求值 openai-chat JSON Flag，按 modelRef 选择白名单模型，
+        按 promptRef 插入固定版本的 system 消息并检查撤销。
+        Authorization Bearer 凭证原样传给模型上游；响应原样转发。请求体上限 32 MiB。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: 上游原始 JSON 或 SSE 响应。
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          description: 未提供 Bearer API Key，或上游拒绝凭证。
+        "413":
+          description: 请求体超过 32 MiB。
+        "423":
+          description: Prompt 已撤销。
+        "503":
+          description: 固定工作空间、Flag 或 AI 资源不可用。
+        "501":
+          description: 未配置模型上游。
+        "502":
+          description: 模型上游不可达。
   "/api/v1/health":
     get:
       tags: [health]

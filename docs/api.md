@@ -136,6 +136,14 @@
 | `GET {env前缀}/ai/resolve?type=&logicalId=&version=` | 原始内容读取——**仅 owner**（单独授权） |
 | `PUT/GET /api/v1/admin/workspaces/{ws}/model-allowlist` | `{entries:[{provider,model,enabled}]}`；未入白名单的 modelRef flag 无法发布 |
 
+## OpenAI 兼容 Chat Completions
+
+配置 `-openai-upstream-url https://api.openai.com/v1 -openai-workspace acme -openai-environment prod` 后，GoLab 在 `POST /v1/chat/completions` 使用服务端固定的工作空间和环境；`-openai-flag-key` 可覆盖默认 Flag 键 `openai-chat`。客户端只需将 `baseURL` 指向 GoLab 的 `/v1`，保留原有上游 Bearer API Key。入站 `model` 必须存在，但实际发送给上游的模型由 Flag 的 `modelRef` 决定。
+
+该环境须发布 JSON Flag，选中的 variation 须包含 `{"modelRef":{"provider":"openai","model":"gpt-4.1"},"promptRef":{"logicalId":"chat-system"}}`。先在工作空间白名单中允许该模型，再注册并固定 Prompt 版本。`promptRef.version` 可选；省略时选择最新固定版本。GoLab 对每个请求求值 Flag、验证模型白名单及 Prompt 内容摘要，把 Prompt 作为第一条 `system` 消息插入，并在发送上游前再次检查撤销。Flag 缺失、禁用或资源不可用时返回 503；Prompt 被撤销时返回 423，不请求上游。已开始的流按本次请求冻结的配置完成。实验分流单位由上游 Key 与可选 `user` 字段的组合哈希得到，不存储原始 Key。
+
+Flag 可使用 `targetingKey` 或 `user_id` 做稳定分流；二者均由上游 Key 与可选 `user` 字段哈希得到。普通 JSON 和 `stream: true` SSE 均由上游逐块返回，上游错误状态与响应体原样返回。未配置上游时返回 501，请求体（含插入的 Prompt）超过 32 MiB 返回 413，无法连接上游时返回 502。入站 Cookie 不会发给上游。此端点不接受 GoLab SDK 凭证作为模型 Key。上游 URL 只能由 GoLab 运行者配置，客户端无法覆盖。
+
 ## SDK 数据面（sdk 凭证）
 
 | 端点 | 说明 |

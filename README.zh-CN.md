@@ -13,6 +13,7 @@ GoLab 是可自托管的功能开关、渐进发布与 A/B 实验平台，也为
 - **AI 资源治理**：Prompt、Skill 和 AgentSpec 独立版本，固定版本、会话级配置冻结、摘要校验与紧急撤销。
 - **客户端**：Go SDK 本地求值、Python/TypeScript SDK 远程求值、OpenFeature Go Provider，以及可独立部署的远程求值代理。
 - **部署选择**：内置 gonacos 或外部 Nacos 3.2.1+ 分发配置；JSON 文件、纯 Go SQLite 或 PostgreSQL 保存 GoLab 平台数据。控制台内嵌，无需构建前端。
+- **OpenAI 客户端兼容**：可选地将 Chat Completions（包括 SSE 流）转发到配置好的 OpenAI 兼容上游；客户端只需修改 `baseURL`。
 
 ## 快速开始
 
@@ -47,6 +48,10 @@ make run RUN_ARGS='-sqlite data/golab.db'
 | 独立代理 | 远程求值、SSE 与事件采集中继 | [代理与 API](docs/api.md) |
 
 GoLab 分别签发管理、SDK 读取和事件采集凭证。浏览器客户端不应持有管理凭证。
+
+### OpenAI 兼容的 Chat Completions
+
+先创建工作空间 `acme`、环境 `prod`、已发布的 JSON Flag `openai-chat`、已固定版本的 Prompt 及模型白名单，再以 `make run RUN_ARGS='-openai-upstream-url https://api.openai.com/v1 -openai-workspace acme -openai-environment prod'` 启动。现有 OpenAI 客户端只需把 `baseURL` 改为 `http://127.0.0.1:19080/v1`，保留原有上游 API Key 和请求，包括 `stream: true`。GoLab 求值 Flag，使用其 `modelRef` 选择白名单模型，将 `promptRef` 的固定版本作为 system 消息插入，检查撤销，再透传原有 Bearer Key 和普通 JSON 或 SSE 响应。参见 [API 说明](docs/api.md)。
 
 ## 架构
 

@@ -18,29 +18,36 @@ import (
 	"sync"
 	"time"
 
+	"github.com/godeps/gonacos/pkg/server"
 	"github.com/saker-ai/grayling/internal/ai"
 	"github.com/saker-ai/grayling/internal/api"
 	"github.com/saker-ai/grayling/internal/configstore"
 	"github.com/saker-ai/grayling/internal/nacos"
 	"github.com/saker-ai/grayling/internal/nativeauth"
+	"github.com/saker-ai/grayling/internal/openaiproxy"
 	"github.com/saker-ai/grayling/internal/platform"
 	"github.com/saker-ai/grayling/internal/recovery"
 	"github.com/saker-ai/grayling/web"
-	"github.com/godeps/gonacos/pkg/server"
 )
 
 // Options selects platform storage and the Nacos substrate. Empty DataFile
 // selects an in-memory platform store; empty NacosURL selects embedded gonacos.
 // The zero-value embedded listener addresses use ephemeral loopback ports.
 type Options struct {
-	DataFile                string
-	SQLitePath              string
-	PostgresDSN             string
-	RecoveryPoint           string
-	NacosURL                string
-	NacosUsername           string
-	NacosPassword           string
-	NacosToken              string
+	DataFile      string
+	SQLitePath    string
+	PostgresDSN   string
+	RecoveryPoint string
+	NacosURL      string
+	NacosUsername string
+	NacosPassword string
+	NacosToken    string
+	// OpenAIUpstreamURL enables governed Chat Completions. The client's
+	// existing model provider key is forwarded unchanged.
+	OpenAIUpstreamURL       string
+	OpenAIWorkspace         string
+	OpenAIEnvironment       string
+	OpenAIFlagKey           string
 	GonacosAddr             string
 	GonacosGRPCAddr         string
 	GonacosRoot             string
@@ -63,6 +70,7 @@ type Options struct {
 type App struct {
 	apiHandler http.Handler
 	handler    http.Handler
+	chatProxy  *openaiproxy.Proxy
 	gonacos    *server.Server
 	ownerToken string
 	cancel     context.CancelFunc
@@ -85,6 +93,19 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 	}
 	if opts.Logger == nil {
 		opts.Logger = log.New(io.Discard, "", 0)
+	}
+	var chatHandler http.Handler
+	var chatProxy *openaiproxy.Proxy
+	if opts.OpenAIUpstreamURL != "" {
+		if opts.OpenAIFlagKey == "" {
+			opts.OpenAIFlagKey = "openai-chat"
+		}
+		var err error
+		chatProxy, err = openaiproxy.New(opts.OpenAIUpstreamURL)
+		if err != nil {
+			return nil, fmt.Errorf("golab: %w", err)
+		}
+		chatHandler = chatProxy
 	}
 	if opts.GonacosAddr == "" {
 		opts.GonacosAddr = "127.0.0.1:0"
@@ -204,6 +225,10 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 
 	apiServer := api.NewServer(store, cfg, api.Options{
 		Logger: opts.Logger, AdminPassword: opts.AdminPassword,
+		ChatCompletions:      chatHandler,
+		OpenAIWorkspace:      opts.OpenAIWorkspace,
+		OpenAIEnvironment:    opts.OpenAIEnvironment,
+		OpenAIFlagKey:        opts.OpenAIFlagKey,
 		ConsoleSessionSecret: opts.AuthSecret,
 		RequestsPerSecond:    opts.RequestsPerSecond,
 		EvaluationSampleRate: opts.EvaluationSampleRate,
@@ -217,7 +242,7 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 	apiHandler := apiServer.Handler()
 	runCtx, cancel := context.WithCancel(ctx)
 	app := &App{
-		apiHandler: apiHandler, handler: web.Handler(apiHandler),
+		apiHandler: apiHandler, handler: web.Handler(apiHandler), chatProxy: chatProxy,
 		gonacos: gsrv, ownerToken: ownerToken, cancel: cancel,
 		errors: make(chan error, 1), done: make(chan struct{}),
 	}
@@ -252,6 +277,9 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 	go func() {
 		<-runCtx.Done()
 		app.wg.Wait()
+		if app.chatProxy != nil {
+			app.chatProxy.CloseIdleConnections()
+		}
 		app.closeErr = store.Close()
 		close(app.done)
 		close(app.errors)
@@ -260,6 +288,12 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 }
 
 func validateOptions(opts Options) error {
+	if opts.OpenAIUpstreamURL != "" && (opts.OpenAIWorkspace == "" || opts.OpenAIEnvironment == "") {
+		return fmt.Errorf("golab: OpenAI workspace and environment are required with an upstream")
+	}
+	if opts.OpenAIUpstreamURL == "" && (opts.OpenAIWorkspace != "" || opts.OpenAIEnvironment != "" || opts.OpenAIFlagKey != "") {
+		return fmt.Errorf("golab: OpenAI scope and flag require an upstream")
+	}
 	if opts.SQLitePath != "" && opts.PostgresDSN != "" {
 		return fmt.Errorf("golab: SQLite and PostgreSQL stores are mutually exclusive")
 	}
