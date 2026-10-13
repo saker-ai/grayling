@@ -29,7 +29,12 @@ function bindListSearch(m) {
   if (!input) return;
   input.oninput = () => {
     const query = input.value.trim().toLocaleLowerCase();
-    $$('tbody tr', m).forEach(row => { row.hidden = !!query && !row.textContent.toLocaleLowerCase().includes(query); });
+    let visible = 0;
+    $$('[data-list-record]', m).forEach(record => {
+      record.hidden = !!query && !record.textContent.toLocaleLowerCase().includes(query);
+      if (!record.hidden && record.tagName === 'TR') visible++;
+    });
+    $('[data-list-no-match]', m)?.classList.toggle('hidden', !query || visible > 0);
   };
 }
 
@@ -1080,20 +1085,26 @@ async function viewSegments(m) {
   m.innerHTML =
     '<div class="view-head"><h2>' + esc(t('seg.title')) + '</h2><span class="muted">' + esc(t('seg.count', { n: S.segDrafts.length })) + '</span>' +
     '<input class="list-search" type="search" placeholder="' + esc(t('list.search')) + '" aria-label="' + esc(t('list.search')) + '"><button class="btn primary sm" id="seg-new">' + esc(t('seg.new')) + '</button></div>' +
-    '<table class="grid"><thead><tr><th>' + esc(t('th.key')) + '</th><th>' + esc(t('th.state')) + '</th><th>' + esc(t('th.risk')) + '</th><th>' + esc(t('th.updatedBy')) + '</th><th>' + esc(t('th.updated')) + '</th></tr></thead><tbody>' +
+    '<table class="grid mobile-card-table"><thead><tr><th>' + esc(t('th.key')) + '</th><th>' + esc(t('th.state')) + '</th><th>' + esc(t('th.risk')) + '</th><th>' + esc(t('th.updatedBy')) + '</th><th>' + esc(t('th.updated')) + '</th></tr></thead><tbody>' +
     (S.segDrafts.map(d =>
-      '<tr><td class="mono"><button class="row-link" type="button" data-seg="' + esc(d.key) + '">' + esc(d.key) + '</button></td><td>' +
+      '<tr data-list-record><td class="mono"><button class="row-link" type="button" data-seg="' + esc(d.key) + '">' + esc(d.key) + '</button></td><td>' +
       chip(d.state, DRAFT_CHIP[d.state] || 'gray') + '</td><td>' + esc(d.risk || '—') + '</td><td>' +
       esc(d.updatedBy || '—') + '</td><td class="nowrap">' + esc(fmtTime(d.updatedAt)) + '</td></tr>').join('') ||
       '<tr><td colspan="5" class="muted">' + esc(t('seg.empty')) + '</td></tr>') +
-    '</tbody></table>';
+    '</tbody></table><div class="mobile-record-cards">' + S.segDrafts.map(d =>
+      '<article class="mobile-record" data-list-record><button class="row-link mono" type="button" data-seg="' +
+      esc(d.key) + '">' + esc(d.key) + '</button><div>' + chip(d.state, DRAFT_CHIP[d.state] || 'gray') +
+      ' · ' + esc(d.risk || '—') + '</div><div class="muted">' + esc(d.updatedBy || '—') +
+      ' · ' + esc(fmtTime(d.updatedAt)) + '</div></article>').join('') + '</div>' +
+    (S.segDrafts.length ? '' : '<p class="muted mobile-empty">' + esc(t('seg.empty')) + '</p>') +
+    '<p class="muted hidden" data-list-no-match>' + esc(t('list.noMatch')) + '</p>';
   bindListSearch(m);
   $('#seg-new', m).onclick = () => {
     const key = (prompt(t('prompt.newSegKey')) || '').trim();
     if (!key) return;
     S.segKey = key; route();
   };
-  $('tbody', m).addEventListener('click', ev => {
+  m.addEventListener('click', ev => {
     const tr = ev.target.closest('[data-seg]');
     if (tr) { S.segKey = tr.dataset.seg; route(); }
   });
@@ -1250,17 +1261,24 @@ async function viewExperiments(m) {
   m.innerHTML =
     '<div class="view-head"><h2>' + esc(t('exp.title')) + '</h2><span class="muted">' + esc(exps.length) + '</span>' +
     '<input class="list-search" type="search" placeholder="' + esc(t('list.search')) + '" aria-label="' + esc(t('list.search')) + '"><button class="btn primary sm" id="exp-new">' + esc(t('exp.new')) + '</button></div>' +
-    '<table class="grid"><thead><tr><th>' + esc(t('th.id')) + '</th><th>' + esc(t('th.flag')) + '</th><th>' + esc(t('th.unit')) + '</th><th>' + esc(t('th.state')) + '</th><th>' + esc(t('th.variants')) + '</th><th>' + esc(t('th.epoch')) + '</th><th>' + esc(t('th.created')) + '</th></tr></thead><tbody>' +
+    '<table class="grid mobile-card-table"><thead><tr><th>' + esc(t('th.id')) + '</th><th>' + esc(t('th.flag')) + '</th><th>' + esc(t('th.unit')) + '</th><th>' + esc(t('th.state')) + '</th><th>' + esc(t('th.variants')) + '</th><th>' + esc(t('th.epoch')) + '</th><th>' + esc(t('th.created')) + '</th></tr></thead><tbody>' +
     (exps.map(e =>
-      '<tr><td class="mono"><button class="row-link" type="button" data-exp="' + esc(e.id) + '">' + esc(e.id) + '</button></td><td class="mono">' +
+      '<tr data-list-record><td class="mono"><button class="row-link" type="button" data-exp="' + esc(e.id) + '">' + esc(e.id) + '</button></td><td class="mono">' +
       esc(e.flagKey) + '</td><td class="mono">' + esc(e.unit) + '</td><td>' +
       chip(e.state, EXP_CHIP[e.state] || 'gray') + '</td><td>' + esc((e.variants || []).join(', ')) +
       '</td><td>' + esc(e.epoch || 0) + '</td><td class="nowrap">' + esc(fmtTime(e.createdAt)) + '</td></tr>').join('') ||
       '<tr><td colspan="7" class="muted">' + esc(t('exp.empty')) + '</td></tr>') +
-    '</tbody></table>';
+    '</tbody></table><div class="mobile-record-cards">' + exps.map(e =>
+      '<article class="mobile-record" data-list-record><button class="row-link mono" type="button" data-exp="' +
+      esc(e.id) + '">' + esc(e.id) + '</button><div>' + chip(e.state, EXP_CHIP[e.state] || 'gray') +
+      ' · ' + esc(e.flagKey) + ' · ' + esc(e.unit) + '</div><div class="muted">' +
+      esc((e.variants || []).join(', ')) + ' · ' + esc(t('th.epoch')) + ' ' + esc(e.epoch || 0) + '</div><div class="muted">' +
+      esc(fmtTime(e.createdAt)) + '</div></article>').join('') + '</div>' +
+    (exps.length ? '' : '<p class="muted mobile-empty">' + esc(t('exp.empty')) + '</p>') +
+    '<p class="muted hidden" data-list-no-match>' + esc(t('list.noMatch')) + '</p>';
   bindListSearch(m);
   $('#exp-new', m).onclick = () => { S.expCreate = true; S.wizardDirty = false; S.expTab = 'summary'; route(); };
-  $('tbody', m).addEventListener('click', ev => {
+  m.addEventListener('click', ev => {
     const tr = ev.target.closest('[data-exp]');
     if (tr) { S.expId = tr.dataset.exp; S.expTab = 'summary'; route(); }
   });
@@ -2665,6 +2683,7 @@ async function viewAI(m) {
     const i = k.indexOf('\u0000');
     return { type: i < 0 ? k : k.slice(0, i), logicalId: i < 0 ? '' : k.slice(i + 1), reason };
   });
+  const revocationReasons = new Map(revocations.map(item => [item.type + '\u0000' + item.logicalId, item.reason]));
   let allow = [];
   try { allow = (await api(wsPath() + '/model-allowlist')) || []; } catch { /* optional */ }
   const aiPath = scopePath() + '/ai/resources';
@@ -2677,21 +2696,41 @@ async function viewAI(m) {
       '<label class="field">' + esc(t('label.name')) + '<input id="ai-name"></label></div>' +
     '<div class="row"><button class="btn primary" id="ai-reg">' + esc(t('btn.register')) + '</button></div></section>' +
     '<section class="card"><h3>' + esc(t('ai.resources', { n: resources.length })) + '</h3>' +
-    '<table class="grid" id="ai-res-tbl"><thead><tr><th>' + esc(t('th.type')) + '</th><th>' + esc(t('ai.logicalId')) + '</th><th>' + esc(t('ai.physicalId')) + '</th><th>' + esc(t('th.owner')) + '</th><th>' + esc(t('th.created')) + '</th><th>' + esc(t('th.actions')) + '</th></tr></thead><tbody>' +
+    '<input class="list-search" type="search" placeholder="' + esc(t('list.search')) +
+      '" aria-label="' + esc(t('list.search')) + '">' +
+    '<table class="grid mobile-card-table" id="ai-res-tbl"><thead><tr><th>' + esc(t('th.type')) + '</th><th>' + esc(t('ai.logicalId')) + '</th><th>' + esc(t('ai.physicalId')) + '</th><th>' + esc(t('th.owner')) + '</th><th>' + esc(t('th.created')) + '</th><th>' + esc(t('th.actions')) + '</th></tr></thead><tbody>' +
     (resources.map(r =>
-      '<tr><td>' + chip(r.type, 'teal') + '</td><td class="mono"><button type="button" class="row-link" data-ai-detail="' +
+      '<tr data-list-record><td>' + chip(r.type, 'teal') + '</td><td class="mono"><button type="button" class="row-link" data-ai-detail="' +
       esc(r.type + '|' + r.logicalId) + '">' + esc(r.logicalId) + '</button></td><td class="mono">' +
       esc(r.physicalId || '—') + '</td><td>' + esc(r.owner || '—') + '</td><td class="nowrap">' + esc(fmtTime(r.createdAt)) +
       '</td><td class="nowrap"><button class="btn sm" data-pin="' + esc(r.type + '|' + r.logicalId) + '">' + esc(t('btn.pinVersion')) + '</button> ' +
-      '<button class="btn sm danger" data-revoke="' + esc(r.type + '|' + r.logicalId) + '">' + esc(t('btn.revoke')) + '</button></td></tr>').join('') ||
+      (revocationReasons.has(r.type + '\u0000' + r.logicalId) ?
+        '<button class="btn sm" data-reinstate="' + esc(r.type + '|' + r.logicalId) + '">' + esc(t('btn.reinstate')) + '</button>' :
+        '<button class="btn sm danger" data-revoke="' + esc(r.type + '|' + r.logicalId) + '">' + esc(t('btn.revoke')) + '</button>') + '</td></tr>').join('') ||
       '<tr><td colspan="6" class="muted">' + esc(t('ai.noneRegistered')) + '</td></tr>') +
-    '</tbody></table>' +
+    '</tbody></table><div class="mobile-record-cards" id="ai-resource-cards">' + resources.map(r =>
+      '<article class="mobile-record" data-list-record><button type="button" class="row-link mono" data-ai-detail="' +
+      esc(r.type + '|' + r.logicalId) + '">' + esc(r.logicalId) + '</button><div>' + chip(r.type, 'teal') + ' ' +
+      (revocationReasons.has(r.type + '\u0000' + r.logicalId) ? chip(t('chip.revoked'), 'red') : chip(t('chip.active'), 'green')) +
+      '</div><div class="mono wrap-anywhere muted">' + esc(r.physicalId || '—') + '</div>' +
+      '<div class="muted">' + esc(r.owner || '—') + ' · ' + esc(fmtTime(r.createdAt)) + '</div>' +
+      (revocationReasons.has(r.type + '\u0000' + r.logicalId) ?
+        '<div class="warn-text">' + esc(revocationReasons.get(r.type + '\u0000' + r.logicalId)) + '</div>' : '') +
+      '<div class="row"><button type="button" class="btn sm" data-pin="' + esc(r.type + '|' + r.logicalId) +
+      '">' + esc(t('btn.pinVersion')) + '</button> ' +
+      (revocationReasons.has(r.type + '\u0000' + r.logicalId) ?
+        '<button type="button" class="btn sm" data-reinstate="' + esc(r.type + '|' + r.logicalId) +
+        '">' + esc(t('btn.reinstate')) + '</button>' :
+        '<button type="button" class="btn sm danger" data-revoke="' + esc(r.type + '|' + r.logicalId) +
+        '">' + esc(t('btn.revoke')) + '</button>') + '</div></article>').join('') + '</div>' +
+    (resources.length ? '' : '<p class="muted mobile-empty">' + esc(t('ai.noneRegistered')) + '</p>') +
+    '<p class="muted hidden" data-list-no-match>' + esc(t('list.noMatch')) + '</p>' +
     (revocations.length
-      ? '<h4>' + esc(t('ai.revocations')) + '</h4><table class="grid" id="ai-rev-tbl"><thead><tr><th>' + esc(t('th.type')) + '</th><th>' + esc(t('ai.logicalId')) + '</th><th>' + esc(t('th.reason')) + '</th><th></th></tr></thead><tbody>' +
+      ? '<div class="ai-revocations-desktop"><h4>' + esc(t('ai.revocations')) + '</h4><table class="grid" id="ai-rev-tbl"><thead><tr><th>' + esc(t('th.type')) + '</th><th>' + esc(t('ai.logicalId')) + '</th><th>' + esc(t('th.reason')) + '</th><th></th></tr></thead><tbody>' +
         revocations.map(rv =>
           '<tr><td>' + chip(rv.type, 'red') + '</td><td class="mono">' + esc(rv.logicalId) + '</td><td>' + esc(rv.reason || '—') +
           '</td><td><button class="btn sm" data-reinstate="' + esc(rv.type + '|' + rv.logicalId) + '">' + esc(t('btn.reinstate')) + '</button></td></tr>').join('') +
-        '</tbody></table>'
+        '</tbody></table></div>'
       : '') +
     '</section>' +
     '<section class="card"><h3>' + esc(t('ai.resolveViewer')) + '</h3><div class="row">' +
@@ -2705,6 +2744,7 @@ async function viewAI(m) {
     '<button class="btn primary" id="ai-allow-save">' + esc(t('ai.saveAllowlist')) + '</button></div></section>';
 
   const split = v => { const i = v.indexOf('|'); return [v.slice(0, i), v.slice(i + 1)]; };
+  bindListSearch(m);
   $('#ai-reg', m).onclick = () => {
     const body = {
       type: $('#ai-type', m).value,
@@ -2714,27 +2754,19 @@ async function viewAI(m) {
     if (!body.logicalId || !body.name) { toast(t('toast.aiFieldsRequired'), false); return; }
     run(() => api(aiPath, { method: 'POST', body }), t('toast.resourceRegistered'));
   };
-  $('#ai-res-tbl', m).addEventListener('click', async ev => {
+  m.addEventListener('click', ev => {
     const detail = ev.target.closest('[data-ai-detail]');
     if (detail) {
       const [type, logicalId] = split(detail.dataset.aiDetail);
       S.aiRef = { type, logicalId }; route(); return;
     }
     const pin = ev.target.closest('[data-pin]'), revoke = ev.target.closest('[data-revoke]');
-    if (pin || revoke) {
-      const [type, logicalId] = split(pin ? pin.dataset.pin : revoke.dataset.revoke);
-      handleAIResourceAction(pin ? 'pin' : 'revoke', type, logicalId).catch(reportError);
+    const reinstate = ev.target.closest('[data-reinstate]');
+    if (pin || revoke || reinstate) {
+      const [type, logicalId] = split(pin ? pin.dataset.pin : revoke ? revoke.dataset.revoke : reinstate.dataset.reinstate);
+      handleAIResourceAction(pin ? 'pin' : revoke ? 'revoke' : 'reinstate', type, logicalId).catch(reportError);
     }
   });
-  const revTbl = $('#ai-rev-tbl', m);
-  if (revTbl) {
-    revTbl.addEventListener('click', async ev => {
-      const b = ev.target.closest('[data-reinstate]');
-      if (!b) return;
-      const [ty, lid] = split(b.dataset.reinstate);
-      handleAIResourceAction('reinstate', ty, lid).catch(reportError);
-    });
-  }
   $('#ai-resolve', m).onclick = async () => {
     const q = new URLSearchParams({
       type: $('#ai-r-type', m).value,

@@ -207,6 +207,8 @@ table.grid { min-width: 620px; }
 .diagnostic-cards { display: none; }
 .flag-record-cards { display: none; }
 .flag-empty-mobile { display: none; }
+.mobile-record-cards, .mobile-empty { display: none; }
+.mobile-record[hidden], tr[data-list-record][hidden] { display: none !important; }
 [data-flag-record][hidden] { display: none !important; }
 .flag-diff-list { display: grid; gap: 8px; }
 .flag-diff-item { border: 1px solid var(--border); border-radius: 7px; padding: 9px 12px; }
@@ -333,6 +335,11 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
 .auth-card h1 span { color: var(--muted); font-weight: 400; }
 .auth-card .field { margin: 12px 0; }
 @media (max-width: 700px) {
+  table.grid.mobile-card-table, .ai-revocations-desktop { display: none; }
+  .mobile-record-cards { display: grid; gap: 10px; margin: 10px 0; }
+  .mobile-empty { display: block; }
+  .mobile-record { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+  .mobile-record .row { flex-wrap: wrap; }
   table.grid.flag-list-table { display: none; }
   .flag-record-cards { display: grid; gap: 10px; margin: 10px 0; }
   .flag-empty-mobile { display: block; }
