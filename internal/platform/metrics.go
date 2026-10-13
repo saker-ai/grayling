@@ -197,6 +197,14 @@ func (s *Store) resolveExperimentMetricRefsLocked(exp *Experiment) error {
 		if def.Status != MetricPublished {
 			return nil, fmt.Errorf("%w: metric %s v%d is not published", ErrInvalidState, ref.Key, ref.Version)
 		}
+		if exp.AnalysisWindow <= 0 || def.AttributionWindow > exp.AnalysisWindow {
+			return nil, fmt.Errorf("%w: metric %s attribution window exceeds experiment analysis window", ErrValidation, ref.Key)
+		}
+		retention := s.quotasLocked(exp.WorkspaceID).EventRetention
+		headroom := maxLateWindow + 7*24*time.Hour
+		if retention <= headroom || exp.AnalysisWindow > retention-headroom {
+			return nil, fmt.Errorf("%w: event retention cannot cover analysis, late arrivals and replay buffer", ErrValidation)
+		}
 		hash, err := metricDefinitionHash(def)
 		if err != nil || hash != def.Hash || (ref.DefinitionHash != "" && ref.DefinitionHash != def.Hash) {
 			return nil, fmt.Errorf("%w: metric %s v%d definition hash mismatch", ErrConflict, ref.Key, ref.Version)

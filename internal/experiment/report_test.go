@@ -42,7 +42,7 @@ func TestReportCarriesFrozenMetricReference(t *testing.T) {
 	exp, err := store.CreateExperiment(&platform.Experiment{
 		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "f", Epoch: 1, Unit: "user_id",
 		Variants: []string{"control", "treatment"}, Proportions: map[string]float64{"control": 50, "treatment": 50},
-		PrimaryMetricRef: &ref, Alpha: 0.05, AnalysisWindow: time.Hour,
+		PrimaryMetricRef: &ref, Alpha: 0.05, AnalysisWindow: 7 * 24 * time.Hour,
 	})
 	if err != nil {
 		t.Fatal(err)

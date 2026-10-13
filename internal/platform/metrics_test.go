@@ -140,7 +140,13 @@ func TestExperimentFreezesPublishedMetricReferences(t *testing.T) {
 	}
 	primary := create("activation.complete", "activation_complete")
 	guard := create("guardrail.crash", "crash_event")
+	short := baseP5Experiment(ws.ID, env.ID, MetricSpec{})
+	short.PrimaryMetricRef = &primary
+	if _, err := store.CreateExperiment(short); !errors.Is(err, ErrValidation) {
+		t.Fatalf("short analysis window accepted for catalog metric: %v", err)
+	}
 	exp := baseP5Experiment(ws.ID, env.ID, MetricSpec{})
+	exp.AnalysisWindow = 7 * 24 * time.Hour
 	exp.PrimaryMetricRef = &primary
 	exp.Guardrails = []GuardrailSpec{{MetricRef: &guard, MaxRelativeRegression: 0.05, MinSample: 10}}
 	created, err := store.CreateExperiment(exp)
@@ -173,6 +179,7 @@ func TestExperimentFreezesPublishedMetricReferences(t *testing.T) {
 		t.Fatalf("deprecated definition must remain reportable: %v", err)
 	}
 	newExperiment := baseP5Experiment(ws.ID, env.ID, MetricSpec{})
+	newExperiment.AnalysisWindow = 7 * 24 * time.Hour
 	newExperiment.Epoch = 2
 	newExperiment.PrimaryMetricRef = &primary
 	if _, err := store.CreateExperiment(newExperiment); !errors.Is(err, ErrInvalidState) {
