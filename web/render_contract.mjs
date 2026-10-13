@@ -35,8 +35,19 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
+
+const flagDiff = sandbox.__renderFlagDiff(
+  { revision: 4, content: { type: 'bool', variations: { safe: false, launch: true }, disable: false } },
+  { content: { type: 'bool', variations: { safe: false, launch: '<img src=x onerror=alert(1)>' }, disable: true } },
+);
+assert(flagDiff.includes('Compared with published revision r4') && flagDiff.includes('Kill switch') &&
+  flagDiff.includes('Variations') && !flagDiff.includes('<img') && flagDiff.includes('&lt;img'),
+  'draft diff must show changed sections and escape variation values');
+assert(!flagDiff.includes('Value type'), 'unchanged fields should not clutter the draft diff');
+assert(sandbox.__renderFlagDiff(null, null).includes('No saved draft'), 'missing draft state');
+assert(sandbox.__renderFlagDiff(null, { deleted: true }).includes('marks the Flag for deletion'), 'deletion state');
 
 const flagRows = [
   { key: 'published', current: { publishedAt: '2026-10-13T10:00:00Z' } },

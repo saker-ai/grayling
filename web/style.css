@@ -208,6 +208,13 @@ table.grid { min-width: 620px; }
 .flag-record-cards { display: none; }
 .flag-empty-mobile { display: none; }
 [data-flag-record][hidden] { display: none !important; }
+.flag-diff-list { display: grid; gap: 8px; }
+.flag-diff-item { border: 1px solid var(--border); border-radius: 7px; padding: 9px 12px; }
+.flag-diff-item summary { cursor: pointer; font-weight: 600; }
+.flag-diff-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+.flag-diff-values > div { min-width: 0; }
+.flag-diff-values pre { margin: 6px 0 0; }
+.modal .flag-diff-values { grid-template-columns: 1fr; }
 table.grid tr[hidden] { display: none; }
 .row-link { border: 0; background: none; padding: 2px 0; color: var(--accent); font: inherit; cursor: pointer; text-align: left; }
 .row-link:hover { text-decoration: underline; }
@@ -289,6 +296,7 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
   table.grid.flag-list-table { display: none; }
   .flag-record-cards { display: grid; gap: 10px; margin: 10px 0; }
   .flag-empty-mobile { display: block; }
+  .flag-diff-values { grid-template-columns: 1fr; }
   .flag-record { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; }
   table.grid.diagnostic-table { display: none; }
   .diagnostic-cards { display: grid; gap: 10px; margin: 10px 0; }

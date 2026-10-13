@@ -338,7 +338,7 @@ function actionDialog({ title, summary, preview = '', reasonLabel = '', reasonRe
     ov.addEventListener('keydown', ev => {
       if (ev.key === 'Escape') { ev.preventDefault(); finish(null); }
       if (ev.key === 'Tab') {
-        const controls = $$('textarea, button', ov);
+        const controls = $$('summary, textarea, button', ov);
         if (ev.shiftKey && document.activeElement === controls[0]) { ev.preventDefault(); controls.at(-1).focus(); }
         else if (!ev.shiftKey && document.activeElement === controls.at(-1)) { ev.preventDefault(); controls[0].focus(); }
       }
@@ -772,6 +772,43 @@ function revisionsTable(f) {
     '</tbody></table>';
 }
 
+function canonicalFlagValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalFlagValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalFlagValue(value[key])]));
+  }
+  return value;
+}
+
+function flagDiffValue(value) {
+  return value === undefined ? '—' : JSON.stringify(canonicalFlagValue(value), null, 2);
+}
+
+function renderFlagDiff(current, draft) {
+  if (!draft) return '<section class="card"><h3>' + esc(t('flags.diffTitle')) + '</h3><p class="muted">' +
+    esc(t('flags.diffNoDraft')) + '</p></section>';
+  if (draft.deleted) return '<section class="card"><h3>' + esc(t('flags.diffTitle')) + '</h3><div class="banner warn">' +
+    esc(t('flags.diffDeleted')) + '</div></section>';
+  const before = current?.content || {};
+  const after = draft.content || {};
+  const labels = {
+    type: t('flags.diffType'), disable: t('flags.diffDisable'), bucketing: t('flags.diffBucketing'),
+    fields: t('flags.diffFields'), variations: t('flags.diffVariations'),
+    defaultRule: t('flags.diffDefaultRule'), targeting: t('flags.diffTargeting'),
+    experiment: t('flags.diffExperiment'),
+  };
+  const keys = Object.keys(labels).filter(key => flagDiffValue(before[key]) !== flagDiffValue(after[key]));
+  return '<section class="card"><h3>' + esc(t('flags.diffTitle')) + '</h3>' +
+    '<p class="muted">' + esc(t('flags.diffBase', { revision: current?.revision || 0 })) + '</p>' +
+    (keys.length ? '<div class="flag-diff-list">' + keys.map(key =>
+      '<details class="flag-diff-item"><summary>' + esc(labels[key]) + '</summary>' +
+      '<div class="flag-diff-values"><div><strong>' + esc(t('flags.diffBefore')) +
+      '</strong><pre class="pre small">' + esc(flagDiffValue(before[key])) + '</pre></div>' +
+      '<div><strong>' + esc(t('flags.diffAfter')) + '</strong><pre class="pre small">' +
+      esc(flagDiffValue(after[key])) + '</pre></div></div></details>').join('') + '</div>'
+      : '<p>' + esc(t('flags.diffNoChanges')) + '</p>') + '</section>';
+}
+
 async function viewFlagDetail(m) {
   const key = S.flagKey;
   const kp = scopePath() + '/flags/' + encodeURIComponent(key);
@@ -791,6 +828,7 @@ async function viewFlagDetail(m) {
     '<h2 class="mono">' + esc(key) + '</h2>' + st +
     (draft ? '<span class="muted">' + esc(t('flags.riskMeta', { risk: draft.risk || '—', by: draft.updatedBy || '—', time: fmtTime(draft.updatedAt) })) + '</span>' : '') +
     '</div>' +
+    renderFlagDiff(f && f.current, draft) +
     '<div class="cols">' +
       '<section class="card"><h3>' + esc(t('flags.draftEditor')) + '</h3>' +
         '<textarea id="flag-json" class="json" rows="24" spellcheck="false"></textarea>' +
@@ -868,7 +906,8 @@ function bindFlagDetail(m, key, kp, f) {
   };
   $('#flag-publish', m).onclick = async () => {
     const approval = await actionDialog({ title: t('btn.publish'), summary: t('action.flagSummary', { key }),
-      preview: reviewPreview(f?.preview, 'action-review-preview'), reasonLabel: t('prompt.publishNote'), reasonRequired: false, confirmLabel: t('btn.publish') });
+      preview: reviewPreview(f?.preview, 'action-review-preview') + renderFlagDiff(f?.current, draft),
+      reasonLabel: t('prompt.publishNote'), reasonRequired: false, confirmLabel: t('btn.publish') });
     if (!approval) return;
     run(() => api(kp + '/publish', { method: 'POST', body: { note: approval.reason } }),
       r => t('toast.published', { flag: r && r.flagRevision, manifest: r && r.manifestRevision }));
