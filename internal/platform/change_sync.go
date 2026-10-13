@@ -73,19 +73,38 @@ type controlChange struct {
 // types use the existing atomic full reload until they gain a dedicated loader.
 func (s *Store) SyncChanges() error {
 	if p, ok := s.persist.(*gormPersistence); ok {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if err := s.commitLocked(); err != nil {
+			return err
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		version, err := p.currentVersion(ctx)
+		state, events, metrics, reload, err := p.eventDelta(ctx, p.version, s.data.ControlVersion)
 		if err != nil {
-			return fmt.Errorf("platform: read database version: %w", err)
+			s.syncStats.failures.Add(1)
+			return fmt.Errorf("platform: read database changes: %w", err)
 		}
-		s.mu.RLock()
-		current := p.version
-		s.mu.RUnlock()
-		if version == current {
+		if state.Version <= p.version {
 			return nil
 		}
-		return s.ReloadFromBackend()
+		if reload {
+			return s.fullReloadLocked()
+		}
+		for _, ev := range events {
+			if _, exists := s.data.EventIndex[ev.EventID]; !exists {
+				s.appendEventLocked(ev)
+			}
+		}
+		for _, metric := range metrics {
+			if err := applyDatabaseMetric(s.data, metric); err != nil {
+				return err
+			}
+		}
+		p.version = state.Version
+		s.syncStats.applied.Add(int64(len(events)))
+		s.syncStats.versionLag.Store(0)
+		return nil
 	}
 	p, ok := s.persist.(*pgPersistence)
 	if !ok {

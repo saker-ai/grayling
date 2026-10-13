@@ -34,6 +34,8 @@ type databaseState struct {
 
 type databaseEvent struct {
 	EventID       string    `gorm:"primaryKey"`
+	CommitVersion int64     `gorm:"index:idx_event_commit,priority:1;not null"`
+	CommitOrdinal int       `gorm:"index:idx_event_commit,priority:2;not null"`
 	WorkspaceID   string    `gorm:"index:idx_analysis,priority:1;not null"`
 	EnvironmentID string    `gorm:"index:idx_analysis,priority:2;not null"`
 	ExperimentID  string    `gorm:"index:idx_analysis,priority:3;not null"`
@@ -189,13 +191,89 @@ func (p *gormPersistence) Close() error {
 	return db.Close()
 }
 
-func (p *gormPersistence) currentVersion(ctx context.Context) (int64, error) {
-	var row databaseState
-	err := p.db.WithContext(ctx).Select("version").First(&row, 1).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, nil
+// eventDelta reads a consistent event batch and its authoritative aggregate
+// rows. A control change or a gap (retention, old schema, or a large backlog)
+// asks the caller to reload the whole working set instead.
+func (p *gormPersistence) eventDelta(ctx context.Context, after, controlVersion int64) (databaseState, []*Event, []databaseMetric, bool, error) {
+	var state databaseState
+	var rows []databaseEvent
+	var metrics []databaseMetric
+	const maxDelta = 4096
+	fullReload := false
+	err := p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if p.dialect == "postgres" {
+			if err := tx.Exec("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ").Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Select("version", "control_version").First(&state, 1).Error; err != nil {
+			return err
+		}
+		if state.ControlVersion != controlVersion || state.Version <= after {
+			return nil
+		}
+		if err := tx.Where("commit_version > ? AND commit_version <= ?", after, state.Version).
+			Order("commit_version, commit_ordinal").Limit(maxDelta + 1).Find(&rows).Error; err != nil {
+			return err
+		}
+		if len(rows) == 0 || len(rows) > maxDelta {
+			fullReload = true
+			return nil
+		}
+		keys := make(map[string]struct{}, len(rows)*3)
+		for _, row := range rows {
+			var ev Event
+			if err := json.Unmarshal(row.Payload, &ev); err != nil {
+				return fmt.Errorf("platform: decode delta event %s: %w", row.EventID, err)
+			}
+			for _, key := range metricKeysForEvent(&ev) {
+				keys[key] = struct{}{}
+			}
+		}
+		batch := make([]string, 0, 1000)
+		loadBatch := func() error {
+			if len(batch) == 0 {
+				return nil
+			}
+			var found []databaseMetric
+			if err := tx.Where("key IN ?", batch).Find(&found).Error; err != nil {
+				return err
+			}
+			metrics = append(metrics, found...)
+			batch = batch[:0]
+			return nil
+		}
+		for key := range keys {
+			batch = append(batch, key)
+			if len(batch) == cap(batch) {
+				if err := loadBatch(); err != nil {
+					return err
+				}
+			}
+		}
+		return loadBatch()
+	})
+	if err != nil || fullReload || state.ControlVersion != controlVersion {
+		return state, nil, nil, fullReload || state.ControlVersion != controlVersion, err
 	}
-	return row.Version, err
+	events := make([]*Event, 0, len(rows))
+	for _, row := range rows {
+		var ev Event
+		if err := json.Unmarshal(row.Payload, &ev); err != nil {
+			return state, nil, nil, false, err
+		}
+		events = append(events, &ev)
+	}
+	return state, events, metrics, false, nil
+}
+
+func metricKeysForEvent(ev *Event) []string {
+	scope := fmt.Sprintf("%s/%s/%s/%d/%s", ev.WorkspaceID, ev.EnvironmentID,
+		ev.ExperimentID, ev.Epoch, ev.Variant)
+	if ev.Type == EventExposure {
+		return []string{scope + "/exposure", scope + "/" + ev.UnitHash}
+	}
+	return []string{scope + "/conversion", scope + "/" + ev.UnitHash + "/" + ev.MetricKey}
 }
 
 func (p *gormPersistence) Load() (*Data, error) {
@@ -255,35 +333,42 @@ func hydrateMetrics(data *Data, metrics []databaseMetric) error {
 	data.SplitExposedUnits = map[string]map[string]bool{}
 	data.EventCounts = map[string]int64{}
 	for _, metric := range metrics {
-		switch metric.Category {
-		case "agg":
-			var value UnitAgg
-			if err := json.Unmarshal(metric.Payload, &value); err != nil {
-				return fmt.Errorf("platform: decode aggregate %s: %w", metric.Key, err)
-			}
-			data.UnitAggs[metric.Key] = &value
-		case "count":
-			var value int64
-			if err := json.Unmarshal(metric.Payload, &value); err != nil {
-				return fmt.Errorf("platform: decode count %s: %w", metric.Key, err)
-			}
-			data.EventCounts[metric.Key] = value
-		case "exposed", "split":
-			scope, unit, ok := strings.CutLast(metric.Key, "/")
-			if !ok {
-				return fmt.Errorf("platform: malformed exposure key %q", metric.Key)
-			}
-			target := data.ExposedUnits
-			if metric.Category == "split" {
-				target = data.SplitExposedUnits
-			}
-			if target[scope] == nil {
-				target[scope] = map[string]bool{}
-			}
-			target[scope][unit] = true
-		default:
-			return fmt.Errorf("platform: unknown metric category %q", metric.Category)
+		if err := applyDatabaseMetric(data, metric); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func applyDatabaseMetric(data *Data, metric databaseMetric) error {
+	switch metric.Category {
+	case "agg":
+		var value UnitAgg
+		if err := json.Unmarshal(metric.Payload, &value); err != nil {
+			return fmt.Errorf("platform: decode aggregate %s: %w", metric.Key, err)
+		}
+		data.UnitAggs[metric.Key] = &value
+	case "count":
+		var value int64
+		if err := json.Unmarshal(metric.Payload, &value); err != nil {
+			return fmt.Errorf("platform: decode count %s: %w", metric.Key, err)
+		}
+		data.EventCounts[metric.Key] = value
+	case "exposed", "split":
+		scope, unit, ok := strings.CutLast(metric.Key, "/")
+		if !ok {
+			return fmt.Errorf("platform: malformed exposure key %q", metric.Key)
+		}
+		target := data.ExposedUnits
+		if metric.Category == "split" {
+			target = data.SplitExposedUnits
+		}
+		if target[scope] == nil {
+			target[scope] = map[string]bool{}
+		}
+		target[scope][unit] = true
+	default:
+		return fmt.Errorf("platform: unknown metric category %q", metric.Category)
 	}
 	return nil
 }
@@ -361,12 +446,14 @@ func (p *gormPersistence) Commit(data *Data, ch *ChangeSet) error {
 				return err
 			}
 		}
-		for _, ev := range ch.Events {
+		committedVersion = current.Version + 1
+		for ordinal, ev := range ch.Events {
 			payload, err := json.Marshal(ev)
 			if err != nil {
 				return err
 			}
-			row := databaseEvent{EventID: ev.EventID, WorkspaceID: ev.WorkspaceID,
+			row := databaseEvent{EventID: ev.EventID, CommitVersion: committedVersion,
+				CommitOrdinal: ordinal, WorkspaceID: ev.WorkspaceID,
 				EnvironmentID: ev.EnvironmentID, ExperimentID: ev.ExperimentID,
 				Epoch: ev.Epoch, ServerTime: ev.ServerTime, Payload: payload}
 			result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
@@ -400,7 +487,6 @@ func (p *gormPersistence) Commit(data *Data, ch *ChangeSet) error {
 		if control {
 			persisted.ControlVersion++
 		}
-		committedVersion = current.Version + 1
 		if current.Version == 0 {
 			payload, err := json.Marshal(&persisted)
 			if err != nil {

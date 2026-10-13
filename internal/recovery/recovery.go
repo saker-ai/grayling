@@ -146,14 +146,14 @@ func Capture(ctx context.Context, dsn, authSecret string, store *platform.Store,
 			if rev == 0 {
 				continue
 			}
-			m, err := cfg.GetManifest(env.NamespaceID)
+			m, err := cfg.GetManifestContext(ctx, env.NamespaceID)
 			if err != nil {
 				return nil, fmt.Errorf("recovery: %s manifest: %w", env.NamespaceID, err)
 			}
 			if m.Revision != rev {
 				return nil, fmt.Errorf("recovery: %s manifest revision %d, postgres %d; restore a matching pair", env.NamespaceID, m.Revision, rev)
 			}
-			if _, err := cfg.LoadSnapshot(env.NamespaceID); err != nil {
+			if _, err := cfg.LoadSnapshotContext(ctx, env.NamespaceID); err != nil {
 				return nil, fmt.Errorf("recovery: %s incomplete snapshot: %w", env.NamespaceID, err)
 			}
 			for _, entry := range m.Flags {

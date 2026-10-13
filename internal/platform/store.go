@@ -532,6 +532,33 @@ func (s *Store) CreateToken(kind TokenKind, name string, role Role, workspaceID,
 	return &CreatedToken{Token: tok, Secret: secret}, nil
 }
 
+// BootstrapOwner creates the initial global owner at most once across
+// PostgreSQL replicas. The database lock covers the refresh, check, and write.
+func (s *Store) BootstrapOwner(ctx context.Context, name string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if locker, ok := s.persist.(scopeLocker); ok {
+		release, err := locker.LockScope(ctx, scopeLockKey("bootstrap", "owner"))
+		if err != nil {
+			return "", fmt.Errorf("platform: bootstrap lock: %w", err)
+		}
+		defer release()
+	}
+	if err := s.ReloadFromBackend(); err != nil {
+		return "", fmt.Errorf("platform: bootstrap reload: %w", err)
+	}
+	if len(s.ListTokens("")) != 0 {
+		return "", nil
+	}
+	created, err := s.CreateToken(TokenAdmin, name, RoleOwner, "", "", "bootstrap")
+	if err != nil {
+		return "", fmt.Errorf("platform: bootstrap owner: %w", err)
+	}
+	_ = s.Audit(name, RoleOwner, "bootstrap.owner", "", "", created.Token.ID, "initial credential")
+	return created.Secret, nil
+}
+
 func hashSecret(secret string) string {
 	sum := sha256.Sum256([]byte(secret))
 	return hex.EncodeToString(sum[:])

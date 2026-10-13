@@ -235,7 +235,7 @@ func (s *Server) handlePinAIVersion(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		var err error
-		pin, err = s.ai.PublishVersion(ws.ID, env.ID, typ, logical, req.Content, actor.Name)
+		pin, err = s.ai.PublishVersionContext(r.Context(), ws.ID, env.ID, typ, logical, req.Content, actor.Name)
 		return err
 	})
 	if err != nil {
@@ -260,7 +260,7 @@ func (s *Server) handleResolveAIResource(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	q := r.URL.Query()
-	content, err := s.ai.Resolve(ws.ID, env.ID, q.Get("type"), q.Get("logicalId"), q.Get("version"))
+	content, err := s.ai.ResolveContext(r.Context(), ws.ID, env.ID, q.Get("type"), q.Get("logicalId"), q.Get("version"))
 	if err != nil {
 		writeStoreError(w, mapAIError(err))
 		return
@@ -336,7 +336,7 @@ func (s *Server) handleSDKAIResolve(w http.ResponseWriter, r *http.Request) {
 	}
 	// The scope comes from the token; the request can only name resources
 	// registered in the token's own environment.
-	content, err := s.ai.Resolve(env.WorkspaceID, env.ID, req.Type, req.LogicalID, req.Version)
+	content, err := s.ai.ResolveContext(r.Context(), env.WorkspaceID, env.ID, req.Type, req.LogicalID, req.Version)
 	if err != nil {
 		writeStoreError(w, mapAIError(err))
 		return
@@ -390,7 +390,7 @@ func (s *Server) handleSDKAISession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation_failed", "sessionId required")
 		return
 	}
-	ev, snapshot, revision, err := s.evaluatorFor(env)
+	ev, snapshot, revision, err := s.evaluatorFor(r.Context(), env)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -436,7 +436,7 @@ func (s *Server) handleSDKAISession(w http.ResponseWriter, r *http.Request) {
 	// freeze — a task must never start on partially resolved config (§7:
 	// 资源缺失安全降级 = do not run with stale/partial bindings).
 	for _, rr := range req.Resources {
-		content, err := s.ai.Resolve(env.WorkspaceID, env.ID, rr.Type, rr.LogicalID, rr.Version)
+		content, err := s.ai.ResolveContext(r.Context(), env.WorkspaceID, env.ID, rr.Type, rr.LogicalID, rr.Version)
 		if err != nil {
 			writeStoreError(w, mapAIError(err))
 			return

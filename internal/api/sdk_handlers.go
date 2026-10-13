@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -31,7 +32,7 @@ func (s *Server) handleSDKConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cheap freshness probe: read only the manifest, serve cache on match.
-	manifest, err := s.Config.GetManifest(env.NamespaceID)
+	manifest, err := s.Config.GetManifestContext(r.Context(), env.NamespaceID)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -45,7 +46,7 @@ func (s *Server) handleSDKConfig(w http.ResponseWriter, r *http.Request) {
 
 	cached := s.lookupSnapshot(env.NamespaceID, manifest.Revision)
 	if cached == nil {
-		snapshot, err := s.Config.LoadSnapshot(env.NamespaceID)
+		snapshot, err := s.Config.LoadSnapshotContext(r.Context(), env.NamespaceID)
 		if err != nil {
 			writeStoreError(w, err)
 			return
@@ -103,7 +104,7 @@ func (s *Server) handleSDKRevision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var revision int64
-	manifest, err := s.Config.GetManifest(env.NamespaceID)
+	manifest, err := s.Config.GetManifestContext(r.Context(), env.NamespaceID)
 	switch {
 	case err == nil:
 		revision = manifest.Revision
@@ -139,8 +140,8 @@ func (s *Server) lookupSnapshot(namespaceID string, revision int64) *cachedSnaps
 
 // evaluatorFor returns a compiled evaluator at the CURRENT manifest
 // revision, rebuilding the cache when the substrate moved.
-func (s *Server) evaluatorFor(env *platform.Environment) (*evaluation.Evaluator, *model.Snapshot, int64, error) {
-	manifest, err := s.Config.GetManifest(env.NamespaceID)
+func (s *Server) evaluatorFor(ctx context.Context, env *platform.Environment) (*evaluation.Evaluator, *model.Snapshot, int64, error) {
+	manifest, err := s.Config.GetManifestContext(ctx, env.NamespaceID)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -150,7 +151,7 @@ func (s *Server) evaluatorFor(env *platform.Environment) (*evaluation.Evaluator,
 			return entry.evaluator, entry.snapshot.snapshot, manifest.Revision, nil
 		}
 	}
-	snapshot, err := s.Config.LoadSnapshot(env.NamespaceID)
+	snapshot, err := s.Config.LoadSnapshotContext(ctx, env.NamespaceID)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -248,7 +249,7 @@ func (s *Server) handleSDKEval(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	ev, snapshot, revision, err := s.evaluatorFor(env)
+	ev, snapshot, revision, err := s.evaluatorFor(r.Context(), env)
 	if err != nil {
 		writeStoreError(w, err)
 		return

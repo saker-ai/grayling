@@ -431,7 +431,7 @@ func (s *Server) handlePublishFlag(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, fmt.Errorf("%w: publish requires a note", platform.ErrValidation))
 		return
 	}
-	res, err := s.Admin.PublishFlag(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
+	res, err := s.Admin.PublishFlagContext(r.Context(), actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
 		r.PathValue("key"), req.Note)
 	if err != nil {
 		writeStoreError(w, err)
@@ -455,7 +455,7 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation_failed", "approvalId or emergency=true required")
 		return
 	}
-	res, err := s.Admin.RollbackFlag(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
+	res, err := s.Admin.RollbackFlagContext(r.Context(), actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
 		r.PathValue("key"), req.Revision, req.Reason, req.ApprovalID)
 	if err != nil {
 		writeStoreError(w, err)
@@ -472,7 +472,7 @@ func (s *Server) handleEmergencyDisable(w http.ResponseWriter, r *http.Request) 
 		writeStoreError(w, err)
 		return
 	}
-	result, err := s.Admin.EmergencyDisableFlag(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
+	result, err := s.Admin.EmergencyDisableFlagContext(r.Context(), actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
 		r.PathValue("key"), req.Reason)
 	if err != nil {
 		writeStoreError(w, err)
@@ -625,7 +625,7 @@ func (s *Server) handlePublishSegment(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, fmt.Errorf("%w: publish requires a note", platform.ErrValidation))
 		return
 	}
-	res, err := s.Admin.PublishSegment(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
+	res, err := s.Admin.PublishSegmentContext(r.Context(), actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
 		r.PathValue("key"), req.Note)
 	if err != nil {
 		writeStoreError(w, err)
@@ -703,7 +703,7 @@ func (s *Server) handleTransitionExperiment(w http.ResponseWriter, r *http.Reque
 		writeStoreError(w, err)
 		return
 	}
-	exp, err := s.Admin.TransitionExperiment(actorFrom(r), r.PathValue("id"), req.To, req.Reason)
+	exp, err := s.Admin.TransitionExperimentContext(r.Context(), actorFrom(r), r.PathValue("id"), req.To, req.Reason)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -744,7 +744,7 @@ func (s *Server) handleDebugEval(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	res, snapshot, err := s.Admin.DebugEvaluate(actor, r.PathValue("ws"), r.PathValue("env"),
+	res, snapshot, err := s.Admin.DebugEvaluateContext(r.Context(), actor, r.PathValue("ws"), r.PathValue("env"),
 		req.FlagKey, req.Context)
 	if err != nil {
 		writeStoreError(w, err)

@@ -22,6 +22,7 @@
 package ai
 
 import (
+	"context"
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/hex"
@@ -129,6 +130,10 @@ func (s *Service) RegisterResource(workspaceID, environmentID, typ, logicalID, n
 //     draft — exactly one applies at any time, the other's error is
 //     tolerated.
 func (s *Service) PublishVersion(workspaceID, environmentID, typ, logicalID, content, actor string) (*platform.PinnedVersion, error) {
+	return s.PublishVersionContext(context.Background(), workspaceID, environmentID, typ, logicalID, content, actor)
+}
+
+func (s *Service) PublishVersionContext(ctx context.Context, workspaceID, environmentID, typ, logicalID, content, actor string) (*platform.PinnedVersion, error) {
 	ref, err := s.Store.GetAIResource(workspaceID, environmentID, typ, logicalID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnauthorized, err)
@@ -137,7 +142,7 @@ func (s *Service) PublishVersion(workspaceID, environmentID, typ, logicalID, con
 		return nil, fmt.Errorf("ai: refusing to publish empty content")
 	}
 	if s.External != nil {
-		return s.publishExternal(workspaceID, environmentID, typ, logicalID, content, actor, ref)
+		return s.publishExternal(ctx, workspaceID, environmentID, typ, logicalID, content, actor, ref)
 	}
 	var res *gonacosai.Resource
 	switch typ {
@@ -180,7 +185,7 @@ func (s *Service) PublishVersion(workspaceID, environmentID, typ, logicalID, con
 	// Read-back verification before pinning: the version we just published
 	// must download with exactly the digest gonacos reported (§3: 不报告
 	// "已生效"直到读回验证).
-	got, err := s.downloadVersion(workspaceID, environmentID, typ, ref.PhysicalID, version)
+	got, err := s.downloadVersion(ctx, workspaceID, environmentID, typ, ref.PhysicalID, version)
 	if err != nil {
 		return nil, fmt.Errorf("ai: read-back of %s@%s failed: %w", ref.PhysicalID, version, err)
 	}
@@ -203,7 +208,7 @@ func externalDataID(typ, physicalID, version string) string {
 	return "golab.ai." + typ + "." + physicalID + "." + version
 }
 
-func (s *Service) publishExternal(workspaceID, environmentID, typ, logicalID, content, actor string, ref *platform.AIResourceRef) (*platform.PinnedVersion, error) {
+func (s *Service) publishExternal(ctx context.Context, workspaceID, environmentID, typ, logicalID, content, actor string, ref *platform.AIResourceRef) (*platform.PinnedVersion, error) {
 	env, err := s.Store.GetEnvironment(workspaceID, environmentID)
 	if err != nil {
 		return nil, err
@@ -214,7 +219,7 @@ func (s *Service) publishExternal(workspaceID, environmentID, typ, logicalID, co
 	}
 	version := hex.EncodeToString(random[:])
 	dataID := externalDataID(typ, ref.PhysicalID, version)
-	if _, err := s.External.PublishDoc(env.NamespaceID, dataID, []byte(content)); err != nil {
+	if _, err := s.External.PublishDocContext(ctx, env.NamespaceID, dataID, []byte(content)); err != nil {
 		return nil, fmt.Errorf("ai: publish external version: %w", err)
 	}
 	pin := &platform.PinnedVersion{
@@ -267,13 +272,13 @@ func versionMD5(res *gonacosai.Resource, version string) string {
 }
 
 // downloadVersion fetches version content through the gonacos API.
-func (s *Service) downloadVersion(workspaceID, environmentID, typ, physicalID, version string) (string, error) {
+func (s *Service) downloadVersion(ctx context.Context, workspaceID, environmentID, typ, physicalID, version string) (string, error) {
 	if s.External != nil {
 		env, err := s.Store.GetEnvironment(workspaceID, environmentID)
 		if err != nil {
 			return "", err
 		}
-		content, _, err := s.External.GetDoc(env.NamespaceID, externalDataID(typ, physicalID, version))
+		content, _, err := s.External.GetDocContext(ctx, env.NamespaceID, externalDataID(typ, physicalID, version))
 		return string(content), err
 	}
 	switch typ {
@@ -297,6 +302,10 @@ func (s *Service) downloadVersion(workspaceID, environmentID, typ, physicalID, v
 // scope. Unauthorized scopes (including any cross-workspace attempt) get
 // ErrUnauthorized without leaking existence. Revocation is checked live.
 func (s *Service) Resolve(workspaceID, environmentID, typ, logicalID, version string) (*Content, error) {
+	return s.ResolveContext(context.Background(), workspaceID, environmentID, typ, logicalID, version)
+}
+
+func (s *Service) ResolveContext(ctx context.Context, workspaceID, environmentID, typ, logicalID, version string) (*Content, error) {
 	if reason, revoked := s.revoked(workspaceID, environmentID, typ, logicalID); revoked {
 		return nil, fmt.Errorf("%w: %s/%s: %s", ErrRevoked, typ, logicalID, reason)
 	}
@@ -321,7 +330,7 @@ func (s *Service) Resolve(workspaceID, environmentID, typ, logicalID, version st
 	if pin.PhysicalID != ref.PhysicalID {
 		return nil, ErrUnauthorized
 	}
-	content, err := s.downloadVersion(workspaceID, environmentID, typ, ref.PhysicalID, version)
+	content, err := s.downloadVersion(ctx, workspaceID, environmentID, typ, ref.PhysicalID, version)
 	if err != nil {
 		return nil, fmt.Errorf("ai: version %s@%s unreadable: %w", ref.PhysicalID, version, err)
 	}

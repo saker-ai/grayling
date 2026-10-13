@@ -62,6 +62,11 @@ func (st ReconcileStats) Repaired() bool {
 // PostgreSQL control journal, then reconciles each environment under the publish lock (the
 // same lock publishes take — a repair can never interleave with a publish).
 func (s *Service) ReconcileOnce() ReconcileStats {
+	return s.ReconcileOnceContext(context.Background())
+}
+
+// ReconcileOnceContext runs a pass that stops when ctx is canceled.
+func (s *Service) ReconcileOnceContext(ctx context.Context) ReconcileStats {
 	stats := ReconcileStats{}
 	if err := s.Store.SyncChanges(); err != nil {
 		stats.Errors = append(stats.Errors, "sync: "+err.Error())
@@ -69,7 +74,10 @@ func (s *Service) ReconcileOnce() ReconcileStats {
 	}
 	for _, ws := range s.Store.ListWorkspaces() {
 		for _, env := range s.Store.ListEnvironments(ws.ID) {
-			s.reconcileEnv(ws.ID, env.ID, &stats)
+			if err := ctx.Err(); err != nil {
+				return stats
+			}
+			s.reconcileEnv(ctx, ws.ID, env.ID, &stats)
 		}
 	}
 	return stats
@@ -87,12 +95,15 @@ func (s *Service) RunReconciler(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		select {
 		case <-ctx.Done():
 			s.logf("reconcile: stopped")
 			return
 		case <-t.C:
-			stats := s.ReconcileOnce()
+			stats := s.ReconcileOnceContext(ctx)
 			m := s.Store.ChangeSyncMetrics()
 			s.logf("reconcile: envs=%d healthy=%d docsRepaired=%d manifestsRepaired=%d errors=%v control_applied=%d control_queries=%d control_failures=%d control_version_lag=%d control_max_notification_delay=%s full_reloads=%d last_full_reload=%s control_fallback_reloads=%d control_journal_rows=%d control_journal_bytes=%d control_oldest_unconfirmed_cursor=%d control_pruned_through=%d",
 				stats.Environments, stats.Healthy, stats.DocsRepaired,
@@ -127,7 +138,7 @@ func (s *Service) acquireReconcileLock(env *platform.Environment) (func(), error
 	}, nil
 }
 
-func (s *Service) reconcileEnv(wsID, envID string, stats *ReconcileStats) {
+func (s *Service) reconcileEnv(ctx context.Context, wsID, envID string, stats *ReconcileStats) {
 	env, err := s.Store.GetEnvironment(wsID, envID)
 	if err != nil {
 		stats.Errors = append(stats.Errors, fmt.Sprintf("env %s/%s: %v", wsID, envID, err))
@@ -155,7 +166,7 @@ func (s *Service) reconcileEnv(wsID, envID string, stats *ReconcileStats) {
 			return
 		}
 		expected := s.Store.ManifestRevision(ws.ID, env.ID)
-		actual, actualErr := s.Config.GetManifest(env.NamespaceID)
+		actual, actualErr := s.Config.GetManifestContext(ctx, env.NamespaceID)
 		actualRev := int64(0)
 		if actualErr == nil {
 			actualRev = actual.Revision
@@ -209,8 +220,11 @@ func (s *Service) reconcileEnv(wsID, envID string, stats *ReconcileStats) {
 			// Substrate behind the store: lost sync events, a fresh/restarted
 			// node, or a rolled-back persistence envelope. Republish the
 			// store truth AT the recorded revision (catch-up, no inflation).
-			docs := s.repairCurrentDocs(ws, env, stats)
-			s.republishManifest(ws, env, expected, fmt.Sprintf(
+			docs := s.repairCurrentDocs(ctx, ws, env, stats)
+			if ctx.Err() != nil {
+				return
+			}
+			s.republishManifest(ctx, ws, env, expected, fmt.Sprintf(
 				"substrate at r%d (read err: %v), store at r%d, docs repaired %d",
 				actualRev, actualErr, expected, docs), stats)
 			return
@@ -232,7 +246,10 @@ func (s *Service) reconcileEnv(wsID, envID string, stats *ReconcileStats) {
 		// Substrate AT the store revision: verify every in-force document
 		// reads back with its recorded hash, and the manifest entries point
 		// at exactly the store's current set.
-		docs := s.repairCurrentDocs(ws, env, stats)
+		docs := s.repairCurrentDocs(ctx, ws, env, stats)
+		if ctx.Err() != nil {
+			return
+		}
 		if manifestMatchesStore(s.Store, ws, env, actual) {
 			if docs == 0 {
 				stats.Healthy++
@@ -241,7 +258,7 @@ func (s *Service) reconcileEnv(wsID, envID string, stats *ReconcileStats) {
 		}
 		// Same revision, different content: republish bumped so revision/ETag
 		// watchers actually refetch the repaired index.
-		s.republishManifest(ws, env, expected+1, fmt.Sprintf(
+		s.republishManifest(ctx, ws, env, expected+1, fmt.Sprintf(
 			"manifest r%d entries disagree with the store; docs repaired %d",
 			expected, docs), stats)
 		return
@@ -251,11 +268,14 @@ func (s *Service) reconcileEnv(wsID, envID string, stats *ReconcileStats) {
 // repairCurrentDocs re-verifies every in-force flag/segment document by
 // read-back and idempotently republishes the ones missing or corrupted in
 // THIS replica's substrate. Returns the number of documents republished.
-func (s *Service) repairCurrentDocs(ws *platform.Workspace, env *platform.Environment,
+func (s *Service) repairCurrentDocs(ctx context.Context, ws *platform.Workspace, env *platform.Environment,
 	stats *ReconcileStats) int {
 
 	repaired := 0
 	for _, fr := range s.Store.CurrentFlagContents(ws.ID, env.ID) {
+		if ctx.Err() != nil {
+			break
+		}
 		raw, err := model.CanonicalJSON(fr.Content)
 		if err != nil || model.HashBytes(raw) != fr.Hash {
 			stats.Errors = append(stats.Errors, fmt.Sprintf(
@@ -263,10 +283,10 @@ func (s *Service) repairCurrentDocs(ws *platform.Workspace, env *platform.Enviro
 				fr.Key, fr.Revision, fr.Hash))
 			continue
 		}
-		if _, gotHash, err := s.Config.GetDoc(env.NamespaceID, fr.DataID); err == nil && gotHash == fr.Hash {
+		if _, gotHash, err := s.Config.GetDocContext(ctx, env.NamespaceID, fr.DataID); err == nil && gotHash == fr.Hash {
 			continue // readable and correct
 		}
-		if _, err := s.Config.PublishDoc(env.NamespaceID, fr.DataID, raw); err != nil {
+		if _, err := s.Config.PublishDocContext(ctx, env.NamespaceID, fr.DataID, raw); err != nil {
 			stats.Errors = append(stats.Errors, fmt.Sprintf(
 				"flag %s r%d: republish: %v", fr.Key, fr.Revision, err))
 			continue
@@ -275,6 +295,9 @@ func (s *Service) repairCurrentDocs(ws *platform.Workspace, env *platform.Enviro
 		s.logf("reconcile: %s/%s flag doc %s republished", ws.Slug, env.Slug, fr.DataID)
 	}
 	for _, sr := range s.Store.CurrentSegmentContents(ws.ID, env.ID) {
+		if ctx.Err() != nil {
+			break
+		}
 		raw, err := model.CanonicalJSON(sr.Content)
 		if err != nil || model.HashBytes(raw) != sr.Hash {
 			stats.Errors = append(stats.Errors, fmt.Sprintf(
@@ -282,10 +305,10 @@ func (s *Service) repairCurrentDocs(ws *platform.Workspace, env *platform.Enviro
 				sr.Key, sr.Revision, sr.Hash))
 			continue
 		}
-		if _, gotHash, err := s.Config.GetDoc(env.NamespaceID, sr.DataID); err == nil && gotHash == sr.Hash {
+		if _, gotHash, err := s.Config.GetDocContext(ctx, env.NamespaceID, sr.DataID); err == nil && gotHash == sr.Hash {
 			continue
 		}
-		if _, err := s.Config.PublishDoc(env.NamespaceID, sr.DataID, raw); err != nil {
+		if _, err := s.Config.PublishDocContext(ctx, env.NamespaceID, sr.DataID, raw); err != nil {
 			stats.Errors = append(stats.Errors, fmt.Sprintf(
 				"segment %s r%d: republish: %v", sr.Key, sr.Revision, err))
 			continue
@@ -299,7 +322,7 @@ func (s *Service) repairCurrentDocs(ws *platform.Workspace, env *platform.Enviro
 
 // republishManifest writes the store truth as manifest revision `rev` and
 // records it (monotonic). PublishManifest itself confirms by read-back.
-func (s *Service) republishManifest(ws *platform.Workspace, env *platform.Environment,
+func (s *Service) republishManifest(ctx context.Context, ws *platform.Workspace, env *platform.Environment,
 	rev int64, reason string, stats *ReconcileStats) {
 
 	m, err := s.buildManifestAt(ws, env, rev)
@@ -308,7 +331,7 @@ func (s *Service) republishManifest(ws *platform.Workspace, env *platform.Enviro
 			"%s/%s: build manifest r%d: %v", ws.Slug, env.Slug, rev, err))
 		return
 	}
-	if err := s.Config.PublishManifest(env.NamespaceID, m); err != nil {
+	if err := s.Config.PublishManifestContext(ctx, env.NamespaceID, m); err != nil {
 		stats.Errors = append(stats.Errors, fmt.Sprintf(
 			"%s/%s: publish manifest r%d: %v", ws.Slug, env.Slug, rev, err))
 		return

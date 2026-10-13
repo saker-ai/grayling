@@ -28,6 +28,9 @@ var dbCounter atomic.Int64
 // registers teardown. It blocks until the server accepts SQL connections.
 func DSN(t *testing.T) string {
 	t.Helper()
+	if os.Getenv("GOLAB_TEST_PG_SKIP") == "1" {
+		t.Skip("pgtest: PostgreSQL integration tests are disabled for this job")
+	}
 	if admin := os.Getenv("GOLAB_TEST_PG_DSN"); admin != "" {
 		return scratchDatabase(t, admin)
 	}

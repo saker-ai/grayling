@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -247,8 +248,12 @@ func (s *Service) MarkFlagDeleted(actor Actor, workspaceID, environmentID, key s
 // a no-op (memory) or a self-reread (file), so this preserves the historical
 // single-node behavior exactly.
 func (s *Service) acquirePublishLock(env *platform.Environment) (func(), error) {
+	return s.acquirePublishLockContext(context.Background(), env)
+}
+
+func (s *Service) acquirePublishLockContext(ctx context.Context, env *platform.Environment) (func(), error) {
 	s.publishMu.Lock()
-	releaseDB, err := s.Store.PublishLock(env.WorkspaceID, env.ID)
+	releaseDB, err := s.Store.PublishLockContext(ctx, env.WorkspaceID, env.ID)
 	if err != nil {
 		s.publishMu.Unlock()
 		return nil, err
@@ -297,11 +302,15 @@ func (s *Service) WithScopeLock(workspaceID, environmentID string, fn func() err
 // same approved draft cannot both allocate a revision for it: the loser sees
 // the winner's publish (draft back to editing) and answers ErrInvalidState.
 func (s *Service) PublishFlag(actor Actor, workspaceID, environmentID, key, note string) (*PublishResult, error) {
+	return s.PublishFlagContext(context.Background(), actor, workspaceID, environmentID, key, note)
+}
+
+func (s *Service) PublishFlagContext(ctx context.Context, actor Actor, workspaceID, environmentID, key, note string) (*PublishResult, error) {
 	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagPublish)
 	if err != nil {
 		return nil, err
 	}
-	release, err := s.acquirePublishLock(env)
+	release, err := s.acquirePublishLockContext(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -321,14 +330,14 @@ func (s *Service) PublishFlag(actor Actor, workspaceID, environmentID, key, note
 		return nil, err
 	}
 	if draft.Deleted {
-		return s.publishDeletionLocked(actor, env, key, draft.ApprovedHash)
+		return s.publishDeletionLockedContext(ctx, actor, env, key, draft.ApprovedHash)
 	}
 	approvalHash := draft.ApprovedHash
 
 	content := *draft.Content
 	rev := s.Store.NextFlagRevision(env.WorkspaceID, env.ID, key)
 	content.Version = model.FormatRevision(rev)
-	fr, m, err := s.publishRevisionLocked(actor, env, &content, note)
+	fr, m, err := s.publishRevisionLockedContext(ctx, actor, env, &content, note)
 	if err != nil {
 		s.audit(actor, "flag.publish.failed", env.WorkspaceID, env.ID, key, map[string]any{"error": err.Error()})
 		return nil, err
@@ -346,18 +355,28 @@ func (s *Service) PublishFlag(actor Actor, workspaceID, environmentID, key, note
 // publishRevisionLocked instead (the lock is not reentrant).
 func (s *Service) publishRevision(actor Actor, env *platform.Environment,
 	content *model.Flag, note string) (*platform.FlagRevision, *model.Manifest, error) {
+	return s.publishRevisionContext(context.Background(), actor, env, content, note)
+}
 
-	release, err := s.acquirePublishLock(env)
+func (s *Service) publishRevisionContext(ctx context.Context, actor Actor, env *platform.Environment,
+	content *model.Flag, note string) (*platform.FlagRevision, *model.Manifest, error) {
+
+	release, err := s.acquirePublishLockContext(ctx, env)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer release()
-	return s.publishRevisionLocked(actor, env, content, note)
+	return s.publishRevisionLockedContext(ctx, actor, env, content, note)
 }
 
 // publishRevisionLocked is the publish pipeline body; the caller holds the
 // publish lock and the working set is already reloaded.
 func (s *Service) publishRevisionLocked(actor Actor, env *platform.Environment,
+	content *model.Flag, note string) (*platform.FlagRevision, *model.Manifest, error) {
+	return s.publishRevisionLockedContext(context.Background(), actor, env, content, note)
+}
+
+func (s *Service) publishRevisionLockedContext(ctx context.Context, actor Actor, env *platform.Environment,
 	content *model.Flag, note string) (*platform.FlagRevision, *model.Manifest, error) {
 
 	ws, err := s.Store.GetWorkspace(env.WorkspaceID)
@@ -379,7 +398,7 @@ func (s *Service) publishRevisionLocked(actor Actor, env *platform.Environment,
 	}
 	rev := s.Store.NextFlagRevision(env.WorkspaceID, env.ID, content.Key)
 	dataID := configstore.FlagDataID(content.Key, rev)
-	if _, err := s.Config.PublishDoc(env.NamespaceID, dataID, raw); err != nil {
+	if _, err := s.Config.PublishDocContext(ctx, env.NamespaceID, dataID, raw); err != nil {
 		return nil, nil, err
 	}
 	hash := model.HashBytes(raw)
@@ -391,7 +410,7 @@ func (s *Service) publishRevisionLocked(actor Actor, env *platform.Environment,
 	if err := s.Store.AppendFlagRevision(fr); err != nil {
 		return nil, nil, err
 	}
-	m, err := s.publishManifest(ws, env)
+	m, err := s.publishManifestContext(ctx, ws, env)
 	if err != nil {
 		return fr, nil, err
 	}
@@ -402,6 +421,10 @@ func (s *Service) publishRevisionLocked(actor Actor, env *platform.Environment,
 // an owner can use this break-glass path; the result requires independent
 // post-action review just like an emergency rollback.
 func (s *Service) EmergencyDisableFlag(actor Actor, workspaceID, environmentID, key, reason string) (*PublishResult, error) {
+	return s.EmergencyDisableFlagContext(context.Background(), actor, workspaceID, environmentID, key, reason)
+}
+
+func (s *Service) EmergencyDisableFlagContext(ctx context.Context, actor Actor, workspaceID, environmentID, key, reason string) (*PublishResult, error) {
 	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagPublish)
 	if err != nil {
 		return nil, err
@@ -412,7 +435,7 @@ func (s *Service) EmergencyDisableFlag(actor Actor, workspaceID, environmentID, 
 	if reason == "" {
 		return nil, fmt.Errorf("%w: emergency disable requires a reason", platform.ErrValidation)
 	}
-	release, err := s.acquirePublishLock(env)
+	release, err := s.acquirePublishLockContext(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +450,7 @@ func (s *Service) EmergencyDisableFlag(actor Actor, workspaceID, environmentID, 
 	content := *current.Content
 	content.Disable = true
 	content.Version = model.FormatRevision(s.Store.NextFlagRevision(env.WorkspaceID, env.ID, key))
-	fr, m, err := s.publishRevisionLocked(actor, env, &content, reason)
+	fr, m, err := s.publishRevisionLockedContext(ctx, actor, env, &content, reason)
 	if err != nil {
 		return nil, err
 	}
@@ -460,6 +483,10 @@ func (s *Service) EmergencyDisableFlag(actor Actor, workspaceID, environmentID, 
 // stay for audit; the tombstone tells delta-capable clients to evict,
 // full-sync clients evict on absence.
 func (s *Service) publishDeletionLocked(actor Actor, env *platform.Environment, key, approvalHash string) (*PublishResult, error) {
+	return s.publishDeletionLockedContext(context.Background(), actor, env, key, approvalHash)
+}
+
+func (s *Service) publishDeletionLockedContext(ctx context.Context, actor Actor, env *platform.Environment, key, approvalHash string) (*PublishResult, error) {
 	ws, err := s.Store.GetWorkspace(env.WorkspaceID)
 	if err != nil {
 		return nil, err
@@ -468,7 +495,7 @@ func (s *Service) publishDeletionLocked(actor Actor, env *platform.Environment, 
 	if err := s.Store.DeleteFlagCurrent(env.WorkspaceID, env.ID, key, newRev); err != nil {
 		return nil, err
 	}
-	m, err := s.publishManifest(ws, env)
+	m, err := s.publishManifestContext(ctx, ws, env)
 	if err != nil {
 		return nil, err
 	}
@@ -526,11 +553,15 @@ func (s *Service) buildManifestAt(ws *platform.Workspace, env *platform.Environm
 
 // publishManifest writes and confirms one manifest revision.
 func (s *Service) publishManifest(ws *platform.Workspace, env *platform.Environment) (*model.Manifest, error) {
+	return s.publishManifestContext(context.Background(), ws, env)
+}
+
+func (s *Service) publishManifestContext(ctx context.Context, ws *platform.Workspace, env *platform.Environment) (*model.Manifest, error) {
 	m, err := s.buildManifest(ws, env)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.Config.PublishManifest(env.NamespaceID, m); err != nil {
+	if err := s.Config.PublishManifestContext(ctx, env.NamespaceID, m); err != nil {
 		return nil, err
 	}
 	if err := s.Store.SetManifestRevision(ws.ID, env.ID, m.Revision); err != nil {
@@ -543,11 +574,15 @@ func (s *Service) publishManifest(ws *platform.Workspace, env *platform.Environm
 // RepublishManifest rebuilds and publishes the manifest without touching any
 // flag revision — used by segment publication and reconciliation.
 func (s *Service) RepublishManifest(actor Actor, workspaceID, environmentID, reason string) (*model.Manifest, error) {
+	return s.RepublishManifestContext(context.Background(), actor, workspaceID, environmentID, reason)
+}
+
+func (s *Service) RepublishManifestContext(ctx context.Context, actor Actor, workspaceID, environmentID, reason string) (*model.Manifest, error) {
 	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagPublish)
 	if err != nil {
 		return nil, err
 	}
-	release, err := s.acquirePublishLock(env)
+	release, err := s.acquirePublishLockContext(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -556,7 +591,7 @@ func (s *Service) RepublishManifest(actor Actor, workspaceID, environmentID, rea
 	if err != nil {
 		return nil, err
 	}
-	m, err := s.publishManifest(ws, env)
+	m, err := s.publishManifestContext(ctx, ws, env)
 	if err != nil {
 		return nil, err
 	}
@@ -572,12 +607,17 @@ func (s *Service) RepublishManifest(actor Actor, workspaceID, environmentID, rea
 // config substrate with the recorded hash.
 func (s *Service) RollbackFlag(actor Actor, workspaceID, environmentID, key string,
 	targetRevision int64, reason string, approvalID ...string) (*PublishResult, error) {
+	return s.RollbackFlagContext(context.Background(), actor, workspaceID, environmentID, key, targetRevision, reason, approvalID...)
+}
+
+func (s *Service) RollbackFlagContext(ctx context.Context, actor Actor, workspaceID, environmentID, key string,
+	targetRevision int64, reason string, approvalID ...string) (*PublishResult, error) {
 
 	ws, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagPublish)
 	if err != nil {
 		return nil, err
 	}
-	release, err := s.acquirePublishLock(env)
+	release, err := s.acquirePublishLockContext(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -616,7 +656,7 @@ func (s *Service) RollbackFlag(actor Actor, workspaceID, environmentID, key stri
 		return nil, err
 	}
 	// Verify the document is still retained and uncorrupted in the substrate.
-	doc, hash, err := s.Config.GetDoc(env.NamespaceID, target.DataID)
+	doc, hash, err := s.Config.GetDocContext(ctx, env.NamespaceID, target.DataID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: rollback target r%d not readable: %v", platform.ErrNotFound, targetRevision, err)
 	}
@@ -630,7 +670,7 @@ func (s *Service) RollbackFlag(actor Actor, workspaceID, environmentID, key stri
 	if err := s.Store.SetCurrentFlagRevision(env.WorkspaceID, env.ID, key, targetRevision, actor.Name); err != nil {
 		return nil, err
 	}
-	m, err := s.publishManifest(ws, env)
+	m, err := s.publishManifestContext(ctx, ws, env)
 	if err != nil {
 		return nil, err
 	}
@@ -725,11 +765,15 @@ func (s *Service) ApproveSegmentDraft(actor Actor, workspaceID, environmentID, k
 // PublishSegment publishes an approved segment draft as an immutable
 // revision and republishes the manifest.
 func (s *Service) PublishSegment(actor Actor, workspaceID, environmentID, key, note string) (*PublishResult, error) {
+	return s.PublishSegmentContext(context.Background(), actor, workspaceID, environmentID, key, note)
+}
+
+func (s *Service) PublishSegmentContext(ctx context.Context, actor Actor, workspaceID, environmentID, key, note string) (*PublishResult, error) {
 	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagPublish)
 	if err != nil {
 		return nil, err
 	}
-	release, err := s.acquirePublishLock(env)
+	release, err := s.acquirePublishLockContext(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -756,7 +800,7 @@ func (s *Service) PublishSegment(actor Actor, workspaceID, environmentID, key, n
 		return nil, err
 	}
 	dataID := configstore.SegmentDataID(key, rev)
-	if _, err := s.Config.PublishDoc(env.NamespaceID, dataID, raw); err != nil {
+	if _, err := s.Config.PublishDocContext(ctx, env.NamespaceID, dataID, raw); err != nil {
 		return nil, err
 	}
 	sr := &platform.SegmentRevision{
@@ -771,7 +815,7 @@ func (s *Service) PublishSegment(actor Actor, workspaceID, environmentID, key, n
 	if err != nil {
 		return nil, err
 	}
-	m, err := s.publishManifest(ws, env)
+	m, err := s.publishManifestContext(ctx, ws, env)
 	if err != nil {
 		return nil, err
 	}
@@ -854,12 +898,18 @@ func (s *Service) ListFlags(actor Actor, workspaceID, environmentID string) ([]*
 // without recording exposures (§11: 评估调试器默认不写曝光).
 func (s *Service) DebugEvaluate(actor Actor, workspaceID, environmentID, key string,
 	evalCtx model.EvaluationContext) (*model.Result, *model.Snapshot, error) {
+	return s.DebugEvaluateContext(context.Background(), actor, workspaceID, environmentID, key, evalCtx)
+}
+
+// DebugEvaluateContext evaluates against the published snapshot with cancellation.
+func (s *Service) DebugEvaluateContext(ctx context.Context, actor Actor, workspaceID, environmentID, key string,
+	evalCtx model.EvaluationContext) (*model.Result, *model.Snapshot, error) {
 
 	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagRead)
 	if err != nil {
 		return nil, nil, err
 	}
-	snapshot, err := s.Config.LoadSnapshot(env.NamespaceID)
+	snapshot, err := s.Config.LoadSnapshotContext(ctx, env.NamespaceID)
 	if err != nil {
 		return nil, nil, err
 	}

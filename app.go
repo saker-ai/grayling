@@ -153,7 +153,7 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 		if err != nil {
 			return nil, fmt.Errorf("golab: external Nacos: %w", err)
 		}
-		if err := client.Ping(); err != nil {
+		if err := client.PingContext(ctx); err != nil {
 			return nil, fmt.Errorf("golab: external Nacos health check: %w", err)
 		}
 		cfg = configstore.NewNacosStore(client)
@@ -210,7 +210,7 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 	})
 	apiServer.SetAI(aiService)
 	apiServer.Rollout.LeaseDuration = opts.RolloutLeaseDuration
-	ownerToken, err := bootstrapOwner(store, opts.BootstrapOwnerName)
+	ownerToken, err := store.BootstrapOwner(ctx, opts.BootstrapOwnerName)
 	if err != nil {
 		return nil, err
 	}
@@ -301,18 +301,6 @@ func openPlatform(ctx context.Context, opts Options) (*platform.Store, error) {
 		return nil, fmt.Errorf("golab: platform store: %w", err)
 	}
 	return store, nil
-}
-
-func bootstrapOwner(store *platform.Store, name string) (string, error) {
-	if len(store.ListTokens("")) > 0 {
-		return "", nil
-	}
-	ct, err := store.CreateToken(platform.TokenAdmin, name, platform.RoleOwner, "", "", "bootstrap")
-	if err != nil {
-		return "", fmt.Errorf("golab: bootstrap owner: %w", err)
-	}
-	_ = store.Audit(name, platform.RoleOwner, "bootstrap.owner", "", "", ct.Token.ID, "initial credential")
-	return ct.Secret, nil
 }
 
 func loopbackBind(addr string) bool {

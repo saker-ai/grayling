@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -245,6 +246,11 @@ func matchingProportions(pct, proportions map[string]float64) bool {
 // Requires publish permission because it changes what users get.
 func (s *Service) TransitionExperiment(actor Actor, experimentID string,
 	to model.ExperimentState, reason string) (*platform.Experiment, error) {
+	return s.TransitionExperimentContext(context.Background(), actor, experimentID, to, reason)
+}
+
+func (s *Service) TransitionExperimentContext(ctx context.Context, actor Actor, experimentID string,
+	to model.ExperimentState, reason string) (*platform.Experiment, error) {
 
 	exp, err := s.Store.GetExperiment(experimentID)
 	if err != nil {
@@ -277,7 +283,7 @@ func (s *Service) TransitionExperiment(actor Actor, experimentID string,
 		}
 		content.Experiment.State = to
 		content.Version = ""
-		if _, _, err := s.publishRevision(actor, env, &content,
+		if _, _, err := s.publishRevisionContext(ctx, actor, env, &content,
 			fmt.Sprintf("experiment %s → %s: %s", experimentID, to, reason)); err != nil {
 			return nil, fmt.Errorf("state recorded but flag republish failed (retry converges): %w", err)
 		}

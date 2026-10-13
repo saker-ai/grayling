@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -213,6 +214,14 @@ func (f *flakyConfig) GetManifest(namespaceID string) (*model.Manifest, error) {
 		return nil, fmt.Errorf("transient substrate read failure")
 	}
 	return f.Store.GetManifest(namespaceID)
+}
+
+func (f *flakyConfig) GetManifestContext(ctx context.Context, namespaceID string) (*model.Manifest, error) {
+	if f.failGetManifest > 0 {
+		f.failGetManifest--
+		return nil, fmt.Errorf("transient substrate read failure")
+	}
+	return f.Store.GetManifestContext(ctx, namespaceID)
 }
 
 // TestReconcileTransientManifestReadErrorDoesNotRepublish: a FAILED manifest

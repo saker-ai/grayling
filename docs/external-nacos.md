@@ -8,7 +8,7 @@ export GOLAB_NACOS_PASSWORD='从密钥管理器注入的密码'
 GOWORK=off go run ./cmd/golab -nacos-url=https://nacos.example.com -sqlite=data/golab.db
 ```
 
-也可只设置 `GOLAB_NACOS_TOKEN`，用于已有的 Bearer/OIDC 凭证；此时不要同时设置用户名和密码。临时 token 到期后需由部署系统更新并重启 GoLab。用户名/密码模式会在 token 到期前重新登录。未配置凭证时，仅适用于关闭 Admin API 鉴权的 Nacos 环境。GoLab 的 `-auth-secret` 仍用于自身凭证与存储密钥；不要把 Nacos 密码当作该参数。
+也可只设置 `GOLAB_NACOS_TOKEN`，用于已有的 Bearer/OIDC 凭证；此时不要同时设置用户名和密码。临时 token 到期后需由部署系统更新并重启 GoLab。用户名/密码模式会在 token 到期前重新登录，遇到 401 时清除缓存并重试一次。来自 HTTP 请求的配置读取、管理发布与 AI 资源访问会传递请求取消信号，单次外部调用最多等待 10 秒。未配置凭证时，仅适用于关闭 Admin API 鉴权的 Nacos 环境。GoLab 的 `-auth-secret` 仍用于自身凭证与存储密钥；不要把 Nacos 密码当作该参数。
 
 GoLab 会为每个工作空间环境自动创建 Nacos namespace（`golab-<workspaceID>-<environmentID>`）。调用账号需要 namespace 管理权限以及这些 namespace 中配置的读写权限。Flag、segment 与 manifest 保存在 `GOLAB_FLAGS` group；Prompt、Skill、AgentSpec 的独立版本保存在 `GOLAB_AI` group。外部模式的 AI 资源使用 Nacos 配置中心作为内容存储，**不会登记到 Nacos 原生 AI Registry**。资源登记、固定版本、逐次读取摘要校验和撤销仍由 GoLab 提供。
 

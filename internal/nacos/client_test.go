@@ -1,9 +1,12 @@
 package nacos
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -41,6 +44,52 @@ func TestClientLoginAndAuthenticatedRequest(t *testing.T) {
 	}
 	if logins != 1 {
 		t.Fatalf("expected cached login, got %d logins", logins)
+	}
+}
+
+func TestClientRefreshesRejectedCachedToken(t *testing.T) {
+	var logins atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/nacos/v3/auth/user/login":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"accessToken": "issued-" + string(rune('0'+logins.Add(1))), "tokenTtl": 3600,
+			})
+		case "/nacos/v3/admin/core/namespace/list":
+			if r.Header.Get("accessToken") == "issued-1" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte("expired"))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": []any{}})
+		}
+	}))
+	defer srv.Close()
+	client, err := NewClient(Config{URL: srv.URL, Username: "user", Password: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.PingContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := logins.Load(); got != 2 {
+		t.Fatalf("logins = %d, want 2", got)
+	}
+}
+
+func TestClientRequestHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cancel()
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	client, err := NewClient(Config{URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.PingContext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("PingContext error = %v, want context cancellation", err)
 	}
 }
 

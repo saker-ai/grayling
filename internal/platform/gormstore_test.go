@@ -79,6 +79,65 @@ func TestSQLiteMemoryStore(t *testing.T) {
 	}
 }
 
+func TestSQLiteEventSyncDoesNotReloadWorkingSet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared.sqlite")
+	a, err := NewSQLiteStore(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	b, err := NewSQLiteStore(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	ws, err := a.CreateWorkspace("shared", "Shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := a.CreateEnvironment(ws.ID, "dev", "Dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := a.CreateExperiment(&Experiment{
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "flag", Unit: "user_id", Epoch: 1,
+		Variants: []string{"a", "b"}, Proportions: map[string]float64{"a": 50, "b": 50},
+		PrimaryMetric: MetricSpec{Key: "conv", Type: "proportion", Direction: "increase"},
+		Alpha:         0.05, AnalysisWindow: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	before := b.ChangeSyncMetrics().FullReloads
+	ev := &Event{EventID: "cross-store-event", WorkspaceID: ws.ID, EnvironmentID: env.ID,
+		Type: EventExposure, ExperimentID: exp.ID, Epoch: 1, Variant: "a",
+		UnitHash: a.HashUnit(ws.ID, "unit"), Source: "split", ClientTime: time.Now()}
+	if result, err := a.IngestEvents([]*Event{ev}); err != nil || result.Accepted != 1 {
+		t.Fatalf("ingest: %+v, %v", result, err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.ChangeSyncMetrics().FullReloads; got != before {
+		t.Fatalf("event sync caused full reload: %d -> %d", before, got)
+	}
+	if exposures, _ := b.EventMetricTotals(ws.ID, env.ID); exposures != 1 {
+		t.Fatalf("synced exposures = %d, want 1", exposures)
+	}
+	if !b.HasAcceptedEvent(ev.EventID, ws.ID, env.ID, EventExposure) {
+		t.Fatal("peer event absent from recent event window")
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if exposures, _ := b.EventMetricTotals(ws.ID, env.ID); exposures != 1 {
+		t.Fatalf("replayed event on second sync: %d exposures", exposures)
+	}
+}
+
 func TestGORMPostgresRoundtripAndDedup(t *testing.T) {
 	dsn := pgtest.DSN(t)
 	store, err := NewGORMPostgresStore(t.Context(), dsn)
@@ -164,6 +223,83 @@ func TestGORMPostgresReplicaSyncAndLease(t *testing.T) {
 	}
 	if err := a.FinishRolloutLease(t.Context(), "a", gen, ""); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGORMPostgresEventDeltaAndBootstrap(t *testing.T) {
+	dsn := pgtest.DSN(t)
+	a, err := NewGORMPostgresStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	b, err := NewGORMPostgresStore(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	var wg sync.WaitGroup
+	secrets := make(chan string, 2)
+	errors := make(chan error, 2)
+	for _, store := range []*Store{a, b} {
+		wg.Go(func() {
+			secret, err := store.BootstrapOwner(t.Context(), "initial")
+			secrets <- secret
+			errors <- err
+		})
+	}
+	wg.Wait()
+	close(secrets)
+	close(errors)
+	for err := range errors {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	issued := 0
+	for secret := range secrets {
+		if secret != "" {
+			issued++
+		}
+	}
+	if issued != 1 {
+		t.Fatalf("bootstrap issued %d owner credentials, want 1", issued)
+	}
+	ws, err := a.CreateWorkspace("delta", "Delta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := a.CreateEnvironment(ws.ID, "dev", "Dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := a.CreateExperiment(&Experiment{
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "flag", Unit: "user_id", Epoch: 1,
+		Variants: []string{"a", "b"}, Proportions: map[string]float64{"a": 50, "b": 50},
+		PrimaryMetric: MetricSpec{Key: "conv", Type: "proportion", Direction: "increase"},
+		Alpha:         0.05, AnalysisWindow: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	before := b.ChangeSyncMetrics().FullReloads
+	ev := &Event{EventID: "pg-delta-event", WorkspaceID: ws.ID, EnvironmentID: env.ID,
+		Type: EventExposure, ExperimentID: exp.ID, Epoch: 1, Variant: "a",
+		UnitHash: a.HashUnit(ws.ID, "unit"), Source: "split", ClientTime: time.Now()}
+	if result, err := a.IngestEvents([]*Event{ev}); err != nil || result.Accepted != 1 {
+		t.Fatalf("ingest: %+v, %v", result, err)
+	}
+	if err := b.SyncChanges(); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.ChangeSyncMetrics().FullReloads; got != before {
+		t.Fatalf("event sync caused full reload: %d -> %d", before, got)
+	}
+	if exposures, _ := b.EventMetricTotals(ws.ID, env.ID); exposures != 1 {
+		t.Fatalf("synced exposures = %d, want 1", exposures)
 	}
 }
 

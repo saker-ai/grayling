@@ -18,6 +18,7 @@
 package configstore
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,6 +60,12 @@ func SegmentDataID(key string, revision int64) string {
 
 // Store is the substrate abstraction used by GoLab's publish and read paths.
 type Store interface {
+	PublishDocContext(ctx context.Context, namespaceID, dataID string, content []byte) (string, error)
+	GetDocContext(ctx context.Context, namespaceID, dataID string) ([]byte, string, error)
+	DeleteDocContext(ctx context.Context, namespaceID, dataID string) error
+	PublishManifestContext(ctx context.Context, namespaceID string, m *model.Manifest) error
+	GetManifestContext(ctx context.Context, namespaceID string) (*model.Manifest, error)
+	LoadSnapshotContext(ctx context.Context, namespaceID string) (*model.Snapshot, error)
 	// PublishDoc writes immutable content and confirms by read-back.
 	// Returns the dataId and the SHA-256 hex of the content.
 	PublishDoc(namespaceID, dataID string, content []byte) (string, error)
@@ -78,9 +85,9 @@ type Store interface {
 }
 
 type documentBackend interface {
-	Publish(namespace, group, dataID, content string) error
-	Get(namespace, group, dataID string) (string, error)
-	Delete(namespace, group, dataID string) error
+	PublishContext(ctx context.Context, namespace, group, dataID, content string) error
+	GetContext(ctx context.Context, namespace, group, dataID string) (string, error)
+	DeleteContext(ctx context.Context, namespace, group, dataID string) error
 }
 
 type configStore struct {
@@ -90,14 +97,14 @@ type configStore struct {
 
 type embeddedBackend struct{ cfg *config.Service }
 
-func (b embeddedBackend) Publish(namespace, group, dataID, content string) error {
+func (b embeddedBackend) PublishContext(_ context.Context, namespace, group, dataID, content string) error {
 	return b.cfg.Publish(config.PublishRequest{
 		NamespaceID: namespace, GroupName: group, DataID: dataID,
 		Content: content, Type: "json", Desc: "golab immutable revision document", AppName: "golab",
 	})
 }
 
-func (b embeddedBackend) Get(namespace, group, dataID string) (string, error) {
+func (b embeddedBackend) GetContext(_ context.Context, namespace, group, dataID string) (string, error) {
 	item, err := b.cfg.Get(namespace, group, dataID)
 	if err != nil {
 		return "", err
@@ -105,7 +112,7 @@ func (b embeddedBackend) Get(namespace, group, dataID string) (string, error) {
 	return item.Content, nil
 }
 
-func (b embeddedBackend) Delete(namespace, group, dataID string) error {
+func (b embeddedBackend) DeleteContext(_ context.Context, namespace, group, dataID string) error {
 	return b.cfg.Delete(namespace, group, dataID)
 }
 
@@ -127,15 +134,19 @@ func NewNacosAIStore(client *nacos.Client) Store {
 }
 
 func (g *configStore) PublishDoc(namespaceID, dataID string, content []byte) (string, error) {
+	return g.PublishDocContext(context.Background(), namespaceID, dataID, content)
+}
+
+func (g *configStore) PublishDocContext(ctx context.Context, namespaceID, dataID string, content []byte) (string, error) {
 	if len(content) == 0 {
 		return "", fmt.Errorf("configstore: refusing to publish empty document %s", dataID)
 	}
 	hash := model.HashBytes(content)
-	if err := g.backend.Publish(namespaceID, g.group, dataID, string(content)); err != nil {
+	if err := g.backend.PublishContext(ctx, namespaceID, g.group, dataID, string(content)); err != nil {
 		return "", fmt.Errorf("configstore: publish %s/%s: %w", namespaceID, dataID, err)
 	}
 	// Publish confirmation = read-back (§3: 不报告"已生效"直到读回验证).
-	got, gotHash, err := g.GetDoc(namespaceID, dataID)
+	got, gotHash, err := g.GetDocContext(ctx, namespaceID, dataID)
 	if err != nil {
 		return "", fmt.Errorf("%w: publish of %s not confirmed: %v", ErrReadbackMismatch, dataID, err)
 	}
@@ -146,7 +157,11 @@ func (g *configStore) PublishDoc(namespaceID, dataID string, content []byte) (st
 }
 
 func (g *configStore) GetDoc(namespaceID, dataID string) ([]byte, string, error) {
-	content, err := g.backend.Get(namespaceID, g.group, dataID)
+	return g.GetDocContext(context.Background(), namespaceID, dataID)
+}
+
+func (g *configStore) GetDocContext(ctx context.Context, namespaceID, dataID string) ([]byte, string, error) {
+	content, err := g.backend.GetContext(ctx, namespaceID, g.group, dataID)
 	if err != nil {
 		if errors.Is(err, config.ErrConfigNotFound) || errors.Is(err, nacos.ErrNotFound) {
 			return nil, "", fmt.Errorf("%w: %s/%s", ErrNotFound, namespaceID, dataID)
@@ -158,7 +173,11 @@ func (g *configStore) GetDoc(namespaceID, dataID string) ([]byte, string, error)
 }
 
 func (g *configStore) DeleteDoc(namespaceID, dataID string) error {
-	err := g.backend.Delete(namespaceID, g.group, dataID)
+	return g.DeleteDocContext(context.Background(), namespaceID, dataID)
+}
+
+func (g *configStore) DeleteDocContext(ctx context.Context, namespaceID, dataID string) error {
+	err := g.backend.DeleteContext(ctx, namespaceID, g.group, dataID)
 	if err != nil && !errors.Is(err, config.ErrConfigNotFound) && !errors.Is(err, nacos.ErrNotFound) {
 		return fmt.Errorf("configstore: delete %s/%s: %w", namespaceID, dataID, err)
 	}
@@ -166,15 +185,19 @@ func (g *configStore) DeleteDoc(namespaceID, dataID string) error {
 }
 
 func (g *configStore) PublishManifest(namespaceID string, m *model.Manifest) error {
+	return g.PublishManifestContext(context.Background(), namespaceID, m)
+}
+
+func (g *configStore) PublishManifestContext(ctx context.Context, namespaceID string, m *model.Manifest) error {
 	content, err := model.CanonicalJSON(m)
 	if err != nil {
 		return fmt.Errorf("configstore: encode manifest: %w", err)
 	}
-	if _, err := g.PublishDoc(namespaceID, ManifestDataID, content); err != nil {
+	if _, err := g.PublishDocContext(ctx, namespaceID, ManifestDataID, content); err != nil {
 		return err
 	}
 	// Extra confirmation: the manifest must re-parse and re-hash identically.
-	got, gotHash, err := g.GetDoc(namespaceID, ManifestDataID)
+	got, gotHash, err := g.GetDocContext(ctx, namespaceID, ManifestDataID)
 	if err != nil {
 		return fmt.Errorf("%w: manifest not readable after publish", ErrReadbackMismatch)
 	}
@@ -193,7 +216,11 @@ func (g *configStore) PublishManifest(namespaceID string, m *model.Manifest) err
 }
 
 func (g *configStore) GetManifest(namespaceID string) (*model.Manifest, error) {
-	content, _, err := g.GetDoc(namespaceID, ManifestDataID)
+	return g.GetManifestContext(context.Background(), namespaceID)
+}
+
+func (g *configStore) GetManifestContext(ctx context.Context, namespaceID string) (*model.Manifest, error) {
+	content, _, err := g.GetDocContext(ctx, namespaceID, ManifestDataID)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +236,11 @@ func (g *configStore) GetManifest(namespaceID string) (*model.Manifest, error) {
 }
 
 func (g *configStore) LoadSnapshot(namespaceID string) (*model.Snapshot, error) {
-	m, err := g.GetManifest(namespaceID)
+	return g.LoadSnapshotContext(context.Background(), namespaceID)
+}
+
+func (g *configStore) LoadSnapshotContext(ctx context.Context, namespaceID string) (*model.Snapshot, error) {
+	m, err := g.GetManifestContext(ctx, namespaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +260,7 @@ func (g *configStore) LoadSnapshot(namespaceID string) (*model.Snapshot, error) 
 		if entry.Deleted {
 			continue
 		}
-		content, hash, err := g.GetDoc(namespaceID, entry.DataID)
+		content, hash, err := g.GetDocContext(ctx, namespaceID, entry.DataID)
 		if err != nil {
 			return nil, fmt.Errorf("%w: segment %s: %v", ErrIncompleteSnapshot, entry.Key, err)
 		}
@@ -251,7 +282,7 @@ func (g *configStore) LoadSnapshot(namespaceID string) (*model.Snapshot, error) 
 		if entry.Deleted {
 			continue
 		}
-		content, hash, err := g.GetDoc(namespaceID, entry.DataID)
+		content, hash, err := g.GetDocContext(ctx, namespaceID, entry.DataID)
 		if err != nil {
 			return nil, fmt.Errorf("%w: flag %s: %v", ErrIncompleteSnapshot, entry.Key, err)
 		}

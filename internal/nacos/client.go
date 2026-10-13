@@ -100,7 +100,7 @@ func (c *Client) authToken(ctx context.Context) (string, error) {
 	return c.token, nil
 }
 
-func (c *Client) call(ctx context.Context, method, path string, values url.Values) (json.RawMessage, error) {
+func (c *Client) call(ctx context.Context, method, path string, values url.Values, retryAuth bool) (json.RawMessage, error) {
 	token, err := c.authToken(ctx)
 	if err != nil {
 		return nil, err
@@ -128,6 +128,16 @@ func (c *Client) call(ctx context.Context, method, path string, values url.Value
 		return nil, fmt.Errorf("nacos: %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized && retryAuth && c.config.Username != "" {
+		_ = resp.Body.Close()
+		c.mu.Lock()
+		if c.token == token {
+			c.token = ""
+			c.expiry = time.Time{}
+		}
+		c.mu.Unlock()
+		return c.call(ctx, method, path, values, false)
+	}
 	var result response
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 10<<20)).Decode(&result); err != nil {
 		return nil, fmt.Errorf("nacos: %s %s: HTTP %d: decode response: %w", method, path, resp.StatusCode, err)
@@ -141,18 +151,26 @@ func (c *Client) call(ctx context.Context, method, path string, values url.Value
 	return result.Data, nil
 }
 
-func (c *Client) request(method, path string, values url.Values) (json.RawMessage, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (c *Client) request(ctx context.Context, method, path string, values url.Values) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	return c.call(ctx, method, path, values)
+	return c.call(ctx, method, path, values, true)
 }
 
 func (c *Client) Ping() error {
-	_, err := c.request(http.MethodGet, "/nacos/v3/admin/core/namespace/list", nil)
+	return c.PingContext(context.Background())
+}
+
+func (c *Client) PingContext(ctx context.Context) error {
+	_, err := c.request(ctx, http.MethodGet, "/nacos/v3/admin/core/namespace/list", nil)
 	return err
 }
 
 func (c *Client) EnsureNamespace(namespace string) error {
+	return c.EnsureNamespaceContext(context.Background(), namespace)
+}
+
+func (c *Client) EnsureNamespaceContext(ctx context.Context, namespace string) error {
 	if namespace == "" {
 		return fmt.Errorf("nacos: empty namespace")
 	}
@@ -163,7 +181,7 @@ func (c *Client) EnsureNamespace(namespace string) error {
 		return nil
 	}
 	var exists bool
-	data, err := c.request(http.MethodGet, "/nacos/v3/admin/core/namespace/check", url.Values{"namespaceId": {namespace}})
+	data, err := c.request(ctx, http.MethodGet, "/nacos/v3/admin/core/namespace/check", url.Values{"namespaceId": {namespace}})
 	if err != nil {
 		return err
 	}
@@ -171,7 +189,7 @@ func (c *Client) EnsureNamespace(namespace string) error {
 		return fmt.Errorf("nacos: namespace check: %w", err)
 	}
 	if !exists {
-		created, createErr := c.request(http.MethodPost, "/nacos/v3/admin/core/namespace", url.Values{
+		created, createErr := c.request(ctx, http.MethodPost, "/nacos/v3/admin/core/namespace", url.Values{
 			"namespaceId": {namespace}, "namespaceName": {namespace}, "namespaceDesc": {"GoLab managed"},
 		})
 		var apiErr *apiError
@@ -192,7 +210,11 @@ func (c *Client) EnsureNamespace(namespace string) error {
 }
 
 func (c *Client) Get(namespace, group, dataID string) (string, error) {
-	data, err := c.request(http.MethodGet, "/nacos/v3/admin/cs/config", url.Values{
+	return c.GetContext(context.Background(), namespace, group, dataID)
+}
+
+func (c *Client) GetContext(ctx context.Context, namespace, group, dataID string) (string, error) {
+	data, err := c.request(ctx, http.MethodGet, "/nacos/v3/admin/cs/config", url.Values{
 		"namespaceId": {namespace}, "groupName": {group}, "dataId": {dataID},
 	})
 	if err != nil {
@@ -211,22 +233,26 @@ func (c *Client) Get(namespace, group, dataID string) (string, error) {
 }
 
 func (c *Client) Publish(namespace, group, dataID, content string) error {
-	if err := c.EnsureNamespace(namespace); err != nil {
+	return c.PublishContext(context.Background(), namespace, group, dataID, content)
+}
+
+func (c *Client) PublishContext(ctx context.Context, namespace, group, dataID, content string) error {
+	if err := c.EnsureNamespaceContext(ctx, namespace); err != nil {
 		return err
 	}
 	values := url.Values{
 		"namespaceId": {namespace}, "groupName": {group}, "dataId": {dataID},
 		"content": {content}, "type": {"text"}, "appName": {"golab"},
 	}
-	data, err := c.request(http.MethodPost, "/nacos/v3/admin/cs/config", values)
+	data, err := c.request(ctx, http.MethodPost, "/nacos/v3/admin/cs/config", values)
 	if errors.Is(err, ErrNotFound) {
 		c.mu.Lock()
 		delete(c.known, namespace)
 		c.mu.Unlock()
-		if ensureErr := c.EnsureNamespace(namespace); ensureErr != nil {
+		if ensureErr := c.EnsureNamespaceContext(ctx, namespace); ensureErr != nil {
 			return ensureErr
 		}
-		data, err = c.request(http.MethodPost, "/nacos/v3/admin/cs/config", values)
+		data, err = c.request(ctx, http.MethodPost, "/nacos/v3/admin/cs/config", values)
 	}
 	if err != nil {
 		return err
@@ -239,7 +265,11 @@ func (c *Client) Publish(namespace, group, dataID, content string) error {
 }
 
 func (c *Client) Delete(namespace, group, dataID string) error {
-	data, err := c.request(http.MethodDelete, "/nacos/v3/admin/cs/config", url.Values{
+	return c.DeleteContext(context.Background(), namespace, group, dataID)
+}
+
+func (c *Client) DeleteContext(ctx context.Context, namespace, group, dataID string) error {
+	data, err := c.request(ctx, http.MethodDelete, "/nacos/v3/admin/cs/config", url.Values{
 		"namespaceId": {namespace}, "groupName": {group}, "dataId": {dataID},
 	})
 	if errors.Is(err, ErrNotFound) {

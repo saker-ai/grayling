@@ -82,11 +82,15 @@ func (s *Store) PlanLock(experimentID string) (func(), error) {
 // releases the lock and is always safe to call exactly once. On
 // single-process backends it returns a no-op release.
 func (s *Store) PublishLock(workspaceID, environmentID string) (func(), error) {
+	return s.PublishLockContext(context.Background(), workspaceID, environmentID)
+}
+
+func (s *Store) PublishLockContext(ctx context.Context, workspaceID, environmentID string) (func(), error) {
 	lk, ok := s.persist.(scopeLocker)
 	if !ok {
 		return func() {}, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), publishLockTimeout)
+	ctx, cancel := context.WithTimeout(ctx, publishLockTimeout)
 	defer cancel()
 	release, err := lk.LockScope(ctx, scopeLockKey(workspaceID, environmentID))
 	if err != nil {
