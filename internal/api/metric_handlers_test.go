@@ -30,6 +30,14 @@ func TestMetricDefinitionApprovalAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	other, err := store.CreateWorkspace("other", "Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outsider, err := store.CreateToken(platform.TokenAdmin, "outsider", platform.RoleOwner, other.ID, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	server := NewServer(store, nil, Options{})
 	call := func(method, path, secret string, body any) *httptest.ResponseRecorder {
 		t.Helper()
@@ -65,6 +73,12 @@ func TestMetricDefinitionApprovalAPI(t *testing.T) {
 	path := fmt.Sprintf("%s/%s/versions/%d", base, created.Key, created.Version)
 	if got := call(http.MethodGet, path, owner.Secret, nil); got.Code != 200 {
 		t.Fatalf("get: %d %s", got.Code, got.Body.String())
+	}
+	if got := call(http.MethodGet, path, outsider.Secret, nil); got.Code != http.StatusForbidden {
+		t.Fatalf("cross-workspace get: %d %s", got.Code, got.Body.String())
+	}
+	if got := call(http.MethodGet, base, outsider.Secret, nil); got.Code != http.StatusForbidden {
+		t.Fatalf("cross-workspace list: %d %s", got.Code, got.Body.String())
 	}
 	if got := call(http.MethodGet, base+"?limit=1", owner.Secret, nil); got.Code != 200 {
 		t.Fatalf("list: %d %s", got.Code, got.Body.String())
