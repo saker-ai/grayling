@@ -21,6 +21,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // browser's <script> tags) so app.js resolves t()/I18N from the catalogs.
 // The sandbox has no golab_lang and no navigator.language → en (default).
 const code = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8') + '\n' +
+  fs.readFileSync(path.join(__dirname, 'flag_editor.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 
 const el = () => ({

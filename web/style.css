@@ -215,6 +215,21 @@ table.grid { min-width: 620px; }
 .flag-diff-values > div { min-width: 0; }
 .flag-diff-values pre { margin: 6px 0 0; }
 .modal .flag-diff-values { grid-template-columns: 1fr; }
+.flag-editor-modes { margin-bottom: 12px; }
+.flag-editor-modes [aria-pressed="true"] { background: var(--active); color: var(--active-text); border-color: var(--accent); }
+.flag-structured h4 { margin: 16px 0 8px; }
+.flag-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.flag-fields .flag-wide { grid-column: 1 / -1; }
+.flag-variation { display: flex; align-items: end; gap: 8px; margin: 8px 0; }
+.flag-variation > .field:first-child { flex: 0 1 35%; }
+.flag-variation > .field, .flag-rule .field { min-width: 0; }
+.flag-variation input { width: 100%; }
+.flag-rule { border: 1px solid var(--border); border-radius: 8px; margin: 10px 0; padding: 10px; min-width: 0; }
+.flag-rule legend { padding: 0 5px; font-weight: 600; }
+.flag-rule .row { align-items: end; }
+.flag-rule .field select, .flag-rule .field input { min-width: 0; width: 100%; }
+.flag-rule textarea { width: 100%; }
+.flag-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(85px, 1fr)); gap: 8px; flex: 1; }
 table.grid tr[hidden] { display: none; }
 .row-link { border: 0; background: none; padding: 2px 0; color: var(--accent); font: inherit; cursor: pointer; text-align: left; }
 .row-link:hover { text-decoration: underline; }
@@ -297,6 +312,13 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
   .flag-record-cards { display: grid; gap: 10px; margin: 10px 0; }
   .flag-empty-mobile { display: block; }
   .flag-diff-values { grid-template-columns: 1fr; }
+  .flag-fields { grid-template-columns: 1fr; }
+  .flag-variation { align-items: stretch; flex-wrap: wrap; }
+  .flag-variation > .field:first-child { flex: 1 1 100%; }
+  .flag-variation > .field.grow { flex: 1 1 100%; }
+  .flag-rule .row { align-items: stretch; flex-direction: column; }
+  .flag-rule .row > .field, .flag-rule .row > .flag-split { width: 100%; }
+  .flag-rule .row > button { align-self: start; }
   .flag-record { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; }
   table.grid.diagnostic-table { display: none; }
   .diagnostic-cards { display: grid; gap: 10px; margin: 10px 0; }

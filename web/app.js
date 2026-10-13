@@ -195,7 +195,11 @@ const S = {
 };
 function editorValue() {
   const flag = $('#flag-json');
-  if (flag) return JSON.stringify(['flag', flag.value, $('#flag-risk')?.value, $('#flag-base')?.value]);
+  if (flag) {
+    const form = $('#flag-structured');
+    const fields = form ? $$('input, select, textarea', form).map(control => [control.value, control.checked]) : [];
+    return JSON.stringify(['flag', flag.value, $('#flag-risk')?.value, $('#flag-base')?.value, fields]);
+  }
   const segment = $('#seg-json');
   if (segment) return JSON.stringify(['segment', segment.value, $('#seg-risk')?.value]);
   return null;
@@ -642,26 +646,55 @@ function flagTemplate(key) {
 // Client-side lint of the flag DSL; returns a list of issue strings.
 function lintFlag(c) {
   const issues = [];
-  if (typeof c !== 'object' || c === null) return [t('lint.notObject')];
+  if (typeof c !== 'object' || c === null || Array.isArray(c)) return [t('lint.notObject')];
   if (!['bool', 'string', 'number', 'json'].includes(c.type)) issues.push(t('lint.badType'));
-  const vars = c.variations || {};
+  if (!c.variations || typeof c.variations !== 'object' || Array.isArray(c.variations)) {
+    return [...issues, t('flags.editorNeedVariation')];
+  }
+  const vars = c.variations;
+  if (!Object.keys(vars).length) issues.push(t('flags.editorNeedVariation'));
+  for (const [name, value] of Object.entries(vars)) {
+    const valid = c.type === 'json' ||
+      (c.type === 'bool' && typeof value === 'boolean') ||
+      (c.type === 'string' && typeof value === 'string') ||
+      (c.type === 'number' && typeof value === 'number' && Number.isFinite(value));
+    if (!valid) issues.push(t('flags.editorValueType', { name }));
+  }
   const checkRule = (r, where) => {
-    if (!r) { issues.push(t('lint.ruleMissing', { where })); return; }
+    if (!r || typeof r !== 'object' || Array.isArray(r)) { issues.push(t('lint.ruleMissing', { where })); return; }
     const hasVar = r.variation !== undefined, hasPct = r.percentage !== undefined;
     if (hasVar === hasPct) issues.push(t('lint.ruleExclusive', { where }));
     if (hasVar && !(r.variation in vars)) issues.push(t('lint.unknownVariation', { where, name: r.variation }));
     if (hasPct) {
-      const sum = Object.values(r.percentage).reduce((a, b) => a + Number(b), 0);
-      if (Math.abs(sum - 100) > 0.01) issues.push(t('lint.pctSum', { where, sum }));
-      for (const vn of Object.keys(r.percentage)) if (!(vn in vars)) issues.push(t('lint.unknownVariation', { where, name: vn }));
+      if (!r.percentage || typeof r.percentage !== 'object' || Array.isArray(r.percentage)) {
+        issues.push(t('flags.editorPercentRange'));
+      } else {
+        const sum = Object.values(r.percentage).reduce((a, b) => a + Number(b), 0);
+        if (!Number.isFinite(sum) || Math.abs(sum - 100) > 0.01) issues.push(t('lint.pctSum', { where, sum }));
+        for (const [vn, percent] of Object.entries(r.percentage)) {
+          if (!(vn in vars)) issues.push(t('lint.unknownVariation', { where, name: vn }));
+          if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent > 100) {
+            issues.push(t('flags.editorPercentRange'));
+          }
+        }
+      }
+    }
+    if (r.constraints && !Array.isArray(r.constraints)) {
+      issues.push(t('flags.editorConstraintsArray'));
+      return;
     }
     for (const con of r.constraints || []) {
+      if (!con || typeof con !== 'object' || Array.isArray(con)) {
+        issues.push(t('flags.editorConstraintsArray'));
+        continue;
+      }
       if (!con.field) issues.push(t('lint.constraintField', { where }));
       if (!OPS.includes(con.op)) issues.push(t('lint.unknownOp', { where, op: con.op }));
     }
   };
   checkRule(c.defaultRule, 'defaultRule');
-  (c.targeting || []).forEach((r, i) => checkRule(r, 'targeting[' + i + ']'));
+  if (c.targeting && !Array.isArray(c.targeting)) issues.push(t('flags.editorRulesArray'));
+  else (c.targeting || []).forEach((r, i) => checkRule(r, 'targeting[' + i + ']'));
   return issues;
 }
 
@@ -845,7 +878,14 @@ async function viewFlagDetail(m) {
     '<div id="flag-conflict"></div>' +
     '<div class="cols">' +
       '<section class="card"><h3>' + esc(t('flags.draftEditor')) + '</h3>' +
-        '<textarea id="flag-json" class="json" rows="24" spellcheck="false"></textarea>' +
+        '<div class="row flag-editor-modes" role="group" aria-label="' + esc(t('flags.editorMode')) + '">' +
+        '<button type="button" class="btn sm" id="flag-mode-structured" aria-pressed="true">' +
+          esc(t('flags.editorStructured')) + '</button>' +
+        '<button type="button" class="btn sm" id="flag-mode-json" aria-pressed="false">' +
+          esc(t('flags.editorAdvanced')) + '</button></div>' +
+        '<div id="flag-structured"></div>' +
+        '<div id="flag-advanced" class="hidden"><p class="muted">' + esc(t('flags.editorAdvancedHint')) + '</p>' +
+          '<textarea id="flag-json" class="json" rows="24" spellcheck="false"></textarea></div>' +
         '<div class="row"><button class="btn sm" id="flag-validate">' + esc(t('btn.validateJson')) + '</button><span id="flag-valid" class="muted grow"></span>' +
         '<label class="inline">' + esc(t('label.risk')) + ' <select id="flag-risk"><option value="normal">normal</option><option value="high">high</option></select></label>' +
         '<label class="inline">baseRevision <input id="flag-base" type="number" min="0" size="4" value="' + esc((f && f.currentRevision) || 0) + '"></label></div>' +
@@ -875,10 +915,17 @@ async function viewFlagDetail(m) {
   $('#flag-current', m).textContent = f && f.current ? JSON.stringify(f.current.content, null, 2) : '';
   if (draft && draft.risk) $('#flag-risk', m).value = draft.risk;
   bindFlagDetail(m, key, kp, f);
+  if (!can('flag.write')) {
+    $$('input, select, textarea, button', $('#flag-structured', m)).forEach(control => { control.disabled = true; });
+    $('#flag-json', m).readOnly = true;
+    $('#flag-risk', m).disabled = true;
+    $('#flag-base', m).disabled = true;
+  }
 }
 
 function bindFlagDetail(m, key, kp, f) {
   let savedDraftHash = f?.draftHash || '';
+  const structured = bindFlagStructured(m);
   $('#flag-back', m).onclick = () => { if (!confirmLeaveEditor()) return; S.flagKey = null; S.flagNew = false; route(); };
   // Returns parsed content, or null (with toast) when invalid.
   const readJSON = () => {
@@ -886,6 +933,8 @@ function bindFlagDetail(m, key, kp, f) {
     try { c = JSON.parse($('#flag-json', m).value); }
     catch (e) { toast(t('toast.invalidJson', { msg: e.message }), false); return null; }
     if (!c || c.key !== key) { toast(t('toast.keyMismatch', { key }), false); return null; }
+    const issues = lintFlag(c);
+    if (issues.length) { toast(issues.join(' · '), false); return null; }
     return c;
   };
   $('#flag-validate', m).onclick = () => {
@@ -899,6 +948,7 @@ function bindFlagDetail(m, key, kp, f) {
     else { out.className = 'ok-text grow'; out.textContent = t('validate.ok'); }
   };
   $('#flag-save', m).onclick = async () => {
+    if (!structured.valid()) return;
     const content = readJSON();
     if (!content) return;
     const button = $('#flag-save', m);

@@ -14,6 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // browser's <script> tags) so app.js resolves t()/I18N from the catalogs.
 // The sandbox has no golab_lang and no navigator.language → en (default).
 const code = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8') + '\n' +
+  fs.readFileSync(path.join(__dirname, 'flag_editor.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 
 const el = () => ({
@@ -35,8 +36,19 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
+
+const structuredFlag = sandbox.__renderFlagStructured({ type: 'bool',
+  variations: { control: false, treatment: true }, defaultRule: { variation: 'control' },
+  targeting: [{ name: '<script>alert(1)</script>', percentage: { control: 50, treatment: 50 },
+    constraints: [{ field: 'country', op: 'eq', value: 'CN' }] }] });
+assert(structuredFlag.includes('Percentage split') && structuredFlag.includes('data-split="control"') &&
+  structuredFlag.includes('Constraints (JSON array)') && !structuredFlag.includes('<script>') &&
+  structuredFlag.includes('&lt;script&gt;'), 'structured Flag editor must render split and escape rule content');
+assert(sandbox.__lintFlag({ type: 'bool', variations: { control: 'false' },
+  defaultRule: { variation: 'control' }, targeting: {} }).length >= 2,
+  'JSON advanced mode must report invalid value types and rule shape without throwing');
 
 const flagDiff = sandbox.__renderFlagDiff(
   { revision: 4, content: { type: 'bool', variations: { safe: false, launch: true }, disable: false } },
