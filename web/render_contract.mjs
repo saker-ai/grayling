@@ -38,7 +38,7 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderExpDecisionHero = renderExpDecisionHero; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderExpDecisionHero = renderExpDecisionHero; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagExperimentImpact = renderFlagExperimentImpact; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
 
 const structuredFlag = sandbox.__renderFlagStructured({ type: 'bool',
@@ -113,6 +113,12 @@ assert(flagDiff.includes('Compared with published revision r4') && flagDiff.incl
   flagDiff.includes('Variations') && !flagDiff.includes('<img') && flagDiff.includes('&lt;img'),
   'draft diff must show changed sections and escape variation values');
 assert(!flagDiff.includes('Value type'), 'unchanged fields should not clutter the draft diff');
+const flagImpact = sandbox.__renderFlagExperimentImpact({ total: 2, references: [
+  { id: '<img src=x>', state: 'running', epoch: 3, flagRevision: 4 },
+] });
+assert(flagImpact.includes('Showing 1 of 2') && flagImpact.includes('running') &&
+  flagImpact.includes('data-exp-from-flag=') && flagImpact.includes('&lt;img src=x&gt;') &&
+  !flagImpact.includes('<img'), 'Flag relationship summary must show scope, state, truncation and escape IDs');
 assert(sandbox.__renderFlagDiff(null, null).includes('No saved draft'), 'missing draft state');
 assert(sandbox.__renderFlagDiff(null, { deleted: true }).includes('marks the Flag for deletion'), 'deletion state');
 const conflict = sandbox.__renderFlagSaveConflict({ currentRevision: 5,

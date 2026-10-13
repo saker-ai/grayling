@@ -2,7 +2,7 @@
 
 范围：`openapi.yaml` 中的 `/api/v1/admin/` 管理操作（共 62 项）。`GET /api/v1/health` 是健康检查，不属于管理操作。SDK config/eval/collect、原生 Nacos 协议及 HMAC 原始密钥为数据面或运维密钥，刻意不进入管理 UI。
 
-下表说明 Web 是否提供入口及代码契约，**不表示每项都已在浏览器执行**。真实浏览器的操作、截图、HTTP 结果与未覆盖项见 [2026-10-08 验收报告](acceptance/web-2026-10-08/report.md)、[跨角色发布验收](acceptance/web-2026-10-13-roles/report.md)、[故障状态模拟验收](acceptance/web-2026-10-13-failures/report.md)、[会话恢复验收](acceptance/web-2026-10-13-reauth/report.md)、[实验列表摘要验收](acceptance/web-2026-10-13-exp-list/report.md)、[实验绑定并发冲突验收](acceptance/web-2026-10-13-bind-conflict/report.md)、[实验首屏决策验收](acceptance/web-2026-10-13-exp-decision/report.md)、[总览摘要验收](acceptance/web-2026-10-13-overview/report.md)及 [放量操作报告门禁验收](acceptance/web-2026-10-13-rollout-report-gate/report.md)。
+下表说明 Web 是否提供入口及代码契约，**不表示每项都已在浏览器执行**。真实浏览器的操作、截图、HTTP 结果与未覆盖项见 [2026-10-08 验收报告](acceptance/web-2026-10-08/report.md)、[跨角色发布验收](acceptance/web-2026-10-13-roles/report.md)、[故障状态模拟验收](acceptance/web-2026-10-13-failures/report.md)、[会话恢复验收](acceptance/web-2026-10-13-reauth/report.md)、[实验列表摘要验收](acceptance/web-2026-10-13-exp-list/report.md)、[实验绑定并发冲突验收](acceptance/web-2026-10-13-bind-conflict/report.md)、[实验首屏决策验收](acceptance/web-2026-10-13-exp-decision/report.md)、[总览摘要验收](acceptance/web-2026-10-13-overview/report.md)及 [放量操作报告门禁验收](acceptance/web-2026-10-13-rollout-report-gate/report.md)。[Flag 关联实验验收](acceptance/web-2026-10-13-flag-experiment-impact/report.md)记录本次代码契约及未完成的现场浏览器验证。
 
 | 方法 | 管理端点 | 分类 | Web 入口 / 行为或仅 API 理由 | 验证证据 |
 |---|---|---|---|---|
@@ -29,7 +29,7 @@
 | `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/publish` | 已覆盖 | 详情页或审批队列执行已批准发布 | i18n DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/deprecate` | 已覆盖 | 详情页确认并弃用版本 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags` | 已覆盖 | 开关列表/详情：草稿、审批、发布、回滚、删除、导入、紧急禁用 | i18n DOM；API 路由契约 |
-| `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}` | 已覆盖 | 开关列表/详情；实验创建向导核对发布版本及变体 | i18n DOM；API 路由契约；向导浏览器样本验收 |
+| `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}` | 已覆盖 | 开关列表/详情；同环境关联实验计数与有界状态列表；实验创建向导核对发布版本及变体 | i18n/渲染 DOM；管理服务作用域和有界列表测试；API 路由契约；向导浏览器样本验收 |
 | `DELETE` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}` | 已覆盖 | 开关列表/详情：草稿、审批、发布、回滚、删除、导入、紧急禁用 | i18n DOM；API 路由契约 |
 | `PUT` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/draft` | 已覆盖 | 开关列表/详情：草稿、审批、发布、回滚、删除、导入、紧急禁用 | i18n DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/submit` | 已覆盖 | 开关列表/详情：草稿、审批、发布、回滚、删除、导入、紧急禁用 | i18n DOM；API 路由契约 |

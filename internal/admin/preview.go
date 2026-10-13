@@ -19,16 +19,74 @@ import (
 // EstimatedAffected is deliberately an upper bound: GoLab has no complete
 // census of SDK users, so a count would be misleading.
 type ReviewPreview struct {
-	TargetEnvironment string        `json:"targetEnvironment"`
-	Risk              platform.Risk `json:"risk"`
-	BaseRevision      int64         `json:"baseRevision"`
-	CurrentHash       string        `json:"currentHash,omitempty"`
-	ProposedHash      string        `json:"proposedHash"`
-	ChangedFields     []string      `json:"changedFields"`
-	EstimatedAffected string        `json:"estimatedAffected"`
-	RollbackTarget    string        `json:"rollbackTarget"`
-	Guardrails        string        `json:"guardrails"`
-	ApprovalExpiresAt *time.Time    `json:"approvalExpiresAt,omitempty"`
+	TargetEnvironment string                `json:"targetEnvironment"`
+	Risk              platform.Risk         `json:"risk"`
+	BaseRevision      int64                 `json:"baseRevision"`
+	CurrentHash       string                `json:"currentHash,omitempty"`
+	ProposedHash      string                `json:"proposedHash"`
+	ChangedFields     []string              `json:"changedFields"`
+	EstimatedAffected string                `json:"estimatedAffected"`
+	RollbackTarget    string                `json:"rollbackTarget"`
+	Guardrails        string                `json:"guardrails"`
+	ApprovalExpiresAt *time.Time            `json:"approvalExpiresAt,omitempty"`
+	ExperimentImpact  *FlagExperimentImpact `json:"experimentImpact,omitempty"`
+}
+
+// FlagExperimentImpact names experiments registered against this flag in the
+// same environment. It is a relationship inventory, not a user count or a
+// claim that every listed experiment is currently serving traffic.
+type FlagExperimentImpact struct {
+	Total      int                       `json:"total"`
+	References []FlagExperimentReference `json:"references"`
+}
+
+type FlagExperimentReference struct {
+	ID           string                `json:"id"`
+	State        model.ExperimentState `json:"state"`
+	Epoch        int64                 `json:"epoch"`
+	FlagRevision int64                 `json:"flagRevision"`
+	UpdatedAt    time.Time             `json:"updatedAt"`
+}
+
+const maxFlagExperimentReferences = 20
+
+func (s *Service) flagExperimentImpact(env *platform.Environment, key string) *FlagExperimentImpact {
+	all := s.Store.ListExperiments(env.WorkspaceID, env.ID)
+	matching := make([]*platform.Experiment, 0)
+	for _, exp := range all {
+		if exp.FlagKey == key {
+			matching = append(matching, exp)
+		}
+	}
+	priority := func(state model.ExperimentState) int {
+		switch state {
+		case model.ExperimentRunning, model.ExperimentPaused:
+			return 0
+		case model.ExperimentScheduled:
+			return 1
+		case model.ExperimentReviewed, model.ExperimentDraft:
+			return 2
+		default:
+			return 3
+		}
+	}
+	slices.SortFunc(matching, func(a, b *platform.Experiment) int {
+		if order := cmp.Compare(priority(a.State), priority(b.State)); order != 0 {
+			return order
+		}
+		if order := b.UpdatedAt.Compare(a.UpdatedAt); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+	impact := &FlagExperimentImpact{Total: len(matching), References: []FlagExperimentReference{}}
+	for _, exp := range matching[:min(len(matching), maxFlagExperimentReferences)] {
+		impact.References = append(impact.References, FlagExperimentReference{
+			ID: exp.ID, State: exp.State, Epoch: exp.Epoch,
+			FlagRevision: exp.FlagRevision, UpdatedAt: exp.UpdatedAt,
+		})
+	}
+	return impact
 }
 
 func changedFields(before, after any) []string {

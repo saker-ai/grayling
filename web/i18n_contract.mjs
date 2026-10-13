@@ -131,6 +131,9 @@ const flagSummary = {
 };
 const flagDetail = {
   ...flagSummary,
+  experimentImpact: { total: 1, references: [
+    { id: 'exp-1', state: 'running', epoch: 1, flagRevision: 2, updatedAt: TS },
+  ] },
   revisions: [
     { revision: 2, hash: 'abc123def456789abc', publishedAt: TS, publishedBy: 'bob', note: 'ship', rollbackOf: null },
     { revision: 1, hash: '0123456789abcdef00', publishedAt: TS, publishedBy: 'alice', note: '', rollbackOf: null },
@@ -278,9 +281,9 @@ const SWEEPS = [
     ids: ['flag-new'] },
   { name: 'flags-detail', view: 'flags',
     setup: S => { S.flagKey = 'my-flag'; S.flagNew = false; },
-    en: ['Draft editor', 'Save draft', 'Mark deleted', 'History &amp; rollback',
+    en: ['Draft editor', 'Save draft', 'Mark deleted', 'History &amp; rollback', 'Registered experiments',
       'Import (creates HIGH-risk draft)', 'Rollback to r2', 'Current published (r2)', 'Validate JSON'],
-    zh: ['草稿编辑器', '保存草稿', '标记删除', '历史与回滚',
+    zh: ['草稿编辑器', '保存草稿', '标记删除', '历史与回滚', '已登记的关联实验',
       '导入（创建 HIGH 风险草稿）', '回滚到 r2', '当前已发布（r2）', '校验 JSON'],
     ids: ['flag-json', 'flag-save', 'flag-submit', 'flag-approve', 'flag-reject',
       'flag-publish', 'flag-delete', 'flag-revs', 'gff-run'] },

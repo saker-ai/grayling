@@ -2965,6 +2965,26 @@ components:
         rollbackTarget: { type: string }
         guardrails: { type: string }
         approvalExpiresAt: { type: string, format: date-time }
+        experimentImpact:
+          $ref: "#/components/schemas/FlagExperimentImpact"
+    FlagExperimentImpact:
+      type: object
+      description: 同环境中登记使用此 Flag 的实验关系；不代表用户数或所有实验都在运行。最多返回 20 条，total 是完整计数。
+      required: [total, references]
+      properties:
+        total: { type: integer, minimum: 0 }
+        references:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [id, state, epoch, flagRevision, updatedAt]
+            properties:
+              id: { type: string }
+              state: { $ref: "#/components/schemas/ExperimentState" }
+              epoch: { type: integer, format: int64 }
+              flagRevision: { type: integer, format: int64 }
+              updatedAt: { type: string, format: date-time }
     SegmentDependencies:
       type: object
       required: [segmentKey, segmentRevision, flags]
@@ -3758,6 +3778,8 @@ components:
           description: 已保存草稿状态指纹；无草稿时为空字符串，保存时作为 expectedDraftHash 原样回传。
         preview:
           $ref: "#/components/schemas/ReviewPreview"
+        experimentImpact:
+          $ref: "#/components/schemas/FlagExperimentImpact"
         currentRevision:
           type: integer
           format: int64

@@ -834,13 +834,14 @@ func (s *Service) PublishSegmentContext(ctx context.Context, actor Actor, worksp
 
 // FlagView is the console read model of one flag.
 type FlagView struct {
-	Key             string                   `json:"key"`
-	Draft           *platform.FlagDraft      `json:"draft,omitempty"`
-	DraftHash       string                   `json:"draftHash"`
-	CurrentRevision int64                    `json:"currentRevision"`
-	Current         *platform.FlagRevision   `json:"current,omitempty"`
-	Revisions       []*platform.FlagRevision `json:"revisions,omitempty"`
-	Preview         *ReviewPreview           `json:"preview,omitempty"`
+	Key              string                   `json:"key"`
+	Draft            *platform.FlagDraft      `json:"draft,omitempty"`
+	DraftHash        string                   `json:"draftHash"`
+	CurrentRevision  int64                    `json:"currentRevision"`
+	Current          *platform.FlagRevision   `json:"current,omitempty"`
+	Revisions        []*platform.FlagRevision `json:"revisions,omitempty"`
+	Preview          *ReviewPreview           `json:"preview,omitempty"`
+	ExperimentImpact *FlagExperimentImpact    `json:"experimentImpact,omitempty"`
 }
 
 // GetFlagView assembles draft + published state of one flag.
@@ -866,9 +867,11 @@ func (s *Service) GetFlagView(actor Actor, workspaceID, environmentID, key strin
 	}
 	if withHistory {
 		view.Revisions = s.Store.ListFlagRevisions(env.WorkspaceID, env.ID, key)
+		view.ExperimentImpact = s.flagExperimentImpact(env, key)
 	}
 	if view.Draft != nil {
 		view.Preview = s.flagPreview(env, view.Draft, view.Current)
+		view.Preview.ExperimentImpact = view.ExperimentImpact
 	}
 	return view, nil
 }

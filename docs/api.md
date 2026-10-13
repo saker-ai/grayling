@@ -34,7 +34,7 @@
 
 | 端点（前缀 `/api/v1/admin/workspaces/{ws}/environments/{env}`） | 说明 |
 |---|---|
-| `GET /flags` / `GET /flags/{key}` | 列表 / 详情（含草稿、`draftHash`、当前 revision、历史）；`draftHash` 是下一次保存的草稿并发令牌 |
+| `GET /flags` / `GET /flags/{key}` | 列表 / 详情（含草稿、`draftHash`、当前 revision、历史）；详情另含 `experimentImpact`：同环境登记使用此 Flag 的实验完整计数和最多 20 条状态/epoch/注册 revision 关系，不代表受影响用户数或所有实验当前运行；`draftHash` 是下一次保存的草稿并发令牌 |
 | `PUT /flags/{key}/draft` | 保存草稿 `{content:<Flag DSL>, risk:"normal"\|"high", baseRevision, expectedDraftHash}`；`content.key` 必须等于 `{key}`。两个并发令牌均必填：`baseRevision` 等于当前已发布版本（无发布版时 0），`expectedDraftHash` 原样取自 GET 详情的 `draftHash`（无草稿时空字符串）；任一状态变化返回 409，需读取最新版本并合并 |
 | `POST /flags/{key}/submit` / `approve` / `reject` | 评审流（submit 必填 `{reason}`；approve 可带 `{note}`） |
 | `POST /flags/{key}/publish` | `{note}` 必填；发布已批准草稿 → `{flagRevision, manifestRevision, hash, dataId}` |

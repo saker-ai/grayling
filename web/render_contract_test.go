@@ -36,6 +36,20 @@ func TestRenderReportDOMContract(t *testing.T) {
 	t.Logf("%s", out)
 }
 
+func TestFlagPublishReviewContract(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not available; Flag publish review contract requires node")
+	}
+	cmd := exec.Command(node, "flag_publish_contract.mjs")
+	cmd.Dir = wd(t)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Flag publish review contract failed: %v\n%s", err, out)
+	}
+	t.Logf("%s", out)
+}
+
 // TestRenderRolloutDOMContract runs the Node-based DOM/contract test for the
 // staged-rollout (release plan) UI of the experiment-detail view (§5.3 P4
 // 自动推进). It loads the same real web/app.js in a vm and drives

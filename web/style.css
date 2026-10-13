@@ -213,6 +213,7 @@ table.grid { min-width: 620px; }
 .mobile-record[hidden], tr[data-list-record][hidden] { display: none !important; }
 [data-flag-record][hidden] { display: none !important; }
 .flag-diff-list { display: grid; gap: 8px; }
+.flag-experiment-list { display: grid; gap: 6px; padding-left: 20px; overflow-wrap: anywhere; }
 .flag-diff-item { border: 1px solid var(--border); border-radius: 7px; padding: 9px 12px; }
 .flag-diff-item summary { cursor: pointer; font-weight: 600; }
 .flag-diff-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }

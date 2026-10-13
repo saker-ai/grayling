@@ -45,11 +45,30 @@ function reviewPreview(p, id = 'review-preview') {
       esc(t('approval.risk')) + ': ' + esc(p.risk) + ' · ' + esc(t('approval.base')) + ': r' + esc(p.baseRevision) + '</p>' +
     '<p>' + esc(t('approval.changed')) + ': ' + esc((p.changedFields || []).join(', ') || '—') + '</p>' +
     '<p>' + esc(t('approval.impact')) + ': ' + esc(p.estimatedAffected) + '</p>' +
+    renderFlagExperimentImpact(p.experimentImpact, false) +
     '<p>' + esc(t('approval.rollback')) + ': ' + esc(p.rollbackTarget) + '</p>' +
     '<p>' + esc(t('approval.guardrails')) + ': ' + esc(p.guardrails) + '</p>' +
     '<p class="mono">' + esc(t('approval.hash')) + ': ' + esc(p.proposedHash) + '</p>' +
     (p.approvalExpiresAt ? '<p>' + esc(t('approval.expires')) + ': ' + esc(fmtTime(p.approvalExpiresAt)) + '</p>' : '') +
     '</section>';
+}
+
+function renderFlagExperimentImpact(impact, links = true) {
+  if (!impact) return '';
+  const references = impact.references || [];
+  const summary = '<p>' + esc(t('flags.linkedExperimentsCount', {
+    shown: references.length, total: impact.total || 0,
+  })) + '</p>';
+  const rows = references.map(ref => '<li>' +
+    (links ? '<button class="row-link mono" type="button" data-exp-from-flag="' + esc(ref.id) + '">' +
+      esc(ref.id) + '</button>' : '<span class="mono">' + esc(ref.id) + '</span>') +
+    ' · ' + esc(ref.state) + ' · ' + esc(t('th.epoch')) + ' ' + esc(ref.epoch) +
+    ' · r' + esc(ref.flagRevision) + '</li>').join('');
+  const content = summary + (rows ? '<ul class="flag-experiment-list">' + rows + '</ul>' :
+    '<p class="muted">' + esc(t('flags.noLinkedExperiments')) + '</p>') +
+    (impact.total > references.length ? '<p class="muted">' + esc(t('flags.linkedExperimentsMore')) + '</p>' : '');
+  return links ? '<section class="card"><h3>' + esc(t('flags.linkedExperiments')) +
+    '</h3>' + content + '</section>' : content;
 }
 
 async function requestChange(action, object, payload, reasonOverride = '') {
@@ -140,6 +159,7 @@ async function downloadReport(path, format) {
 }
 
 function errMsg(e) {
+  if (e.code === 'flag_review_changed') return t('flags.reviewChanged');
   if (e.code === 'report_changed') return t('ro.reportChanged');
   if (e.code === 'report_unavailable') return t('ro.reportUnavailable');
   if (e.status === 403) return t('err.denied403');
@@ -974,6 +994,30 @@ function renderFlagSaveConflict(latest, local) {
     '<button class="btn" type="button" id="flag-conflict-ack">' + esc(t('flags.conflictAcknowledge')) + '</button>';
 }
 
+async function confirmFlagPublish(key, kp) {
+  if (!confirmLeaveEditor()) return;
+  let reviewed;
+  try { reviewed = await api(kp); }
+  catch (e) { reportError(e); return; }
+  const reviewContent = value => reviewPreview(value?.preview, 'action-review-preview') +
+    renderFlagDiff(value?.current, value?.draft);
+  const accepted = await actionDialog({ title: t('btn.publish'), summary: t('action.flagSummary', { key }),
+    preview: '<div id="flag-publish-review">' + reviewContent(reviewed) + '</div>',
+    reasonLabel: t('prompt.publishNote'), confirmLabel: t('btn.publish'), onConfirm: async ({ reason }) => {
+      const latest = await api(kp);
+      if (latest.draftHash !== reviewed.draftHash || latest.currentRevision !== reviewed.currentRevision ||
+        JSON.stringify(latest.experimentImpact) !== JSON.stringify(reviewed.experimentImpact)) {
+        reviewed = latest;
+        const box = $('#flag-publish-review');
+        if (box) box.innerHTML = reviewContent(latest);
+        throw new ApiError(0, 'flag_review_changed', t('flags.reviewChanged'));
+      }
+      const result = await api(kp + '/publish', { method: 'POST', body: { note: reason } });
+      toast(t('toast.published', { flag: result?.flagRevision, manifest: result?.manifestRevision }));
+    } });
+  if (accepted) route();
+}
+
 async function viewFlagDetail(m) {
   const key = S.flagKey;
   const kp = scopePath() + '/flags/' + encodeURIComponent(key);
@@ -994,6 +1038,7 @@ async function viewFlagDetail(m) {
     (draft ? '<span class="muted">' + esc(t('flags.riskMeta', { risk: draft.risk || '—', by: draft.updatedBy || '—', time: fmtTime(draft.updatedAt) })) + '</span>' : '') +
     '</div>' +
     '<div id="flag-saved-diff">' + renderFlagDiff(f && f.current, draft) + '</div>' +
+    renderFlagExperimentImpact(f?.experimentImpact) +
     '<div id="flag-conflict"></div>' +
     '<div class="cols">' +
       '<section class="card"><h3>' + esc(t('flags.draftEditor')) + '</h3>' +
@@ -1045,6 +1090,12 @@ async function viewFlagDetail(m) {
 function bindFlagDetail(m, key, kp, f) {
   let savedDraftHash = f?.draftHash || '';
   const structured = bindFlagStructured(m);
+  m.addEventListener('click', ev => {
+    const link = ev.target.closest('[data-exp-from-flag]');
+    if (!link || !confirmLeaveEditor()) return;
+    S.view = 'experiments'; S.expId = link.dataset.expFromFlag; S.expTab = 'summary';
+    S.flagKey = null; route();
+  });
   $('#flag-back', m).onclick = () => { if (!confirmLeaveEditor()) return; S.flagKey = null; S.flagNew = false; route(); };
   // Returns parsed content, or null (with toast) when invalid.
   const readJSON = () => {
@@ -1133,16 +1184,7 @@ function bindFlagDetail(m, key, kp, f) {
         route();
       });
   };
-  $('#flag-publish', m).onclick = async () => {
-    if (!confirmLeaveEditor()) return;
-    const accepted = await actionDialog({ title: t('btn.publish'), summary: t('action.flagSummary', { key }),
-      preview: reviewPreview(f?.preview, 'action-review-preview') + renderFlagDiff(f?.current, f?.draft),
-      reasonLabel: t('prompt.publishNote'), confirmLabel: t('btn.publish'), onConfirm: async ({ reason }) => {
-        const result = await api(kp + '/publish', { method: 'POST', body: { note: reason } });
-        toast(t('toast.published', { flag: result?.flagRevision, manifest: result?.manifestRevision }));
-      } });
-    if (accepted) route();
-  };
+  $('#flag-publish', m).onclick = () => confirmFlagPublish(key, kp);
   $('#flag-delete', m).onclick = async () => {
     const approval = await actionDialog({ title: t('btn.markDeleted'), summary: t('confirm.markDeleted', { key }), confirmLabel: t('btn.markDeleted') });
     if (!approval) return;
