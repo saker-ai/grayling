@@ -263,7 +263,12 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_query", "audit search exceeds 128 bytes")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.Store.AuditPage(resolved.ID, before, limit, query))
+	object := r.URL.Query().Get("object")
+	if len(object) > 128 {
+		writeError(w, http.StatusBadRequest, "invalid_object", "audit object exceeds 128 bytes")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.Store.AuditPageForObject(resolved.ID, before, limit, query, object))
 }
 
 func (s *Server) handleSetQuotas(w http.ResponseWriter, r *http.Request) {

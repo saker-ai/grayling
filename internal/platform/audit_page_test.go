@@ -35,3 +35,32 @@ func TestAuditPageFiltersAcrossCursor(t *testing.T) {
 		t.Fatalf("second page: %+v", second)
 	}
 }
+
+func TestAuditPageForObjectMatchesExactlyBeforePagination(t *testing.T) {
+	s, err := NewStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := s.CreateWorkspace("audit-exact", "Audit exact")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range []struct{ object, action string }{
+		{"exp-8", "manual.pause"},
+		{"exp-80", "manual.advance"},
+		{"exp-8", "manual.advance"},
+		{"exp-8", "manual.resume"},
+	} {
+		if err := s.Audit("operator", RoleOwner, entry.action, ws.ID, "prod", entry.object, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first := s.AuditPageForObject(ws.ID, 0, 2, "manual", "exp-8")
+	if len(first) != 2 || first[0].Action != "manual.resume" || first[1].Action != "manual.advance" {
+		t.Fatalf("first page: %+v", first)
+	}
+	second := s.AuditPageForObject(ws.ID, first[1].ID, 2, "manual", "exp-8")
+	if len(second) != 1 || second[0].Action != "manual.pause" {
+		t.Fatalf("second page: %+v", second)
+	}
+}

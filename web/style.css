@@ -352,6 +352,7 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
   .mobile-record-cards { display: grid; gap: 10px; margin: 10px 0; }
   .mobile-empty { display: block; }
   .mobile-record { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+  .audit-record pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; }
   .mobile-record .row { flex-wrap: wrap; }
   table.grid.flag-list-table { display: none; }
   .flag-record-cards { display: grid; gap: 10px; margin: 10px 0; }

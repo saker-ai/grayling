@@ -671,6 +671,12 @@ func (s *Store) AuditList(workspaceID string, n int) []*AuditEntry {
 // AuditPage returns matching records newest first. beforeID is an exclusive
 // cursor; zero begins at the latest record. A zero limit returns all records.
 func (s *Store) AuditPage(workspaceID string, beforeID int64, n int, query string) []*AuditEntry {
+	return s.AuditPageForObject(workspaceID, beforeID, n, query, "")
+}
+
+// AuditPageForObject applies an exact object filter before pagination. An
+// empty object keeps the workspace-wide search behavior of AuditPage.
+func (s *Store) AuditPageForObject(workspaceID string, beforeID int64, n int, query, object string) []*AuditEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]*AuditEntry, 0, min(len(s.data.Audit), max(n, 0)))
@@ -678,6 +684,9 @@ func (s *Store) AuditPage(workspaceID string, beforeID int64, n int, query strin
 	for i := len(s.data.Audit) - 1; i >= 0; i-- {
 		e := s.data.Audit[i]
 		if beforeID > 0 && e.ID >= beforeID {
+			continue
+		}
+		if object != "" && e.Object != object {
 			continue
 		}
 		if query != "" && !strings.Contains(strings.ToLower(e.Actor+" "+e.Action+" "+e.Object+" "+e.EnvironmentID+" "+e.Detail), query) {

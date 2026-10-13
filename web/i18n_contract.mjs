@@ -252,6 +252,21 @@ assert.strictEqual(themed.x.S.expTab, 'diagnostics');
 assert.strictEqual(themed.x.consoleHash(), '#/console/acme/prod/experiments/exp-1/diagnostics');
 assert(!themed.x.restoreConsoleHash('#/console/acme/prod/experiments/exp-1/unknown'),
   'unknown experiment tab rejected');
+assert(themed.x.restoreConsoleHash('#/console/acme/prod/audit/exp-8'));
+assert.strictEqual(themed.x.S.auditObject, 'exp-8');
+assert.strictEqual(themed.x.consoleHash(), '#/console/acme/prod/audit/exp-8');
+assert(!themed.x.restoreConsoleHash('#/console/acme/prod/audit/exp-8/extra'),
+  'audit deep link accepts one exact object only');
+const scopedAudit = makeSandbox();
+scopedAudit.x.S.ws = 'acme';
+scopedAudit.x.S.auditObject = 'exp-8';
+const auditRoot = viewRoot();
+await scopedAudit.x.VIEWS.audit(auditRoot);
+assert(scopedAudit.fetchCalls.some(call => call.url.includes('/audit?') &&
+  call.url.includes('&object=exp-8')), 'audit deep link must request an exact object filter');
+assert(auditRoot.innerHTML.includes('id="a-object-filter"'), 'audit page must show active exact filter');
+assert(auditRoot.querySelector('#a-box').innerHTML.includes('class="mobile-record audit-record"'),
+  'audit results must provide readable mobile records');
 
 // ===========================================================================
 // 2. Bilingual view sweep — sampled strings hit each language, layout IDs are
@@ -374,6 +389,7 @@ x.S.envs = [{ slug: 'prod', name: 'Production' }];
 const reportHtml = () => { const box = {}; x.renderReport(box, report); return box.innerHTML; };
 const repEn = reportHtml();
 const roRunEn = x.renderRollout(expDetail);
+assert(roRunEn.includes('id="ro-open-audit"') && roRunEn.includes('View full audit trail'));
 const roCreateEn = x.renderRollout({ id: 'exp-1', state: 'reviewed' });
 const roBlockedEn = x.renderRollout({ id: 'exp-1', state: 'running', releasePlan: { ...plan, state: 'paused', pausedReason: 'data health gate: SRM alarm', history: [] } });
 const htmlEn = await runSweeps(x);
@@ -388,6 +404,7 @@ assert.strictEqual(main.store.get('golab_lang'), 'zh', 'setLang must persist to 
 
 const repZh = reportHtml();
 const roRunZh = x.renderRollout(expDetail);
+assert(roRunZh.includes('id="ro-open-audit"') && roRunZh.includes('查看完整审计记录'));
 const roCreateZh = x.renderRollout({ id: 'exp-1', state: 'reviewed' });
 const roBlockedZh = x.renderRollout({ id: 'exp-1', state: 'running', releasePlan: { ...plan, state: 'paused', pausedReason: 'data health gate: SRM alarm', history: [] } });
 const htmlZh = await runSweeps(x);

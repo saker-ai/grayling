@@ -505,6 +505,10 @@ paths:
           name: q
           schema: {type: string, maxLength: 128}
           description: 搜索操作人、动作、对象、环境和详情。
+        - in: query
+          name: object
+          schema: {type: string, maxLength: 128}
+          description: 精确匹配审计对象 ID；可与 q 和 before 组合。
       responses:
         "200":
           description: 审计条目列表。

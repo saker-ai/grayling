@@ -217,7 +217,7 @@ const S = {
   metricRef: null, metricQuery: '', metricStatus: '', metricCursor: '',
   deepLinkRequested: false, deepLinkDenied: false,
   auditLimit: 50,
-  auditQuery: '', auditCursors: [0], auditPage: 0,
+  auditQuery: '', auditObject: '', auditCursors: [0], auditPage: 0,
   aiAvailable: true, aiRef: null,
   booted: false,
   timer: null,
@@ -480,6 +480,7 @@ function consoleHash() {
   if (S.view === 'metrics' && S.metricRef) parts.push(S.metricRef.key, String(S.metricRef.version));
   if (S.view === 'approvals' && S.approvalID) parts.push(S.approvalID);
   if (S.view === 'ai' && S.aiRef) parts.push(S.aiRef.type, S.aiRef.logicalId);
+  if (S.view === 'audit' && S.auditObject) parts.push(S.auditObject);
   return '#/' + parts.map(encodeURIComponent).join('/');
 }
 
@@ -492,10 +493,13 @@ function restoreConsoleHash(hash) {
   if (parts[3] === 'experiments' && (parts.length > 6 ||
     (parts[5] && (parts[4] === '~new' || parts[5] !== 'diagnostics')))) return false;
   if (parts[3] === 'ai' && parts.length !== 4 && parts.length !== 6) return false;
+  if (parts[3] === 'audit' && parts.length > 5) return false;
   S.ws = parts[1] === '~' ? '' : parts[1];
   S.env = parts[2] === '~' ? '' : parts[2];
   S.view = parts[3];
   S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;
+  S.auditObject = S.view === 'audit' ? (parts[4] || '') : '';
+  S.auditCursors = [0]; S.auditPage = 0;
   S.expCreate = false;
   S.expTab = 'summary';
   if (S.view === 'flags' && parts[4]) S.flagKey = parts[4];
@@ -2499,6 +2503,7 @@ function renderRollout(exp) {
     '<h4>' + esc(t('ro.planSteps')) + '</h4>' + renderRolloutSteps(plan) +
     '<h4>' + esc(t('ro.actionHistory')) + ' <span class="muted">' + esc(t('ro.historyNote')) + '</span></h4>' +
     renderRolloutHistory(plan) +
+    '<div class="row"><button class="btn sm" id="ro-open-audit" type="button">' + esc(t('ro.openAudit')) + '</button></div>' +
     '<div id="ro-report-gate" role="status"></div>' +
     '<div class="row actions">' +
       '<button class="btn sm" id="ro-refresh">' + esc(t('btn.refresh')) + '</button>' +
@@ -2547,6 +2552,12 @@ function setRolloutReportStatus(m, status) {
 function bindRollout(m, expId, exp = null) {
   const base = '/api/v1/admin/experiments/' + encodeURIComponent(expId) + '/release-plan';
   const plan = exp?.releasePlan;
+  const openAudit = $('#ro-open-audit', m);
+  if (openAudit) openAudit.onclick = () => {
+    S.view = 'audit'; S.auditObject = expId; S.auditQuery = '';
+    S.auditCursors = [0]; S.auditPage = 0;
+    route();
+  };
   const checkReport = async (notify = true) => {
     try {
       const report = await api('/api/v1/admin/experiments/' + encodeURIComponent(expId) + '/report');
@@ -2857,27 +2868,39 @@ async function viewAudit(m) {
     '<label class="inline">' + esc(t('audit.limit')) + ' <select id="a-limit">' +
     [25, 50, 100].map(n => '<option' + (n === S.auditLimit ? ' selected' : '') + '>' + n + '</option>').join('') +
     '</select></label><form id="a-search-form" class="inline-search"><input id="a-search" type="search" maxlength="128" value="' + esc(S.auditQuery) + '" placeholder="' + esc(t('audit.search')) + '" aria-label="' + esc(t('audit.search')) + '"><button class="btn sm" type="submit">' + esc(t('audit.searchButton')) + '</button></form></div>' +
+    (S.auditObject ? '<div class="banner" id="a-object-filter">' + esc(t('audit.objectFilter', { object: S.auditObject })) +
+      ' <button class="btn sm" id="a-clear-object" type="button">' + esc(t('audit.clearObject')) + '</button></div>' : '') +
     '<div id="a-box"><p class="muted">' + esc(t('misc.loading')) + '</p></div>';
   let loadSeq = 0;
   const load = async () => {
     const seq = ++loadSeq;
     const cursor = S.auditCursors[S.auditPage] || 0;
     const params = 'limit=' + (S.auditLimit + 1) + '&q=' + encodeURIComponent(S.auditQuery) +
+      (S.auditObject ? '&object=' + encodeURIComponent(S.auditObject) : '') +
       (cursor ? '&before=' + encodeURIComponent(cursor) : '');
     const page = (await api(wsPath() + '/audit?' + params)) || [];
     if (seq !== loadSeq) return;
     const rows = page.slice(0, S.auditLimit);
     const hasMore = page.length > S.auditLimit;
+    const records = rows.map(entry => ({ entry,
+      detail: typeof entry.detail === 'string' ? entry.detail : JSON.stringify(entry.detail ?? '') }));
     $('#a-box', m).innerHTML =
-      '<table class="grid"><thead><tr><th>' + esc(t('th.time')) + '</th><th>' + esc(t('th.actor')) + '</th><th>' + esc(t('th.action')) + '</th><th>' + esc(t('th.object')) + '</th><th>' + esc(t('th.env')) + '</th><th>' + esc(t('th.detail')) + '</th></tr></thead><tbody>' +
-      (rows.map(a => {
-        const detail = typeof a.detail === 'string' ? a.detail : JSON.stringify(a.detail ?? '');
+      '<table class="grid mobile-card-table"><thead><tr><th>' + esc(t('th.time')) + '</th><th>' + esc(t('th.actor')) + '</th><th>' + esc(t('th.action')) + '</th><th>' + esc(t('th.object')) + '</th><th>' + esc(t('th.env')) + '</th><th>' + esc(t('th.detail')) + '</th></tr></thead><tbody>' +
+      (records.map(({ entry: a, detail }) => {
         return '<tr><td class="nowrap">' + esc(fmtTime(a.time)) + '</td><td>' + esc(a.actor || '—') +
           '</td><td class="mono">' + esc(a.action) + '</td><td class="mono">' + esc(a.object || '—') +
           '</td><td class="mono">' + esc(a.environmentId || '—') + '</td>' +
           '<td class="detail" title="' + esc(detail) + '">' + esc(detail) + '</td></tr>';
       }).join('') || '<tr><td colspan="6" class="muted">' + esc(t('audit.empty')) + '</td></tr>') +
-      '</tbody></table><div class="pager"><button class="btn sm" id="a-prev" type="button"' + (S.auditPage ? '' : ' disabled') + '>' + esc(t('audit.previous')) + '</button><span>' + esc(t('audit.page', { n: S.auditPage + 1 })) + '</span><button class="btn sm" id="a-next" type="button"' + (hasMore ? '' : ' disabled') + '>' + esc(t('audit.next')) + '</button></div>';
+      '</tbody></table><div class="mobile-record-cards" aria-label="' + esc(t('audit.title')) + '">' +
+      (records.map(({ entry: a, detail }) => '<article class="mobile-record audit-record"><div class="row"><strong class="mono">' +
+        esc(a.action) + '</strong><span class="muted">' + esc(fmtTime(a.time)) + '</span></div><div><b>' +
+        esc(t('th.object')) + ':</b> <span class="mono">' + esc(a.object || '—') + '</span></div><div><b>' +
+        esc(t('th.actor')) + ':</b> ' + esc(a.actor || '—') + '</div><div><b>' + esc(t('th.env')) +
+        ':</b> ' + esc(a.environmentId || '—') + '</div>' + (detail ? '<details><summary>' +
+        esc(t('th.detail')) + '</summary><pre>' + esc(detail) + '</pre></details>' : '') + '</article>').join('') ||
+        '<p class="muted">' + esc(t('audit.empty')) + '</p>') + '</div>' +
+      '<div class="pager"><button class="btn sm" id="a-prev" type="button"' + (S.auditPage ? '' : ' disabled') + '>' + esc(t('audit.previous')) + '</button><span>' + esc(t('audit.page', { n: S.auditPage + 1 })) + '</span><button class="btn sm" id="a-next" type="button"' + (hasMore ? '' : ' disabled') + '>' + esc(t('audit.next')) + '</button></div>';
     const prev = $('#a-prev', m), next = $('#a-next', m);
     if (prev) prev.onclick = () => { if (S.auditPage > 0) { S.auditPage--; load().catch(reportError); } };
     if (next) next.onclick = () => {
@@ -2892,6 +2915,11 @@ async function viewAudit(m) {
     S.auditLimit = Number(ev.target.value);
     S.auditCursors = [0]; S.auditPage = 0;
     load().catch(e => { $('#a-box', m).innerHTML = errBanner(e); });
+  };
+  const clearObject = $('#a-clear-object', m);
+  if (clearObject) clearObject.onclick = () => {
+    S.auditObject = ''; S.auditCursors = [0]; S.auditPage = 0;
+    route();
   };
   const searchForm = $('#a-search-form', m);
   if (searchForm) searchForm.onsubmit = ev => {
@@ -3360,6 +3388,7 @@ function init() {
       }
       if (!confirmLeaveEditor()) return;
       S.view = b.dataset.view;
+      if (S.view === 'audit') { S.auditObject = ''; S.auditQuery = ''; S.auditCursors = [0]; S.auditPage = 0; }
       S.deepLinkDenied = false;
       S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;
       S.flagNew = S.expCreate = S.wizardDirty = false;
@@ -3377,6 +3406,7 @@ function init() {
     S.globalCapabilities = null;
     updateCapabilities();
     S.env = '';
+    S.auditObject = ''; S.auditQuery = ''; S.auditCursors = [0]; S.auditPage = 0;
     S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;
     S.expCreate = S.wizardDirty = false;
     localStorage.setItem('golab_ws', S.ws);
@@ -3387,6 +3417,7 @@ function init() {
   $('#sel-env').onchange = ev => {
     if (!confirmLeaveEditor()) { ev.target.value = S.env; return; }
     S.env = ev.target.value;
+    S.auditObject = ''; S.auditQuery = ''; S.auditCursors = [0]; S.auditPage = 0;
     S.deepLinkDenied = false;
     S.deepLinkRequested = false;
     S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;

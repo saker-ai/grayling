@@ -2,7 +2,7 @@
 
 范围：`openapi.yaml` 中的 `/api/v1/admin/` 管理操作（共 62 项）。`GET /api/v1/health` 是健康检查，不属于管理操作。SDK config/eval/collect、原生 Nacos 协议及 HMAC 原始密钥为数据面或运维密钥，刻意不进入管理 UI。
 
-下表说明 Web 是否提供入口及代码契约，**不表示每项都已在浏览器执行**。真实浏览器的操作、截图、HTTP 结果与未覆盖项见 [2026-10-08 验收报告](acceptance/web-2026-10-08/report.md)、[跨角色发布验收](acceptance/web-2026-10-13-roles/report.md)、[故障状态模拟验收](acceptance/web-2026-10-13-failures/report.md)、[会话恢复验收](acceptance/web-2026-10-13-reauth/report.md)、[实验列表摘要验收](acceptance/web-2026-10-13-exp-list/report.md)、[实验绑定并发冲突验收](acceptance/web-2026-10-13-bind-conflict/report.md)、[实验首屏决策验收](acceptance/web-2026-10-13-exp-decision/report.md)、[总览摘要验收](acceptance/web-2026-10-13-overview/report.md)、[放量操作报告门禁验收](acceptance/web-2026-10-13-rollout-report-gate/report.md)、[Flag 关联实验验收](acceptance/web-2026-10-13-flag-experiment-impact/report.md)和[报告证据版本验收](acceptance/web-2026-10-13-rollout-report-version/report.md)。
+下表说明 Web 是否提供入口及代码契约，**不表示每项都已在浏览器执行**。真实浏览器的操作、截图、HTTP 结果与未覆盖项见 [2026-10-08 验收报告](acceptance/web-2026-10-08/report.md)、[跨角色发布验收](acceptance/web-2026-10-13-roles/report.md)、[故障状态模拟验收](acceptance/web-2026-10-13-failures/report.md)、[会话恢复验收](acceptance/web-2026-10-13-reauth/report.md)、[实验列表摘要验收](acceptance/web-2026-10-13-exp-list/report.md)、[实验绑定并发冲突验收](acceptance/web-2026-10-13-bind-conflict/report.md)、[实验首屏决策验收](acceptance/web-2026-10-13-exp-decision/report.md)、[总览摘要验收](acceptance/web-2026-10-13-overview/report.md)、[放量操作报告门禁验收](acceptance/web-2026-10-13-rollout-report-gate/report.md)、[Flag 关联实验验收](acceptance/web-2026-10-13-flag-experiment-impact/report.md)、[报告证据版本验收](acceptance/web-2026-10-13-rollout-report-version/report.md)和[实验审计导航验收](acceptance/web-2026-10-13-audit-navigation/report.md)。
 
 | 方法 | 管理端点 | 分类 | Web 入口 / 行为或仅 API 理由 | 验证证据 |
 |---|---|---|---|---|
@@ -19,7 +19,7 @@
 | `POST` | `/api/v1/admin/workspaces/{ws}/tokens` | 已覆盖 | 令牌页：列表/创建/撤销 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/tokens` | 已覆盖 | 令牌页：列表/创建/撤销 | i18n DOM；API 路由契约 |
 | `DELETE` | `/api/v1/admin/tokens/{id}` | 已覆盖 | 令牌页：列表/创建/撤销 | i18n DOM；API 路由契约 |
-| `GET` | `/api/v1/admin/workspaces/{ws}/audit` | 已覆盖 | 审计页：搜索、条数选择与游标翻页 | i18n DOM；游标筛选测试；API 路由契约 |
+| `GET` | `/api/v1/admin/workspaces/{ws}/audit` | 已覆盖 | 审计页：搜索、精确对象筛选、条数选择与游标翻页；实验放量时间轴可直达对象记录 | i18n DOM；作用域/精确筛选 API 测试；[桌面和手机浏览器验收](acceptance/web-2026-10-13-audit-navigation/report.md) |
 | `GET` | `/api/v1/admin/workspaces/{ws}/quotas` | 已覆盖 | 配额页：owner 可见，读取/编辑/校验/确认/保存 | quota API + i18n DOM |
 | `PUT` | `/api/v1/admin/workspaces/{ws}/quotas` | 已覆盖 | 配额页：owner 可见，读取/编辑/校验/确认/保存 | quota API + i18n DOM |
 | `GET` | `/api/v1/admin/workspaces/{ws}/metrics` | 已覆盖 | 指标目录列表、搜索和状态筛选 | i18n DOM；API 路由契约 |
