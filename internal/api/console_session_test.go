@@ -53,6 +53,13 @@ func TestConsoleSessionLifecycleAndCSRF(t *testing.T) {
 	if got := call(http.MethodGet, "/api/v1/admin/workspaces", "", cookie, ""); got.Code != http.StatusOK {
 		t.Fatalf("session read: %d %s", got.Code, got.Body.String())
 	}
+	identity := call(http.MethodGet, "/api/v1/admin/session", "", cookie, "")
+	if identity.Code != http.StatusOK ||
+		!strings.Contains(identity.Body.String(), `"principalId":"`+token.Token.ID+`"`) ||
+		strings.Contains(identity.Body.String(), token.Secret) {
+		t.Fatalf("session identity must expose stable principal ID without credential: %d %s",
+			identity.Code, identity.Body.String())
+	}
 	// Every replica must accept a session minted with the shared secret.
 	srv = newServer()
 	if got := call(http.MethodGet, "/api/v1/admin/workspaces", "", cookie, ""); got.Code != http.StatusOK {

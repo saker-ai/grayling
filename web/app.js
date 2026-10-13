@@ -106,7 +106,7 @@ async function api(path, opts = {}) {
   if (!res.ok) {
     const err = (data && data.error) || {};
     const e = new ApiError(res.status, err.code || 'http_' + res.status, err.message || res.statusText);
-    if (res.status === 401) { cookieSession = false; memoryToken = ''; showAuth(t('err.tokenRejected401')); }
+    if (res.status === 401) { cookieSession = false; memoryToken = ''; showAuth(t('err.tokenRejected401'), true); }
     throw e;
   }
   return data;
@@ -126,7 +126,7 @@ async function downloadReport(path, format) {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     const err = body.error || {};
-    if (res.status === 401) { cookieSession = false; memoryToken = ''; showAuth(t('err.tokenRejected401')); }
+    if (res.status === 401) { cookieSession = false; memoryToken = ''; showAuth(t('err.tokenRejected401'), true); }
     throw new ApiError(res.status, err.code || 'http_' + res.status, err.message || res.statusText);
   }
   const url = URL.createObjectURL(await res.blob());
@@ -189,6 +189,7 @@ const S = {
   flagKey: null, flagNew: false,
   segKey: null, segDrafts: [],
   approvalID: null, approvalFilter: 'pending', actorName: '',
+  principalID: '', reauthDraft: null,
   expId: null, expCreate: false, expTab: 'summary',
   wizardDirty: false,
   metricRef: null, metricQuery: '', metricStatus: '', metricCursor: '',
@@ -215,6 +216,51 @@ function editorValue() {
     return JSON.stringify(['segment', segment.value, $('#seg-risk')?.value, fields]);
   }
   return null;
+}
+function captureReauthDraft() {
+  if (!S.principalID || !S.ws || !S.env) return;
+  let content = null;
+  let key = '';
+  let meta = '';
+  if (S.view === 'flags' && S.flagKey && editorValue() !== S.editorBaseline) {
+    key = S.flagKey;
+    content = $('#flag-json')?.value || '';
+    meta = t('auth.draftMetaFlag', { risk: $('#flag-risk')?.value || '—',
+      revision: $('#flag-base')?.value || '0' });
+  } else if (S.view === 'segments' && S.segKey && editorValue() !== S.editorBaseline) {
+    key = S.segKey;
+    content = $('#seg-json')?.value || '';
+    meta = t('auth.draftMetaSegment', { risk: $('#seg-risk')?.value || '—' });
+  } else if (S.view === 'experiments' && S.expCreate && S.wizardDirty) {
+    key = '~new';
+    content = JSON.stringify($$('input, select, textarea', $('#main')).map(control => ({
+      field: control.id || control.name || control.getAttribute('aria-label') || control.placeholder || '',
+      value: control.value, checked: control.type === 'checkbox' ? control.checked : undefined,
+    })), null, 2);
+  }
+  if (!content) return;
+  S.reauthDraft = { principalID: S.principalID, ws: S.ws, env: S.env, view: S.view, key, content, meta };
+}
+
+function renderReauthDraft() {
+  const draft = S.reauthDraft;
+  if (!draft) return;
+  const key = S.view === 'flags' ? S.flagKey : S.view === 'segments' ? S.segKey : S.expCreate ? '~new' : '';
+  if (draft.principalID !== S.principalID || draft.ws !== S.ws || draft.env !== S.env ||
+      draft.view !== S.view || draft.key !== key) { S.reauthDraft = null; return; }
+  if ($('#reauth-draft')) return;
+  const card = document.createElement('section');
+  card.className = 'card';
+  card.id = 'reauth-draft';
+  card.innerHTML = '<h3 tabindex="-1">' + esc(t('auth.draftSaved')) + '</h3><p>' + esc(t('auth.draftReview')) + '</p>' +
+    (draft.meta ? '<p class="muted">' + esc(draft.meta) + '</p>' : '') +
+    '<label class="field">' + esc(t('auth.draftContent')) + '<textarea class="json" rows="8" readonly></textarea></label>' +
+    '<div class="row actions"><button class="btn sm" type="button" data-draft-dismiss>' +
+      esc(t('btn.dismiss')) + '</button></div>';
+  $('textarea', card).value = draft.content;
+  $('[data-draft-dismiss]', card).onclick = () => { S.reauthDraft = null; card.remove(); };
+  $('#main').prepend(card);
+  $('h3', card).focus();
 }
 function confirmLeaveEditor() {
   if (S.expCreate && S.wizardDirty) {
@@ -467,6 +513,7 @@ async function route() {
   });
   const m = $('#main');
   if (S.deepLinkDenied) {
+    S.reauthDraft = null;
     m.innerHTML = '<div class="banner err" role="alert">' + esc(t('err.deepLinkDenied')) + '</div>';
     return;
   }
@@ -480,10 +527,12 @@ async function route() {
     m.replaceChildren(stage);
     gateActions(m);
     S.editorBaseline = editorValue();
+    renderReauthDraft();
   } catch (e) {
     if (epoch !== routeEpoch) return;
     if (e.status === 401) return; // showAuth already triggered by api()
     m.innerHTML = errBanner(e);
+    renderReauthDraft();
     const rb = $('#btn-reauth2', m);
     if (rb) rb.onclick = () => showAuth();
   }
@@ -492,7 +541,8 @@ async function route() {
 // ---------------------------------------------------------------------------
 // Auth screen & boot
 // ---------------------------------------------------------------------------
-function showAuth(msg) {
+function showAuth(msg, preserveEditor = false) {
+  if (preserveEditor) captureReauthDraft();
   $('#auth-url').value = localStorage.getItem('golab_url') || '';
   $('#auth-token').value = '';
   if (msg !== undefined) $('#auth-error').textContent = msg;
@@ -549,6 +599,8 @@ async function signOut() {
   cookieSession = false;
   memoryToken = '';
   S.actorName = '';
+  S.principalID = '';
+  S.reauthDraft = null;
   S.booted = false;
   $('#auth-token').value = '';
   showAuth('');
@@ -587,6 +639,8 @@ async function loadEnvs() {
 async function boot() {
   const session = await api('/api/v1/admin/session');
   S.actorName = session.name || '';
+  S.principalID = session.principalId || '';
+  if (S.reauthDraft && S.reauthDraft.principalID !== S.principalID) S.reauthDraft = null;
   await loadWorkspaces();
   S.deepLinkRequested = false;
   $('#auth').classList.add('hidden');

@@ -146,7 +146,8 @@ func (s *Server) handleConsoleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleConsoleSession(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]string{"name": actorFrom(r).Name})
+	actor := actorFrom(r)
+	writeJSON(w, http.StatusOK, map[string]string{"name": actor.Name, "principalId": actor.TokenID})
 }
 
 func (s *Server) handleConsoleLogout(w http.ResponseWriter, r *http.Request) {

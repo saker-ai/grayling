@@ -207,7 +207,16 @@ paths:
       operationId: getConsoleSession
       security: [{cookieSession: []}, {bearerAuth: []}]
       responses:
-        "200": {description: 当前管理员名称。}
+        "200":
+          description: 当前管理员名称和不含密钥的主体 ID；Web 控制台用主体 ID 限定内存中的重登草稿。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, principalId]
+                properties:
+                  name: {type: string}
+                  principalId: {type: string}
         "401": {$ref: "#/components/responses/Unauthorized"}
     delete:
       tags: [workspaces]
