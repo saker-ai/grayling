@@ -1411,6 +1411,59 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/Internal"
+  "/api/v1/admin/experiments/{id}/report/export":
+    get:
+      tags: [experiments]
+      summary: 导出当前实验报告快照
+      description: >-
+        与报告读取使用相同的 report.read 授权和实时重算口径。JSON 含工作空间、环境和完整报告；
+        CSV 每个变体一行，仅包含聚合数据和报告健康信息，不包含单元级事实。
+      operationId: exportExperimentReport
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+        - name: format
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [json, csv]
+      responses:
+        "200":
+          description: 可下载的报告快照；两种格式均禁止缓存。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [workspaceId, environmentId, report]
+                properties:
+                  workspaceId:
+                    type: string
+                  environmentId:
+                    type: string
+                  report:
+                    $ref: "#/components/schemas/Report"
+            text/csv:
+              schema:
+                type: string
+                description: 每个变体一行的 UTF-8 CSV；首行为固定字段名。
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
   "/api/v1/admin/experiments/{id}/diagnostics":
     get:
       tags: [experiments]

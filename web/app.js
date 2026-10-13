@@ -107,6 +107,33 @@ async function api(path, opts = {}) {
   return data;
 }
 
+async function downloadReport(path, format) {
+  const headers = {};
+  if (!cookieSession && memoryToken) headers.Authorization = 'Bearer ' + memoryToken;
+  let res;
+  try {
+    res = await fetch(baseUrl() + path + '?format=' + format, {
+      headers, credentials: cookieSession ? 'same-origin' : 'omit',
+    });
+  } catch (e) {
+    throw new ApiError(0, 'network', t('err.cannotReach', { url: baseUrl() || t('err.sameOrigin'), msg: e.message }));
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const err = body.error || {};
+    if (res.status === 401) { cookieSession = false; memoryToken = ''; showAuth(t('err.tokenRejected401')); }
+    throw new ApiError(res.status, err.code || 'http_' + res.status, err.message || res.statusText);
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'grayling-report.' + format;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
 function errMsg(e) {
   if (e.status === 403) return t('err.denied403');
   if (e.status === 409) return t('err.conflict409');
@@ -1200,6 +1227,8 @@ async function viewExpDetail(m) {
       '<button class="btn primary" id="exp-transition">' + esc(t('btn.transition')) + '</button></div>' +
       '<h3>' + esc(t('exp.report')) + '</h3>' +
       '<div class="row"><button class="btn" id="exp-report">' + esc(t('btn.loadReport')) + '</button>' +
+      (can('report.read') ? '<button class="btn" id="exp-export-csv">' + esc(t('report.exportCsv')) + '</button>' +
+        '<button class="btn" id="exp-export-json">' + esc(t('report.exportJson')) + '</button>' : '') +
       '<label class="inline"><input type="checkbox" id="exp-auto"> ' + esc(t('exp.autoRefresh')) + '</label></div>' +
       '<div id="report-box"><p class="muted">' + esc(t('exp.notLoaded')) + '</p></div>' +
     '</section></div>' +
@@ -1239,6 +1268,14 @@ async function viewExpDetail(m) {
     }
   };
   $('#exp-report', m).onclick = loadReport;
+  if (can('report.read')) {
+    for (const format of ['csv', 'json']) {
+      $('#exp-export-' + format, m).onclick = async () => {
+        try { await downloadReport(p + '/report/export', format); }
+        catch (err) { reportError(err); }
+      };
+    }
+  }
   let autoRefresh = false;
   let failures = 0;
   let polling = false;

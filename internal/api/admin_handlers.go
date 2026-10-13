@@ -712,21 +712,12 @@ func (s *Server) handleTransitionExperiment(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleExperimentReport(w http.ResponseWriter, r *http.Request) {
-	actor := actorFrom(r)
-	exp, err := s.Admin.GetExperiment(actor, r.PathValue("id"))
+	_, rep, err := s.authorizedExperimentReport(r)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	if err := admin.Authorize(actor, exp.WorkspaceID, admin.PermReportRead); err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	rep, err := experiment.BuildReport(s.Store, exp.ID, time.Now())
-	if err != nil {
-		writeStoreError(w, err)
-		return
-	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, rep)
 }
 
