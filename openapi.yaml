@@ -3782,6 +3782,14 @@ components:
           type: string
           enum: [onDecision, onRender]
           description: 缺省 onDecision；onRender 在实际展示后显式上报曝光。
+        exposureTrigger:
+          type: string
+          maxLength: 200
+          description: onRender 必填；记录何时真正展示或生效并上报曝光，写入注册契约。
+        integrationOwner:
+          type: string
+          maxLength: 200
+          description: onRender 必填；记录负责曝光接入的团队或人员，写入注册契约。
         bandit:
           $ref: "#/components/schemas/BanditSpec"
         primaryMetric:

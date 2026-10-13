@@ -274,6 +274,8 @@ type Experiment struct {
 	AllocationMode   string          `json:"allocationMode,omitempty"`
 	Bandit           *BanditSpec     `json:"bandit,omitempty"`
 	ExposureMode     string          `json:"exposureMode,omitempty"` // onDecision | onRender
+	ExposureTrigger  string          `json:"exposureTrigger,omitempty"`
+	IntegrationOwner string          `json:"integrationOwner,omitempty"`
 	PrimaryMetricRef *MetricRef      `json:"primaryMetricRef,omitempty"`
 	PrimaryMetric    MetricSpec      `json:"primaryMetric"`
 	Guardrails       []GuardrailSpec `json:"guardrails,omitempty"`

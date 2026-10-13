@@ -437,7 +437,8 @@ func TestSQLiteAssignmentDoesNotCountAsExposure(t *testing.T) {
 	}
 	exp, err := store.CreateExperiment(&Experiment{
 		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "flag", Unit: "user_id",
-		Epoch: 1, ExposureMode: "onRender", Variants: []string{"a", "b"},
+		Epoch: 1, ExposureMode: "onRender", ExposureTrigger: "after display", IntegrationOwner: "test",
+		Variants:      []string{"a", "b"},
 		Proportions:   map[string]float64{"a": 50, "b": 50},
 		PrimaryMetric: MetricSpec{Key: "conv", Type: "proportion", Direction: "increase"},
 		Alpha:         0.05, AnalysisWindow: 24 * time.Hour, MinSamplePerArm: 10,

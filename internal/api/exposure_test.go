@@ -31,6 +31,7 @@ func TestRemoteOnRenderExposureRequiresRecordedAssignment(t *testing.T) {
 	exp, err := store.CreateExperiment(&platform.Experiment{
 		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "onboarding",
 		Unit: "user_id", Epoch: 1, ExposureMode: "onRender",
+		ExposureTrigger: "after display", IntegrationOwner: "test",
 		Variants:      []string{"control", "treatment"},
 		Proportions:   map[string]float64{"control": 50, "treatment": 50},
 		PrimaryMetric: platform.MetricSpec{Key: "complete", Type: "proportion", Direction: "increase"},
@@ -148,7 +149,8 @@ func TestLocalOnRenderAssignmentAndExposureBatch(t *testing.T) {
 	}
 	exp, err := store.CreateExperiment(&platform.Experiment{
 		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "onboarding", Unit: "user_id",
-		Epoch: 1, ExposureMode: "onRender", Variants: []string{"control", "treatment"},
+		Epoch: 1, ExposureMode: "onRender", ExposureTrigger: "after display", IntegrationOwner: "test",
+		Variants:      []string{"control", "treatment"},
 		Proportions:   map[string]float64{"control": 50, "treatment": 50},
 		PrimaryMetric: platform.MetricSpec{Key: "complete", Type: "proportion", Direction: "increase"},
 		Alpha:         0.05, AnalysisWindow: 24 * time.Hour, MinSamplePerArm: 10,

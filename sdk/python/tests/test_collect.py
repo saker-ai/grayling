@@ -160,11 +160,14 @@ def test_on_render_requires_explicit_exposure(env):
         "POST", f"/api/v1/admin/workspaces/{env.ws}/environments/{env.env}/experiments",
         env.server.owner_token, {
             "flagKey": key, "unit": "user_id", "exposureMode": "onRender",
+            "exposureTrigger": "after display", "integrationOwner": "python SDK test",
             "variants": ["control", "treatment"],
             "proportions": {"control": 50, "treatment": 50},
             "primaryMetric": {"key": "conversion", "type": "proportion", "direction": "increase"},
             "alpha": 0.05, "analysisWindow": 7 * 24 * 3600 * 10**9, "minSamplePerArm": 5,
         }, expect=201)
+    assert exp["exposureTrigger"] == "after display"
+    assert exp["integrationOwner"] == "python SDK test"
     env.server.request("POST", f"/api/v1/admin/experiments/{exp['id']}/review",
                        env.server.owner_token, {"note": "render test"}, expect=200)
     env.server.request("POST", f"/api/v1/admin/experiments/{exp['id']}/bind",

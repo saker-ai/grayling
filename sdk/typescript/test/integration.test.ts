@@ -392,10 +392,13 @@ test("onRender records assignment before explicit exposure", async () => {
     `/api/v1/admin/workspaces/${env.ws}/environments/${env.env}/experiments`, 201,
     server.ownerToken, {
       flagKey: key, unit: "user_id", exposureMode: "onRender",
+      exposureTrigger: "after display", integrationOwner: "TypeScript SDK test",
       variants: ["control", "treatment"], proportions: { control: 50, treatment: 50 },
       primaryMetric: { key: "conversion", type: "proportion", direction: "increase" },
       alpha: 0.05, analysisWindow: 7 * 24 * 3600 * 1e9, minSamplePerArm: 5,
     });
+  assert.equal(exp.exposureTrigger, "after display");
+  assert.equal(exp.integrationOwner, "TypeScript SDK test");
   await server.expect("POST", `/api/v1/admin/experiments/${exp.id}/review`, 200,
     server.ownerToken, { note: "render test" });
   await server.expect("POST", `/api/v1/admin/experiments/${exp.id}/bind`, 200, server.ownerToken);

@@ -91,7 +91,7 @@ func TestOnRenderReportHoldsForUnexposedAssignments(t *testing.T) {
 	store, ws, env := setup(t)
 	exp, err := store.CreateExperiment(&platform.Experiment{
 		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "flag", Epoch: 1,
-		Unit: "user_id", ExposureMode: "onRender",
+		Unit: "user_id", ExposureMode: "onRender", ExposureTrigger: "after display", IntegrationOwner: "test",
 		Variants:    []string{"control", "treatment"},
 		Proportions: map[string]float64{"control": 50, "treatment": 50},
 		PrimaryMetric: platform.MetricSpec{
@@ -147,7 +147,7 @@ func TestDiagnosticsReplaysSQLiteAssignmentsAfterRestart(t *testing.T) {
 	}
 	exp, err := store.CreateExperiment(&platform.Experiment{
 		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "flag", Epoch: 1,
-		Unit: "user_id", ExposureMode: "onRender",
+		Unit: "user_id", ExposureMode: "onRender", ExposureTrigger: "after display", IntegrationOwner: "test",
 		Variants:    []string{"control", "treatment"},
 		Proportions: map[string]float64{"control": 50, "treatment": 50},
 		PrimaryMetric: platform.MetricSpec{
