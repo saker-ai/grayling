@@ -206,6 +206,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/admin/experiments/{id}", s.adminOnly(s.handleGetExperiment))
 	mux.HandleFunc("POST /api/v1/admin/experiments/{id}/review", s.adminOnly(s.handleReviewExperiment))
 	mux.HandleFunc("POST /api/v1/admin/experiments/{id}/bind", s.adminOnly(s.handleBindExperiment))
+	mux.HandleFunc("GET /api/v1/admin/experiments/{id}/bind-check", s.adminOnly(s.handleExperimentBindCheck))
 	mux.HandleFunc("POST /api/v1/admin/experiments/{id}/transition", s.adminOnly(s.handleTransitionExperiment))
 	mux.HandleFunc("GET /api/v1/admin/experiments/{id}/report", s.adminOnly(s.handleExperimentReport))
 	mux.HandleFunc("GET /api/v1/admin/experiments/{id}/report/export", s.adminOnly(s.handleExperimentReportExport))

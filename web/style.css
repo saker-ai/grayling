@@ -248,6 +248,10 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
 .banner.warn { border-color: var(--amber); background: var(--banner-warn); }
 .banner.ok { border-color: var(--green); background: var(--banner-ok); }
 .banner ul { margin: 6px 0 0; padding-left: 18px; }
+.bind-readiness .banner { margin: 0 0 12px; }
+.bind-readiness .banner p { margin: 6px 0; }
+.bind-check-list { display: grid; gap: 5px; }
+.bind-check-state { display: inline-block; min-width: 7em; font-weight: 600; }
 .report-summary { border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: 14px 16px; margin: 10px 0 18px; background: var(--card); }
 .report-summary-blocked { border-left-color: var(--red); background: var(--banner-error); }
 .report-summary-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px; }

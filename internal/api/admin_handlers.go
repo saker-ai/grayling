@@ -694,6 +694,16 @@ func (s *Server) handleBindExperiment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, draft)
 }
 
+func (s *Server) handleExperimentBindCheck(w http.ResponseWriter, r *http.Request) {
+	readiness, err := s.Admin.CheckExperimentBinding(actorFrom(r), r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, readiness)
+}
+
 func (s *Server) handleTransitionExperiment(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		To     model.ExperimentState `json:"to"`

@@ -247,9 +247,9 @@ function updateCapabilities() {
 // Hide controls after each render. The server still checks every request.
 function gateActions(root) {
   const groups = {
-    'flag.write': ['#flag-new', '#flag-save', '#flag-submit', '#flag-delete', '#gff-run', '#seg-new', '#seg-save', '#seg-submit'],
+    'flag.write': ['#flag-new', '#flag-save', '#flag-submit', '#flag-delete', '#gff-run', '#seg-new', '#seg-save', '#seg-submit', '#exp-bind'],
     'flag.approve': ['#flag-approve', '#flag-reject', '#seg-approve', '[data-appr]'],
-    'flag.publish': ['#flag-publish', '#flag-emergency-disable', '[data-rb]', '[data-er]', '#seg-publish', '#exp-bind', '#exp-transition', '#ro-create', '#ro-pause', '#ro-resume', '#ro-advance', '#ro-takeover-on', '#ro-takeover-off', '[data-pin]', '[data-exec]', '#metric-publish', '#metric-deprecate'],
+    'flag.publish': ['#flag-publish', '#flag-emergency-disable', '[data-rb]', '[data-er]', '#seg-publish', '#exp-transition', '#ro-create', '#ro-pause', '#ro-resume', '#ro-advance', '#ro-takeover-on', '#ro-takeover-off', '[data-pin]', '[data-exec]', '#metric-publish', '#metric-deprecate'],
     'experiment.write': ['#exp-new', '#x-create', '#exp-review', '#metric-new', '#metric-submit'],
     'ai.write': ['#ai-reg', '[data-revoke]', '[data-reinstate]'],
     'ai.content.read': ['#ai-resolve', '#ai-allow-add', '#ai-allow-save'],
@@ -1351,9 +1351,11 @@ async function viewExpDetail(m) {
         ' (' + esc(h.control) + ' → ' + esc(h.treatment) + ')</li>').join('') + '</ul>' : '') +
     '</section>' +
     '<section class="card"><h3>' + esc(t('exp.lifecycle')) + '</h3>' +
+      '<div class="bind-readiness" id="exp-bind-check" role="status">' + esc(t('exp.bindCheckLoading')) + '</div>' +
       '<div class="row actions" style="border:0;padding:0;margin:0">' +
       '<button class="btn" id="exp-review">' + esc(t('btn.review')) + '</button>' +
-      '<button class="btn" id="exp-bind">' + esc(t('btn.bind')) + '</button></div>' +
+      '<button class="btn" id="exp-recheck">' + esc(t('exp.bindRecheck')) + '</button>' +
+      '<button class="btn" id="exp-bind" disabled>' + esc(t('btn.bind')) + '</button></div>' +
       '<p class="muted">' + t('exp.bindHint') + '</p>' +
       '<div class="row"><select id="exp-to">' +
       '<option value="running">running</option><option value="paused">paused</option>' +
@@ -1377,7 +1379,44 @@ async function viewExpDetail(m) {
     const note = prompt(t('prompt.reviewNote'), '') || '';
     act('/review', { note }, t('toast.reviewRecorded'));
   };
-  $('#exp-bind', m).onclick = () => act('/bind', {}, t('toast.expBound'));
+  let bindReadiness = null;
+  const loadBindCheck = async () => {
+    const box = $('#exp-bind-check', m);
+    $('#exp-bind', m).disabled = true;
+    box.textContent = t('exp.bindCheckLoading');
+    try {
+      const readiness = await api(p + '/bind-check');
+      if (S.expId !== id || S.view !== 'experiments') return false;
+      bindReadiness = readiness;
+      box.innerHTML = renderBindReadiness(readiness);
+      $('#exp-bind', m).disabled = !readiness.ready;
+      return readiness.ready;
+    } catch (err) {
+      bindReadiness = null;
+      box.innerHTML = errBanner(err);
+      return false;
+    }
+  };
+  $('#exp-recheck', m).onclick = loadBindCheck;
+  $('#exp-bind', m).onclick = async () => {
+    if (!await loadBindCheck() || !bindReadiness?.ready) {
+      toast(t('exp.bindNotReady'), false);
+      return;
+    }
+    try {
+      await api(p + '/bind', { method: 'POST', body: {} });
+      toast(t('toast.expBound'));
+      route();
+    } catch (err) {
+      reportError(err);
+      await loadBindCheck();
+    }
+  };
+  if (can('flag.read')) loadBindCheck();
+  else {
+    $('#exp-bind-check', m).textContent = t('exp.bindCheckPermission');
+    $('#exp-recheck', m).disabled = true;
+  }
   $('#exp-transition', m).onclick = () => {
     const to = $('#exp-to', m).value;
     const reason = $('#exp-reason', m).value.trim();
@@ -1530,6 +1569,30 @@ function renderDiagnostics(d) {
       esc(count) + '</li>').join('') + '</ul>' :
       '<p class="muted">' + esc(t('report.noRejectedEvents')) + '</p>') +
     '</section>';
+}
+
+function renderBindReadiness(readiness) {
+  const names = {
+    state: t('exp.bindCheckState'),
+    published_flag: t('exp.bindCheckPublished'),
+    draft_clear: t('exp.bindCheckDraft'),
+    registered_revision: t('exp.bindCheckRevision'),
+    fallback: t('exp.bindCheckFallback'),
+    unit: t('exp.bindCheckUnit'),
+    split: t('exp.bindCheckSplit'),
+    bandit_rule: t('exp.bindCheckBandit'),
+    existing_binding: t('exp.bindCheckExisting'),
+  };
+  const checks = Array.isArray(readiness.checks) ? readiness.checks : [];
+  return '<div class="banner ' + (readiness.ready ? 'ok' : 'warn') + '">' +
+    '<strong>' + esc(t(readiness.ready ? 'exp.bindReady' : 'exp.bindNotReady')) + '</strong>' +
+    '<p class="muted">' + esc(t('exp.bindRevisionCompare', {
+      registered: readiness.registeredRevision ?? '—', current: readiness.currentRevision || '—',
+    })) + '</p>' +
+    '<ul class="bind-check-list">' + checks.map(check =>
+      '<li><span class="bind-check-state">' + esc(t(check.ready ? 'exp.bindCheckPass' : 'exp.bindCheckFail')) +
+      '</span> ' + esc(names[check.code] || check.code) + '</li>').join('') + '</ul>' +
+    '</div>';
 }
 
 function renderReport(box, r) {

@@ -48,8 +48,10 @@
 | `GET` | `/api/v1/admin/experiments/{id}` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/experiments/{id}/review` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/experiments/{id}/bind` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
+| `GET` | `/api/v1/admin/experiments/{id}/bind-check` | 已覆盖 | 实验详情：绑定前逐项准备检查与重新检查 | i18n DOM；绑定准备检查 DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/experiments/{id}/transition` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/experiments/{id}/report` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
+| `GET` | `/api/v1/admin/experiments/{id}/report/export` | 已覆盖 | 实验详情：只读 JSON/CSV 报告导出 | 报告 DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/experiments/{id}/diagnostics` | 已覆盖 | 实验详情独立诊断页：水位、分配/曝光、SRM、污染与阻断项 | i18n DOM；API 路由契约；待真实浏览器验收 |
 | `POST` | `/api/v1/admin/experiments/{id}/release-plan` | 已覆盖 | 实验详情：放量计划、暂停/恢复/推进/接管 | rollout DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/experiments/{id}/release-plan` | 仅 API | 实验详情已从实验读模型展示计划；独立读取供自动化客户端 | OpenAPI ↔ 路由契约；rollout DOM |

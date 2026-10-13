@@ -63,6 +63,7 @@
 | `POST {env前缀}/experiments` | 预注册（flagKey/unit/variants/proportions/primaryMetric/guardrails/alpha/power/mde/minSamplePerArm/minRuntime(ns)/analysisWindow(ns)/hypothesis/layer?/eligibility?/holmFamily?）；epoch 自动分配、永不复用；layer 槽位注册即分配。`primaryMetric.type ∈ proportion\|mean\|ratio\|quantile\|funnel\|retention`；ratio 需 `denominatorKey`（`numeratorKey` 缺省用 `key`），quantile 需 `quantileLevel ∈(0,1)`，mean 可带 `covariateKey` 启用 CUPED；funnel/retention 的预注册结构见 `docs/漏斗与留存.md`（见下"高级统计"） |
 | `GET {env前缀}/experiments`、`GET /api/v1/admin/experiments/{id}` | 列表/详情 |
 | `POST /experiments/{id}/review` | Draft→Reviewed |
+| `GET /experiments/{id}/bind-check` | 只读绑定准备检查（`flag.read`）；返回逐项通过状态、注册时与当前 Flag revision。结果是快照，绑定时重新检查 |
 | `POST /experiments/{id}/bind` | 校验 flag 结构与比例一致后注入绑定，生成高风险草稿并转 Scheduled（需二人审批后发布） |
 | `POST /experiments/{id}/transition` | `{to, reason}`；状态变更自动重发布绑定 flag（重试收敛） |
 | `GET /experiments/{id}/report` | 分析报告：健康位/SRM/per-variant/主指标（welch\|two-proportion-z\|ratio-delta\|quantile\|cuped）/护栏/决策门（ship/rollback/continue/hold）；显式注册多重比较时另有 `holm`，并保留分离呈现的序贯（`sequential`）与贝叶斯（`bayesian`）视图 |

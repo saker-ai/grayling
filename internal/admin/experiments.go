@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -136,13 +137,28 @@ func (s *Service) BindExperimentFlag(actor Actor, experimentID string) (*platfor
 	if err := Authorize(actor, exp.WorkspaceID, PermFlagWrite); err != nil {
 		return nil, err
 	}
-	if exp.State != model.ExperimentReviewed && exp.State != model.ExperimentScheduled {
-		return nil, fmt.Errorf("%w: experiment %s is %s, want reviewed/scheduled",
-			platform.ErrInvalidState, experimentID, exp.State)
-	}
 	current := s.Store.CurrentFlagContents(exp.WorkspaceID, exp.EnvironmentID)[exp.FlagKey]
-	if current == nil {
-		return nil, fmt.Errorf("%w: flag %q not published", platform.ErrNotFound, exp.FlagKey)
+	draft, err := s.Store.GetFlagDraft(exp.WorkspaceID, exp.EnvironmentID, exp.FlagKey)
+	if err != nil && !errors.Is(err, platform.ErrNotFound) {
+		return nil, err
+	}
+	readiness := bindingReadiness(exp, current, draft)
+	if !readiness.Ready {
+		for _, check := range readiness.Checks {
+			if check.Ready {
+				continue
+			}
+			kind := platform.ErrValidation
+			switch check.Code {
+			case "state":
+				kind = platform.ErrInvalidState
+			case "published_flag":
+				kind = platform.ErrNotFound
+			case "registered_revision", "draft_clear", "existing_binding":
+				kind = platform.ErrConflict
+			}
+			return nil, fmt.Errorf("%w: binding precheck %s: %s", kind, check.Code, check.Detail)
+		}
 	}
 
 	content := *current.Content
@@ -152,34 +168,6 @@ func (s *Service) BindExperimentFlag(actor Actor, experimentID string) (*platfor
 	}
 
 	// Structural validation against the registered contract.
-	if content.DefaultRule == nil || content.DefaultRule.Variation == "" {
-		return nil, fmt.Errorf("%w: flag needs deterministic defaultRule.variation for experiment binding",
-			platform.ErrValidation)
-	}
-	if content.Bucketing == nil || content.Bucketing.Unit != exp.Unit {
-		return nil, fmt.Errorf("%w: flag bucketing unit %q != experiment unit %q",
-			platform.ErrValidation, unitOf(content.Bucketing), exp.Unit)
-	}
-	if !hasMatchingSplit(&content, exp.Proportions) {
-		return nil, fmt.Errorf("%w: flag has no percentage rule matching registered proportions %v",
-			platform.ErrValidation, exp.Proportions)
-	}
-	if exp.AllocationMode == "bandit" {
-		count := 0
-		for _, rule := range content.Targeting {
-			if len(rule.Percentage) == 0 {
-				continue
-			}
-			count++
-			if !matchingProportions(rule.Percentage, exp.Proportions) {
-				return nil, fmt.Errorf("%w: every bandit percentage rule must match the registered fallback", platform.ErrValidation)
-			}
-		}
-		if count != 1 {
-			return nil, fmt.Errorf("%w: bandit requires exactly one registered percentage rule", platform.ErrValidation)
-		}
-	}
-
 	binding := exp.ExperimentBinding()
 	if exp.Layer != "" && exp.LayerSlot != nil {
 		// Inside a layer the slot is the eligibility mechanism.
@@ -194,7 +182,7 @@ func (s *Service) BindExperimentFlag(actor Actor, experimentID string) (*platfor
 	content.Experiment = binding
 	content.Version = "" // set at publish time
 
-	draft, err := s.Store.SaveFlagDraft(exp.WorkspaceID, exp.EnvironmentID, &content,
+	draft, err = s.Store.SaveFlagDraft(exp.WorkspaceID, exp.EnvironmentID, &content,
 		platform.RiskHigh, actor.Name, current.Revision)
 	if err != nil {
 		return nil, err
@@ -207,11 +195,94 @@ func (s *Service) BindExperimentFlag(actor Actor, experimentID string) (*platfor
 	return draft, nil
 }
 
-func unitOf(b *model.Bucketing) string {
-	if b == nil {
-		return ""
+// BindingCheck reports one stable, read-only binding prerequisite.
+type BindingCheck struct {
+	Code   string `json:"code"`
+	Ready  bool   `json:"ready"`
+	Detail string `json:"detail"`
+}
+
+// BindingReadiness is a snapshot; BindExperimentFlag rechecks every item.
+type BindingReadiness struct {
+	ExperimentID       string         `json:"experimentId"`
+	RegisteredRevision int64          `json:"registeredRevision"`
+	CurrentRevision    int64          `json:"currentRevision"`
+	Ready              bool           `json:"ready"`
+	Checks             []BindingCheck `json:"checks"`
+}
+
+func (s *Service) CheckExperimentBinding(actor Actor, experimentID string) (BindingReadiness, error) {
+	exp, err := s.Store.GetExperiment(experimentID)
+	if err != nil {
+		return BindingReadiness{}, err
 	}
-	return b.Unit
+	if err := Authorize(actor, exp.WorkspaceID, PermFlagRead); err != nil {
+		return BindingReadiness{}, err
+	}
+	current := s.Store.CurrentFlagContents(exp.WorkspaceID, exp.EnvironmentID)[exp.FlagKey]
+	draft, err := s.Store.GetFlagDraft(exp.WorkspaceID, exp.EnvironmentID, exp.FlagKey)
+	if err != nil && !errors.Is(err, platform.ErrNotFound) {
+		return BindingReadiness{}, err
+	}
+	return bindingReadiness(exp, current, draft), nil
+}
+
+func bindingReadiness(exp *platform.Experiment, current *platform.FlagRevision,
+	draft *platform.FlagDraft) BindingReadiness {
+	result := BindingReadiness{ExperimentID: exp.ID, RegisteredRevision: exp.FlagRevision, Ready: true}
+	add := func(code string, ready bool, detail string) {
+		result.Checks = append(result.Checks, BindingCheck{Code: code, Ready: ready, Detail: detail})
+		result.Ready = result.Ready && ready
+	}
+	add("state", exp.State == model.ExperimentReviewed || exp.State == model.ExperimentScheduled,
+		"experiment must be reviewed or scheduled")
+	add("published_flag", current != nil, "flag must have a published revision")
+	add("draft_clear", bindingDraftClear(draft, current),
+		"finish or discard the changed flag draft before binding")
+	if current == nil || current.Content == nil {
+		for _, code := range []string{"registered_revision", "fallback", "unit", "split", "bandit_rule", "existing_binding"} {
+			add(code, false, "published flag is unavailable")
+		}
+		return result
+	}
+	result.CurrentRevision = current.Revision
+	content := current.Content
+	add("registered_revision", current.Revision == exp.FlagRevision,
+		"published flag revision changed since experiment registration")
+	add("fallback", content.DefaultRule != nil && content.DefaultRule.Variation != "",
+		"flag needs a deterministic default variation")
+	add("unit", content.Bucketing != nil && content.Bucketing.Unit == exp.Unit,
+		"flag bucketing unit must match experiment randomization unit")
+	add("split", content.DefaultRule != nil && hasMatchingSplit(content, exp.Proportions),
+		"flag needs a percentage rule matching registered proportions")
+	banditReady := true
+	if exp.AllocationMode == "bandit" {
+		count := 0
+		for _, rule := range content.Targeting {
+			if len(rule.Percentage) == 0 {
+				continue
+			}
+			count++
+			banditReady = banditReady && matchingProportions(rule.Percentage, exp.Proportions)
+		}
+		banditReady = banditReady && count == 1
+	}
+	add("bandit_rule", banditReady, "bandit needs one percentage rule matching its fallback")
+	add("existing_binding", content.Experiment == nil, "published flag already has an experiment binding")
+	return result
+}
+
+func bindingDraftClear(draft *platform.FlagDraft, current *platform.FlagRevision) bool {
+	if draft == nil {
+		return true
+	}
+	if current == nil || current.Content == nil || draft.Content == nil || draft.Deleted ||
+		draft.State != platform.DraftEditing || draft.BaseRevision != current.Revision {
+		return false
+	}
+	content := *draft.Content
+	content.Version = current.Content.Version
+	return reflect.DeepEqual(&content, current.Content)
 }
 
 // copyFlagRules deep-copies the mutable parts of a flag via JSON round-trip

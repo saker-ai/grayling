@@ -1353,6 +1353,33 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/Internal"
+  "/api/v1/admin/experiments/{id}/bind-check":
+    get:
+      tags: [experiments]
+      summary: 只读实验绑定准备检查
+      description: >-
+        使用 flag.read 权限。检查状态、已发布版本、注册时 revision、默认变体、随机化单元、比例规则、
+        bandit 规则、已有绑定和未完成草稿。结果是当前快照；POST bind 会重新检查。
+      operationId: checkExperimentBinding
+      parameters:
+        - $ref: "#/components/parameters/ExperimentIdPath"
+      responses:
+        "200":
+          description: 绑定准备状态，不修改实验或 Flag。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BindingReadiness"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
   "/api/v1/admin/experiments/{id}/transition":
     post:
       tags: [experiments]
@@ -3724,6 +3751,25 @@ components:
           type: integer
           format: int64
           description: 纳秒；至少 analysisWindow + 72h。
+    BindingReadiness:
+      type: object
+      required: [experimentId, registeredRevision, currentRevision, ready, checks]
+      properties:
+        experimentId: {type: string}
+        registeredRevision: {type: integer, format: int64}
+        currentRevision: {type: integer, format: int64}
+        ready: {type: boolean}
+        checks:
+          type: array
+          items:
+            type: object
+            required: [code, ready, detail]
+            properties:
+              code:
+                type: string
+                enum: [state, published_flag, draft_clear, registered_revision, fallback, unit, split, bandit_rule, existing_binding]
+              ready: {type: boolean}
+              detail: {type: string}
     Experiment:
       type: object
       additionalProperties: false

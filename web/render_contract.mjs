@@ -35,8 +35,20 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
+
+const blockedBind = sandbox.__renderBindReadiness({ ready: false, registeredRevision: 2, currentRevision: 3,
+  checks: [{ code: 'registered_revision', ready: false }, { code: 'draft_clear', ready: false }] });
+assert(blockedBind.includes('Binding blocked') && blockedBind.includes('Current: 3') &&
+  blockedBind.includes('Flag revision matches registration') && blockedBind.includes('Flag draft has no pending changes'),
+  'binding precheck must explain blocked revision and draft');
+const readyBind = sandbox.__renderBindReadiness({ ready: true, registeredRevision: 2, currentRevision: 2,
+  checks: [{ code: 'state', ready: true }] });
+assert(readyBind.includes('Ready to bind') && readyBind.includes('Pass'), 'ready binding state missing');
+const escapedBind = sandbox.__renderBindReadiness({ ready: false, registeredRevision: 2, currentRevision: 0,
+  checks: [{ code: '<script>alert(1)</script>', ready: false }] });
+assert(!escapedBind.includes('<script>') && escapedBind.includes('&lt;script&gt;'), 'binding check code was not escaped');
 
 function render(report) {
   const box = {};

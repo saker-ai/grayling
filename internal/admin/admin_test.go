@@ -4,11 +4,11 @@ import (
 	"errors"
 	"testing"
 
+	gconfig "github.com/godeps/gonacos/pkg/config"
 	"github.com/saker-ai/grayling/internal/configstore"
 	"github.com/saker-ai/grayling/internal/platform"
 	"github.com/saker-ai/grayling/pkg/bucketing"
 	"github.com/saker-ai/grayling/pkg/model"
-	gconfig "github.com/godeps/gonacos/pkg/config"
 )
 
 type fixture struct {
@@ -445,8 +445,45 @@ func TestExperimentLifecycleRepublishesFlag(t *testing.T) {
 	if _, err := f.svc.ReviewExperiment(f.analyst, created.ID, "pre-registration complete"); err != nil {
 		t.Fatalf("ReviewExperiment: %v", err)
 	}
+	readiness, err := f.svc.CheckExperimentBinding(f.viewer, created.ID)
+	if err != nil || !readiness.Ready || readiness.CurrentRevision != created.FlagRevision {
+		t.Fatalf("binding precheck: %+v, %v", readiness, err)
+	}
+	current := f.store.CurrentFlagContents(f.ws.ID, f.env.ID)[created.FlagKey]
+	var changed model.Flag
+	if err := copyFlagRules(&changed, current.Content); err != nil {
+		t.Fatal(err)
+	}
+	if changed.DefaultRule.Variation == "on" {
+		changed.DefaultRule.Variation = "off"
+	} else {
+		changed.DefaultRule.Variation = "on"
+	}
+	if _, err := f.store.SaveFlagDraft(f.ws.ID, f.env.ID, &changed, platform.RiskNormal,
+		"editor", current.Revision); err != nil {
+		t.Fatal(err)
+	}
+	readiness, err = f.svc.CheckExperimentBinding(f.viewer, created.ID)
+	if err != nil || readiness.Ready {
+		t.Fatalf("changed draft must block binding: %+v, %v", readiness, err)
+	}
+	if _, err := f.svc.BindExperimentFlag(f.publisher, created.ID); !errors.Is(err, platform.ErrConflict) {
+		t.Fatalf("binding overwrote changed draft: %v", err)
+	}
+	if after, err := f.store.GetExperiment(created.ID); err != nil || after.State != model.ExperimentReviewed {
+		t.Fatalf("failed bind changed experiment state: %+v, %v", after, err)
+	}
+	clean := *current.Content
+	if _, err := f.store.SaveFlagDraft(f.ws.ID, f.env.ID, &clean, platform.RiskNormal,
+		"editor", current.Revision); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := f.svc.BindExperimentFlag(f.publisher, created.ID); err != nil {
 		t.Fatalf("BindExperimentFlag: %v", err)
+	}
+	readiness, err = f.svc.CheckExperimentBinding(f.viewer, created.ID)
+	if err != nil || readiness.Ready {
+		t.Fatalf("binding should not be repeated over a submitted draft: %+v, %v", readiness, err)
 	}
 	// Binding created a HIGH-risk draft in submitted state; a different
 	// actor must approve.
