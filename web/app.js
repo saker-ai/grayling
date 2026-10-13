@@ -162,6 +162,7 @@ const S = {
   aiAvailable: true,
   booted: false,
   timer: null,
+  pollCleanup: null,
   editorBaseline: null,
 };
 function editorValue() {
@@ -370,7 +371,8 @@ function syncConsoleHash() {
 async function route() {
   const epoch = ++routeEpoch;
   syncConsoleHash();
-  if (S.timer) { clearInterval(S.timer); S.timer = null; }
+  if (S.pollCleanup) { S.pollCleanup(); S.pollCleanup = null; }
+  if (S.timer) { clearTimeout(S.timer); S.timer = null; }
   $$('#nav button').forEach(b => {
     const active = b.dataset.view === S.view;
     b.classList.toggle('active', active);
@@ -1199,16 +1201,50 @@ async function viewExpDetail(m) {
     if (!confirm(t('confirm.transition', { to }))) return;
     act('/transition', { to, reason }, t('toast.transitioned', { to }));
   };
+  let lastReport = null;
   const loadReport = async () => {
     const box = $('#report-box', m);
-    if (!box) { if (S.timer) { clearInterval(S.timer); S.timer = null; } return; }
-    try { renderReport(box, await api(p + '/report')); }
-    catch (err) { box.innerHTML = errBanner(err); }
+    if (!box) return false;
+    try {
+      const report = await api(p + '/report');
+      if (S.expId !== id || S.view !== 'experiments') return false;
+      lastReport = report;
+      renderReport(box, report);
+      return true;
+    } catch (err) {
+      if (lastReport) {
+        renderReport(box, lastReport);
+        box.innerHTML = '<div class="banner warn" role="status">' + esc(t('report.stale')) + '</div>' + errBanner(err) + box.innerHTML;
+      } else box.innerHTML = errBanner(err);
+      return false;
+    }
   };
   $('#exp-report', m).onclick = loadReport;
+  let autoRefresh = false;
+  let failures = 0;
+  let polling = false;
+  const stopTimer = () => { if (S.timer) { clearTimeout(S.timer); S.timer = null; } };
+  const poll = async () => {
+    if (!autoRefresh || polling || document.visibilityState === 'hidden') return;
+    polling = true;
+    const ok = await loadReport();
+    polling = false;
+    failures = ok ? 0 : Math.min(failures + 1, 3);
+    if (autoRefresh && document.visibilityState !== 'hidden' && S.expId === id && S.view === 'experiments') {
+      S.timer = setTimeout(poll, Math.min(60000, 10000 * 2 ** failures));
+    }
+  };
+  const onVisibility = () => {
+    stopTimer();
+    if (autoRefresh && document.visibilityState !== 'hidden') poll();
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+  S.pollCleanup = () => { autoRefresh = false; stopTimer(); document.removeEventListener?.('visibilitychange', onVisibility); };
   $('#exp-auto', m).onchange = ev => {
-    if (S.timer) { clearInterval(S.timer); S.timer = null; }
-    if (ev.target.checked) { loadReport(); S.timer = setInterval(loadReport, 10000); }
+    autoRefresh = ev.target.checked;
+    stopTimer();
+    failures = 0;
+    if (autoRefresh) poll();
   };
   bindRollout(m, id);
 }
