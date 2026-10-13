@@ -122,9 +122,9 @@
 | `POST /api/v1/admin/experiments/{id}/release-plan` | 预注册计划 `{steps:[{name, ratio, minRuntime(ns), observationWindow(ns), autoAdvance}], approvalId}`；ratio 必须严格递增 ∈(0,100]，minRuntime>0；实验须处于 reviewed/scheduled/running；计划唯一（重复创建 409） |
 | `GET /api/v1/admin/experiments/{id}/release-plan` | 计划详情 + 动作历史（每个自动/手动动作都记录 actor 与原因） |
 | `POST .../release-plan/pause` | `{reason}` 必填；armed/running → paused，引擎停手 |
-| `POST .../release-plan/resume` | paused → running（**步骤时钟重置**：干预后须重新服满观察窗）；从未起跑的计划回到 armed |
-| `POST .../release-plan/advance` | `{reason}` 人工推进下一步（最后一步则完成计划）；不被决策门拦截（人工发布决策），但当前 verdict 记入历史 |
-| `POST .../release-plan/takeover` | `{enabled, reason}` 人工接管开关：开启后引擎对该计划不做任何自动动作 |
+| `POST .../release-plan/resume` | paused → running（**步骤时钟重置**：干预后须重新服满观察窗）；已起跑的运行中实验要求当前报告可构建，否则 409；从未起跑的计划回到 armed |
+| `POST .../release-plan/advance` | `{reason}` 人工推进下一步（最后一步则完成计划）；要求当前报告可构建，否则 409；不被报告 verdict 拦截（人工发布决策），verdict 记入历史 |
+| `POST .../release-plan/takeover` | `{enabled, reason}` 人工接管开关：开启后引擎对该计划不做任何自动动作；运行中实验关闭人工接管前要求当前报告可构建，否则 409 |
 
 引擎语义（全部动作幂等，先记状态后发布、失败下一 tick 收敛修复）：
 

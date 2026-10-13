@@ -14,6 +14,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1201,6 +1203,102 @@ func TestRolloutManualTakeoverPauseAdvance(t *testing.T) {
 	h.tick()
 	if plan := h.getPlan(t, expID); plan.State != platform.ReleasePlanCompleted {
 		t.Fatalf("final ship verdict must complete the plan: %+v", plan)
+	}
+}
+
+func TestOperatorActionsRequireAvailableReport(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.json")
+	store, err := platform.NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newHarnessOnStore(t, store)
+	expID := h.runningExperiment(t, "report-gate", nil)
+	h.createPlan(t, expID,
+		step{Name: "canary", Ratio: 20, MinRuntime: int64(time.Hour)},
+		step{Name: "full", Ratio: 100, MinRuntime: int64(time.Hour)})
+	h.tick()
+	if plan := h.getPlan(t, expID); plan.State != platform.ReleasePlanRunning {
+		t.Fatalf("plan did not start: %+v", plan)
+	}
+
+	// Corrupt the frozen metric reference in the persisted fixture so report
+	// construction fails while ordinary experiment and plan reads still work.
+	setMissingMetric := func(missing bool) {
+		t.Helper()
+		dataBytes, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var data platform.Data
+		if err := json.Unmarshal(dataBytes, &data); err != nil {
+			t.Fatal(err)
+		}
+		if missing {
+			data.Experiments[expID].PrimaryMetricRef = &platform.MetricRef{
+				Key: "missing", Version: 1, DefinitionHash: "missing",
+			}
+		} else {
+			data.Experiments[expID].PrimaryMetricRef = nil
+		}
+		dataBytes, err = json.Marshal(&data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, dataBytes, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.ReloadFromBackend(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := "/api/v1/admin/experiments/" + expID + "/release-plan"
+	setMissingMetric(true)
+	if code := h.do("POST", base+"/advance", h.owner, map[string]any{"reason": "override"}, nil); code != http.StatusConflict {
+		t.Fatalf("manual advance with unavailable report: %d", code)
+	}
+	if plan := h.getPlan(t, expID); plan.CurrentStep != 0 {
+		t.Fatalf("failed advance changed step: %+v", plan)
+	}
+	if code := h.do("POST", base+"/pause", h.owner, map[string]any{"reason": "investigate"}, nil); code != http.StatusOK {
+		t.Fatalf("pause should remain available: %d", code)
+	}
+	if code := h.do("POST", base+"/resume", h.owner, nil, nil); code != http.StatusConflict {
+		t.Fatalf("resume with unavailable report: %d", code)
+	}
+	if code := h.do("POST", base+"/takeover", h.owner, map[string]any{"enabled": true, "reason": "freeze"}, nil); code != http.StatusOK {
+		t.Fatalf("manual takeover should remain available: %d", code)
+	}
+	if code := h.do("POST", base+"/takeover", h.owner, map[string]any{"enabled": false}, nil); code != http.StatusConflict {
+		t.Fatalf("return to automatic control with unavailable report: %d", code)
+	}
+	if plan := h.getPlan(t, expID); plan.State != platform.ReleasePlanPaused || !plan.ManualOverride {
+		t.Fatalf("failed actions changed pause or takeover state: %+v", plan)
+	}
+
+	setMissingMetric(false)
+	if code := h.do("POST", base+"/resume", h.owner, nil, nil); code != http.StatusOK {
+		t.Fatalf("resume after report recovery: %d", code)
+	}
+	if code := h.do("POST", base+"/takeover", h.owner, map[string]any{"enabled": false}, nil); code != http.StatusOK {
+		t.Fatalf("return to automatic control after recovery: %d", code)
+	}
+	if code := h.do("POST", base+"/advance", h.owner, map[string]any{"reason": "operator decision"}, nil); code != http.StatusOK {
+		t.Fatalf("manual advance after report recovery: %d", code)
+	}
+	plan := h.getPlan(t, expID)
+	if plan.CurrentStep != 1 || plan.ManualOverride {
+		t.Fatalf("operator actions did not recover: %+v", plan)
+	}
+	if last := plan.History[len(plan.History)-1]; last.Action != "manual.advance" || last.Actor == "" {
+		t.Fatalf("manual advance lacks actor-attributed history: %+v", last)
+	}
+	foundAudit := false
+	for _, entry := range store.AuditList(h.ws.ID, 50) {
+		foundAudit = foundAudit || entry.Action == "release_plan.manual_advance" && entry.Object == expID
+	}
+	if !foundAudit {
+		t.Fatal("manual advance lacks audit record")
 	}
 }
 

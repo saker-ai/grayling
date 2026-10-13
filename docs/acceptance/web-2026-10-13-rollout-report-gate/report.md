@@ -10,6 +10,8 @@
 
 本地服务中 `exp-8` 没有真实放量计划。浏览器打开真实实验详情后，向放量卡注入**仅用于界面验收的合成运行计划**，调用页面实际渲染、绑定和报告状态函数。报告状态设为 `unavailable` 后得到：`advanceDisabled=true`、`pauseDisabled=false`、`takeoverDisabled=false`，页面显示重试当前报告的提示。该检查不证明服务端存在这个计划，也不作为真实放量操作的证据。
 
-## 尚未完成的端到端约束
+## 服务端真实计划验证
 
-服务端 `AdvanceNow` 允许具备发布权限的操作者在报告构建失败时人工推进；Web 门禁不能约束直接调用 API 的客户端。后续必须统一服务端人工操作的“报告不可用”门禁，并用真实运行计划验证报告失败及恢复后的行为。健康但结论为 HOLD 的报告仍允许操作者按既有人工接管规则作出有审计记录的决策。
+`TestOperatorActionsRequireAvailableReport` 在真实 HTTP 服务和文件存储中创建、启动放量计划，然后让持久化实验合同中的指标引用失效，使服务端报告无法构建。人工推进、恢复和交还自动控制均返回 409，计划阶段和暂停/接管状态未被这些失败动作改变；暂停及开启人工接管仍成功。恢复有效合同后，三种动作可以继续执行。该恢复场景没有曝光，报告结论仍为 HOLD，验证“报告可构建”与“健康且可自动推进”是不同门槛；人工推进仍由具备发布权限的操作者负责并记录审计。
+
+`GOLAB_TEST_PG_SKIP=1 GOWORK=off go test ./internal/rollout -run 'TestOperatorActionsRequireAvailableReport|TestRolloutManualTakeoverPauseAdvance' -count=1` 通过。尚需真实浏览器在服务端运行计划上验收完整交互；上节浏览器检查使用的是合成计划。

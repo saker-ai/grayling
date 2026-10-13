@@ -544,6 +544,15 @@ func (e *Engine) pause(exp *platform.Experiment, now time.Time, reason string, s
 // Manual operations (admin API surface; actor-attributed and audited)
 // ---------------------------------------------------------------------------
 
+func (e *Engine) reportForOperatorAction(experimentID string) (*experiment.Report, error) {
+	report, err := experiment.BuildReport(e.Store, experimentID, e.now())
+	if err != nil {
+		e.Logger.Printf("rollout: report unavailable for operator action on %s: %v", experimentID, err)
+		return nil, fmt.Errorf("%w: current experiment report unavailable", platform.ErrInvalidState)
+	}
+	return report, nil
+}
+
 // Pause holds the plan for an operator. Allowed from armed/running.
 func (e *Engine) Pause(actor admin.Actor, experimentID, reason string) (*platform.Experiment, error) {
 	release, err := e.lockPlan(experimentID)
@@ -596,6 +605,12 @@ func (e *Engine) Resume(actor admin.Actor, experimentID string) (*platform.Exper
 	if err := admin.Authorize(actor, exp.WorkspaceID, admin.PermFlagPublish); err != nil {
 		return nil, err
 	}
+	if exp.State == model.ExperimentRunning && exp.ReleasePlan != nil &&
+		exp.ReleasePlan.State == platform.ReleasePlanPaused && exp.ReleasePlan.StepStartedAt != nil {
+		if _, err := e.reportForOperatorAction(experimentID); err != nil {
+			return nil, err
+		}
+	}
 	now := e.now()
 	out, err := e.Store.UpdateReleasePlan(experimentID, func(p *platform.ReleasePlan) error {
 		if p.State != platform.ReleasePlanPaused {
@@ -636,6 +651,11 @@ func (e *Engine) SetManualOverride(actor admin.Actor, experimentID string, enabl
 	if err := admin.Authorize(actor, exp.WorkspaceID, admin.PermFlagPublish); err != nil {
 		return nil, err
 	}
+	if !enabled && exp.State == model.ExperimentRunning && exp.ReleasePlan != nil && exp.ReleasePlan.ManualOverride {
+		if _, err := e.reportForOperatorAction(experimentID); err != nil {
+			return nil, err
+		}
+	}
 	now := e.now()
 	out, err := e.Store.UpdateReleasePlan(experimentID, func(p *platform.ReleasePlan) error {
 		if p.ManualOverride == enabled {
@@ -659,9 +679,9 @@ func (e *Engine) SetManualOverride(actor admin.Actor, experimentID string, enabl
 
 // AdvanceNow moves to the next step (or completes the plan on the final
 // step) on an operator's explicit decision. Manual advance is a human
-// publish decision: it is NOT gated by the report verdict, but the current
-// verdict is recorded in the history entry for traceability (§9: 任何信号
-// 不得绕过发布权限 — the caller needs publish permission).
+// publish decision: it is not gated by the report verdict, but a report must
+// be available. Its verdict is recorded for traceability (§9: 任何信号不得绕过
+// 发布权限 — the caller needs publish permission).
 func (e *Engine) AdvanceNow(actor admin.Actor, experimentID, reason string) (*platform.Experiment, error) {
 	release, err := e.lockPlan(experimentID)
 	if err != nil {
@@ -682,10 +702,11 @@ func (e *Engine) AdvanceNow(actor admin.Actor, experimentID, reason string) (*pl
 	if plan == nil || plan.State != platform.ReleasePlanRunning {
 		return nil, fmt.Errorf("%w: plan must be running to advance", platform.ErrInvalidState)
 	}
-	verdictNote := ""
-	if report, rerr := experiment.BuildReport(e.Store, experimentID, e.now()); rerr == nil {
-		verdictNote = fmt.Sprintf("; gate verdict at advance: %s", report.Decision.Verdict)
+	report, err := e.reportForOperatorAction(experimentID)
+	if err != nil {
+		return nil, err
 	}
+	verdictNote := fmt.Sprintf("; gate verdict at advance: %s", report.Decision.Verdict)
 	now := e.now()
 	final := plan.CurrentStep == len(plan.Steps)-1
 	if final {

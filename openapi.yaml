@@ -1691,6 +1691,7 @@ paths:
     post:
       tags: [release-plans]
       summary: 恢复计划（paused→running）。无请求体。
+      description: 已起跑的运行中实验要求当前报告可构建；否则返回 409，计划保持暂停。未起跑的计划恢复到 armed。
       operationId: resumeReleasePlan
       parameters:
         - $ref: "#/components/parameters/ExperimentIdPath"
@@ -1717,6 +1718,7 @@ paths:
     post:
       tags: [release-plans]
       summary: 人工推进到下一步骤（body 可选）
+      description: 当前报告必须可构建；否则返回 409，不推进计划。报告 verdict 不限制具备发布权限的人工决策，当前 verdict 记入计划历史。
       operationId: advanceReleasePlan
       parameters:
         - $ref: "#/components/parameters/ExperimentIdPath"
@@ -1749,6 +1751,7 @@ paths:
     post:
       tags: [release-plans]
       summary: 人工接管开关（enabled=true 时引擎不做任何自动动作）
+      description: 运行中实验关闭人工接管前要求当前报告可构建；否则返回 409。开启人工接管不受报告可用性限制。
       operationId: takeoverReleasePlan
       parameters:
         - $ref: "#/components/parameters/ExperimentIdPath"
