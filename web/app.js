@@ -146,7 +146,7 @@ async function run(fn, okMsg, savedEditor = false) {
 // App state
 // ---------------------------------------------------------------------------
 const S = {
-  view: 'flags',
+  view: 'overview',
   ws: localStorage.getItem('golab_ws') || '',
   env: localStorage.getItem('golab_env') || '',
   workspaces: [], envs: [],
@@ -520,6 +520,61 @@ async function probeAI() {
     }
   }
   $('#nav-ai').classList.toggle('hidden', !S.aiAvailable);
+}
+
+// ---------------------------------------------------------------------------
+// View: Overview
+// ---------------------------------------------------------------------------
+async function viewOverview(m) {
+  if (!needScope(m)) return;
+  const [experimentsRead, approvalsRead, flagsRead] = await Promise.allSettled([
+    api(scopePath() + '/experiments'), api(wsPath() + '/approvals'), api(scopePath() + '/flags'),
+  ]);
+  const experiments = experimentsRead.status === 'fulfilled' && Array.isArray(experimentsRead.value) ? experimentsRead.value : null;
+  const approvals = approvalsRead.status === 'fulfilled' && Array.isArray(approvalsRead.value) ? approvalsRead.value : null;
+  const flags = flagsRead.status === 'fulfilled' && Array.isArray(flagsRead.value) ? flagsRead.value : null;
+  const relevant = experiments?.filter(e => e.state === 'running' || e.state === 'paused').slice(0, 3) || [];
+  const reports = await Promise.allSettled(relevant.map(e => api('/api/v1/admin/experiments/' + encodeURIComponent(e.id) + '/report')));
+  const issues = [];
+  for (const e of experiments || []) {
+    if (e.state === 'paused') issues.push({ kind: 'experiment', id: e.id, text: t('overview.paused') });
+  }
+  for (let i = 0; i < relevant.length; i++) {
+    const result = reports[i];
+    if (result.status === 'fulfilled' && result.value && !result.value.healthy) {
+      issues.push({ kind: 'experiment', id: relevant[i].id,
+        text: t('overview.reportIssue') + ': ' + (result.value.healthIssues || []).slice(0, 1).join('') });
+    }
+  }
+  for (const a of approvals || []) {
+    if (a.state === 'submitted') issues.push({ kind: 'approval', id: a.id, text: a.action + ' · ' + a.object });
+  }
+  const partial = experiments === null || approvals === null || flags === null || reports.some(r => r.status === 'rejected');
+  const count = (value, predicate) => value === null ? '—' : String(value.filter(predicate).length);
+  m.innerHTML = '<div class="view-head"><h2>' + esc(t('overview.title')) + '</h2>' +
+    '<span class="muted">' + esc(t('overview.scope')) + ': ' + esc(S.ws) + ' / ' + esc(S.env) + '</span>' +
+    '<button class="btn sm" id="overview-refresh">' + esc(t('overview.refresh')) + '</button></div>' +
+    (partial ? '<div class="banner warn" role="status">' + esc(t('overview.moduleUnavailable')) + '</div>' : '') +
+    '<div class="overview-grid">' +
+    [[t('overview.paused'), count(experiments, e => e.state === 'paused')],
+      [t('overview.running'), count(experiments, e => e.state === 'running')],
+      [t('overview.pending'), count(approvals, a => a.state === 'submitted')],
+      [t('overview.flags'), count(flags, f => !!f.current)]].map(([label, value]) =>
+      '<section class="card overview-stat"><span class="muted">' + esc(label) + '</span><strong>' + esc(value) + '</strong></section>').join('') +
+    '</div><section class="card"><h3>' + esc(t('overview.attention')) + '</h3>' +
+    (issues.length ? '<ul class="attention-list">' + issues.slice(0, 8).map(item =>
+      '<li><span>' + esc(item.text) + '</span><button class="btn sm" data-overview-kind="' + item.kind + '" data-overview-id="' + esc(item.id) + '">' +
+      esc(t(item.kind === 'experiment' ? 'overview.openExperiment' : 'overview.openApprovals')) + '</button></li>').join('') + '</ul>' :
+      '<p class="muted">' + esc(t('overview.noAttention')) + '</p>') + '</section>';
+  $('#overview-refresh', m).onclick = () => route();
+  $('.attention-list', m)?.addEventListener('click', ev => {
+    const button = ev.target.closest('[data-overview-kind]');
+    if (!button) return;
+    if (button.dataset.overviewKind === 'experiment') {
+      S.view = 'experiments'; S.expId = button.dataset.overviewId;
+    } else S.view = 'audit';
+    route();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -2086,6 +2141,7 @@ async function viewMetrics(m) {
 // Init
 // ---------------------------------------------------------------------------
 Object.assign(VIEWS, {
+  overview: viewOverview,
   flags: viewFlags,
   segments: viewSegments,
   experiments: viewExperiments,

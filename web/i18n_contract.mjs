@@ -190,6 +190,7 @@ function mockResponse(url) {
   if (url.includes('/model-allowlist')) return json(allowlist);
   if (url.endsWith('/quotas')) return json(quotas);
   if (url.endsWith('/tokens')) return json(tokens);
+  if (url.endsWith('/approvals')) return json([{ id: 'approval-1', state: 'submitted', action: 'flag.publish', object: 'my-flag' }]);
   if (url.includes('/metrics/activation.complete/versions/1')) return json(metric);
   if (url.includes('/metrics?')) return json({ items: [metric] });
   if (url.includes('/audit')) return json(audit);
@@ -233,6 +234,10 @@ assert(!themed.x.restoreConsoleHash('#/console/acme/prod/unknown'), 'unknown dee
 //    identical across languages.
 // ===========================================================================
 const SWEEPS = [
+  { name: 'overview', view: 'overview',
+    en: ['Workspace overview', 'Needs attention', 'Pending approvals', 'Refresh status'],
+    zh: ['工作空间总览', '需要处理', '待审批变更', '刷新状态'],
+    ids: ['overview-refresh'] },
   { name: 'metrics-list', view: 'metrics',
     setup: S => { S.metricRef = null; S.metricQuery = ''; S.metricStatus = ''; S.metricCursor = ''; },
     en: ['Metric catalog', 'New metric', 'All statuses'],
