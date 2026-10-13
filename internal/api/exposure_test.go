@@ -110,6 +110,14 @@ func TestRemoteOnRenderExposureRequiresRecordedAssignment(t *testing.T) {
 	if got, _ := store.EventMetricTotals(ws.ID, env.ID); got != 1 {
 		t.Fatalf("expected one exposure, got %d", got)
 	}
+	counts, err := store.CollectionCounts(exp.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts["missing_exposure"] != 1 || counts["assignment_mismatch"] != 1 ||
+		counts["duplicate_event"] != 1 {
+		t.Fatalf("collection diagnostics: %+v", counts)
+	}
 }
 
 type exposureConfigStub struct {

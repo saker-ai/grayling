@@ -1306,6 +1306,18 @@ async function viewExpDiagnostics(m, experiment, path) {
 
 function renderDiagnostics(d) {
   if (!d) return '';
+  const collectionLabels = {
+    invalid_event: t('collect.code.invalid_event'),
+    unknown_experiment: t('collect.code.unknown_experiment'),
+    stale_epoch: t('collect.code.stale_epoch'),
+    assignment_mismatch: t('collect.code.assignment_mismatch'),
+    missing_exposure: t('collect.code.missing_exposure'),
+    missing_unit: t('collect.code.missing_unit'),
+    invalid_exposure_token: t('collect.code.invalid_exposure_token'),
+    expired_exposure_token: t('collect.code.expired_exposure_token'),
+    late_event: t('collect.code.late_event'),
+    future_event: t('collect.code.future_event'),
+  };
   const srm = (label, value) => '<div>' + esc(label) + ': ' +
     (value ? 'p = ' + esc(value.pValue ?? '—') + ' ' +
       chip(value.healthy ? t('chip.noSrm') : t('chip.srmDetected'), value.healthy ? 'green' : 'red') :
@@ -1314,6 +1326,7 @@ function renderDiagnostics(d) {
     ? '<p class="muted">' + esc(t('report.banditSrmSeparate')) + '</p>'
     : '<div class="row">' + srm(t('report.assignmentSrm'), d.assignmentSrm) +
       srm(t('report.exposureSrm'), d.exposureSrm) + '</div>';
+  const rejected = Object.entries(d.rejectedByReason || {}).sort(([a], [b]) => a.localeCompare(b));
   return '<section aria-label="' + esc(t('report.deliveryDiagnostics')) + '">' +
     '<h4>' + esc(t('report.deliveryDiagnostics')) + '</h4>' +
     '<p class="muted">' + esc(t('report.deliveryExplanation')) + '</p>' +
@@ -1334,6 +1347,13 @@ function renderDiagnostics(d) {
       '<span>' + esc(t('th.converted')) + '</span><strong>' + esc(v.conversions) + '</strong></dd></dl>').join('') + '</div>' +
     '<div>' + esc(t('report.crossVariantUnits')) + ': ' + esc(d.crossVariantUnits) +
       ' · ' + esc(t('report.assignmentMismatch')) + ': ' + esc(d.assignmentMismatch) + '</div>' +
+    '<h5>' + esc(t('report.collectionAttempts')) + '</h5>' +
+    '<p class="muted">' + esc(t('report.collectionAttemptsNote')) + '</p>' +
+    '<div>' + esc(t('report.duplicateEvents')) + ': ' + esc(d.duplicateEvents || 0) + '</div>' +
+    (rejected.length ? '<ul>' + rejected.map(([code, count]) => '<li>' +
+      esc(collectionLabels[code] || code) + ' <span class="mono">(' + esc(code) + ')</span>: ' +
+      esc(count) + '</li>').join('') + '</ul>' :
+      '<p class="muted">' + esc(t('report.noRejectedEvents')) + '</p>') +
     '</section>';
 }
 

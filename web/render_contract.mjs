@@ -78,12 +78,14 @@ assert(incomplete.includes('Incomplete') && incomplete.includes('watermark pendi
 const delivery = render({ ...base, healthy: false, healthIssues: ['delivery skew'],
   diagnostics: { assignmentSrm: { healthy: true, pValue: 0.8 },
     exposureSrm: { healthy: false, pValue: 0.00001 }, crossVariantUnits: 2,
-    assignmentMismatch: 1, perVariant: [
+    assignmentMismatch: 1, duplicateEvents: 3, rejectedByReason: { stale_epoch: 4 }, perVariant: [
       { variant: 'control', assignments: 100, exposures: 100, unexposed: 0, conversions: 12 },
       { variant: 'treatment', assignments: 100, exposures: 20, unexposed: 80, conversions: 3 },
     ] } });
 assert(delivery.includes('Assignment SRM') && delivery.includes('Exposure SRM') &&
-  delivery.includes('Not exposed') && delivery.includes('delivery skew') && delivery.includes('80'),
+  delivery.includes('Not exposed') && delivery.includes('delivery skew') && delivery.includes('80') &&
+  delivery.includes('Wrong experiment epoch') && delivery.includes('stale_epoch') &&
+  delivery.includes('Duplicate events'),
   'delivery diagnostics or distinct SRM checks missing');
 
 const journey = render({ ...base, healthy: false, healthIssues: ['immature cohorts'],

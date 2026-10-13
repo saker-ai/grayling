@@ -195,6 +195,9 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	if exp.ExposureMode == "onRender" {
 		rep.Diagnostics = buildDiagnostics(exp, analysis.EventsForExperiment(exp.WorkspaceID,
 			exp.EnvironmentID, exp.ID, exp.Epoch, ""), window, now)
+		if err := attachCollectionCounts(store, exp, rep.Diagnostics); err != nil {
+			return nil, err
+		}
 		rep.HealthIssues = append(rep.HealthIssues, rep.Diagnostics.Issues...)
 	}
 	for _, guard := range exp.Guardrails {

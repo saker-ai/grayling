@@ -48,7 +48,13 @@ func BuildBanditReport(store *platform.Store, exp *platform.Experiment, now time
 	if err != nil {
 		return nil, err
 	}
-	return replayBanditReport(exp, events, now), nil
+	report := replayBanditReport(exp, events, now)
+	if report.Diagnostics != nil {
+		if err := attachCollectionCounts(store, exp, report.Diagnostics); err != nil {
+			return nil, err
+		}
+	}
+	return report, nil
 }
 
 func replayBanditReport(exp *platform.Experiment, events []*platform.Event, now time.Time) *Report {

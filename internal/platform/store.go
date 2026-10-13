@@ -68,7 +68,8 @@ type Data struct {
 	// proportions, so SRM must be computed on this set alone; targeting /
 	// default arms are deterministic and would bias the test (§10.1).
 	SplitExposedUnits map[string]map[string]bool `json:"splitExposedUnits"`
-	EventCounts       map[string]int64           `json:"eventCounts"` // ws/env/exp/epoch/variant/exposure|conversion -> count
+	EventCounts       map[string]int64           `json:"eventCounts"`                // ws/env/exp/epoch/variant/exposure|conversion -> count
+	CollectionCounts  map[string]int64           `json:"collectionCounts,omitempty"` // ws/env/exp/epoch/reason -> attempts
 
 	Audit     []*AuditEntry `json:"audit"`
 	NextAudit int64         `json:"nextAudit"`
@@ -249,6 +250,7 @@ func newData() *Data {
 		ExposedUnits:      map[string]map[string]bool{},
 		SplitExposedUnits: map[string]map[string]bool{},
 		EventCounts:       map[string]int64{},
+		CollectionCounts:  map[string]int64{},
 		AIResources:       map[string]*AIResourceRef{},
 		PinnedVersions:    map[string][]*PinnedVersion{},
 		ModelAllowlist:    map[string][]ModelAllowEntry{},

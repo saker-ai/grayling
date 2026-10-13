@@ -34,6 +34,8 @@ type Diagnostics struct {
 	ExposureSRM        *stats.SRMResult              `json:"exposureSrm,omitempty"`
 	CrossVariantUnits  int64                         `json:"crossVariantUnits"`
 	AssignmentMismatch int64                         `json:"assignmentMismatch"`
+	DuplicateEvents    int64                         `json:"duplicateEvents"`
+	RejectedByReason   map[string]int64              `json:"rejectedByReason,omitempty"`
 	LastCollectedAt    *time.Time                    `json:"lastCollectedAt,omitempty"`
 	Issues             []string                      `json:"issues,omitempty"`
 }
@@ -55,8 +57,25 @@ func BuildDiagnostics(store *platform.Store, experimentID string, now time.Time)
 	if err != nil {
 		return nil, err
 	}
-	return buildDiagnostics(exp, analysis.EventsForExperiment(exp.WorkspaceID, exp.EnvironmentID,
-		exp.ID, exp.Epoch, ""), window, now), nil
+	d := buildDiagnostics(exp, analysis.EventsForExperiment(exp.WorkspaceID, exp.EnvironmentID,
+		exp.ID, exp.Epoch, ""), window, now)
+	if err := attachCollectionCounts(store, exp, d); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+func attachCollectionCounts(store *platform.Store, exp *platform.Experiment, d *Diagnostics) error {
+	counts, err := store.CollectionCounts(exp.ID)
+	if err != nil {
+		return err
+	}
+	d.DuplicateEvents = counts["duplicate_event"]
+	delete(counts, "duplicate_event")
+	if len(counts) > 0 {
+		d.RejectedByReason = counts
+	}
+	return nil
 }
 
 func buildDiagnostics(exp *platform.Experiment, events []*platform.Event,

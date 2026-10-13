@@ -4062,9 +4062,10 @@ components:
       description: >-
         当前分析窗口内的聚合流量诊断。onDecision 的历史实验可能没有单独的
         assignment 事实；SRM 仅在各变体期望计数达到 5 时计算。
-        issues 中的异常阻止 onRender 报告自动推进。拒收原因计数需后续持久化采集结果，
-        本接口当前不返回未经核验的拒收数。
-      required: [experimentId, epoch, exposureMode, generatedAt, window, perVariant, crossVariantUnits, assignmentMismatch]
+        issues 中的异常阻止 onRender 报告自动推进。拒收与重复计数是本实验当前 epoch
+        的采集尝试次数（重复提交重复计数），不属于分析窗口内的独立用户数。
+        未知或跨凭证作用域的实验 ID 不计入。
+      required: [experimentId, epoch, exposureMode, generatedAt, window, perVariant, crossVariantUnits, assignmentMismatch, duplicateEvents]
       properties:
         experimentId: {type: string}
         epoch: {type: integer, format: int64}
@@ -4078,6 +4079,11 @@ components:
         exposureSrm: {$ref: "#/components/schemas/SRMResult"}
         crossVariantUnits: {type: integer, format: int64}
         assignmentMismatch: {type: integer, format: int64}
+        duplicateEvents: {type: integer, format: int64}
+        rejectedByReason:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+          description: 固定机器码到拒收尝试次数的映射；无拒收时省略。
         lastCollectedAt: {type: string, format: date-time}
         issues:
           type: array

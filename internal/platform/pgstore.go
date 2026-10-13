@@ -189,6 +189,15 @@ var pgMigrations = []pgMigration{
         PRIMARY KEY (workspace_id, key, version)
     );
     CREATE INDEX metric_definitions_workspace_status_idx ON metric_definitions(workspace_id, status, key)`},
+	{11, `CREATE TABLE collection_diagnostics (
+        workspace_id text NOT NULL,
+        environment_id text NOT NULL,
+        experiment_id text NOT NULL,
+        epoch bigint NOT NULL,
+        code text NOT NULL,
+        cnt bigint NOT NULL,
+        PRIMARY KEY (workspace_id, environment_id, experiment_id, epoch, code)
+    )`},
 }
 
 const pgSchemaV1 = `
@@ -1578,6 +1587,53 @@ func (p *pgPersistence) commitCounts(ctx context.Context, tx pgx.Tx, counts []Co
 		return fmt.Errorf("platform: persist event counts: %w", err)
 	}
 	return nil
+}
+
+func (p *pgPersistence) recordCollectionCounts(counts []collectionCount) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	batch := &pgx.Batch{}
+	for _, count := range counts {
+		batch.Queue(`INSERT INTO collection_diagnostics
+			(workspace_id, environment_id, experiment_id, epoch, code, cnt)
+			VALUES ($1,$2,$3,$4,$5,$6)
+			ON CONFLICT (workspace_id, environment_id, experiment_id, epoch, code)
+			DO UPDATE SET cnt = collection_diagnostics.cnt + EXCLUDED.cnt`,
+			count.WorkspaceID, count.EnvironmentID, count.ExperimentID,
+			count.Epoch, count.Code, count.Count)
+	}
+	if err := tx.SendBatch(ctx, batch).Close(); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *pgPersistence) collectionCounts(workspaceID, environmentID, experimentID string,
+	epoch int64) (map[string]int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	rows, err := p.pool.Query(ctx, `SELECT code, cnt FROM collection_diagnostics
+		WHERE workspace_id = $1 AND environment_id = $2 AND experiment_id = $3 AND epoch = $4`,
+		workspaceID, environmentID, experimentID, epoch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var code string
+		var count int64
+		if err := rows.Scan(&code, &count); err != nil {
+			return nil, err
+		}
+		counts[code] = count
+	}
+	return counts, rows.Err()
 }
 
 func (p *pgPersistence) commitAudit(ctx context.Context, tx pgx.Tx, entries []*AuditEntry) error {

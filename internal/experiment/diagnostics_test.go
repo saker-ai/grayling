@@ -178,6 +178,12 @@ func TestDiagnosticsReplaysSQLiteAssignmentsAfterRestart(t *testing.T) {
 	if result, err := store.IngestEvents([]*platform.Event{assignment, &exposure}); err != nil || result.Accepted != 2 {
 		t.Fatalf("ingest: %+v, %v", result, err)
 	}
+	if err := store.RecordCollectionOutcomes(ws.ID, env.ID, []platform.CollectionOutcome{
+		{ExperimentID: exp.ID, Status: "rejected", Code: "stale_epoch"},
+		{ExperimentID: exp.ID, Status: "duplicate", Code: "duplicate_event"},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	before, err := BuildDiagnostics(store, exp.ID, now.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)
@@ -196,7 +202,8 @@ func TestDiagnosticsReplaysSQLiteAssignmentsAfterRestart(t *testing.T) {
 	}
 	if before.PerVariant[0] != after.PerVariant[0] ||
 		after.PerVariant[0].Assignments != 1 || after.PerVariant[0].Exposures != 1 ||
-		after.Window.Backend != "sqlite-raw" {
+		after.Window.Backend != "sqlite-raw" || after.RejectedByReason["stale_epoch"] != 1 ||
+		after.DuplicateEvents != 1 {
 		t.Fatalf("raw replay changed diagnostics: before=%+v after=%+v", before, after)
 	}
 }

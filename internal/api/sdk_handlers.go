@@ -666,6 +666,16 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 		item.EventID = req.Events[eventIndexes[i]].EventID
 		results[eventIndexes[i]] = item
 	}
+	collectionOutcomes := make([]platform.CollectionOutcome, 0, len(results))
+	for i, item := range results {
+		collectionOutcomes = append(collectionOutcomes, platform.CollectionOutcome{
+			ExperimentID: req.Events[i].ExperimentID, Status: item.Status, Code: item.Code,
+		})
+	}
+	if err := s.Store.RecordCollectionOutcomes(env.WorkspaceID, env.ID, collectionOutcomes); err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	if res.Accepted > 0 || res.Duplicates > 0 {
 		s.decisionMu.Lock()
 		for _, dto := range req.Events {

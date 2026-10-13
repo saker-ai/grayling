@@ -183,6 +183,15 @@ func newGORMStore(ctx context.Context, dialector gorm.Dialector, dialect string)
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("platform: migrate %s: %w", dialect, err)
 	}
+	if err := db.WithContext(ctx).Exec(`CREATE TABLE IF NOT EXISTS collection_diagnostics (
+		workspace_id text NOT NULL, environment_id text NOT NULL,
+		experiment_id text NOT NULL, epoch bigint NOT NULL,
+		code text NOT NULL, cnt bigint NOT NULL,
+		PRIMARY KEY (workspace_id, environment_id, experiment_id, epoch, code)
+	)`).Error; err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("platform: migrate collection diagnostics: %w", err)
+	}
 	store, err := newStore(&gormPersistence{db: db, dialect: dialect})
 	if err != nil {
 		_ = sqlDB.Close()
@@ -197,6 +206,46 @@ func (p *gormPersistence) Close() error {
 		return err
 	}
 	return db.Close()
+}
+
+func (p *gormPersistence) recordCollectionCounts(counts []collectionCount) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, count := range counts {
+			if err := tx.Exec(`INSERT INTO collection_diagnostics
+				(workspace_id, environment_id, experiment_id, epoch, code, cnt)
+				VALUES (?, ?, ?, ?, ?, ?)
+				ON CONFLICT (workspace_id, environment_id, experiment_id, epoch, code)
+				DO UPDATE SET cnt = cnt + excluded.cnt`,
+				count.WorkspaceID, count.EnvironmentID, count.ExperimentID,
+				count.Epoch, count.Code, count.Count).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (p *gormPersistence) collectionCounts(workspaceID, environmentID, experimentID string,
+	epoch int64) (map[string]int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var rows []struct {
+		Code string
+		Cnt  int64
+	}
+	err := p.db.WithContext(ctx).Raw(`SELECT code, cnt FROM collection_diagnostics
+		WHERE workspace_id = ? AND environment_id = ? AND experiment_id = ? AND epoch = ?`,
+		workspaceID, environmentID, experimentID, epoch).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		counts[row.Code] = row.Cnt
+	}
+	return counts, nil
 }
 
 // eventDelta reads a consistent event batch and its authoritative aggregate
@@ -540,6 +589,7 @@ func (p *gormPersistence) Commit(data *Data, ch *ChangeSet) error {
 		persisted.ExposedUnits = nil
 		persisted.SplitExposedUnits = nil
 		persisted.EventCounts = nil
+		persisted.CollectionCounts = nil
 		persisted.MetricDefinitions = nil
 		if control {
 			persisted.ControlVersion++
