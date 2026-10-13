@@ -784,10 +784,11 @@ function flagDiffValue(value) {
   return value === undefined ? '—' : JSON.stringify(canonicalFlagValue(value), null, 2);
 }
 
-function renderFlagDiff(current, draft) {
-  if (!draft) return '<section class="card"><h3>' + esc(t('flags.diffTitle')) + '</h3><p class="muted">' +
+function renderFlagDiff(current, draft, options = {}) {
+  const title = options.title || t('flags.diffTitle');
+  if (!draft) return '<section class="card"><h3>' + esc(title) + '</h3><p class="muted">' +
     esc(t('flags.diffNoDraft')) + '</p></section>';
-  if (draft.deleted) return '<section class="card"><h3>' + esc(t('flags.diffTitle')) + '</h3><div class="banner warn">' +
+  if (draft.deleted) return '<section class="card"><h3>' + esc(title) + '</h3><div class="banner warn">' +
     esc(t('flags.diffDeleted')) + '</div></section>';
   const before = current?.content || {};
   const after = draft.content || {};
@@ -798,15 +799,26 @@ function renderFlagDiff(current, draft) {
     experiment: t('flags.diffExperiment'),
   };
   const keys = Object.keys(labels).filter(key => flagDiffValue(before[key]) !== flagDiffValue(after[key]));
-  return '<section class="card"><h3>' + esc(t('flags.diffTitle')) + '</h3>' +
+  return '<section class="card"><h3>' + esc(title) + '</h3>' +
     '<p class="muted">' + esc(t('flags.diffBase', { revision: current?.revision || 0 })) + '</p>' +
     (keys.length ? '<div class="flag-diff-list">' + keys.map(key =>
       '<details class="flag-diff-item"><summary>' + esc(labels[key]) + '</summary>' +
       '<div class="flag-diff-values"><div><strong>' + esc(t('flags.diffBefore')) +
       '</strong><pre class="pre small">' + esc(flagDiffValue(before[key])) + '</pre></div>' +
-      '<div><strong>' + esc(t('flags.diffAfter')) + '</strong><pre class="pre small">' +
+      '<div><strong>' + esc(options.afterLabel || t('flags.diffAfter')) + '</strong><pre class="pre small">' +
       esc(flagDiffValue(after[key])) + '</pre></div></div></details>').join('') + '</div>'
-      : '<p>' + esc(t('flags.diffNoChanges')) + '</p>') + '</section>';
+      : '<p>' + esc(options.emptyLabel || t('flags.diffNoChanges')) + '</p>') + '</section>';
+}
+
+function renderFlagSaveConflict(latest, local) {
+  return '<div class="banner warn" role="alert"><strong>' + esc(t('flags.conflictTitle')) + '</strong>' +
+    '<p>' + esc(t('flags.conflictHelp', { revision: latest.currentRevision || 0 })) + '</p></div>' +
+    renderFlagDiff(latest.current, { content: local },
+      { title: t('flags.conflictCompare'), afterLabel: t('flags.conflictLocal'),
+        emptyLabel: t('flags.conflictNoChanges') }) +
+    (latest.draft ? '<details class="flag-diff-item"><summary>' + esc(t('flags.conflictRemoteDraft')) +
+      '</summary><pre class="pre small">' + esc(JSON.stringify(latest.draft.content, null, 2)) +
+      '</pre></details>' : '');
 }
 
 async function viewFlagDetail(m) {
@@ -828,7 +840,8 @@ async function viewFlagDetail(m) {
     '<h2 class="mono">' + esc(key) + '</h2>' + st +
     (draft ? '<span class="muted">' + esc(t('flags.riskMeta', { risk: draft.risk || '—', by: draft.updatedBy || '—', time: fmtTime(draft.updatedAt) })) + '</span>' : '') +
     '</div>' +
-    renderFlagDiff(f && f.current, draft) +
+    '<div id="flag-saved-diff">' + renderFlagDiff(f && f.current, draft) + '</div>' +
+    '<div id="flag-conflict"></div>' +
     '<div class="cols">' +
       '<section class="card"><h3>' + esc(t('flags.draftEditor')) + '</h3>' +
         '<textarea id="flag-json" class="json" rows="24" spellcheck="false"></textarea>' +
@@ -883,13 +896,37 @@ function bindFlagDetail(m, key, kp, f) {
     if (issues.length) { out.className = 'warn-text grow'; out.textContent = '⚠ ' + issues.join(' · '); }
     else { out.className = 'ok-text grow'; out.textContent = t('validate.ok'); }
   };
-  $('#flag-save', m).onclick = () => {
+  $('#flag-save', m).onclick = async () => {
     const content = readJSON();
     if (!content) return;
-    run(() => api(kp + '/draft', {
-      method: 'PUT',
-      body: { content, risk: $('#flag-risk', m).value, baseRevision: Number($('#flag-base', m).value || 0) },
-    }), t('toast.draftSaved'), true);
+    const button = $('#flag-save', m);
+    button.disabled = true;
+    try {
+      await api(kp + '/draft', {
+        method: 'PUT',
+        body: { content, risk: $('#flag-risk', m).value, baseRevision: Number($('#flag-base', m).value || 0) },
+      });
+      S.editorBaseline = editorValue();
+      toast(t('toast.draftSaved'));
+      route();
+    } catch (err) {
+      if (err.status === 409) {
+        try {
+          const latest = await api(kp);
+          $('#flag-saved-diff', m).innerHTML = renderFlagDiff(latest.current, latest.draft);
+          $('#flag-conflict', m).innerHTML = renderFlagSaveConflict(latest, content);
+          $('#flag-conflict', m).scrollIntoView({ block: 'start', behavior: 'smooth' });
+        } catch (refreshErr) {
+          $('#flag-conflict', m).innerHTML = errBanner(refreshErr);
+        }
+      }
+      toast(errMsg(err), false);
+      if (err.status === 403) {
+        try { await refreshCapabilities(); gateActions(m); } catch { /* keep the unsaved editor visible */ }
+      }
+    } finally {
+      button.disabled = false;
+    }
   };
   $('#flag-submit', m).onclick = () => {
     const reason = prompt(t('approval.reason'), '');

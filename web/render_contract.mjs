@@ -35,7 +35,7 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
 
 const flagDiff = sandbox.__renderFlagDiff(
@@ -48,6 +48,13 @@ assert(flagDiff.includes('Compared with published revision r4') && flagDiff.incl
 assert(!flagDiff.includes('Value type'), 'unchanged fields should not clutter the draft diff');
 assert(sandbox.__renderFlagDiff(null, null).includes('No saved draft'), 'missing draft state');
 assert(sandbox.__renderFlagDiff(null, { deleted: true }).includes('marks the Flag for deletion'), 'deletion state');
+const conflict = sandbox.__renderFlagSaveConflict({ currentRevision: 5,
+  current: { revision: 5, content: { type: 'bool', variations: { safe: false } } },
+  draft: { content: { type: 'bool', variations: { safe: true } } } },
+{ type: 'bool', variations: { safe: '<svg/onload=alert(1)>' } });
+assert(conflict.includes('Published revision is now r5') && conflict.includes('Your unsaved input') &&
+  conflict.includes('Latest saved draft on the server') && !conflict.includes('<svg'),
+  '409 conflict review must show current, remote draft and escaped local input');
 
 const flagRows = [
   { key: 'published', current: { publishedAt: '2026-10-13T10:00:00Z' } },
