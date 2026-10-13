@@ -221,8 +221,9 @@ type RetentionSpec struct {
 // GuardrailSpec is an operational protection rule, evaluated separately from
 // statistical significance of the primary metric (§5.3, §10.3).
 type GuardrailSpec struct {
-	MetricKey string `json:"metricKey"`
-	Type      string `json:"type"` // "proportion" | "mean"
+	MetricRef *MetricRef `json:"metricRef,omitempty"`
+	MetricKey string     `json:"metricKey"`
+	Type      string     `json:"type"` // "proportion" | "mean"
 	// Direction declares what movement is GOOD for this metric:
 	// "increase" (default) or "decrease" (cost/latency style). A breach is
 	// movement against the good direction beyond MaxRelativeRegression.
@@ -270,11 +271,12 @@ type Experiment struct {
 	Variants      []string           `json:"variants"`    // explicit stable order
 	Proportions   map[string]float64 `json:"proportions"`
 	// AllocationMode is fixed-split (the legacy default) or bandit.
-	AllocationMode string          `json:"allocationMode,omitempty"`
-	Bandit         *BanditSpec     `json:"bandit,omitempty"`
-	PrimaryMetric  MetricSpec      `json:"primaryMetric"`
-	Guardrails     []GuardrailSpec `json:"guardrails,omitempty"`
-	HolmFamily     *HolmFamily     `json:"holmFamily,omitempty"`
+	AllocationMode   string          `json:"allocationMode,omitempty"`
+	Bandit           *BanditSpec     `json:"bandit,omitempty"`
+	PrimaryMetricRef *MetricRef      `json:"primaryMetricRef,omitempty"`
+	PrimaryMetric    MetricSpec      `json:"primaryMetric"`
+	Guardrails       []GuardrailSpec `json:"guardrails,omitempty"`
+	HolmFamily       *HolmFamily     `json:"holmFamily,omitempty"`
 	// RegistrationVersion fingerprints the immutable hypothesis contract.
 	RegistrationVersion string        `json:"registrationVersion,omitempty"`
 	Alpha               float64       `json:"alpha"`

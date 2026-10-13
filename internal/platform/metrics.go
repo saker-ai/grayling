@@ -47,8 +47,9 @@ type MetricDefinition struct {
 
 // MetricRef identifies the exact published definition frozen by an experiment.
 type MetricRef struct {
-	Key     string `json:"key"`
-	Version int64  `json:"version"`
+	Key            string `json:"key"`
+	Version        int64  `json:"version"`
+	DefinitionHash string `json:"definitionHash,omitempty"`
 }
 
 var metricKeyRE = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
@@ -90,18 +91,21 @@ func validateMetricDefinition(def *MetricDefinition) error {
 		}
 		seen[key] = true
 	}
-	if def.Spec.Key != "" && def.Spec.Key != def.Key {
-		return fmt.Errorf("%w: metric spec key differs from definition key", ErrValidation)
+	if def.Spec.Key == "" {
+		def.Spec.Key = def.EventKeys[0]
 	}
-	def.Spec.Key = def.Key
+	if !slices.Contains(def.EventKeys, def.Spec.Key) {
+		return fmt.Errorf("%w: metric spec key must be in eventKeys", ErrValidation)
+	}
 	if def.Spec.Direction != "increase" && def.Spec.Direction != "decrease" {
 		return fmt.Errorf("%w: metric direction must be increase or decrease", ErrValidation)
 	}
 	switch def.Spec.Type {
 	case "proportion", "mean":
 	case "ratio":
-		if def.Spec.DenominatorKey == "" {
-			return fmt.Errorf("%w: ratio metric needs denominatorKey", ErrValidation)
+		if def.Spec.DenominatorKey == "" || !seen[def.Spec.DenominatorKey] ||
+			(def.Spec.NumeratorKey != "" && !seen[def.Spec.NumeratorKey]) {
+			return fmt.Errorf("%w: ratio numerator and denominator must be eventKeys", ErrValidation)
 		}
 	case "quantile":
 		if def.Spec.QuantileLevel <= 0 || def.Spec.QuantileLevel >= 1 {
@@ -110,6 +114,16 @@ func validateMetricDefinition(def *MetricDefinition) error {
 	case "funnel", "retention":
 		if err := validateJourney(def.Spec.Type, def.Spec.Funnel, def.Spec.Retention); err != nil {
 			return err
+		}
+		if def.Spec.Funnel != nil {
+			for _, step := range def.Spec.Funnel.Steps {
+				if !seen[step] {
+					return fmt.Errorf("%w: funnel step %q must be in eventKeys", ErrValidation, step)
+				}
+			}
+		}
+		if def.Spec.Retention != nil && !seen[def.Spec.Retention.ReturnKey] {
+			return fmt.Errorf("%w: retention returnKey must be in eventKeys", ErrValidation)
 		}
 	default:
 		return fmt.Errorf("%w: unsupported metric type %q", ErrValidation, def.Spec.Type)
@@ -153,6 +167,66 @@ func metricDefinitionHash(def *MetricDefinition) (string, error) {
 		return "", fmt.Errorf("%w: encode metric definition: %v", ErrValidation, err)
 	}
 	return fmt.Sprintf("sha256:%x", sha256.Sum256(encoded)), nil
+}
+
+// ResolveExperimentMetricRefs returns an experiment with published metric
+// versions expanded into immutable analysis snapshots. The store repeats this
+// check under the creation lock, so deprecation cannot race registration.
+func (s *Store) ResolveExperimentMetricRefs(exp *Experiment) (*Experiment, error) {
+	if exp == nil {
+		return nil, fmt.Errorf("%w: nil experiment", ErrValidation)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	copy := cloneRegisteredExperiment(exp)
+	if err := s.resolveExperimentMetricRefsLocked(copy); err != nil {
+		return nil, err
+	}
+	return copy, nil
+}
+
+func (s *Store) resolveExperimentMetricRefsLocked(exp *Experiment) error {
+	resolve := func(ref *MetricRef) (*MetricDefinition, error) {
+		if ref == nil || ref.Key == "" || ref.Version <= 0 {
+			return nil, fmt.Errorf("%w: metric reference needs key and positive version", ErrValidation)
+		}
+		def := s.data.MetricDefinitions[metricDefinitionKey(exp.WorkspaceID, ref.Key, ref.Version)]
+		if def == nil {
+			return nil, fmt.Errorf("%w: metric %s v%d", ErrNotFound, ref.Key, ref.Version)
+		}
+		if def.Status != MetricPublished {
+			return nil, fmt.Errorf("%w: metric %s v%d is not published", ErrInvalidState, ref.Key, ref.Version)
+		}
+		hash, err := metricDefinitionHash(def)
+		if err != nil || hash != def.Hash || (ref.DefinitionHash != "" && ref.DefinitionHash != def.Hash) {
+			return nil, fmt.Errorf("%w: metric %s v%d definition hash mismatch", ErrConflict, ref.Key, ref.Version)
+		}
+		ref.DefinitionHash = def.Hash
+		return def, nil
+	}
+	if exp.PrimaryMetricRef != nil {
+		def, err := resolve(exp.PrimaryMetricRef)
+		if err != nil {
+			return err
+		}
+		exp.PrimaryMetric = cloneRegisteredMetric(def.Spec)
+	}
+	for i := range exp.Guardrails {
+		g := &exp.Guardrails[i]
+		if g.MetricRef == nil {
+			continue
+		}
+		def, err := resolve(g.MetricRef)
+		if err != nil {
+			return err
+		}
+		g.MetricKey = def.Spec.Key
+		g.Type = def.Spec.Type
+		g.Direction = def.Spec.Direction
+		g.Funnel = cloneFunnel(def.Spec.Funnel)
+		g.Retention = cloneRetention(def.Spec.Retention)
+	}
+	return nil
 }
 
 // CreateMetricDefinition adds an immutable draft at the next version number.

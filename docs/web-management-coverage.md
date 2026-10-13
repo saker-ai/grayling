@@ -1,6 +1,6 @@
 # Web 管理功能覆盖矩阵
 
-范围：`openapi.yaml` 中的 `/api/v1/admin/` 管理操作（共 56 项）。`GET /api/v1/health` 是健康检查，不属于管理操作。SDK config/eval/collect、原生 Nacos 协议及 HMAC 原始密钥为数据面或运维密钥，刻意不进入管理 UI。
+范围：`openapi.yaml` 中的 `/api/v1/admin/` 管理操作（共 62 项）。`GET /api/v1/health` 是健康检查，不属于管理操作。SDK config/eval/collect、原生 Nacos 协议及 HMAC 原始密钥为数据面或运维密钥，刻意不进入管理 UI。
 
 下表说明 Web 是否提供入口及代码契约，**不表示每项都已在浏览器执行**。真实浏览器的操作、截图、HTTP 结果与未覆盖项见 [2026-10-08 验收报告](acceptance/web-2026-10-08/report.md)。
 
@@ -22,6 +22,12 @@
 | `GET` | `/api/v1/admin/workspaces/{ws}/audit` | 已覆盖 | 审计页：搜索、条数选择与游标翻页 | i18n DOM；游标筛选测试；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/quotas` | 已覆盖 | 配额页：owner 可见，读取/编辑/校验/确认/保存 | quota API + i18n DOM |
 | `PUT` | `/api/v1/admin/workspaces/{ws}/quotas` | 已覆盖 | 配额页：owner 可见，读取/编辑/校验/确认/保存 | quota API + i18n DOM |
+| `GET` | `/api/v1/admin/workspaces/{ws}/metrics` | 需补齐 | 指标目录列表与搜索 | API 契约；Web 入口待实现 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/metrics` | 需补齐 | 创建指标草稿版本 | API 契约；Web 入口待实现 |
+| `GET` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}` | 需补齐 | 指标版本详情 | API 契约；Web 入口待实现 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/submit` | 需补齐 | 提交独立审批 | API 契约；Web 入口待实现 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/publish` | 需补齐 | 经批准发布版本 | API 契约；Web 入口待实现 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/deprecate` | 需补齐 | 弃用版本 | API 契约；Web 入口待实现 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags` | 已覆盖 | 开关列表/详情：草稿、审批、发布、回滚、删除、导入、紧急禁用 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}` | 已覆盖 | 开关列表/详情：草稿、审批、发布、回滚、删除、导入、紧急禁用 | i18n DOM；API 路由契约 |
 | `DELETE` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}` | 已覆盖 | 开关列表/详情：草稿、审批、发布、回滚、删除、导入、紧急禁用 | i18n DOM；API 路由契约 |

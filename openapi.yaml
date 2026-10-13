@@ -3507,6 +3507,14 @@ components:
         note:
           type: string
           description: 调试求值永不记录曝光。
+    MetricRef:
+      type: object
+      additionalProperties: false
+      required: [key, version]
+      properties:
+        key: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+        definitionHash: {type: string, description: 服务端冻结的指标定义 SHA-256；创建请求可省略。}
     MetricDefinition:
       type: object
       additionalProperties: false
@@ -3576,6 +3584,8 @@ components:
       description: 运营护栏规则，与主指标统计显著性分开评估。
       required: [metricKey, type, maxRelativeRegression, minSample]
       properties:
+        metricRef:
+          $ref: "#/components/schemas/MetricRef"
         metricKey:
           type: string
         type:
@@ -3616,7 +3626,7 @@ components:
         layerSlot、state、时间戳、createdBy。更改随机化单元、指标定义、
         比例或资源绑定 = 新 epoch，历史永不覆写。显式 Holm 家族冻结于
         创建时，所有用于决策的多指标/多变体比较须放在同一家族。
-      required: [flagKey, unit, variants, proportions, primaryMetric, alpha, analysisWindow]
+      required: [flagKey, unit, variants, proportions, alpha, analysisWindow]
       properties:
         id:
           type: string
@@ -3663,6 +3673,8 @@ components:
           $ref: "#/components/schemas/BanditSpec"
         primaryMetric:
           $ref: "#/components/schemas/MetricSpec"
+        primaryMetricRef:
+          $ref: "#/components/schemas/MetricRef"
         guardrails:
           type: array
           items:

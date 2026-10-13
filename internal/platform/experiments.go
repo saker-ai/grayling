@@ -53,12 +53,15 @@ func (s *Store) CreateExperiment(exp *Experiment) (*Experiment, error) {
 	if exp.AnalysisMethod == "" && (exp.PrimaryMetric.Type == "funnel" || exp.PrimaryMetric.Type == "retention") {
 		exp.AnalysisMethod = "two-proportion-z"
 	}
-	if err := validateExperimentInvariants(exp); err != nil {
-		return nil, err
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.checkEnvLocked(exp.WorkspaceID, exp.EnvironmentID); err != nil {
+		return nil, err
+	}
+	if err := s.resolveExperimentMetricRefsLocked(exp); err != nil {
+		return nil, err
+	}
+	if err := validateExperimentInvariants(exp); err != nil {
 		return nil, err
 	}
 	q := s.quotasLocked(exp.WorkspaceID)
@@ -89,13 +92,10 @@ func (s *Store) CreateExperiment(exp *Experiment) (*Experiment, error) {
 		return nil, err
 	}
 	exp.RegistrationVersion = version
-	stored := exp
-	if exp.HolmFamily != nil || exp.PrimaryMetric.Funnel != nil || exp.PrimaryMetric.Retention != nil || hasJourneyGuardrail(exp.Guardrails) {
-		stored = cloneRegisteredExperiment(exp)
-	}
+	stored := cloneRegisteredExperiment(exp)
 	s.data.Experiments[exp.ID] = stored
 	s.changes.markDirty(collExperiments, exp.ID)
-	return exp, s.commitLocked()
+	return cloneRegisteredExperiment(stored), s.commitLocked()
 }
 
 // cloneRegisteredExperiment keeps the pre-registered decision contract out of
@@ -109,8 +109,14 @@ func cloneRegisteredExperiment(exp *Experiment) *Experiment {
 		clone.LayerSlot = new(*exp.LayerSlot)
 	}
 	clone.PrimaryMetric = cloneRegisteredMetric(exp.PrimaryMetric)
+	if exp.PrimaryMetricRef != nil {
+		clone.PrimaryMetricRef = new(*exp.PrimaryMetricRef)
+	}
 	clone.Guardrails = slices.Clone(exp.Guardrails)
 	for i := range clone.Guardrails {
+		if exp.Guardrails[i].MetricRef != nil {
+			clone.Guardrails[i].MetricRef = new(*exp.Guardrails[i].MetricRef)
+		}
 		clone.Guardrails[i].Funnel = cloneFunnel(exp.Guardrails[i].Funnel)
 		clone.Guardrails[i].Retention = cloneRetention(exp.Guardrails[i].Retention)
 	}
@@ -383,31 +389,33 @@ func validateHolmFamily(exp *Experiment) error {
 // accidental in-memory modification of the registered family fails closed.
 func ExperimentRegistrationVersion(exp *Experiment) (string, error) {
 	contract := struct {
-		FlagKey         string
-		FlagRevision    int64
-		Epoch           int64
-		Unit            string
-		Layer           string
-		LayerSlot       *model.BucketRange
-		Eligibility     float64
-		Variants        []string
-		Proportions     map[string]float64
-		PrimaryMetric   MetricSpec
-		Guardrails      []GuardrailSpec
-		HolmFamily      *HolmFamily
-		Alpha           float64
-		Power           float64
-		MDE             float64
-		MinSamplePerArm int64
-		MinRuntime      time.Duration
-		AnalysisWindow  time.Duration
-		Hypothesis      string
-		AnalysisMethod  string
+		FlagKey          string
+		FlagRevision     int64
+		Epoch            int64
+		Unit             string
+		Layer            string
+		LayerSlot        *model.BucketRange
+		Eligibility      float64
+		Variants         []string
+		Proportions      map[string]float64
+		PrimaryMetric    MetricSpec
+		PrimaryMetricRef *MetricRef `json:"PrimaryMetricRef,omitempty"`
+		Guardrails       []GuardrailSpec
+		HolmFamily       *HolmFamily
+		Alpha            float64
+		Power            float64
+		MDE              float64
+		MinSamplePerArm  int64
+		MinRuntime       time.Duration
+		AnalysisWindow   time.Duration
+		Hypothesis       string
+		AnalysisMethod   string
 	}{
 		FlagKey: exp.FlagKey, FlagRevision: exp.FlagRevision, Epoch: exp.Epoch,
 		Unit: exp.Unit, Layer: exp.Layer, LayerSlot: exp.LayerSlot, Eligibility: exp.Eligibility,
 		Variants: exp.Variants, Proportions: exp.Proportions, PrimaryMetric: exp.PrimaryMetric,
-		Guardrails: exp.Guardrails, HolmFamily: exp.HolmFamily, Alpha: exp.Alpha,
+		PrimaryMetricRef: exp.PrimaryMetricRef,
+		Guardrails:       exp.Guardrails, HolmFamily: exp.HolmFamily, Alpha: exp.Alpha,
 		Power: exp.Power, MDE: exp.MDE, MinSamplePerArm: exp.MinSamplePerArm,
 		MinRuntime: exp.MinRuntime, AnalysisWindow: exp.AnalysisWindow,
 		Hypothesis: exp.Hypothesis, AnalysisMethod: exp.AnalysisMethod,
@@ -427,10 +435,7 @@ func (s *Store) GetExperiment(id string) (*Experiment, error) {
 	if !ok {
 		return nil, fmt.Errorf("%w: experiment %q", ErrNotFound, id)
 	}
-	if e.HolmFamily != nil || e.PrimaryMetric.Funnel != nil || e.PrimaryMetric.Retention != nil || hasJourneyGuardrail(e.Guardrails) {
-		return cloneRegisteredExperiment(e), nil
-	}
-	return e, nil
+	return cloneRegisteredExperiment(e), nil
 }
 
 // ListExperiments returns experiments of one environment (all when
@@ -441,11 +446,7 @@ func (s *Store) ListExperiments(workspaceID, environmentID string) []*Experiment
 	out := []*Experiment{}
 	for _, e := range s.data.Experiments {
 		if e.WorkspaceID == workspaceID && (environmentID == "" || e.EnvironmentID == environmentID) {
-			if e.HolmFamily != nil || e.PrimaryMetric.Funnel != nil || e.PrimaryMetric.Retention != nil || hasJourneyGuardrail(e.Guardrails) {
-				out = append(out, cloneRegisteredExperiment(e))
-			} else {
-				out = append(out, e)
-			}
+			out = append(out, cloneRegisteredExperiment(e))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
@@ -462,10 +463,7 @@ func (s *Store) TransitionExperiment(id string, to model.ExperimentState, actor 
 		return nil, fmt.Errorf("%w: experiment %q", ErrNotFound, id)
 	}
 	if e.State == to {
-		if e.HolmFamily != nil || e.PrimaryMetric.Funnel != nil || e.PrimaryMetric.Retention != nil || hasJourneyGuardrail(e.Guardrails) {
-			return cloneRegisteredExperiment(e), nil
-		}
-		return e, nil // idempotent
+		return cloneRegisteredExperiment(e), nil // idempotent
 	}
 	if !ExperimentTransitionAllowed(e.State, to) {
 		return nil, fmt.Errorf("%w: %s → %s", ErrInvalidState, e.State, to)
@@ -485,10 +483,7 @@ func (s *Store) TransitionExperiment(id string, to model.ExperimentState, actor 
 	e.UpdatedAt = now
 	s.changes.markDirty(collExperiments, id)
 	err := s.commitLocked()
-	if e.HolmFamily != nil || e.PrimaryMetric.Funnel != nil || e.PrimaryMetric.Retention != nil || hasJourneyGuardrail(e.Guardrails) {
-		return cloneRegisteredExperiment(e), err
-	}
-	return e, err
+	return cloneRegisteredExperiment(e), err
 }
 
 // NextEpoch returns the next unused epoch for one flag (epochs are never

@@ -36,7 +36,7 @@ func TestMetricDefinitionVersionAndImmutability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Version != 1 || first.Status != MetricDraft || first.Hash == "" || first.Spec.Key != first.Key {
+	if first.Version != 1 || first.Status != MetricDraft || first.Hash == "" || first.Spec.Key != first.EventKeys[0] {
 		t.Fatalf("unexpected first version: %+v", first)
 	}
 	input.EventKeys[0] = "changed_after_create"
@@ -108,5 +108,63 @@ func TestMetricDefinitionSurvivesReopen(t *testing.T) {
 				t.Fatalf("reopened definition: %+v, %v", got, err)
 			}
 		})
+	}
+}
+
+func TestExperimentFreezesPublishedMetricReferences(t *testing.T) {
+	store, err := NewStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := store.CreateWorkspace("metrics", "Metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := store.CreateEnvironment(ws.ID, "prod", "Production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(key, event string) MetricRef {
+		t.Helper()
+		def := testMetricDefinition(ws.ID)
+		def.Key, def.EventKeys = key, []string{event}
+		created, err := store.CreateMetricDefinition(def)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ref := MetricRef{Key: key, Version: created.Version}
+		if _, err := store.PublishMetricDefinition(ws.ID, ref, "reviewer"); err != nil {
+			t.Fatal(err)
+		}
+		return ref
+	}
+	primary := create("activation.complete", "activation_complete")
+	guard := create("guardrail.crash", "crash_event")
+	exp := baseP5Experiment(ws.ID, env.ID, MetricSpec{})
+	exp.PrimaryMetricRef = &primary
+	exp.Guardrails = []GuardrailSpec{{MetricRef: &guard, MaxRelativeRegression: 0.05, MinSample: 10}}
+	created, err := store.CreateExperiment(exp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.PrimaryMetric.Key != "activation_complete" || created.PrimaryMetricRef.DefinitionHash == "" ||
+		created.Guardrails[0].MetricKey != "crash_event" || created.Guardrails[0].MetricRef.DefinitionHash == "" {
+		t.Fatalf("metric reference not frozen: %+v", created)
+	}
+	version := created.RegistrationVersion
+	created.PrimaryMetricRef.Key = "tampered"
+	created.Guardrails[0].MetricRef.Key = "tampered"
+	reread, err := store.GetExperiment(created.ID)
+	if err != nil || reread.PrimaryMetricRef.Key != primary.Key || reread.Guardrails[0].MetricRef.Key != guard.Key || reread.RegistrationVersion != version {
+		t.Fatalf("registration contract mutated: %+v, %v", reread, err)
+	}
+	if _, err := store.DeprecateMetricDefinition(ws.ID, primary); err != nil {
+		t.Fatal(err)
+	}
+	newExperiment := baseP5Experiment(ws.ID, env.ID, MetricSpec{})
+	newExperiment.Epoch = 2
+	newExperiment.PrimaryMetricRef = &primary
+	if _, err := store.CreateExperiment(newExperiment); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("deprecated version accepted: %v", err)
 	}
 }

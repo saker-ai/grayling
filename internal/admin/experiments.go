@@ -26,6 +26,10 @@ func (s *Service) CreateExperiment(actor Actor, workspaceID, environmentID strin
 		return nil, err
 	}
 	exp.WorkspaceID, exp.EnvironmentID = env.WorkspaceID, env.ID
+	exp, err = s.Store.ResolveExperimentMetricRefs(exp)
+	if err != nil {
+		return nil, err
+	}
 
 	// The flag must exist and be published: experiments bind to a concrete
 	// flag revision, not to a draft.
