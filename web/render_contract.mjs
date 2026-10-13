@@ -47,6 +47,7 @@ function render(report) {
 
 const base = {
   healthy: true, epoch: 1, state: 'running', minRuntimeSatisfied: true, analysisMethod: 'welch',
+  primaryAttributionWindow: 3_600_000_000_000,
   window: { version: 'utc-exposure-v1', start: '2026-10-01T00:00:00Z', end: '2026-10-02T00:00:00Z',
     watermark: '2026-10-02T00:00:00Z', complete: true, backend: 'postgresql-raw', recomputable: true },
   srm: { chiSquare: 0.1, pValue: 0.75, healthy: true, observed: [500, 500], expected: [500, 500] },
@@ -68,6 +69,7 @@ assert(html.includes('Analysis window (UTC)') && html.includes('Data watermark')
 assert(html.includes('anytime-valid p'), 'sequential anytime-valid p missing');
 assert(html.includes('not the decision gate'), 'sequential separation note missing');
 assert(html.includes('Bayesian'), 'bayesian heading missing');
+assert(html.includes('Attribution window'), 'frozen primary attribution window missing');
 assert(html.includes('P(B&gt;A)'), 'bayesian probability-of-superiority missing');
 assert(html.includes('expected loss'), 'bayesian expected loss missing');
 assert(html.includes('separate from frequentist'), 'bayesian separation note missing');

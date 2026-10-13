@@ -47,6 +47,34 @@ func TestJourneyReplayOrderDuplicatesSessionsAndWatermark(t *testing.T) {
 	}
 }
 
+func TestJourneyUsesFrozenAttributionWindow(t *testing.T) {
+	start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	window := platform.AnalysisWindowStatus{Start: start, End: start.Add(72 * time.Hour),
+		Watermark: start.Add(5 * 24 * time.Hour)}
+	exp := &platform.Experiment{Variants: []string{"a", "b"}}
+	events := []*platform.Event{
+		{EventID: "exposure", Type: platform.EventExposure, Variant: "a", UnitHash: "u1", Source: "split", ClientTime: start},
+		{EventID: "view", Type: platform.EventConversion, Variant: "a", UnitHash: "u1", MetricKey: "view", ClientTime: start.Add(10 * time.Minute)},
+		{EventID: "pay", Type: platform.EventConversion, Variant: "a", UnitHash: "u1", MetricKey: "pay", ClientTime: start.Add(70 * time.Minute)},
+		{EventID: "return", Type: platform.EventConversion, Variant: "a", UnitHash: "u1", MetricKey: "return", ClientTime: start.Add(36 * time.Hour)},
+	}
+	funnel := &platform.FunnelSpec{Steps: []string{"view", "pay"}, DedupUnit: "user", StepTimeout: 2 * time.Hour}
+	short := buildJourneyWithAttribution(exp, "funnel", "checkout", funnel, nil, events, window, time.Hour)
+	long := buildJourneyWithAttribution(exp, "funnel", "checkout", funnel, nil, events, window, 2*time.Hour)
+	if short.Arms[0].Denominator != 1 || short.Arms[0].Numerator != 0 ||
+		short.Arms[0].Excluded["attribution_window_expired"] != 1 || long.Arms[0].Numerator != 1 {
+		t.Fatalf("funnel attribution: short=%+v long=%+v", short.Arms[0], long.Arms[0])
+	}
+	retention := &platform.RetentionSpec{ReturnKey: "return", Day: 1, Timezone: "UTC"}
+	shortRetention := buildJourneyWithAttribution(exp, "retention", "d1", nil, retention, events, window, 24*time.Hour)
+	longRetention := buildJourneyWithAttribution(exp, "retention", "d1", nil, retention, events, window, 48*time.Hour)
+	if shortRetention.Arms[0].Denominator != 0 || shortRetention.Arms[0].Immature != 1 ||
+		shortRetention.Arms[0].Excluded["attribution_window_short"] != 1 ||
+		longRetention.Arms[0].Numerator != 1 {
+		t.Fatalf("retention attribution: short=%+v long=%+v", shortRetention.Arms[0], longRetention.Arms[0])
+	}
+}
+
 func TestRetentionCalendarDayAndImmatureCohorts(t *testing.T) {
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {

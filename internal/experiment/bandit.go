@@ -44,11 +44,20 @@ func BuildBanditReport(store *platform.Store, exp *platform.Experiment, now time
 	if exp.Bandit == nil || len(exp.Variants) != 2 {
 		return nil, fmt.Errorf("bandit: expected registered two-arm policy")
 	}
+	if exp.PrimaryMetricRef != nil {
+		if err := store.ValidateFrozenMetricRef(exp.WorkspaceID, *exp.PrimaryMetricRef); err != nil {
+			return nil, fmt.Errorf("bandit: primary metric: %w", err)
+		}
+	}
 	events, err := store.BanditEvents(exp, now)
 	if err != nil {
 		return nil, err
 	}
-	report := replayBanditReport(exp, events, now)
+	attributionWindow, err := frozenAttributionWindow(store, exp, exp.PrimaryMetricRef)
+	if err != nil {
+		return nil, err
+	}
+	report := replayBanditReportWithAttribution(exp, events, now, attributionWindow)
 	if report.Diagnostics != nil {
 		if err := attachCollectionCounts(store, exp, report.Diagnostics); err != nil {
 			return nil, err
@@ -58,6 +67,11 @@ func BuildBanditReport(store *platform.Store, exp *platform.Experiment, now time
 }
 
 func replayBanditReport(exp *platform.Experiment, events []*platform.Event, now time.Time) *Report {
+	return replayBanditReportWithAttribution(exp, events, now, exp.AnalysisWindow)
+}
+
+func replayBanditReportWithAttribution(exp *platform.Experiment, events []*platform.Event,
+	now time.Time, attributionWindow time.Duration) *Report {
 	watermark := now.UTC().Add(-exp.Bandit.FeedbackDelay)
 	windowStart := exp.CreatedAt
 	if exp.StartedAt != nil {
@@ -65,7 +79,8 @@ func replayBanditReport(exp *platform.Experiment, events []*platform.Event, now 
 	}
 	rep := &Report{ExperimentID: exp.ID, Epoch: exp.Epoch, FlagKey: exp.FlagKey,
 		State: exp.State, GeneratedAt: now.UTC(), AnalysisMethod: "bandit-beta-bernoulli",
-		RegistrationVersion: exp.RegistrationVersion, PrimaryMetricRef: exp.PrimaryMetricRef,
+		PrimaryAttributionWindow: attributionWindow,
+		RegistrationVersion:      exp.RegistrationVersion, PrimaryMetricRef: exp.PrimaryMetricRef,
 		Control: exp.Variants[0], Treatment: exp.Variants[1],
 		Window: platform.AnalysisWindowStatus{Version: "bandit-feedback-v1", Start: windowStart,
 			End: now.UTC(), Watermark: watermark, Backend: "raw-events", Recomputable: true, Complete: true}}
@@ -158,7 +173,7 @@ func replayBanditReport(exp *platform.Experiment, events []*platform.Event, now 
 		}
 		u := units[ev.UnitHash]
 		if u == nil || ev.Variant != exp.Variants[u.arm] || ev.ClientTime.Before(u.at) ||
-			!ev.ClientTime.Before(u.at.Add(exp.AnalysisWindow)) {
+			!ev.ClientTime.Before(u.at.Add(attributionWindow)) {
 			continue
 		}
 		u.converted = true

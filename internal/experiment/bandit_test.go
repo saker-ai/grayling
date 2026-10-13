@@ -39,6 +39,11 @@ func TestBanditReplayFeedbackAndInferenceIsolation(t *testing.T) {
 	if rep.Bandit.PosteriorMean[0] != 2.0/3 || rep.Bandit.PosteriorMean[1] != 1.0/3 {
 		t.Fatalf("posterior: %+v", rep.Bandit.PosteriorMean)
 	}
+	short := replayBanditReportWithAttribution(exp, events, now, 30*time.Minute)
+	if short.PrimaryAttributionWindow != 30*time.Minute || short.Bandit.Successes[0] != 0 ||
+		short.Bandit.MissingFeedback != 2 {
+		t.Fatalf("short frozen attribution window: %+v", short.Bandit)
+	}
 	state := PublishedBanditState(exp, rep.Bandit)
 	if state.StateVersion == 0 || state.PolicyVersion != "p1" || state.Watermark != now.Add(-96*time.Hour) {
 		t.Fatalf("published state: %+v", state)

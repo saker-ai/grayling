@@ -134,6 +134,7 @@ func (s *Store) AnalysisStore(exp *Experiment, now time.Time) (*Store, AnalysisW
 			status.Issues = append(status.Issues, "late-event watermark has not reached window end")
 		}
 		view := buildAnalysisStore(events, status)
+		view.rawAnalysisEvents = events
 		status.Complete = len(status.Issues) == 0
 		return view, status, nil
 	}
@@ -155,6 +156,24 @@ func (s *Store) AnalysisEventSnapshot(exp *Experiment, now time.Time) ([]*Event,
 }
 
 func buildAnalysisStore(events []*Event, window AnalysisWindowStatus) *Store {
+	return buildAnalysisStoreWithAttribution(events, window, window.End.Sub(window.Start))
+}
+
+// ReplayAttributionWindow keeps the experiment's enrollment window and
+// randomized population while bounding conversion attribution for one frozen
+// metric definition. The durable analysis view retains its full raw snapshot,
+// including events beyond the bounded in-memory working set.
+func (s *Store) ReplayAttributionWindow(exp *Experiment, window AnalysisWindowStatus,
+	attributionWindow time.Duration) *Store {
+	events := s.rawAnalysisEvents
+	if events == nil {
+		events = s.EventsForExperiment(exp.WorkspaceID, exp.EnvironmentID, exp.ID, exp.Epoch, "")
+	}
+	return buildAnalysisStoreWithAttribution(events, window, attributionWindow)
+}
+
+func buildAnalysisStoreWithAttribution(events []*Event, window AnalysisWindowStatus,
+	attributionWindow time.Duration) *Store {
 	view := &Store{data: newData()}
 	type unitKey struct{ variant, unit string }
 	exposures := make(map[unitKey]time.Time)
@@ -191,7 +210,7 @@ func buildAnalysisStore(events []*Event, window AnalysisWindowStatus) *Store {
 			continue
 		}
 		// The pre-registered duration also bounds attribution per exposure.
-		if !ev.ClientTime.Before(first.Add(window.End.Sub(window.Start))) {
+		if !ev.ClientTime.Before(first.Add(attributionWindow)) {
 			continue
 		}
 		view.appendEventLocked(ev)

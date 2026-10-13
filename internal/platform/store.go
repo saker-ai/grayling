@@ -98,12 +98,15 @@ type Data struct {
 // PostgreSQL for production — docs/技术方案.md §3, §10.2).
 type Store struct {
 	banditPins map[string]*Event
-	mu         sync.RWMutex
-	persist    Persistence
-	dedup      eventDedup // optional backend dedup ledger (PostgreSQL)
-	changes    *ChangeSet
-	data       *Data
-	syncStats  syncMetrics
+	// rawAnalysisEvents retains the full immutable ledger snapshot for one
+	// report replay. It is populated only on short-lived analysis views.
+	rawAnalysisEvents []*Event
+	mu                sync.RWMutex
+	persist           Persistence
+	dedup             eventDedup // optional backend dedup ledger (PostgreSQL)
+	changes           *ChangeSet
+	data              *Data
+	syncStats         syncMetrics
 }
 
 const dataSchemaVersion = 1

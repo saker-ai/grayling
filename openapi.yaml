@@ -3964,6 +3964,10 @@ components:
           format: date-time
         window:
           $ref: "#/components/schemas/AnalysisWindowStatus"
+        primaryAttributionWindow:
+          type: integer
+          format: int64
+          description: 主指标冻结的曝光后归因窗口，纳秒；旧内联指标等于实验分析窗口。
         exposureMode:
           type: string
           enum: [onDecision, onRender]

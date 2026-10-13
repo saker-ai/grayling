@@ -26,14 +26,15 @@ import (
 
 // Report is the full analysis output for one experiment epoch.
 type Report struct {
-	ExperimentID string                        `json:"experimentId"`
-	Epoch        int64                         `json:"epoch"`
-	FlagKey      string                        `json:"flagKey"`
-	State        model.ExperimentState         `json:"state"`
-	GeneratedAt  time.Time                     `json:"generatedAt"`
-	Window       platform.AnalysisWindowStatus `json:"window"`
-	ExposureMode string                        `json:"exposureMode,omitempty"`
-	Diagnostics  *Diagnostics                  `json:"diagnostics,omitempty"`
+	ExperimentID             string                        `json:"experimentId"`
+	Epoch                    int64                         `json:"epoch"`
+	FlagKey                  string                        `json:"flagKey"`
+	State                    model.ExperimentState         `json:"state"`
+	GeneratedAt              time.Time                     `json:"generatedAt"`
+	Window                   platform.AnalysisWindowStatus `json:"window"`
+	PrimaryAttributionWindow time.Duration                 `json:"primaryAttributionWindow,omitzero"`
+	ExposureMode             string                        `json:"exposureMode,omitempty"`
+	Diagnostics              *Diagnostics                  `json:"diagnostics,omitempty"`
 
 	AnalysisMethod string  `json:"analysisMethod"`
 	Alpha          float64 `json:"alpha"`
@@ -182,6 +183,20 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	if err != nil {
 		return nil, fmt.Errorf("experiment %s: build analysis window: %w", experimentID, err)
 	}
+	primaryWindow, err := frozenAttributionWindow(store, exp, exp.PrimaryMetricRef)
+	if err != nil {
+		return nil, err
+	}
+	analysisViews := map[time.Duration]*platform.Store{exp.AnalysisWindow: analysis}
+	viewForWindow := func(duration time.Duration) *platform.Store {
+		if view := analysisViews[duration]; view != nil {
+			return view
+		}
+		view := analysis.ReplayAttributionWindow(exp, window, duration)
+		analysisViews[duration] = view
+		return view
+	}
+	primaryAnalysis := viewForWindow(primaryWindow)
 
 	rep := &Report{
 		ExperimentID: exp.ID, Epoch: exp.Epoch, FlagKey: exp.FlagKey,
@@ -189,8 +204,9 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		ExposureMode:   exp.ExposureMode,
 		AnalysisMethod: exp.AnalysisMethod, Alpha: exp.Alpha, MDE: exp.MDE,
 		Control: control, Treatment: treatment, Window: window,
-		RegistrationVersion: exp.RegistrationVersion,
-		PrimaryMetricRef:    exp.PrimaryMetricRef,
+		PrimaryAttributionWindow: primaryWindow,
+		RegistrationVersion:      exp.RegistrationVersion,
+		PrimaryMetricRef:         exp.PrimaryMetricRef,
 	}
 	if exp.ExposureMode == "onRender" {
 		rep.Diagnostics = buildDiagnostics(exp, analysis.EventsForExperiment(exp.WorkspaceID,
@@ -245,7 +261,7 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	// metric for quantile, the outcome for a CUPED-adjusted mean. Ratio and
 	// CUPED fetch their second metric (denominator / covariate) as well.
 	wsID, envID := exp.WorkspaceID, exp.EnvironmentID
-	primaryAgg := analysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.Key)
+	primaryAgg := primaryAnalysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.Key)
 
 	var (
 		ctrlProp, treatProp   stats.ProportionStats
@@ -256,12 +272,16 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 	)
 	switch exp.PrimaryMetric.Type {
 	case "funnel", "retention":
-		section := buildJourney(exp, exp.PrimaryMetric.Type, exp.PrimaryMetric.Key, exp.PrimaryMetric.Funnel,
-			exp.PrimaryMetric.Retention, journeyEvents, window)
+		section := buildJourneyWithAttribution(exp, exp.PrimaryMetric.Type, exp.PrimaryMetric.Key, exp.PrimaryMetric.Funnel,
+			exp.PrimaryMetric.Retention, journeyEvents, window, primaryWindow)
 		rep.Journeys = append(rep.Journeys, section)
 		ctrlProp, treatProp = journeyStats(section, control, treatment)
 		convCtrl, convTreat = ctrlProp.Conversions, treatProp.Conversions
 		for _, arm := range section.Arms {
+			if arm.Excluded["attribution_window_short"] > 0 {
+				rep.HealthIssues = append(rep.HealthIssues,
+					fmt.Sprintf("%s attribution window cannot cover retention day for %s", section.Metric, arm.Variant))
+			}
 			if arm.Immature > 0 {
 				rep.HealthIssues = append(rep.HealthIssues, fmt.Sprintf("%s %s has %d immature cohorts", section.Metric, arm.Variant, arm.Immature))
 			}
@@ -283,9 +303,9 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		}
 		numAgg := primaryAgg
 		if numKey != exp.PrimaryMetric.Key {
-			numAgg = analysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, numKey)
+			numAgg = primaryAnalysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, numKey)
 		}
-		denAgg := analysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.DenominatorKey)
+		denAgg := primaryAnalysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.DenominatorKey)
 		ctrlRatio, treatRatio = buildRatioStats(numAgg, denAgg, splitSets, control, treatment)
 		convCtrl, convTreat = ctrlRatio.N, treatRatio.N
 	case "quantile":
@@ -310,7 +330,7 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 				byVariant[variant].PrimaryValue = value.(stats.MeanStats).Mean()
 			}
 		case "ratio":
-			_, count := buildRatioStats(primaryAgg, analysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.DenominatorKey), splitSets, control, variant)
+			_, count := buildRatioStats(primaryAgg, primaryAnalysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.DenominatorKey), splitSets, control, variant)
 			byVariant[variant].ConvertedUnits = count.N
 		case "quantile":
 			_, vals := buildQuantileValues(primaryAgg, splitSets, control, variant)
@@ -422,7 +442,7 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		// data exists; otherwise (or on insufficient pairs) fall back to Welch.
 		cupedDone := false
 		if exp.PrimaryMetric.CovariateKey != "" {
-			covAgg := analysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.CovariateKey)
+			covAgg := primaryAnalysis.MetricAggregate(wsID, envID, exp.ID, exp.Epoch, exp.PrimaryMetric.CovariateKey)
 			cp, tp := buildPairedStats(covAgg, primaryAgg, splitSets, control, treatment)
 			if cp.N >= 2 && tp.N >= 2 {
 				if cres, cerr := stats.CUPEDTest(cp, tp, exp.Alpha); cerr == nil {
@@ -518,12 +538,22 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 
 	// ---- guardrails (operational rules, separate from significance) ----
 	for _, g := range exp.Guardrails {
+		guardWindow, err := frozenAttributionWindow(store, exp, g.MetricRef)
+		if err != nil {
+			return nil, err
+		}
+		guardAnalysis := viewForWindow(guardWindow)
 		var journey *JourneySection
 		if g.Type == "funnel" || g.Type == "retention" {
-			section := buildJourney(exp, g.Type, g.MetricKey, g.Funnel, g.Retention, journeyEvents, window)
+			section := buildJourneyWithAttribution(exp, g.Type, g.MetricKey, g.Funnel, g.Retention,
+				journeyEvents, window, guardWindow)
 			journey = &section
 			rep.Journeys = append(rep.Journeys, section)
 			for _, arm := range section.Arms {
+				if arm.Excluded["attribution_window_short"] > 0 {
+					rep.HealthIssues = append(rep.HealthIssues,
+						fmt.Sprintf("guardrail %s attribution window cannot cover retention day for %s", section.Metric, arm.Variant))
+				}
 				if arm.Immature > 0 {
 					rep.HealthIssues = append(rep.HealthIssues, fmt.Sprintf("guardrail %s %s has %d immature cohorts", section.Metric, arm.Variant, arm.Immature))
 				}
@@ -540,7 +570,7 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 					rep.HealthIssues = append(rep.HealthIssues, "journey guardrail unavailable: "+check.Detail)
 				}
 			} else {
-				check = evaluateGuardrail(analysis, exp, g, control, variant, splitSets)
+				check = evaluateGuardrail(guardAnalysis, exp, g, control, variant, splitSets)
 			}
 			if len(exp.Variants) > 2 {
 				check.Metric += ":" + variant
@@ -611,6 +641,18 @@ func BuildReport(store *platform.Store, experimentID string, now time.Time) (*Re
 		}
 	}
 	return rep, nil
+}
+
+func frozenAttributionWindow(store *platform.Store, exp *platform.Experiment,
+	ref *platform.MetricRef) (time.Duration, error) {
+	if ref == nil {
+		return exp.AnalysisWindow, nil
+	}
+	def, err := store.GetMetricDefinition(exp.WorkspaceID, *ref)
+	if err != nil {
+		return 0, fmt.Errorf("experiment %s metric %s: %w", exp.ID, ref.Key, err)
+	}
+	return def.AttributionWindow, nil
 }
 
 // adjustDirection flips the sign for "lower is better" metrics so the

@@ -1272,7 +1272,9 @@ function metricReferenceSummary(r) {
   const ref = r.primaryMetricRef;
   return '<div class="muted">' + esc(t('report.metricVersion')) + ': ' +
     (ref ? '<span class="mono">' + esc(ref.key) + ' v' + esc(ref.version) + ' · ' + esc(shortHash(ref.definitionHash)) + '</span>' :
-      esc(t('report.legacyInline'))) + '</div>';
+      esc(t('report.legacyInline'))) +
+    (r.primaryAttributionWindow ? ' · ' + esc(t('report.attributionWindow')) + ': ' + esc(fmtDurNs(r.primaryAttributionWindow)) : '') +
+    '</div>';
 }
 
 async function viewExpDiagnostics(m, experiment, path) {

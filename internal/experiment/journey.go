@@ -34,6 +34,13 @@ type journeyUnit struct{ variant, unit string }
 
 func buildJourney(exp *platform.Experiment, typ, key string, funnel *platform.FunnelSpec,
 	retention *platform.RetentionSpec, events []*platform.Event, window platform.AnalysisWindowStatus) JourneySection {
+	return buildJourneyWithAttribution(exp, typ, key, funnel, retention, events, window,
+		window.End.Sub(window.Start))
+}
+
+func buildJourneyWithAttribution(exp *platform.Experiment, typ, key string, funnel *platform.FunnelSpec,
+	retention *platform.RetentionSpec, events []*platform.Event, window platform.AnalysisWindowStatus,
+	attributionWindow time.Duration) JourneySection {
 	section := JourneySection{Metric: key, Type: typ, Funnel: funnel, Retention: retention, Watermark: window.Watermark}
 	ordered := slices.Clone(events)
 	slices.SortFunc(ordered, func(a, b *platform.Event) int {
@@ -61,9 +68,9 @@ func buildJourney(exp *platform.Experiment, typ, key string, funnel *platform.Fu
 	for _, variant := range exp.Variants {
 		arm := JourneyArm{Variant: variant, Excluded: map[string]int64{}}
 		if typ == "funnel" {
-			buildFunnelArm(&arm, funnel, ordered, exposed, window)
+			buildFunnelArm(&arm, funnel, ordered, exposed, window, attributionWindow)
 		} else {
-			buildRetentionArm(&arm, retention, ordered, exposed, window)
+			buildRetentionArm(&arm, retention, ordered, exposed, window, attributionWindow)
 		}
 		section.Arms = append(section.Arms, arm)
 	}
@@ -71,10 +78,14 @@ func buildJourney(exp *platform.Experiment, typ, key string, funnel *platform.Fu
 }
 
 func buildFunnelArm(arm *JourneyArm, spec *platform.FunnelSpec, events []*platform.Event,
-	exposed map[journeyUnit]time.Time, window platform.AnalysisWindowStatus) {
+	exposed map[journeyUnit]time.Time, window platform.AnalysisWindowStatus,
+	attributionWindow time.Duration) {
 	groups := map[string][]*platform.Event{}
 	for _, ev := range events {
 		if ev.Type != platform.EventConversion || ev.Variant != arm.Variant || ev.ClientTime.Before(window.Start) || !ev.ClientTime.Before(window.End) {
+			continue
+		}
+		if !slices.Contains(spec.Steps, ev.MetricKey) {
 			continue
 		}
 		at, ok := exposed[journeyUnit{ev.Variant, ev.UnitHash}]
@@ -82,7 +93,8 @@ func buildFunnelArm(arm *JourneyArm, spec *platform.FunnelSpec, events []*platfo
 			arm.Excluded["not_randomized_or_before_exposure"]++
 			continue
 		}
-		if !slices.Contains(spec.Steps, ev.MetricKey) {
+		if !ev.ClientTime.Before(at.Add(attributionWindow)) {
+			arm.Excluded["attribution_window_expired"]++
 			continue
 		}
 		group := ev.UnitHash
@@ -130,7 +142,8 @@ func buildFunnelArm(arm *JourneyArm, spec *platform.FunnelSpec, events []*platfo
 }
 
 func buildRetentionArm(arm *JourneyArm, spec *platform.RetentionSpec, events []*platform.Event,
-	exposed map[journeyUnit]time.Time, window platform.AnalysisWindowStatus) {
+	exposed map[journeyUnit]time.Time, window platform.AnalysisWindowStatus,
+	attributionWindow time.Duration) {
 	loc, _ := time.LoadLocation(spec.Timezone) // checked at registration
 	byUnit := map[string][]*platform.Event{}
 	for _, ev := range events {
@@ -147,7 +160,8 @@ func buildRetentionArm(arm *JourneyArm, spec *platform.RetentionSpec, events []*
 			cohortAt = time.Time{}
 			for _, ev := range byUnit[k.unit] {
 				if ev.Type == platform.EventConversion && ev.Variant == k.variant && ev.UnitHash == k.unit &&
-					ev.MetricKey == spec.CohortKey && !ev.ClientTime.Before(exposureAt) && ev.ClientTime.Before(window.End) {
+					ev.MetricKey == spec.CohortKey && !ev.ClientTime.Before(exposureAt) &&
+					ev.ClientTime.Before(window.End) && ev.ClientTime.Before(exposureAt.Add(attributionWindow)) {
 					cohortAt = ev.ClientTime
 					break
 				}
@@ -160,6 +174,11 @@ func buildRetentionArm(arm *JourneyArm, spec *platform.RetentionSpec, events []*
 		local := cohortAt.In(loc)
 		start := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, spec.Day)
 		end := start.AddDate(0, 0, 1)
+		if exposureAt.Add(attributionWindow).Before(end) {
+			arm.Immature++
+			arm.Excluded["attribution_window_short"]++
+			continue
+		}
 		if window.Watermark.Before(end) {
 			arm.Immature++
 			arm.Excluded["immature_cohort"]++
@@ -169,7 +188,8 @@ func buildRetentionArm(arm *JourneyArm, spec *platform.RetentionSpec, events []*
 		found := false
 		for _, ev := range byUnit[k.unit] {
 			if ev.Type == platform.EventConversion && ev.Variant == k.variant && ev.UnitHash == k.unit &&
-				ev.MetricKey == spec.ReturnKey && !ev.ClientTime.Before(start) && ev.ClientTime.Before(end) && !ev.ClientTime.Before(cohortAt) {
+				ev.MetricKey == spec.ReturnKey && !ev.ClientTime.Before(start) && ev.ClientTime.Before(end) &&
+				!ev.ClientTime.Before(cohortAt) && ev.ClientTime.Before(exposureAt.Add(attributionWindow)) {
 				found = true
 				break
 			}

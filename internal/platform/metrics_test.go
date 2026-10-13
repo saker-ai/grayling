@@ -161,8 +161,9 @@ func TestExperimentFreezesPublishedMetricReferences(t *testing.T) {
 	long := baseP5Experiment(ws.ID, env.ID, MetricSpec{})
 	long.AnalysisWindow = 14 * 24 * time.Hour
 	long.PrimaryMetricRef = &primary
-	if _, err := store.CreateExperiment(long); !errors.Is(err, ErrValidation) {
-		t.Fatalf("different analysis window accepted for catalog metric: %v", err)
+	if resolved, err := store.ResolveExperimentMetricRefs(long); err != nil ||
+		resolved.PrimaryMetric.Key != "activation_complete" {
+		t.Fatalf("shorter attribution window rejected: %+v, %v", resolved, err)
 	}
 	exp := baseP5Experiment(ws.ID, env.ID, MetricSpec{})
 	exp.AnalysisWindow = 7 * 24 * time.Hour

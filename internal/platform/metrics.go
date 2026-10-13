@@ -198,12 +198,8 @@ func (s *Store) resolveExperimentMetricRefsLocked(exp *Experiment) error {
 		if def.Status != MetricPublished {
 			return nil, fmt.Errorf("%w: metric %s v%d is not published", ErrInvalidState, ref.Key, ref.Version)
 		}
-		// The current report population uses the experiment's window for
-		// conversion attribution. Until per-metric replay is implemented,
-		// requiring equality prevents a catalog version from silently
-		// producing results with a different window than it declares.
-		if exp.AnalysisWindow <= 0 || def.AttributionWindow != exp.AnalysisWindow {
-			return nil, fmt.Errorf("%w: metric %s attribution window must match experiment analysis window", ErrValidation, ref.Key)
+		if exp.AnalysisWindow <= 0 || def.AttributionWindow > exp.AnalysisWindow {
+			return nil, fmt.Errorf("%w: metric %s attribution window exceeds experiment analysis window", ErrValidation, ref.Key)
 		}
 		retention := s.quotasLocked(exp.WorkspaceID).EventRetention
 		headroom := maxLateWindow + 7*24*time.Hour
