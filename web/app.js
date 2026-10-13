@@ -1263,6 +1263,30 @@ function metricReferenceSummary(r) {
       esc(t('report.legacyInline'))) + '</div>';
 }
 
+function renderDiagnostics(d) {
+  if (!d) return '';
+  const srm = (label, value) => '<div>' + esc(label) + ': ' +
+    (value ? 'p = ' + esc(value.pValue ?? '—') + ' ' +
+      chip(value.healthy ? t('chip.noSrm') : t('chip.srmDetected'), value.healthy ? 'green' : 'red') :
+      esc(t('report.srmInsufficient'))) + '</div>';
+  return '<section aria-label="' + esc(t('report.deliveryDiagnostics')) + '">' +
+    '<h4>' + esc(t('report.deliveryDiagnostics')) + '</h4>' +
+    '<p class="muted">' + esc(t('report.deliveryExplanation')) + '</p>' +
+    '<div class="row">' + srm(t('report.assignmentSrm'), d.assignmentSrm) +
+      srm(t('report.exposureSrm'), d.exposureSrm) + '</div>' +
+    '<table class="grid"><thead><tr><th>' + esc(t('th.variant')) + '</th><th>' +
+      esc(t('report.assignments')) + '</th><th>' + esc(t('report.exposures')) +
+      '</th><th>' + esc(t('report.unexposed')) + '</th><th>' +
+      esc(t('th.converted')) + '</th></tr></thead><tbody>' +
+      (d.perVariant || []).map(v => '<tr><td class="mono">' + esc(v.variant) +
+        '</td><td>' + esc(v.assignments) + '</td><td>' + esc(v.exposures) +
+        '</td><td>' + esc(v.unexposed) + '</td><td>' + esc(v.conversions) + '</td></tr>').join('') +
+      '</tbody></table>' +
+    '<div>' + esc(t('report.crossVariantUnits')) + ': ' + esc(d.crossVariantUnits) +
+      ' · ' + esc(t('report.assignmentMismatch')) + ': ' + esc(d.assignmentMismatch) + '</div>' +
+    '</section>';
+}
+
 function renderReport(box, r) {
   if (r.bandit) { renderBanditReport(box, r); return; }
   const p = r.primary, d = r.decision || {}, srm = r.srm;
@@ -1273,6 +1297,7 @@ function renderReport(box, r) {
       : '<div class="banner err"><b>' + esc(t('report.unhealthy')) + '</b><ul>' +
         (r.healthIssues || []).map(i => '<li>' + esc(i) + '</li>').join('') + '</ul></div>') +
     metricReferenceSummary(r) +
+    renderDiagnostics(r.diagnostics) +
     '<div class="row">' + chip(r.minRuntimeSatisfied ? t('chip.minRuntimeOk') : t('chip.minRuntimeNo'), r.minRuntimeSatisfied ? 'green' : 'amber') +
     ' ' + chip(r.analysisMethod || '—', 'gray') + '</div>' +
     (window ? '<h4>' + esc(t('report.window')) + '</h4>' +

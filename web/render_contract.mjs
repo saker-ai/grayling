@@ -75,6 +75,17 @@ const incomplete = render({ ...base, healthy: false, healthIssues: ['watermark p
   window: { ...base.window, complete: false, issues: ['watermark pending'] } });
 assert(incomplete.includes('Incomplete') && incomplete.includes('watermark pending'), 'incomplete window reason missing');
 
+const delivery = render({ ...base, healthy: false, healthIssues: ['delivery skew'],
+  diagnostics: { assignmentSrm: { healthy: true, pValue: 0.8 },
+    exposureSrm: { healthy: false, pValue: 0.00001 }, crossVariantUnits: 2,
+    assignmentMismatch: 1, perVariant: [
+      { variant: 'control', assignments: 100, exposures: 100, unexposed: 0, conversions: 12 },
+      { variant: 'treatment', assignments: 100, exposures: 20, unexposed: 80, conversions: 3 },
+    ] } });
+assert(delivery.includes('Assignment SRM') && delivery.includes('Exposure SRM') &&
+  delivery.includes('Not exposed') && delivery.includes('delivery skew') && delivery.includes('80'),
+  'delivery diagnostics or distinct SRM checks missing');
+
 const journey = render({ ...base, healthy: false, healthIssues: ['immature cohorts'],
   journeys: [{ metric: 'd1', type: 'retention', watermark: '2026-10-02T00:00:00Z',
     retention: { returnKey: 'visit', day: 1, timezone: 'UTC' },
