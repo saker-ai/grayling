@@ -1279,6 +1279,7 @@ async function viewExpCreate(m) {
     '<div class="form-grid">' +
       '<label class="field">' + esc(t('exp.flagKey')) + '<input id="x-flag" placeholder="my-flag"></label>' +
     '</div>' +
+    '<div id="x-flag-check" role="status" aria-live="polite"></div>' +
     '<label class="field">' + esc(t('exp.hypothesis')) + '<textarea id="x-hyp" rows="2"></textarea></label></div>' +
     '<div class="wizard-step" data-step="1" hidden><h3 tabindex="-1">' + esc(t('exp.wizard.split')) + '</h3>' +
     '<div class="form-grid">' +
@@ -1340,6 +1341,29 @@ async function viewExpCreate(m) {
     '</section>';
   const vars = $('#x-vars', m), guards = $('#x-guards', m);
   let step = 0;
+  let flagView = null;
+  const checkWizardFlag = async () => {
+    const key = $('#x-flag', m).value.trim();
+    const box = $('#x-flag-check', m);
+    box.textContent = t('exp.flagCheckLoading');
+    try {
+      const view = await api(scopePath() + '/flags/' + encodeURIComponent(key));
+      if (!m.isConnected || $('#x-flag', m)?.value.trim() !== key) return false;
+      flagView = view.current ? view : null;
+      box.innerHTML = flagView ? '<div class="banner ok">' +
+        esc(t('exp.flagCheckReady', { n: view.currentRevision,
+          variants: Object.keys(view.current.content?.variations || {}).join(', ') })) + '</div>' :
+        '<div class="banner warn">' + esc(t('exp.flagCheckUnpublished', { key })) +
+        ' <button type="button" class="btn sm" id="x-open-flag">' + esc(t('exp.flagOpen')) + '</button></div>';
+      return !!flagView;
+    } catch (error) {
+      if (!m.isConnected || $('#x-flag', m)?.value.trim() !== key) return false;
+      flagView = null;
+      box.innerHTML = '<div class="banner warn">' + esc(t('exp.flagCheckFailed')) +
+        ' ' + esc(errMsg(error)) + '</div>';
+      return false;
+    }
+  };
   const showWizardError = (message, field) => {
     const error = $('#x-error', m);
     error.textContent = message;
@@ -1358,6 +1382,9 @@ async function viewExpCreate(m) {
       }));
       if (variants.length < 2 || variants.some(v => !v.name)) return [t('toast.need2variants'), 'x-add-var'];
       if (new Set(variants.map(v => v.name)).size !== variants.length) return [t('exp.wizardDuplicateVariant'), 'x-vars'];
+      const published = flagView?.current?.content?.variations || {};
+      const unknown = variants.find(v => !Object.hasOwn(published, v.name));
+      if (flagView && unknown) return [t('exp.flagVariantMissing', { name: unknown.name }), 'x-vars'];
       const sum = variants.reduce((total, v) => total + v.proportion, 0);
       if (variants.some(v => !Number.isFinite(v.proportion) || v.proportion <= 0) || Math.abs(sum - 100) > 0.01)
         return [t('toast.propSum', { sum }), 'x-vars'];
@@ -1408,6 +1435,7 @@ async function viewExpCreate(m) {
       const guardKeys = $$('.g-key', guards).map(input => input.value.trim()).filter(Boolean);
       $('#x-review', m).innerHTML = '<h4>' + esc(t('exp.wizardContract')) + '</h4><dl class="kv">' +
         '<dt>' + esc(t('exp.flagKey')) + '</dt><dd>' + esc($('#x-flag', m).value.trim()) + '</dd>' +
+        '<dt>' + esc(t('exp.flagRevision')) + '</dt><dd>r' + esc(flagView?.currentRevision || 0) + '</dd>' +
         '<dt>' + esc(t('exp.hypothesis')) + '</dt><dd>' + esc($('#x-hyp', m).value.trim()) + '</dd>' +
         '<dt>' + esc(t('exp.unit')) + '</dt><dd>' + esc($('#x-unit', m).value.trim()) + '</dd>' +
         '<dt>' + esc(t('exp.eligShort')) + '</dt><dd>' + esc($('#x-elig', m).value || '100') + '%</dd>' +
@@ -1426,11 +1454,28 @@ async function viewExpCreate(m) {
     if (focus) $('.wizard-step:not([hidden]) h3', m)?.focus();
   };
   $('#x-prev', m).onclick = () => showWizardStep(step - 1);
-  $('#x-next', m).onclick = () => {
+  $('#x-next', m).onclick = async () => {
     const error = validateWizardStep(step);
     if (error) { showWizardError(...error); return; }
+    if (step === 0) {
+      const button = $('#x-next', m);
+      button.disabled = true;
+      const ready = await checkWizardFlag();
+      if (!button.isConnected) return;
+      button.disabled = false;
+      if (!ready) { showWizardError(t('exp.flagCheckBlocked'), 'x-flag'); return; }
+    }
     showWizardStep(step + 1);
   };
+  $('#x-flag', m).addEventListener('input', () => {
+    flagView = null;
+    $('#x-flag-check', m).textContent = '';
+  });
+  m.addEventListener('click', event => {
+    if (event.target.id !== 'x-open-flag' || !confirmLeaveEditor()) return;
+    S.expCreate = false; S.wizardDirty = false; S.view = 'flags';
+    S.flagKey = $('#x-flag', m).value.trim(); S.flagNew = false; route();
+  });
   m.addEventListener('input', () => { S.wizardDirty = true; });
   m.addEventListener('change', () => { S.wizardDirty = true; });
   showWizardStep(0, false);
@@ -1501,91 +1546,99 @@ async function viewExpCreate(m) {
     S.expCreate = false; S.wizardDirty = false; route();
   };
   $('#x-create', m).onclick = async () => {
-    for (let index = 0; index < 5; index++) {
-      const error = validateWizardStep(index);
-      if (error) { showWizardStep(index); showWizardError(...error); return; }
-    }
-    const variants = $$('.vrow', vars)
-      .map(r => ({ name: $('.v-name', r).value.trim(), prop: Number($('.v-prop', r).value) }))
-      .filter(v => v.name);
-    if (variants.length < 2) { toast(t('toast.need2variants'), false); return; }
-    const propSum = variants.reduce((a, v) => a + (v.prop || 0), 0);
-    if (Math.abs(propSum - 100) > 0.01) { toast(t('toast.propSum', { sum: propSum }), false); return; }
-    const proportions = {};
-    variants.forEach(v => { proportions[v.name] = v.prop; });
-    const guardrails = $$('.vrow', guards).map(r => ({
-      metricKey: $('.g-key', r).value.trim(),
-      type: $('.g-type', r).value,
-      direction: $('.g-dir', r).value,
-      maxRelativeRegression: Number($('.g-reg', r).value || 0),
-      minSample: Number($('.g-min', r).value || 0),
-    })).filter(g => g.metricKey);
+    const createButton = $('#x-create', m);
+    if (createButton.disabled) return;
+    createButton.disabled = true;
     try {
-      $$('.vrow', guards).filter(r => $('.g-key', r).value.trim()).forEach((r, i) => {
-        const g = guardrails[i];
-        if (g.type === 'funnel' || g.type === 'retention') g[g.type] = JSON.parse($('.g-journey', r).value);
-      });
-    } catch { toast(t('exp.journeyInvalid'), false); return; }
-    const pm = { key: $('#x-mkey', m).value.trim(), type: $('#x-mtype', m).value, direction: $('#x-mdir', m).value };
-    if (pm.type === 'ratio') {
-      const num = $('#x-numkey', m).value.trim();
-      if (num) pm.numeratorKey = num;
-      pm.denominatorKey = $('#x-denkey', m).value.trim();
-    } else if (pm.type === 'quantile') {
-      pm.quantileLevel = Number($('#x-qlevel', m).value);
-    } else if (pm.type === 'mean') {
-      const cov = $('#x-covkey', m).value.trim();
-      if (cov) pm.covariateKey = cov;
-    } else if (pm.type === 'funnel' || pm.type === 'retention') {
-      try { pm[pm.type] = JSON.parse($('#x-journey', m).value); }
-      catch { toast(t('exp.journeyInvalid'), false); return; }
-    }
-    const body = {
-      flagKey: $('#x-flag', m).value.trim(),
-      unit: $('#x-unit', m).value.trim(),
-      variants: variants.map(v => v.name),
-      proportions,
-      primaryMetric: pm,
-      guardrails,
-      alpha: Number($('#x-alpha', m).value),
-      power: Number($('#x-power', m).value),
-      mde: Number($('#x-mde', m).value),
-      minSamplePerArm: Number($('#x-minsample', m).value),
-      minRuntime: Math.round(Number($('#x-minruntime', m).value) * NS_HOUR),
-      analysisWindow: Math.round(Number($('#x-window', m).value) * NS_DAY),
-      hypothesis: $('#x-hyp', m).value.trim(),
-      exposureMode: $('#x-exposure-mode', m).value,
-    };
-    if (body.exposureMode === 'onRender') {
-      body.exposureTrigger = $('#x-exposure-trigger', m).value.trim();
-      body.integrationOwner = $('#x-integration-owner', m).value.trim();
-    }
-    const selectedMetric = publishedMetrics.find(d => d.key + '/v' + d.version === $('#x-mref', m).value);
-    if (selectedMetric) body.primaryMetricRef = { key: selectedMetric.key, version: selectedMetric.version };
-	body.allocationMode = $('#x-mode', m).value;
-	if (body.allocationMode === 'bandit') {
-	  if (variants.length !== 2 || pm.type !== 'proportion') { toast(t('exp.banditRequiresProportion'), false); return; }
-	  body.bandit = { policyVersion: $('#x-policy-version', m).value.trim(), strategy: $('#x-strategy', m).value,
-	    priorAlpha: Number($('#x-prior-a', m).value), priorBeta: Number($('#x-prior-b', m).value),
-	    epsilon: Number($('#x-epsilon', m).value), feedbackDelay: Math.round(Number($('#x-feedback-delay', m).value) * NS_DAY) };
-	}
-    if (!body.flagKey || !body.primaryMetric.key) { toast(t('toast.flagMetricRequired'), false); return; }
-    if (pm.type === 'ratio' && !pm.denominatorKey) { toast(t('toast.ratioDenominator'), false); return; }
-    if (pm.type === 'quantile' && !(pm.quantileLevel > 0 && pm.quantileLevel < 1)) { toast(t('toast.quantileLevel'), false); return; }
-    const layer = $('#x-layer', m).value.trim();
-    if (layer) body.layer = layer;
-    const elig = $('#x-elig', m).value;
-    if (elig !== '') body.eligibility = Number(elig);
-    const holmText = $('#x-holm', m).value.trim();
-    if (holmText) {
-      try { body.holmFamily = JSON.parse(holmText); }
-      catch (_) { toast(t('exp.holmInvalid'), false); return; }
-    }
-    try {
-      const exp = await api(scopePath() + '/experiments', { method: 'POST', body });
-      toast(t('toast.expCreated', { id: exp.id }));
-      S.expCreate = false; S.wizardDirty = false; S.expId = exp.id; route();
-    } catch (e) { reportError(e); }
+      const ready = await checkWizardFlag();
+      if (!createButton.isConnected) return;
+      if (!ready) { showWizardStep(0); showWizardError(t('exp.flagCheckBlocked'), 'x-flag'); return; }
+      for (let index = 0; index < 5; index++) {
+        const error = validateWizardStep(index);
+        if (error) { showWizardStep(index); showWizardError(...error); return; }
+      }
+      const variants = $$('.vrow', vars)
+        .map(r => ({ name: $('.v-name', r).value.trim(), prop: Number($('.v-prop', r).value) }))
+        .filter(v => v.name);
+      if (variants.length < 2) { toast(t('toast.need2variants'), false); return; }
+      const propSum = variants.reduce((a, v) => a + (v.prop || 0), 0);
+      if (Math.abs(propSum - 100) > 0.01) { toast(t('toast.propSum', { sum: propSum }), false); return; }
+      const proportions = {};
+      variants.forEach(v => { proportions[v.name] = v.prop; });
+      const guardrails = $$('.vrow', guards).map(r => ({
+        metricKey: $('.g-key', r).value.trim(),
+        type: $('.g-type', r).value,
+        direction: $('.g-dir', r).value,
+        maxRelativeRegression: Number($('.g-reg', r).value || 0),
+        minSample: Number($('.g-min', r).value || 0),
+      })).filter(g => g.metricKey);
+      try {
+        $$('.vrow', guards).filter(r => $('.g-key', r).value.trim()).forEach((r, i) => {
+          const g = guardrails[i];
+          if (g.type === 'funnel' || g.type === 'retention') g[g.type] = JSON.parse($('.g-journey', r).value);
+        });
+      } catch { toast(t('exp.journeyInvalid'), false); return; }
+      const pm = { key: $('#x-mkey', m).value.trim(), type: $('#x-mtype', m).value, direction: $('#x-mdir', m).value };
+      if (pm.type === 'ratio') {
+        const num = $('#x-numkey', m).value.trim();
+        if (num) pm.numeratorKey = num;
+        pm.denominatorKey = $('#x-denkey', m).value.trim();
+      } else if (pm.type === 'quantile') {
+        pm.quantileLevel = Number($('#x-qlevel', m).value);
+      } else if (pm.type === 'mean') {
+        const cov = $('#x-covkey', m).value.trim();
+        if (cov) pm.covariateKey = cov;
+      } else if (pm.type === 'funnel' || pm.type === 'retention') {
+        try { pm[pm.type] = JSON.parse($('#x-journey', m).value); }
+        catch { toast(t('exp.journeyInvalid'), false); return; }
+      }
+      const body = {
+        flagKey: $('#x-flag', m).value.trim(),
+        unit: $('#x-unit', m).value.trim(),
+        variants: variants.map(v => v.name),
+        proportions,
+        primaryMetric: pm,
+        guardrails,
+        alpha: Number($('#x-alpha', m).value),
+        power: Number($('#x-power', m).value),
+        mde: Number($('#x-mde', m).value),
+        minSamplePerArm: Number($('#x-minsample', m).value),
+        minRuntime: Math.round(Number($('#x-minruntime', m).value) * NS_HOUR),
+        analysisWindow: Math.round(Number($('#x-window', m).value) * NS_DAY),
+        hypothesis: $('#x-hyp', m).value.trim(),
+        exposureMode: $('#x-exposure-mode', m).value,
+      };
+      if (body.exposureMode === 'onRender') {
+        body.exposureTrigger = $('#x-exposure-trigger', m).value.trim();
+        body.integrationOwner = $('#x-integration-owner', m).value.trim();
+      }
+      const selectedMetric = publishedMetrics.find(d => d.key + '/v' + d.version === $('#x-mref', m).value);
+      if (selectedMetric) body.primaryMetricRef = { key: selectedMetric.key, version: selectedMetric.version };
+      body.allocationMode = $('#x-mode', m).value;
+      if (body.allocationMode === 'bandit') {
+        if (variants.length !== 2 || pm.type !== 'proportion') { toast(t('exp.banditRequiresProportion'), false); return; }
+        body.bandit = { policyVersion: $('#x-policy-version', m).value.trim(), strategy: $('#x-strategy', m).value,
+          priorAlpha: Number($('#x-prior-a', m).value), priorBeta: Number($('#x-prior-b', m).value),
+          epsilon: Number($('#x-epsilon', m).value), feedbackDelay: Math.round(Number($('#x-feedback-delay', m).value) * NS_DAY) };
+      }
+      if (!body.flagKey || !body.primaryMetric.key) { toast(t('toast.flagMetricRequired'), false); return; }
+      if (pm.type === 'ratio' && !pm.denominatorKey) { toast(t('toast.ratioDenominator'), false); return; }
+      if (pm.type === 'quantile' && !(pm.quantileLevel > 0 && pm.quantileLevel < 1)) { toast(t('toast.quantileLevel'), false); return; }
+      const layer = $('#x-layer', m).value.trim();
+      if (layer) body.layer = layer;
+      const elig = $('#x-elig', m).value;
+      if (elig !== '') body.eligibility = Number(elig);
+      const holmText = $('#x-holm', m).value.trim();
+      if (holmText) {
+        try { body.holmFamily = JSON.parse(holmText); }
+        catch (_) { toast(t('exp.holmInvalid'), false); return; }
+      }
+      try {
+        const exp = await api(scopePath() + '/experiments', { method: 'POST', body });
+        toast(t('toast.expCreated', { id: exp.id }));
+        S.expCreate = false; S.wizardDirty = false; S.expId = exp.id; route();
+      } catch (e) { reportError(e); }
+    } finally { createButton.disabled = false; }
   };
   return Promise.resolve();
 }
