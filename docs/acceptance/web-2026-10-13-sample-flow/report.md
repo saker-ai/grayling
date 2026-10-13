@@ -9,4 +9,6 @@ GOLAB_TEST_PG_SKIP=1 GOWORK=off go test ./web -count=1
 git diff --check
 ```
 
-Web 渲染契约使用两组诊断响应验证 `onRender` 的 200→150→17 计数、50 个未曝光单元，以及 `onDecision` 的缺失分配显示。`web/i18n_contract.mjs` 检查新词条中英完整性。本轮未增加真实浏览器截图，流程摘要也未声称三列构成严格嵌套漏斗；指标级归因仍由报告主分析表达。
+Web 渲染契约使用两组诊断响应验证 `onRender` 的 200→150→17 计数、50 个未曝光单元，以及 `onDecision` 的缺失分配显示。`web/i18n_contract.mjs` 检查新词条中英完整性。
+
+真实浏览器在隔离的 `Acceptance/prod/exp-8` 运行中实验上打开诊断页，验证零样本 `onDecision` 摘要和各变体明细都把没有独立事实的分配/未曝光显示为“—”；首次检查发现明细错误显示 0，已修复并重新加载当前嵌入资源复测。桌面和 390px 手机证据见[桌面](desktop.png)、[手机](mobile.png)，浏览器错误列表为空。浏览器样本只覆盖零样本 `onDecision`；非零 `onRender` 由渲染契约覆盖。流程摘要不声称三列构成严格嵌套漏斗；指标级归因仍由报告主分析表达。

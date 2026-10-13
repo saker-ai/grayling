@@ -339,6 +339,7 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
 .modal h3 { margin: 0 0 12px; }
 .modal .field { margin-bottom: 10px; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+#ro-report-evidence .mono { overflow-wrap: anywhere; }
 
 /* ---------- auth screen ---------- */
 .auth-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }

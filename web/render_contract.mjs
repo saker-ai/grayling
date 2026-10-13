@@ -55,8 +55,15 @@ const decisionExposure = sandbox.__renderDiagnostics({ exposureMode: 'onDecision
 ] });
 assert(decisionExposure.includes('<strong>—</strong>') &&
   decisionExposure.includes('no separate assignment count') &&
+  decisionExposure.includes('<td>—</td><td>80</td><td>—</td>') &&
   !decisionExposure.includes('Not exposed: 0'),
   'onDecision diagnostics must not turn missing historical assignments into zero');
+const decisionWithAssignments = sandbox.__renderDiagnostics({ exposureMode: 'onDecision', perVariant: [
+  { variant: 'control', assignments: 50, exposures: 45, conversions: 5, unexposed: 5 },
+] });
+assert(decisionWithAssignments.includes('<strong>50</strong>') &&
+  decisionWithAssignments.includes('Not exposed: 5'),
+  'onDecision diagnostics with real assignment facts must keep those counts visible');
 
 const structuredFlag = sandbox.__renderFlagStructured({ type: 'bool',
   variations: { control: false, treatment: true }, defaultRule: { variation: 'control' },

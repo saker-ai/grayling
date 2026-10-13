@@ -2111,7 +2111,7 @@ function renderDiagnostics(d) {
   const exposed = count('exposures');
   const converted = count('conversions');
   const unexposed = count('unexposed');
-  const hasAssignmentFacts = d.exposureMode === 'onRender';
+  const hasAssignmentFacts = d.exposureMode === 'onRender' || assigned > 0;
   const sampleFlow = '<ol class="sample-flow" aria-label="' + esc(t('report.sampleFlow')) + '">' +
     '<li class="sample-flow-stage"><span>' + esc(t('report.assignments')) + '</span><strong>' +
       esc(hasAssignmentFacts ? assigned : '—') + '</strong></li>' +
@@ -2150,15 +2150,15 @@ function renderDiagnostics(d) {
       esc(t('report.assignments')) + '</th><th>' + esc(t('report.exposures')) +
       '</th><th>' + esc(t('report.unexposed')) + '</th><th>' +
       esc(t('th.converted')) + '</th></tr></thead><tbody>' +
-      (d.perVariant || []).map(v => '<tr><td class="mono">' + esc(v.variant) +
-        '</td><td>' + esc(v.assignments) + '</td><td>' + esc(v.exposures) +
-        '</td><td>' + esc(v.unexposed) + '</td><td>' + esc(v.conversions) + '</td></tr>').join('') +
+      flow.map(v => '<tr><td class="mono">' + esc(v.variant) +
+        '</td><td>' + esc(hasAssignmentFacts ? v.assignments : '—') + '</td><td>' + esc(v.exposures) +
+        '</td><td>' + esc(hasAssignmentFacts ? v.unexposed : '—') + '</td><td>' + esc(v.conversions) + '</td></tr>').join('') +
       '</tbody></table>' +
-    '<div class="diagnostic-cards">' + (d.perVariant || []).map(v =>
+    '<div class="diagnostic-cards">' + flow.map(v =>
       '<dl class="diagnostic-card"><dt class="mono">' + esc(v.variant) + '</dt><dd>' +
-      '<span>' + esc(t('report.assignments')) + '</span><strong>' + esc(v.assignments) + '</strong></dd><dd>' +
+      '<span>' + esc(t('report.assignments')) + '</span><strong>' + esc(hasAssignmentFacts ? v.assignments : '—') + '</strong></dd><dd>' +
       '<span>' + esc(t('report.exposures')) + '</span><strong>' + esc(v.exposures) + '</strong></dd><dd>' +
-      '<span>' + esc(t('report.unexposed')) + '</span><strong>' + esc(v.unexposed) + '</strong></dd><dd>' +
+      '<span>' + esc(t('report.unexposed')) + '</span><strong>' + esc(hasAssignmentFacts ? v.unexposed : '—') + '</strong></dd><dd>' +
       '<span>' + esc(t('th.converted')) + '</span><strong>' + esc(v.conversions) + '</strong></dd></dl>').join('') + '</div>' +
     '<div>' + esc(t('report.crossVariantUnits')) + ': ' + esc(d.crossVariantUnits) +
       ' · ' + esc(t('report.assignmentMismatch')) + ': ' + esc(d.assignmentMismatch) + '</div>' +
