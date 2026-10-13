@@ -77,9 +77,13 @@ label.field input, label.field select, label.field textarea { min-width: 0; }
   width: 190px; flex: none; background: var(--bg2);
   border-right: 1px solid var(--border); display: flex; flex-direction: column;
 }
-.brand { padding: 14px 16px; font-weight: 700; font-size: 15px; border-bottom: 1px solid var(--border); }
+.brand-row { display: flex; align-items: center; border-bottom: 1px solid var(--border); }
+.brand { padding: 14px 16px; font-weight: 700; font-size: 15px; flex: 1; }
 .brand span { color: var(--muted); font-weight: 400; }
-#nav { display: flex; flex-direction: column; padding: 8px; gap: 2px; flex: 1; }
+.menu-toggle { display: none; }
+#nav { display: flex; flex-direction: column; padding: 8px; gap: 12px; flex: 1; overflow-y: auto; }
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.nav-group-label { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 6px 10px 2px; }
 #nav button {
   text-align: left; background: none; border: none; color: var(--muted);
   padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 13px;
@@ -180,10 +184,15 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
 @media (max-width: 700px) {
   .app { flex-direction: column; min-height: 100dvh; height: auto; }
   .sidebar { width: 100%; border-right: 0; border-bottom: 1px solid var(--border); }
-  .brand { padding: 8px 12px; }
-  #nav { flex-direction: row; flex-wrap: wrap; flex: none; gap: 4px; }
+  .brand { padding: 10px 12px; }
+  .menu-toggle { display: inline-block; margin-right: 10px; min-height: 44px; min-width: 44px; }
+  #nav { display: none; flex: none; padding: 8px; max-height: 55dvh; }
+  #nav.mobile-open { display: flex; }
+  .nav-group { border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  .nav-group:last-child { border-bottom: none; }
   #nav button { white-space: nowrap; }
-  .side-foot { padding: 6px 10px; border-top: 0; }
+  .side-foot { display: none; }
+  .sidebar:has(#nav.mobile-open) .side-foot { display: block; padding: 6px 10px; }
   .maincol { min-height: 0; }
   .topbar { padding: 8px; }
   .topbar .conn { margin-left: 0; width: 100%; }

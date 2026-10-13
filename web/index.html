@@ -24,16 +24,27 @@
 
 <div id="app" class="app hidden">
   <aside class="sidebar">
-    <div class="brand">GoLab <span data-i18n="brand.sub">admin</span></div>
-    <nav id="nav">
-      <button data-view="flags" class="active" data-i18n="nav.flags">Flags</button>
-      <button data-view="segments" data-i18n="nav.segments">Segments</button>
-      <button data-view="experiments" data-i18n="nav.experiments">Experiments</button>
-      <button data-view="debug" data-i18n="nav.debug">Debug</button>
-      <button data-view="tokens" data-i18n="nav.tokens">Tokens</button>
-      <button data-view="quotas" id="nav-quotas" class="hidden" data-i18n="nav.quotas">Quotas</button>
-      <button data-view="audit" data-i18n="nav.audit">Audit</button>
-      <button data-view="ai" id="nav-ai" data-i18n="nav.ai">AI Resources</button>
+    <div class="brand-row">
+      <div class="brand">GoLab <span data-i18n="brand.sub">admin</span></div>
+      <button class="btn sm menu-toggle" id="btn-menu" type="button" aria-controls="nav" aria-expanded="false" data-i18n="nav.menu">Menu</button>
+    </div>
+    <nav id="nav" aria-label="Primary">
+      <div class="nav-group"><span class="nav-group-label" data-i18n="nav.groupRelease">Release</span>
+        <button data-view="flags" class="active" data-i18n="nav.flags">Flags</button>
+        <button data-view="segments" data-i18n="nav.segments">Segments</button>
+      </div>
+      <div class="nav-group"><span class="nav-group-label" data-i18n="nav.groupExperiment">Experimentation</span>
+        <button data-view="experiments" data-i18n="nav.experiments">Experiments</button>
+      </div>
+      <div class="nav-group"><span class="nav-group-label" data-i18n="nav.groupAI">AI governance</span>
+        <button data-view="ai" id="nav-ai" data-i18n="nav.ai">AI Resources</button>
+      </div>
+      <div class="nav-group"><span class="nav-group-label" data-i18n="nav.groupOps">Operations</span>
+        <button data-view="debug" data-i18n="nav.debug">Debug</button>
+        <button data-view="tokens" data-i18n="nav.tokens">Tokens</button>
+        <button data-view="quotas" id="nav-quotas" class="hidden" data-i18n="nav.quotas">Quotas</button>
+        <button data-view="audit" data-i18n="nav.audit">Audit</button>
+      </div>
     </nav>
     <div class="side-foot"><button class="btn sm grow" id="btn-reauth" data-i18n="nav.reauth">Sign out</button></div>
   </aside>

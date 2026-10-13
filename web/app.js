@@ -1910,6 +1910,7 @@ function applyStaticI18n() {
   $$('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
   $$('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
   $$('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+  $('#nav')?.setAttribute?.('aria-label', t('nav.primary'));
   if (document.documentElement) document.documentElement.lang = I18N.lang === 'zh' ? 'zh-CN' : 'en';
   document.title = t('app.title');
 }
@@ -1949,13 +1950,24 @@ function init() {
   $('#auth-token').addEventListener('keydown', ev => { if (ev.key === 'Enter') doConnect(); });
   $('#btn-reauth').onclick = signOut;
 
+  $('#btn-menu').onclick = () => {
+    const opened = $('#nav').classList.toggle('mobile-open');
+    $('#btn-menu').setAttribute('aria-expanded', String(opened));
+  };
+
   $$('#nav button').forEach(b => {
     b.onclick = () => {
-      if (S.view === b.dataset.view) return;
+      if (S.view === b.dataset.view) {
+        $('#nav').classList.remove('mobile-open');
+        $('#btn-menu').setAttribute('aria-expanded', 'false');
+        return;
+      }
       if (!confirmLeaveEditor()) return;
       S.view = b.dataset.view;
       S.flagKey = S.segKey = S.expId = null;
       S.flagNew = S.expCreate = false;
+      $('#nav').classList.remove('mobile-open');
+      $('#btn-menu').setAttribute('aria-expanded', 'false');
       route();
     };
   });
