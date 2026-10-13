@@ -158,4 +158,18 @@ assert(html.includes('Adaptive Bandit report') && html.includes('p1'), 'bandit p
 assert(!html.includes('two-proportion-z') && !html.includes('SHIP') && !html.includes('p = 0.001'),
   'fixed-sample inference leaked into bandit report');
 
-console.log('renderReport DOM contract: all assertions passed (8 report shapes)');
+const banditDelivery = render({ ...base, exposureMode: 'onRender',
+  analysisMethod: 'bandit-beta-bernoulli',
+  perVariant: [{ variant: 'control' }, { variant: 'treatment' }],
+  diagnostics: { window: { version: 'bandit-feedback-v1' },
+    perVariant: [{ variant: 'control', assignments: 2, exposures: 1, unexposed: 1, conversions: 0 }],
+    crossVariantUnits: 0, assignmentMismatch: 0 },
+  bandit: { policyVersion: 'p1', stateVersion: 8, feedbackWatermark: '2026-10-01T00:00:00Z',
+    trials: [1, 0], successes: [0, 0], posteriorMean: [0.5, 0.5], pending: 0,
+    missingFeedback: 1, fallbackAssignments: 0, srmAlarm: false, frozen: true,
+    freezeReason: 'assigned units have no recorded exposure' } });
+assert(banditDelivery.includes('Not exposed') && banditDelivery.includes('propensity-aware') &&
+  !banditDelivery.includes('Too few units for an SRM check'),
+  'bandit delivery gap must be visible without fixed-split SRM wording');
+
+console.log('renderReport DOM contract: all assertions passed (9 report shapes)');

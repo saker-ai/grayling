@@ -44,6 +44,13 @@ func BuildDiagnostics(store *platform.Store, experimentID string, now time.Time)
 	if err != nil {
 		return nil, err
 	}
+	if exp.AllocationMode == "bandit" {
+		report, err := BuildBanditReport(store, exp, now)
+		if err != nil {
+			return nil, err
+		}
+		return report.Diagnostics, nil
+	}
 	analysis, window, err := store.AnalysisStore(exp, now)
 	if err != nil {
 		return nil, err
@@ -100,7 +107,7 @@ func buildDiagnostics(exp *platform.Experiment, events []*platform.Event,
 				flow.Assignments++
 				assigned[key] = true
 			}
-			if ev.Source == "split" {
+			if ev.Source == "split" || ev.Source == "bandit" || ev.Source == "bandit-fallback" {
 				if !randomizedAssigned[key] {
 					flow.RandomizedAssignments++
 					randomizedAssigned[key] = true
@@ -113,7 +120,7 @@ func buildDiagnostics(exp *platform.Experiment, events []*platform.Event,
 				flow.Exposures++
 				exposed[key] = true
 			}
-			if ev.Source == "split" {
+			if ev.Source == "split" || ev.Source == "bandit" || ev.Source == "bandit-fallback" {
 				if !randomizedExposed[key] {
 					flow.RandomizedExposures++
 					randomizedExposed[key] = true
@@ -129,7 +136,9 @@ func buildDiagnostics(exp *platform.Experiment, events []*platform.Event,
 				assignment := assignmentsByID["asg-"+decisionID]
 				if !valid || assignment == nil || assignment.Variant != ev.Variant ||
 					assignment.UnitHash != ev.UnitHash || assignment.FlagKey != ev.FlagKey ||
-					assignment.FlagRevision != ev.FlagRevision {
+					assignment.FlagRevision != ev.FlagRevision || assignment.Source != ev.Source ||
+					assignment.PolicyVersion != ev.PolicyVersion || assignment.StateVersion != ev.StateVersion ||
+					assignment.AllocationProbability != ev.AllocationProbability {
 					d.AssignmentMismatch++
 				}
 			}

@@ -1269,11 +1269,14 @@ function renderDiagnostics(d) {
     (value ? 'p = ' + esc(value.pValue ?? '—') + ' ' +
       chip(value.healthy ? t('chip.noSrm') : t('chip.srmDetected'), value.healthy ? 'green' : 'red') :
       esc(t('report.srmInsufficient'))) + '</div>';
+  const srmSummary = d.window?.version === 'bandit-feedback-v1'
+    ? '<p class="muted">' + esc(t('report.banditSrmSeparate')) + '</p>'
+    : '<div class="row">' + srm(t('report.assignmentSrm'), d.assignmentSrm) +
+      srm(t('report.exposureSrm'), d.exposureSrm) + '</div>';
   return '<section aria-label="' + esc(t('report.deliveryDiagnostics')) + '">' +
     '<h4>' + esc(t('report.deliveryDiagnostics')) + '</h4>' +
     '<p class="muted">' + esc(t('report.deliveryExplanation')) + '</p>' +
-    '<div class="row">' + srm(t('report.assignmentSrm'), d.assignmentSrm) +
-      srm(t('report.exposureSrm'), d.exposureSrm) + '</div>' +
+    srmSummary +
     '<table class="grid"><thead><tr><th>' + esc(t('th.variant')) + '</th><th>' +
       esc(t('report.assignments')) + '</th><th>' + esc(t('report.exposures')) +
       '</th><th>' + esc(t('report.unexposed')) + '</th><th>' +
@@ -1414,6 +1417,7 @@ function renderBanditReport(box, r) {
     '<div>' + esc(t('report.banditPending')) + ': ' + esc(b.pending) + ' · ' +
     esc(t('report.banditMissing')) + ': ' + esc(b.missingFeedback) + ' · ' +
     esc(t('report.banditFallback')) + ': ' + esc(b.fallbackAssignments) + '</div>' +
+    (r.exposureMode === 'onRender' ? renderDiagnostics(r.diagnostics) : '') +
     (b.srmAlarm ? '<div class="banner err">' + esc(t('report.banditSrm')) + '</div>' : '') +
     (b.freezeReason ? '<div class="muted">' + esc(b.freezeReason) + '</div>' : '') +
     '<table class="grid"><thead><tr><th>' + esc(t('th.variant')) + '</th><th>' + esc(t('report.banditTrials')) +

@@ -73,6 +73,13 @@ func replayBanditReport(exp *platform.Experiment, events []*platform.Event, now 
 			rep.HealthIssues = append(rep.HealthIssues, issue)
 		}
 	}
+	rep.ExposureMode = exp.ExposureMode
+	rep.Diagnostics = buildDiagnostics(exp, events, rep.Window, now)
+	if exp.ExposureMode == "onRender" {
+		for _, issue := range rep.Diagnostics.Issues {
+			addIssue(issue)
+		}
+	}
 	units := make(map[string]*banditUnit)
 	seenVariant := [2]map[string]bool{{}, {}}
 	matureVariant := [2]map[string]bool{{}, {}}

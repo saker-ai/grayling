@@ -77,6 +77,42 @@ func TestBanditReplayFreezesOnSRMAndArmChange(t *testing.T) {
 	}
 }
 
+func TestBanditOnRenderFreezesOnDeliveryGap(t *testing.T) {
+	now := time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)
+	start := now.Add(-10 * 24 * time.Hour)
+	exp := &platform.Experiment{ID: "e", Epoch: 1, FlagKey: "f", CreatedAt: start, StartedAt: &start,
+		ExposureMode: "onRender", AllocationMode: "bandit", State: model.ExperimentRunning,
+		Variants: []string{"a", "b"}, Proportions: map[string]float64{"a": 50, "b": 50},
+		PrimaryMetric:  platform.MetricSpec{Key: "reward", Type: "proportion"},
+		AnalysisWindow: 24 * time.Hour, Bandit: &platform.BanditSpec{PolicyVersion: "p1",
+			Strategy: "epsilon-greedy", PriorAlpha: 1, PriorBeta: 1, Epsilon: 0.2,
+			FeedbackDelay: 96 * time.Hour}}
+	// A bandit policy runs across many feedback windows. Diagnostics must
+	// cover its full runtime, not stop at the first analysis window.
+	assignedAt := start.Add(2 * 24 * time.Hour)
+	events := []*platform.Event{
+		{EventID: "asg-seen", Type: platform.EventAssignment, Variant: "a", UnitHash: "seen",
+			FlagKey: "f", FlagRevision: 1, Source: "bandit", PolicyVersion: "p1",
+			StateVersion: 1, AllocationProbability: 0.5, ClientTime: assignedAt},
+		{EventID: "exp-seen", Type: platform.EventExposure, Variant: "a", UnitHash: "seen",
+			FlagKey: "f", FlagRevision: 1, Source: "bandit", PolicyVersion: "p1",
+			StateVersion: 1, AllocationProbability: 0.5, ClientTime: assignedAt.Add(time.Second)},
+		{EventID: "asg-unseen", Type: platform.EventAssignment, Variant: "b", UnitHash: "unseen",
+			FlagKey: "f", FlagRevision: 1, Source: "bandit", PolicyVersion: "p1",
+			StateVersion: 1, AllocationProbability: 0.5, ClientTime: assignedAt},
+	}
+	rep := replayBanditReport(exp, events, now)
+	if rep.Diagnostics == nil || rep.Diagnostics.PerVariant[1].Unexposed != 1 {
+		t.Fatalf("bandit delivery gap missing: %+v", rep.Diagnostics)
+	}
+	if rep.Healthy || !rep.Bandit.Frozen || rep.Bandit.SRMAlarm {
+		t.Fatalf("delivery gap must freeze without fixed split SRM: %+v", rep.Bandit)
+	}
+	if rep.Primary != nil || rep.Decision.Verdict != "hold" {
+		t.Fatalf("bandit must retain independent inference semantics: %+v", rep)
+	}
+}
+
 func TestBanditReplayFreezesOnGuardrail(t *testing.T) {
 	now := time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)
 	start := now.Add(-10 * 24 * time.Hour)
