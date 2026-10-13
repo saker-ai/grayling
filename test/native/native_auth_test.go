@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/internal/configstore"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/configstore"
+	"github.com/godeps/grayling/pkg/model"
 	"github.com/godeps/gonacos/pkg/server"
 	"github.com/nacos-group/nacos-sdk-go/v2/common/constant"
 	"github.com/nacos-group/nacos-sdk-go/v2/vo"

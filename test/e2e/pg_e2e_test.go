@@ -20,14 +20,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/internal/api"
-	"github.com/godeps/golab/internal/configstore"
-	"github.com/godeps/golab/internal/experiment"
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/internal/recovery"
-	"github.com/godeps/golab/pkg/model"
-	"github.com/godeps/golab/pkg/sdk"
-	"github.com/godeps/golab/test/pgtest"
+	"github.com/godeps/grayling/internal/api"
+	"github.com/godeps/grayling/internal/configstore"
+	"github.com/godeps/grayling/internal/experiment"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/internal/recovery"
+	"github.com/godeps/grayling/pkg/model"
+	"github.com/godeps/grayling/pkg/sdk"
+	"github.com/godeps/grayling/test/pgtest"
 	gconfig "github.com/godeps/gonacos/pkg/config"
 )
 

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/internal/experiment"
-	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/grayling/internal/experiment"
+	"github.com/godeps/grayling/internal/platform"
 )
 
 func TestBanditTickPublishesFeedbackAndRemoteRouting(t *testing.T) {

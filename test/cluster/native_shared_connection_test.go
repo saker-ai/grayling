@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/godeps/golab/internal/configstore"
+	"github.com/godeps/grayling/internal/configstore"
 	grpcsrv "github.com/godeps/gonacos/pkg/protocol/grpc"
 	"golang.org/x/net/http2"
 )

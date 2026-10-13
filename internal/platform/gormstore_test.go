@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/test/pgtest"
+	"github.com/godeps/grayling/test/pgtest"
 )
 
 func TestSQLiteStoreRoundtripAndDedup(t *testing.T) {

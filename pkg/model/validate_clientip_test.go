@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/godeps/golab/pkg/bucketing"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/bucketing"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // clientIPFlag builds a gray-routing flag that targets the reserved

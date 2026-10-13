@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/test/pgtest"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/test/pgtest"
 )
 
 func TestRolloutLeaseTakeoverAndFencing(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/godeps/golab/pkg/bucketing"
+	"github.com/godeps/grayling/pkg/bucketing"
 )
 
 // KeyPattern constrains flag/segment keys so they can be embedded in gonacos

@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/pkg/evaluation"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/evaluation"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 func TestBanditReplicaAndOfflineFallback(t *testing.T) {

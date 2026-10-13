@@ -17,7 +17,7 @@ package platform
 import (
 	"time"
 
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // Roles (§9: 管理角色最小为 owner、publisher、analyst、viewer).

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/godeps/golab/internal/configstore"
-	"github.com/godeps/golab/internal/nacos"
-	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/grayling/internal/configstore"
+	"github.com/godeps/grayling/internal/nacos"
+	"github.com/godeps/grayling/internal/platform"
 )
 
 func TestExternalNacosConfigAndAI(t *testing.T) {

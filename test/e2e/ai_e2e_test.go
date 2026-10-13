@@ -6,12 +6,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	aisvc "github.com/godeps/golab/internal/ai"
-	"github.com/godeps/golab/internal/api"
-	"github.com/godeps/golab/internal/configstore"
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/pkg/bucketing"
-	"github.com/godeps/golab/pkg/model"
+	aisvc "github.com/godeps/grayling/internal/ai"
+	"github.com/godeps/grayling/internal/api"
+	"github.com/godeps/grayling/internal/configstore"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/pkg/bucketing"
+	"github.com/godeps/grayling/pkg/model"
 	gonacosai "github.com/godeps/gonacos/pkg/ai"
 	gconfig "github.com/godeps/gonacos/pkg/config"
 )

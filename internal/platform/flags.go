@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // ApprovalTTL bounds the time between review and execution. A changed draft

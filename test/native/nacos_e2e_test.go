@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/internal/configstore"
-	"github.com/godeps/golab/pkg/evaluation"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/configstore"
+	"github.com/godeps/grayling/pkg/evaluation"
+	"github.com/godeps/grayling/pkg/model"
 	"github.com/godeps/gonacos/pkg/server"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients/config_client"

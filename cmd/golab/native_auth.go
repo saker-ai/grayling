@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/godeps/golab/internal/nativeauth"
-	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/grayling/internal/nativeauth"
+	"github.com/godeps/grayling/internal/platform"
 )
 
 // authorizeNativeConfig derives the only readable Nacos namespace from the

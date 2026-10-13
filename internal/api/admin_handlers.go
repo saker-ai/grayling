@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/godeps/golab/internal/admin"
-	"github.com/godeps/golab/internal/experiment"
-	"github.com/godeps/golab/internal/gffimport"
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/admin"
+	"github.com/godeps/grayling/internal/experiment"
+	"github.com/godeps/grayling/internal/gffimport"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // maxAdminBodyBytes bounds admin request payloads (§11: 单 flag 大小限额 is

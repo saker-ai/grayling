@@ -44,11 +44,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godeps/golab/internal/admin"
-	"github.com/godeps/golab/internal/experiment"
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/internal/stats"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/admin"
+	"github.com/godeps/grayling/internal/experiment"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/internal/stats"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // EngineActor is the system identity every automatic action is audited

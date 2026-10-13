@@ -27,10 +27,10 @@ import (
 	"syscall"
 	"time"
 
-	golabapp "github.com/godeps/golab"
-	"github.com/godeps/golab/internal/configstore"
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/internal/recovery"
+	golabapp "github.com/godeps/grayling"
+	"github.com/godeps/grayling/internal/configstore"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/internal/recovery"
 	"github.com/godeps/gonacos/pkg/server"
 )
 

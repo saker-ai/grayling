@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/pkg/bucketing"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/bucketing"
+	"github.com/godeps/grayling/pkg/model"
 	gconfig "github.com/godeps/gonacos/pkg/config"
 )
 

@@ -33,8 +33,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/godeps/golab/pkg/bucketing"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/bucketing"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // DefaultSalt is the bucketing salt used when Options.Salt is empty. It

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // newExpP5 pre-registers an experiment with an arbitrary MetricSpec (ratio,

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/godeps/golab/internal/admin"
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/admin"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 type approvalProposal struct {

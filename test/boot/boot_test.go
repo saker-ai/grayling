@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/test/pgtest"
+	"github.com/godeps/grayling/test/pgtest"
 )
 
 func freePort(t *testing.T) int {

@@ -28,7 +28,7 @@ def go_modules():
     while raw.strip():
         item, length = decoder.raw_decode(raw.lstrip())
         raw = raw.lstrip()[length:]
-        if item["Path"] != "github.com/godeps/golab":
+        if item["Path"] != "github.com/godeps/grayling":
             yield item
 
 

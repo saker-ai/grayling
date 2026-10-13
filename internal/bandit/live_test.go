@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 func TestLiveDistributionAndAssignment(t *testing.T) {

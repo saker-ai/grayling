@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/grayling/internal/platform"
 )
 
 func TestRotationOwnerAuthorization(t *testing.T) {

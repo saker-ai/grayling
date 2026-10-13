@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/godeps/golab/internal/configstore"
-	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/grayling/internal/configstore"
+	"github.com/godeps/grayling/internal/platform"
 )
 
 func TestAuthorizeNativeConfigUsesCredentialScopeAndRevocation(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/godeps/golab/internal/admin"
-	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/grayling/internal/admin"
+	"github.com/godeps/grayling/internal/platform"
 )
 
 func TestWorkspaceCapabilitiesAndRBAC(t *testing.T) {

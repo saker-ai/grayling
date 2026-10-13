@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/test/pgtest"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/test/pgtest"
 )
 
 // A real PostgreSQL-backed pair verifies the HTTP read sees a peer's write

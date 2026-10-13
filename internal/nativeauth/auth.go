@@ -4,8 +4,8 @@ package nativeauth
 import (
 	"strings"
 
-	"github.com/godeps/golab/internal/configstore"
-	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/grayling/internal/configstore"
+	"github.com/godeps/grayling/internal/platform"
 )
 
 // Authorize checks the SDK credential and the exact Nacos resource it may read.

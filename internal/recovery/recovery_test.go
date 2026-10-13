@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 func TestRecoveryGateRejectsPartialAndWrongKey(t *testing.T) {

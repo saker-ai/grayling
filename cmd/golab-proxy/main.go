@@ -47,7 +47,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/godeps/golab/internal/proxy"
+	"github.com/godeps/grayling/internal/proxy"
 )
 
 func main() {

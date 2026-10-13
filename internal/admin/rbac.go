@@ -7,7 +7,7 @@ package admin
 import (
 	"fmt"
 
-	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/grayling/internal/platform"
 )
 
 // Actor is the authenticated principal of one admin request. The API layer

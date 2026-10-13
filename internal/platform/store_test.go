@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 func TestPersistenceRoundtrip(t *testing.T) {

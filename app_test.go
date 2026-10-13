@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab"
+	"github.com/godeps/grayling"
 )
 
 func TestEmbeddedAppCanBeMountedAndRestarted(t *testing.T) {

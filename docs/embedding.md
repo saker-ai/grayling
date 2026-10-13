@@ -1,6 +1,6 @@
 # 在 Go 服务中嵌入 GoLab
 
-模块路径为 `github.com/godeps/golab`，需要 Go 1.27 或更新版本。`golab.Start` 打开平台存储和 Nacos 底座、建立 API，并启动对账与发布任务；它不会接管宿主进程的 HTTP 监听或信号。宿主负责挂载 Handler、处理错误和关闭服务。
+模块路径为 `github.com/godeps/grayling`，需要 Go 1.27 或更新版本。从 `v0.2.0` 起使用此路径；`v0.1.x` 版本仍使用原模块路径 `github.com/godeps/golab`。`golab.Start` 打开平台存储和 Nacos 底座、建立 API，并启动对账与发布任务；它不会接管宿主进程的 HTTP 监听或信号。宿主负责挂载 Handler、处理错误和关闭服务。
 
 ```go
 package main
@@ -14,7 +14,7 @@ import (
     "syscall"
     "time"
 
-    "github.com/godeps/golab"
+    "github.com/godeps/grayling"
 )
 
 func main() {

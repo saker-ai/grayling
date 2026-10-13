@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/godeps/golab/internal/admin"
-	aisvc "github.com/godeps/golab/internal/ai"
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/admin"
+	aisvc "github.com/godeps/grayling/internal/ai"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // SetAI attaches the AI resource gate. When unset, all AI endpoints answer

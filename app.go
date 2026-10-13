@@ -18,14 +18,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godeps/golab/internal/ai"
-	"github.com/godeps/golab/internal/api"
-	"github.com/godeps/golab/internal/configstore"
-	"github.com/godeps/golab/internal/nacos"
-	"github.com/godeps/golab/internal/nativeauth"
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/internal/recovery"
-	"github.com/godeps/golab/web"
+	"github.com/godeps/grayling/internal/ai"
+	"github.com/godeps/grayling/internal/api"
+	"github.com/godeps/grayling/internal/configstore"
+	"github.com/godeps/grayling/internal/nacos"
+	"github.com/godeps/grayling/internal/nativeauth"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/internal/recovery"
+	"github.com/godeps/grayling/web"
 	"github.com/godeps/gonacos/pkg/server"
 )
 

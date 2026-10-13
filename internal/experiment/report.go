@@ -19,9 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/internal/stats"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/internal/stats"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // Report is the full analysis output for one experiment epoch.

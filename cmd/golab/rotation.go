@@ -9,9 +9,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/godeps/golab/internal/configstore"
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/internal/recovery"
+	"github.com/godeps/grayling/internal/configstore"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/internal/recovery"
 )
 
 // runHMACRotation is an offline operation. The caller never starts listeners

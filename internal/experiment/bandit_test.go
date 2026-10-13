@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 func TestBanditReplayFeedbackAndInferenceIsolation(t *testing.T) {

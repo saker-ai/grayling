@@ -7,8 +7,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // ReviewPreview is the evidence shown before an approval or publication.

@@ -32,8 +32,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godeps/golab/internal/configstore"
-	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/grayling/internal/configstore"
+	"github.com/godeps/grayling/internal/platform"
 	gonacosai "github.com/godeps/gonacos/pkg/ai"
 )
 

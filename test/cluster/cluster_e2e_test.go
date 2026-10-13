@@ -69,11 +69,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/pkg/bucketing"
-	"github.com/godeps/golab/pkg/model"
-	"github.com/godeps/golab/test/pgtest"
-	"github.com/godeps/golab/test/redistest"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/pkg/bucketing"
+	"github.com/godeps/grayling/pkg/model"
+	"github.com/godeps/grayling/test/pgtest"
+	"github.com/godeps/grayling/test/redistest"
 )
 
 func TestRolloutLeaderProcessFailover(t *testing.T) {

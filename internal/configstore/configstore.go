@@ -23,8 +23,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/godeps/golab/internal/nacos"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/nacos"
+	"github.com/godeps/grayling/pkg/model"
 	"github.com/godeps/gonacos/pkg/config"
 )
 

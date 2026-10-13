@@ -6,7 +6,7 @@ import (
 	"math"
 	"math/rand/v2"
 
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // Distribution returns the *operational* assignment probabilities. Thompson

@@ -1,4 +1,4 @@
-module github.com/godeps/golab
+module github.com/godeps/grayling
 
 go 1.27.0
 

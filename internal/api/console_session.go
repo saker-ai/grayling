@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/grayling/internal/platform"
 )
 
 const (

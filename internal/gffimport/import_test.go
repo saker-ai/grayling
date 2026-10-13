@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/godeps/golab/pkg/bucketing"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/bucketing"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // realisticYAML exercises variations, defaultRule percentage, targeting with

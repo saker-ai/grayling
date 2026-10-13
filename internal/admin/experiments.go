@@ -9,9 +9,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/pkg/bucketing"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/pkg/bucketing"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // CreateExperiment registers the pre-registered analysis contract (§5.3).

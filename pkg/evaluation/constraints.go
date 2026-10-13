@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // MaxRegexInputBytes bounds regex evaluation cost per constraint (§5.2).

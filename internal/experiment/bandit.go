@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/internal/stats"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/internal/stats"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // BanditSection is an adaptive-allocation report. It deliberately has no

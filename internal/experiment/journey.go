@@ -5,8 +5,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/internal/stats"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/internal/stats"
 )
 
 // JourneyArm exposes a rate's exact population and exclusions. Immature

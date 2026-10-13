@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godeps/golab/internal/configstore"
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/pkg/evaluation"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/configstore"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/pkg/evaluation"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // Listener is notified after a manifest revision becomes readable. The API

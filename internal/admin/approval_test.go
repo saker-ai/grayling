@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/grayling/internal/platform"
 )
 
 func TestDraftApprovalRejectsSelfChangeExpiryAndRevocation(t *testing.T) {

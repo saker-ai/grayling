@@ -1,4 +1,4 @@
-# golab
+# GoLab
 
 求值事件、受权决策查询、曝光与转化关联见[求值诊断与事件](docs/求值诊断与事件.md)。
 
@@ -52,7 +52,7 @@ PostgreSQL 示例：
 
 ## SDK 接入（Go）
 
-如需在自己的 Go 服务中启动整个控制面，可 import 根包 `github.com/godeps/golab`，使用 `golab.Start` 和 `App.APIHandler()`；完整示例见[嵌入 GoLab](docs/embedding.md)。
+如需在自己的 Go 服务中启动整个控制面，可 import 根包 `github.com/godeps/grayling`，使用 `golab.Start` 和 `App.APIHandler()`；完整示例见[嵌入 GoLab](docs/embedding.md)。
 
 ```go
 client, err := sdk.New(ctx, sdk.Options{
@@ -127,8 +127,8 @@ await client.close();
 
 ```go
 import (
-    "github.com/godeps/golab/pkg/ofprovider"
-    "github.com/godeps/golab/pkg/sdk"
+    "github.com/godeps/grayling/pkg/ofprovider"
+    "github.com/godeps/grayling/pkg/sdk"
     "github.com/open-feature/go-sdk/openfeature"
 )
 

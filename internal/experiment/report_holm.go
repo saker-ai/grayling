@@ -3,8 +3,8 @@ package experiment
 import (
 	"fmt"
 
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/internal/stats"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/internal/stats"
 )
 
 // HolmComparison exposes the fixed-sample result for a registered hypothesis.

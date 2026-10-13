@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/godeps/golab/pkg/bucketing"
-	"github.com/godeps/golab/pkg/evaluation"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/bucketing"
+	"github.com/godeps/grayling/pkg/evaluation"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // buildBenchSnapshot creates n flags, each with 3 targeting rules (constraint

@@ -53,8 +53,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godeps/golab/pkg/model"
-	"github.com/godeps/golab/pkg/sdk"
+	"github.com/godeps/grayling/pkg/model"
+	"github.com/godeps/grayling/pkg/sdk"
 	of "github.com/open-feature/go-sdk/openfeature"
 )
 

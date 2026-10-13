@@ -16,9 +16,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/godeps/golab/internal/configstore"
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/configstore"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/pkg/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 )

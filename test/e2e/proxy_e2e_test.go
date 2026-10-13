@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godeps/golab/internal/platform"
-	"github.com/godeps/golab/internal/proxy"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/platform"
+	"github.com/godeps/grayling/internal/proxy"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 func newProxyFront(t *testing.T, h *harness) *httptest.Server {

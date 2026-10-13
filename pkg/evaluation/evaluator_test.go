@@ -5,9 +5,9 @@ import (
 	"math"
 	"testing"
 
-	"github.com/godeps/golab/pkg/bucketing"
-	"github.com/godeps/golab/pkg/evaluation"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/pkg/bucketing"
+	"github.com/godeps/grayling/pkg/evaluation"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 func snap(flags map[string]*model.Flag, segments map[string]*model.Segment) *model.Snapshot {

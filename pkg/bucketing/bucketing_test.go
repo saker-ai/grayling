@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/godeps/golab/pkg/bucketing"
+	"github.com/godeps/grayling/pkg/bucketing"
 )
 
 type goldenVector struct {

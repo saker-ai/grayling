@@ -41,9 +41,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/godeps/golab/internal/bandit"
-	"github.com/godeps/golab/pkg/bucketing"
-	"github.com/godeps/golab/pkg/model"
+	"github.com/godeps/grayling/internal/bandit"
+	"github.com/godeps/grayling/pkg/bucketing"
+	"github.com/godeps/grayling/pkg/model"
 )
 
 // Evaluator evaluates flags from one immutable, pre-validated snapshot.

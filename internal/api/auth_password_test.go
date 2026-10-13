@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/grayling/internal/platform"
 )
 
 func TestConfiguredAdminPassword(t *testing.T) {

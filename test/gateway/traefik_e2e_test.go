@@ -49,11 +49,11 @@ import (
 	"testing"
 	"time"
 
-	gw "github.com/godeps/golab/internal/gateway"
-	"github.com/godeps/golab/pkg/bucketing"
-	"github.com/godeps/golab/pkg/model"
-	"github.com/godeps/golab/test/redistest"
-	"github.com/godeps/golab/test/traefiktest"
+	gw "github.com/godeps/grayling/internal/gateway"
+	"github.com/godeps/grayling/pkg/bucketing"
+	"github.com/godeps/grayling/pkg/model"
+	"github.com/godeps/grayling/test/redistest"
+	"github.com/godeps/grayling/test/traefiktest"
 )
 
 // ---------------------------------------------------------------------------

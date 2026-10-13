@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/godeps/golab/internal/platform"
+	"github.com/godeps/grayling/internal/platform"
 	gonacosai "github.com/godeps/gonacos/pkg/ai"
 )
 
