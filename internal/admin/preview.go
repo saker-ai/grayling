@@ -1,9 +1,11 @@
 package admin
 
 import (
+	"cmp"
 	json "encoding/json/v2"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"time"
 
@@ -107,4 +109,91 @@ func (s *Service) GetSegmentPreview(actor Actor, workspaceID, environmentID, key
 		p.ProposedHash = model.HashBytes(raw)
 	}
 	return p, nil
+}
+
+// SegmentDependencies reports published flags whose active rules reference a
+// segment, including references through other published segments.
+type SegmentDependencies struct {
+	SegmentKey      string           `json:"segmentKey"`
+	SegmentRevision int64            `json:"segmentRevision"`
+	Flags           []FlagDependency `json:"flags"`
+}
+
+type FlagDependency struct {
+	Key      string   `json:"key"`
+	Revision int64    `json:"revision"`
+	Via      []string `json:"via"`
+}
+
+func segmentReferencePath(ref, target string, segments map[string]*platform.SegmentRevision,
+	seen map[string]bool) []string {
+	if ref == target {
+		return []string{ref}
+	}
+	if seen[ref] {
+		return nil
+	}
+	segment := segments[ref]
+	if segment == nil || segment.Content == nil {
+		return nil
+	}
+	seen[ref] = true
+	defer delete(seen, ref)
+	for _, nested := range segment.Content.Segments {
+		if path := segmentReferencePath(nested, target, segments, seen); len(path) > 0 {
+			return append([]string{ref}, path...)
+		}
+	}
+	return nil
+}
+
+func flagSegmentPath(flag *model.Flag, target string, segments map[string]*platform.SegmentRevision) []string {
+	check := func(rule model.Rule) []string {
+		for _, ref := range rule.Segments {
+			if path := segmentReferencePath(ref, target, segments, map[string]bool{}); len(path) > 0 {
+				return path
+			}
+		}
+		return nil
+	}
+	if flag.DefaultRule != nil {
+		if path := check(*flag.DefaultRule); len(path) > 0 {
+			return path
+		}
+	}
+	for _, rule := range flag.Targeting {
+		if path := check(rule); len(path) > 0 {
+			return path
+		}
+	}
+	return nil
+}
+
+func (s *Service) GetSegmentDependencies(actor Actor, workspaceID, environmentID, key string) (*SegmentDependencies, error) {
+	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagRead)
+	if err != nil {
+		return nil, err
+	}
+	segments := s.Store.CurrentSegmentContents(env.WorkspaceID, env.ID)
+	current := segments[key]
+	if current == nil {
+		if _, err := s.Store.GetSegmentDraft(env.WorkspaceID, env.ID, key); err != nil {
+			return nil, err
+		}
+	}
+	result := &SegmentDependencies{SegmentKey: key, Flags: []FlagDependency{}}
+	if current != nil {
+		result.SegmentRevision = current.Revision
+	}
+	for _, revision := range s.Store.CurrentFlagContents(env.WorkspaceID, env.ID) {
+		if revision == nil || revision.Content == nil {
+			continue
+		}
+		if path := flagSegmentPath(revision.Content, key, segments); len(path) > 0 {
+			result.Flags = append(result.Flags, FlagDependency{Key: revision.Key,
+				Revision: revision.Revision, Via: path})
+		}
+	}
+	slices.SortFunc(result.Flags, func(a, b FlagDependency) int { return cmp.Compare(a.Key, b.Key) })
+	return result, nil
 }

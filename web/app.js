@@ -1102,7 +1102,17 @@ async function viewSegmentDetail(m) {
   const d = S.segDrafts.find(x => x.key === key);
   const content = (d && d.content) || segmentTemplate(key);
   let preview = null;
-  if (d) preview = await api(kp + '/preview');
+  let previewUnavailable = false;
+  let dependencies = { segmentRevision: 0, flags: [] };
+  if (d) {
+    const [previewResult, dependenciesResult] = await Promise.allSettled([
+      api(kp + '/preview'), api(kp + '/dependencies'),
+    ]);
+    if (previewResult.status === 'fulfilled') preview = previewResult.value;
+    if (!preview) previewUnavailable = true;
+    if (dependenciesResult.status === 'fulfilled') dependencies = dependenciesResult.value;
+    else dependencies = null;
+  }
   m.innerHTML =
     '<div class="view-head"><button class="btn sm" id="seg-back">' + esc(t('seg.back')) + '</button>' +
     '<h2 class="mono">' + esc(key) + '</h2>' +
@@ -1121,7 +1131,10 @@ async function viewSegmentDetail(m) {
     '<button class="btn primary" id="seg-save">' + esc(t('btn.saveDraft')) + '</button>' +
     '<button class="btn" id="seg-submit">' + esc(t('btn.submit')) + '</button>' +
     '<button class="btn" id="seg-approve">' + esc(t('btn.approve')) + '</button>' +
-    '<button class="btn" id="seg-publish">' + esc(t('btn.publish')) + '</button></div></section>' + reviewPreview(preview);
+    '<button class="btn" id="seg-publish"' + (previewUnavailable ? ' disabled' : '') + '>' +
+      esc(t('btn.publish')) + '</button></div></section>' +
+    (previewUnavailable ? '<div class="banner warn" role="status">' + esc(t('seg.previewUnavailable')) + '</div>' :
+      reviewPreview(preview)) + renderSegmentDependencies(dependencies);
   $('#seg-json', m).value = JSON.stringify(content, null, 2);
   if (d && d.risk) $('#seg-risk', m).value = d.risk;
   const structured = bindSegmentStructured(m);
@@ -1131,6 +1144,11 @@ async function viewSegmentDetail(m) {
     $('#seg-risk', m).disabled = true;
   }
   $('#seg-back', m).onclick = () => { if (!confirmLeaveEditor()) return; S.segKey = null; route(); };
+  m.addEventListener('click', event => {
+    const flag = event.target.closest('[data-dependent-flag]');
+    if (!flag || !confirmLeaveEditor()) return;
+    S.view = 'flags'; S.flagKey = flag.dataset.dependentFlag; S.segKey = null; route();
+  });
   $('#seg-validate', m).onclick = () => {
     if (!structured.valid()) return;
     const out = $('#seg-valid', m);

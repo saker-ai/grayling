@@ -2485,6 +2485,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReviewPreview"
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/dependencies":
+    get:
+      tags: [segments]
+      summary: 列出当前已发布 Flag 对 Segment 的直接或嵌套引用
+      operationId: listSegmentDependencies
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/SegmentKeyPath"
+      responses:
+        "200":
+          description: 当前发布版本的依赖索引，不包含草稿引用。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentDependencies"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/emergency-disable":
     post:
       tags: [flags]
@@ -2760,6 +2778,24 @@ components:
         rollbackTarget: { type: string }
         guardrails: { type: string }
         approvalExpiresAt: { type: string, format: date-time }
+    SegmentDependencies:
+      type: object
+      required: [segmentKey, segmentRevision, flags]
+      properties:
+        segmentKey: { type: string }
+        segmentRevision: { type: integer, format: int64, description: 0 表示尚无发布版本。 }
+        flags:
+          type: array
+          items:
+            type: object
+            required: [key, revision, via]
+            properties:
+              key: { type: string }
+              revision: { type: integer, format: int64 }
+              via:
+                type: array
+                items: { type: string }
+                description: 从 Flag 直接引用的 Segment 到目标 Segment 的路径。
     ErrorBody:
       type: object
       required: [code, message]

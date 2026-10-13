@@ -613,6 +613,15 @@ func (s *Server) handleSegmentPreview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
+func (s *Server) handleSegmentDependencies(w http.ResponseWriter, r *http.Request) {
+	result, err := s.Admin.GetSegmentDependencies(actorFrom(r), r.PathValue("ws"), r.PathValue("env"), r.PathValue("key"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handleApproveSegment(w http.ResponseWriter, r *http.Request) {
 	if err := s.Admin.ApproveSegmentDraft(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
 		r.PathValue("key")); err != nil {

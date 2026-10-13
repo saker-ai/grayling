@@ -38,6 +38,17 @@ function lintSegment(content) {
   return issues;
 }
 
+function renderSegmentDependencies(data) {
+  if (!data) return '<div class="banner warn">' + esc(t('seg.dependenciesUnavailable')) + '</div>';
+  return '<section class="card"><h3>' + esc(t('seg.dependenciesTitle')) + '</h3>' +
+    '<p class="muted">' + esc(t('seg.dependenciesScope', { n: data.segmentRevision || 0 })) + '</p>' +
+    (data.flags?.length ? '<ul class="plain">' + data.flags.map(flag =>
+      '<li><button class="row-link" type="button" data-dependent-flag="' + esc(flag.key) + '">' +
+      esc(flag.key) + '</button> · r' + esc(flag.revision) + ' · ' +
+      esc((flag.via || []).join(' → ')) + '</li>').join('') + '</ul>' :
+      '<p class="muted">' + esc(t('seg.dependenciesEmpty')) + '</p>') + '</section>';
+}
+
 function renderSegmentStructured(content) {
   const constraints = Array.isArray(content.constraints) ? content.constraints : [];
   const segments = Array.isArray(content.segments) ? content.segments : [];
