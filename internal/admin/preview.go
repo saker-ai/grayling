@@ -4,12 +4,14 @@ import (
 	"cmp"
 	json "encoding/json/v2"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"sort"
 	"time"
 
 	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/pkg/evaluation"
 	"github.com/saker-ai/grayling/pkg/model"
 )
 
@@ -195,5 +197,61 @@ func (s *Service) GetSegmentDependencies(actor Actor, workspaceID, environmentID
 		}
 	}
 	slices.SortFunc(result.Flags, func(a, b FlagDependency) int { return cmp.Compare(a.Key, b.Key) })
+	return result, nil
+}
+
+// SegmentMatchPreview compares a submitted editor document with the current
+// published segment for exactly one diagnostic context. It is not an audience
+// size estimate and has no exposure or collection side effects.
+type SegmentMatchPreview struct {
+	DraftMatched      bool  `json:"draftMatched"`
+	PublishedMatched  *bool `json:"publishedMatched,omitempty"`
+	PublishedRevision int64 `json:"publishedRevision"`
+}
+
+func (s *Service) PreviewSegmentMatch(actor Actor, workspaceID, environmentID, key string,
+	content *model.Segment, evalCtx model.EvaluationContext) (*SegmentMatchPreview, error) {
+	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagRead)
+	if err != nil {
+		return nil, err
+	}
+	if content == nil || content.Key != key {
+		return nil, fmt.Errorf("%w: segment key does not match path", platform.ErrValidation)
+	}
+	published := s.Store.CurrentSegmentContents(env.WorkspaceID, env.ID)
+	publishedSegments := make(map[string]*model.Segment, len(published))
+	for name, revision := range published {
+		if revision != nil && revision.Content != nil {
+			publishedSegments[name] = revision.Content
+		}
+	}
+	candidateSegments := maps.Clone(publishedSegments)
+	candidateSegments[key] = content
+	if err := model.ValidateSegment(content, candidateSegments); err != nil {
+		return nil, fmt.Errorf("%w: %v", platform.ErrValidation, err)
+	}
+	match := func(segments map[string]*model.Segment) (bool, error) {
+		evaluator, err := evaluation.NewEvaluator(&model.Snapshot{
+			SchemaVersion: model.SchemaVersion, Workspace: env.WorkspaceID,
+			Environment: env.ID, Segments: segments, Flags: map[string]*model.Flag{},
+		})
+		if err != nil {
+			return false, fmt.Errorf("%w: %v", platform.ErrValidation, err)
+		}
+		return evaluator.MatchSegment(key, evalCtx)
+	}
+	draftMatched, err := match(candidateSegments)
+	if err != nil {
+		return nil, err
+	}
+	result := &SegmentMatchPreview{DraftMatched: draftMatched}
+	if current := published[key]; current != nil {
+		publishedMatched, err := match(publishedSegments)
+		if err != nil {
+			return nil, err
+		}
+		result.PublishedMatched = &publishedMatched
+		result.PublishedRevision = current.Revision
+	}
 	return result, nil
 }

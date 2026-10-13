@@ -58,3 +58,40 @@ func TestSegmentDependenciesFollowPublishedNestedReferences(t *testing.T) {
 		t.Fatalf("missing segment: %v", err)
 	}
 }
+
+func TestSegmentMatchPreviewUsesSubmittedDocumentWithoutPublishing(t *testing.T) {
+	f := newFixture(t)
+	publishTestSegment(t, f, &model.Segment{SchemaVersion: model.SchemaVersion, Key: "audience",
+		Constraints: []model.Constraint{{Field: "country", Op: model.OpEq, Value: "CN"}}})
+	candidate := &model.Segment{SchemaVersion: model.SchemaVersion, Key: "audience",
+		Constraints: []model.Constraint{{Field: "country", Op: model.OpEq, Value: "US"}}}
+	preview, err := f.svc.PreviewSegmentMatch(f.viewer, f.ws.ID, f.env.ID, "audience", candidate,
+		model.EvaluationContext{Attributes: map[string]any{"country": "US"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !preview.DraftMatched || preview.PublishedMatched == nil || *preview.PublishedMatched ||
+		preview.PublishedRevision != 1 {
+		t.Fatalf("draft vs published: %+v", preview)
+	}
+	current := f.store.CurrentSegmentContents(f.ws.ID, f.env.ID)["audience"]
+	if current == nil || current.Content.Constraints[0].Value != "CN" {
+		t.Fatalf("preview changed published content: %+v", current)
+	}
+	if _, err := f.svc.PreviewSegmentMatch(f.otherWS, f.ws.ID, f.env.ID, "audience", candidate,
+		model.EvaluationContext{}); !errors.Is(err, platform.ErrAccessDenied) {
+		t.Fatalf("cross-workspace preview: %v", err)
+	}
+	invalid := &model.Segment{SchemaVersion: model.SchemaVersion, Key: "audience", Segments: []string{"missing"}}
+	if _, err := f.svc.PreviewSegmentMatch(f.viewer, f.ws.ID, f.env.ID, "audience", invalid,
+		model.EvaluationContext{}); !errors.Is(err, platform.ErrValidation) {
+		t.Fatalf("invalid candidate: %v", err)
+	}
+	newSegment := &model.Segment{SchemaVersion: model.SchemaVersion, Key: "new",
+		Constraints: []model.Constraint{{Field: "country", Op: model.OpEq, Value: "US"}}}
+	newPreview, err := f.svc.PreviewSegmentMatch(f.viewer, f.ws.ID, f.env.ID, "new", newSegment,
+		model.EvaluationContext{Attributes: map[string]any{"country": "US"}})
+	if err != nil || !newPreview.DraftMatched || newPreview.PublishedMatched != nil || newPreview.PublishedRevision != 0 {
+		t.Fatalf("new segment preview: %+v %v", newPreview, err)
+	}
+}

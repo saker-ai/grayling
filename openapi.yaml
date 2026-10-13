@@ -2503,6 +2503,36 @@ paths:
                 $ref: "#/components/schemas/SegmentDependencies"
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/match-preview":
+    post:
+      tags: [segments]
+      summary: 用一组测试上下文对比未保存输入与当前发布 Segment 的匹配结果
+      description: 只返回该样本的布尔结果，不估算真实受众人数，不记录曝光或事件。
+      operationId: previewSegmentMatch
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - $ref: "#/components/parameters/EnvPath"
+        - $ref: "#/components/parameters/SegmentKeyPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [content, context]
+              properties:
+                content: { $ref: "#/components/schemas/Segment" }
+                context: { $ref: "#/components/schemas/EvaluationContext" }
+      responses:
+        "200":
+          description: 草稿输入和当前发布版对同一样本上下文的匹配结果。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentMatchPreview"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/emergency-disable":
     post:
       tags: [flags]
@@ -2796,6 +2826,13 @@ components:
                 type: array
                 items: { type: string }
                 description: 从 Flag 直接引用的 Segment 到目标 Segment 的路径。
+    SegmentMatchPreview:
+      type: object
+      required: [draftMatched, publishedRevision]
+      properties:
+        draftMatched: { type: boolean }
+        publishedMatched: { type: boolean, description: 尚无发布版时缺省。 }
+        publishedRevision: { type: integer, format: int64, description: 尚无发布版时为 0。 }
     ErrorBody:
       type: object
       required: [code, message]

@@ -1134,7 +1134,7 @@ async function viewSegmentDetail(m) {
     '<button class="btn" id="seg-publish"' + (previewUnavailable ? ' disabled' : '') + '>' +
       esc(t('btn.publish')) + '</button></div></section>' +
     (previewUnavailable ? '<div class="banner warn" role="status">' + esc(t('seg.previewUnavailable')) + '</div>' :
-      reviewPreview(preview)) + renderSegmentDependencies(dependencies);
+      reviewPreview(preview)) + renderSegmentMatchForm() + renderSegmentDependencies(dependencies);
   $('#seg-json', m).value = JSON.stringify(content, null, 2);
   if (d && d.risk) $('#seg-risk', m).value = d.risk;
   const structured = bindSegmentStructured(m);
@@ -1148,6 +1148,17 @@ async function viewSegmentDetail(m) {
     const flag = event.target.closest('[data-dependent-flag]');
     if (!flag || !confirmLeaveEditor()) return;
     S.view = 'flags'; S.flagKey = flag.dataset.dependentFlag; S.segKey = null; route();
+  });
+  m.addEventListener('input', event => {
+    if (event.target.closest('#seg-structured') ||
+        ['seg-json', 'seg-match-context'].includes(event.target.id)) {
+      $('#seg-match-result', m).textContent = '';
+    }
+  });
+  m.addEventListener('click', event => {
+    if (event.target.closest('[data-remove-condition], #seg-add-condition')) {
+      $('#seg-match-result', m).textContent = '';
+    }
   });
   $('#seg-validate', m).onclick = () => {
     if (!structured.valid()) return;
@@ -1168,6 +1179,30 @@ async function viewSegmentDetail(m) {
     const issues = lintSegment(c);
     if (issues.length) { toast(issues.join(' · '), false); return null; }
     return c;
+  };
+  $('#seg-match-run', m).onclick = async () => {
+    if (!structured.valid()) return;
+    const content = readJSON();
+    if (!content) return;
+    let context;
+    try { context = parseSegmentPreviewContext($('#seg-match-context', m).value); }
+    catch {
+      $('#seg-match-result', m).textContent = t('seg.matchBadContext');
+      return;
+    }
+    const contentText = $('#seg-json', m).value;
+    const contextText = $('#seg-match-context', m).value;
+    const button = $('#seg-match-run', m);
+    const resultBox = $('#seg-match-result', m);
+    button.disabled = true;
+    resultBox.textContent = t('misc.loading');
+    try {
+      const result = await api(kp + '/match-preview', { method: 'POST', body: { content, context } });
+      if ($('#seg-json', m).value !== contentText || $('#seg-match-context', m).value !== contextText) {
+        resultBox.textContent = t('seg.matchStale');
+      } else resultBox.innerHTML = renderSegmentMatchResult(result);
+    } catch (error) { resultBox.textContent = errMsg(error); }
+    finally { button.disabled = false; }
   };
   $('#seg-save', m).onclick = () => {
     if (!structured.valid()) return;

@@ -216,6 +216,15 @@ func TestSegmentsNestedAndCycles(t *testing.T) {
 		},
 	}
 	e := mustEvaluator(t, snap(map[string]*model.Flag{"f": f}, segments))
+	if matched, err := e.MatchSegment("eu-beta", ctx("u", map[string]any{"beta_opt_in": true, "region": "eu"})); err != nil || !matched {
+		t.Fatalf("diagnostic segment match: %t, %v", matched, err)
+	}
+	if matched, err := e.MatchSegment("eu-beta", ctx("u", map[string]any{"beta_opt_in": true, "region": "us"})); err != nil || matched {
+		t.Fatalf("diagnostic segment miss: %t, %v", matched, err)
+	}
+	if _, err := e.MatchSegment("missing", ctx("u", nil)); err == nil {
+		t.Fatal("missing segment should return an error")
+	}
 
 	if v, _ := e.StringVariation("f", ctx("u", map[string]any{"beta_opt_in": true, "region": "eu"}), "?"); v != "new" {
 		t.Error("eu AND beta should match")

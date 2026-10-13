@@ -622,6 +622,24 @@ func (s *Server) handleSegmentDependencies(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) handleSegmentMatchPreview(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Content *model.Segment          `json:"content"`
+		Context model.EvaluationContext `json:"context"`
+	}
+	if err := decodeJSON(r, &req, maxAdminBodyBytes); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	result, err := s.Admin.PreviewSegmentMatch(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
+		r.PathValue("key"), req.Content, req.Context)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handleApproveSegment(w http.ResponseWriter, r *http.Request) {
 	if err := s.Admin.ApproveSegmentDraft(actorFrom(r), r.PathValue("ws"), r.PathValue("env"),
 		r.PathValue("key")); err != nil {

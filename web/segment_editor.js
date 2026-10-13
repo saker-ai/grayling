@@ -49,6 +49,34 @@ function renderSegmentDependencies(data) {
       '<p class="muted">' + esc(t('seg.dependenciesEmpty')) + '</p>') + '</section>';
 }
 
+function renderSegmentMatchForm() {
+  return '<section class="card segment-match"><h3>' + esc(t('seg.matchTitle')) + '</h3>' +
+    '<p class="muted">' + esc(t('seg.matchHelp')) + '</p>' +
+    '<label class="field">' + esc(t('seg.matchContext')) +
+    '<textarea id="seg-match-context" class="json" rows="5" spellcheck="false">' +
+    esc(JSON.stringify({ targetingKey: 'sample-user', attributes: {} }, null, 2)) + '</textarea></label>' +
+    '<div class="row"><button type="button" class="btn sm" id="seg-match-run">' +
+    esc(t('seg.matchRun')) + '</button></div><div id="seg-match-result" role="status" aria-live="polite"></div></section>';
+}
+
+function renderSegmentMatchResult(result) {
+  const state = matched => t(matched ? 'seg.matchYes' : 'seg.matchNo');
+  return '<div class="flag-diff-values"><div><strong>' + esc(t('seg.matchDraft')) + '</strong><p>' +
+    esc(state(result.draftMatched)) + '</p></div><div><strong>' +
+    esc(result.publishedMatched == null ? t('seg.matchNoPublished') :
+      t('seg.matchPublished', { n: result.publishedRevision })) + '</strong><p>' +
+    esc(result.publishedMatched == null ? '—' : state(result.publishedMatched)) + '</p></div></div>';
+}
+
+function parseSegmentPreviewContext(text) {
+  const value = JSON.parse(text);
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      (value.targetingKey !== undefined && typeof value.targetingKey !== 'string') ||
+      (value.attributes !== undefined && (!value.attributes || typeof value.attributes !== 'object' ||
+        Array.isArray(value.attributes)))) throw new Error(t('seg.matchBadContext'));
+  return value;
+}
+
 function renderSegmentStructured(content) {
   const constraints = Array.isArray(content.constraints) ? content.constraints : [];
   const segments = Array.isArray(content.segments) ? content.segments : [];

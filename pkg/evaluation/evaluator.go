@@ -143,6 +143,16 @@ func NewEvaluator(snap *model.Snapshot) (*Evaluator, error) {
 // Snapshot exposes the underlying immutable snapshot (read-only).
 func (e *Evaluator) Snapshot() *model.Snapshot { return e.snap }
 
+// MatchSegment evaluates one segment from the snapshot without evaluating a
+// flag or recording an exposure. The caller supplies a diagnostic context.
+func (e *Evaluator) MatchSegment(key string, ctx model.EvaluationContext) (bool, error) {
+	segment, ok := e.segs[key]
+	if !ok {
+		return false, fmt.Errorf("evaluation: segment %q not in snapshot", key)
+	}
+	return e.matchSegment(segment, ctx, map[string]bool{}, 0), nil
+}
+
 func (e *Evaluator) compileFlag(f *model.Flag) (*compiledFlag, error) {
 	cf := &compiledFlag{flag: f}
 	var err error
