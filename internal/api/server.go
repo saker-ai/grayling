@@ -175,6 +175,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/approvals", s.adminOnly(s.handleRequestApproval))
 	mux.HandleFunc("PUT /api/v1/admin/workspaces/{ws}/quotas", s.adminOnly(s.handleSetQuotas))
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/quotas", s.adminOnly(s.handleGetQuotas))
+	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/metrics", s.adminOnly(s.handleListMetricDefinitions))
+	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/metrics", s.adminOnly(s.handleCreateMetricDefinition))
+	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}", s.adminOnly(s.handleGetMetricDefinition))
+	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/submit", s.adminOnly(s.handleSubmitMetricDefinition))
+	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/publish", s.adminOnly(s.handlePublishMetricDefinition))
+	mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/deprecate", s.adminOnly(s.handleDeprecateMetricDefinition))
 
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/flags", s.adminOnly(s.handleListFlags))
 	mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}", s.adminOnly(s.handleGetFlag))

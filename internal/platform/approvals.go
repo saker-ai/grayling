@@ -55,14 +55,20 @@ func copyApproval(a *Approval) *Approval {
 }
 
 func (s *Store) RequestApproval(a Approval) (*Approval, error) {
-	if a.WorkspaceID == "" || a.EnvironmentID == "" || a.Action == "" || a.Object == "" ||
+	if a.WorkspaceID == "" || (a.EnvironmentID == "" && a.Action != "metric.publish") || a.Action == "" || a.Object == "" ||
 		a.PayloadHash == "" || a.SubmittedBy == "" || a.SubmittedTokenID == "" || a.Reason == "" {
 		return nil, fmt.Errorf("%w: incomplete approval request", ErrValidation)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.checkEnvLocked(a.WorkspaceID, a.EnvironmentID); err != nil {
-		return nil, err
+	if a.EnvironmentID == "" {
+		if s.data.Workspaces[a.WorkspaceID] == nil {
+			return nil, fmt.Errorf("%w: workspace %q", ErrNotFound, a.WorkspaceID)
+		}
+	} else {
+		if err := s.checkEnvLocked(a.WorkspaceID, a.EnvironmentID); err != nil {
+			return nil, err
+		}
 	}
 	a.ID = s.nextID("approval")
 	a.State = DraftSubmitted

@@ -94,6 +94,8 @@ tags:
     description: Segment 生命周期（草稿/评审/发布）
   - name: experiments
     description: 实验预注册、评审、绑定、状态迁移与分析报告
+  - name: metrics
+    description: 工作空间指标目录、版本、双人审批和弃用
   - name: release-plans
     description: 分阶段放量计划（自动推进引擎的操作面）
   - name: ai
@@ -1058,6 +1060,143 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/metrics":
+    get:
+      tags: [metrics]
+      summary: 列出指标定义版本
+      operationId: listMetricDefinitions
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - {name: status, in: query, schema: {type: string, enum: [draft, published, deprecated]}}
+        - {name: q, in: query, schema: {type: string}, description: 按 key、名称或描述模糊搜索。}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: cursor, in: query, schema: {type: string}}
+      responses:
+        "200":
+          description: 按 key 升序、版本降序排列的分页结果。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/MetricDefinition"}}
+                  nextCursor: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [metrics]
+      summary: 创建不可变指标定义的新草稿版本
+      operationId: createMetricDefinition
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MetricDefinition"}
+      responses:
+        "201":
+          description: 创建的草稿；版本号和 hash 由服务端确定。
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MetricDefinition"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  "/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}":
+    parameters:
+      - $ref: "#/components/parameters/WsPath"
+      - {name: key, in: path, required: true, schema: {type: string}}
+      - {name: version, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
+    get:
+      tags: [metrics]
+      summary: 读取确定版本的指标定义
+      operationId: getMetricDefinition
+      responses:
+        "200":
+          description: 指标定义。
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MetricDefinition"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  "/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/submit":
+    parameters:
+      - $ref: "#/components/parameters/WsPath"
+      - {name: key, in: path, required: true, schema: {type: string}}
+      - {name: version, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
+    post:
+      tags: [metrics]
+      summary: 提交草稿指标定义供独立审批
+      operationId: submitMetricDefinition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties: {reason: {type: string}}
+      responses:
+        "201":
+          description: 待审批记录；使用现有 approval 端点审批。
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Approval"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  "/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/publish":
+    parameters:
+      - $ref: "#/components/parameters/WsPath"
+      - {name: key, in: path, required: true, schema: {type: string}}
+      - {name: version, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
+    post:
+      tags: [metrics]
+      summary: 使用批准的定义 hash 发布指标版本
+      operationId: publishMetricDefinition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [approvalId]
+              properties: {approvalId: {type: string}}
+      responses:
+        "200":
+          description: 已发布定义。
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MetricDefinition"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  "/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/deprecate":
+    parameters:
+      - $ref: "#/components/parameters/WsPath"
+      - {name: key, in: path, required: true, schema: {type: string}}
+      - {name: version, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
+    post:
+      tags: [metrics]
+      summary: 弃用已发布版本，保留历史实验的冻结引用
+      operationId: deprecateMetricDefinition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties: {reason: {type: string}}
+      responses:
+        "200":
+          description: 已弃用定义。
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MetricDefinition"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
   "/api/v1/admin/workspaces/{ws}/environments/{env}/experiments":
     post:
       tags: [experiments]
@@ -3368,6 +3507,32 @@ components:
         note:
           type: string
           description: 调试求值永不记录曝光。
+    MetricDefinition:
+      type: object
+      additionalProperties: false
+      description: >-
+        指标定义版本；创建时 workspaceId、version、status、hash 和时间戳由服务端设置。
+        定义字段创建后不可修改，状态可从 draft 经审批变为 published，再变为 deprecated。
+      required: [key, displayName, owner, source, eventKeys, dedupUnit, attributionWindow, spec]
+      properties:
+        workspaceId: {type: string}
+        key: {type: string, pattern: '^[a-z][a-z0-9_.-]{0,127}$'}
+        version: {type: integer, format: int64, minimum: 1}
+        displayName: {type: string}
+        description: {type: string}
+        owner: {type: string}
+        source: {type: string, enum: [collect]}
+        eventKeys: {type: array, minItems: 1, maxItems: 32, items: {type: string}}
+        dedupUnit: {type: string, enum: [user]}
+        attributionWindow: {type: integer, format: int64, description: "纳秒，范围 (0, 30 天]。"}
+        timezone: {type: string}
+        spec: {$ref: "#/components/schemas/MetricSpec"}
+        status: {type: string, enum: [draft, published, deprecated]}
+        hash: {type: string}
+        createdAt: {type: string, format: date-time}
+        createdBy: {type: string}
+        publishedAt: {type: string, format: date-time, nullable: true}
+        publishedBy: {type: string}
     MetricSpec:
       type: object
       description: >-
