@@ -527,6 +527,39 @@ func TestExperimentLifecycleRepublishesFlag(t *testing.T) {
 		"editor", current.Revision); err != nil {
 		t.Fatal(err)
 	}
+	cleanDraft, err := f.store.GetFlagDraft(f.ws.ID, f.env.ID, created.FlagKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleHash, err := platform.FlagDraftFingerprint(cleanDraft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrentEdit := clean
+	concurrentEdit.Disable = !clean.Disable
+	if _, err := f.store.SaveFlagDraft(f.ws.ID, f.env.ID, &concurrentEdit, platform.RiskNormal,
+		"other-editor", current.Revision); err != nil {
+		t.Fatal(err)
+	}
+	staleBinding := clean
+	staleBinding.Experiment = created.ExperimentBinding()
+	staleBinding.Experiment.State = model.ExperimentScheduled
+	staleBinding.Version = ""
+	if _, err := f.store.ScheduleExperimentBinding(created.ID, model.ExperimentReviewed,
+		&staleBinding, "binder", current.Revision, staleHash); !errors.Is(err, platform.ErrConflict) {
+		t.Fatalf("stale binding must conflict: %v", err)
+	}
+	if after, err := f.store.GetExperiment(created.ID); err != nil || after.State != model.ExperimentReviewed {
+		t.Fatalf("stale binding changed experiment state: %+v, %v", after, err)
+	}
+	if after, err := f.store.GetFlagDraft(f.ws.ID, f.env.ID, created.FlagKey); err != nil ||
+		after.UpdatedBy != "other-editor" {
+		t.Fatalf("stale binding replaced concurrent editor's draft: %+v, %v", after, err)
+	}
+	if _, err := f.store.SaveFlagDraft(f.ws.ID, f.env.ID, &clean, platform.RiskNormal,
+		"editor", current.Revision); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := f.svc.BindExperimentFlag(f.publisher, created.ID); err != nil {
 		t.Fatalf("BindExperimentFlag: %v", err)
 	}

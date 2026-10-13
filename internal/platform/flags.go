@@ -152,6 +152,74 @@ func (s *Store) SaveFlagDraft(workspaceID, environmentID string, content *model.
 	return draft, s.commitLocked()
 }
 
+// ScheduleExperimentBinding records the scheduled experiment and its submitted
+// high-risk Flag draft in one store commit. It checks the experiment state,
+// published revision, and complete draft fingerprint under the same lock so
+// a concurrent editor cannot be overwritten or leave a scheduled experiment
+// without a binding draft.
+func (s *Store) ScheduleExperimentBinding(experimentID string, expectedState model.ExperimentState,
+	content *model.Flag, actor string, expectedRevision int64, expectedDraftHash string) (*FlagDraft, error) {
+	exp, err := s.GetExperiment(experimentID)
+	if err != nil {
+		return nil, err
+	}
+	if content == nil || content.Key != exp.FlagKey || content.Experiment == nil ||
+		content.Experiment.ID != experimentID || content.Experiment.Epoch != exp.Epoch ||
+		content.Experiment.State != model.ExperimentScheduled {
+		return nil, fmt.Errorf("%w: binding draft does not match scheduled experiment", ErrValidation)
+	}
+	if err := model.ValidateFlag(content, s.segmentsForValidation(exp.WorkspaceID, exp.EnvironmentID)); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	currentExp, ok := s.data.Experiments[experimentID]
+	if !ok {
+		return nil, fmt.Errorf("%w: experiment %q", ErrNotFound, experimentID)
+	}
+	if currentExp.State != expectedState {
+		return nil, fmt.Errorf("%w: experiment changed since binding check", ErrConflict)
+	}
+	if expectedState != model.ExperimentReviewed && expectedState != model.ExperimentScheduled {
+		return nil, fmt.Errorf("%w: experiment must be reviewed or scheduled", ErrInvalidState)
+	}
+	if err := s.checkEnvLocked(exp.WorkspaceID, exp.EnvironmentID); err != nil {
+		return nil, err
+	}
+	scope := flagScopeKey(exp.WorkspaceID, exp.EnvironmentID, exp.FlagKey)
+	if expectedRevision < 1 || s.data.CurrentFlagRev[scope] != expectedRevision {
+		return nil, fmt.Errorf("%w: published flag changed since binding check", ErrConflict)
+	}
+	existing := s.data.FlagDrafts[scope]
+	actualHash, err := FlagDraftFingerprint(existing)
+	if err != nil {
+		return nil, err
+	}
+	if actualHash != expectedDraftHash {
+		return nil, fmt.Errorf("%w: flag draft changed since binding check", ErrConflict)
+	}
+	if existing == nil && s.countFlagsLocked(exp.WorkspaceID, exp.EnvironmentID) >= s.quotasLocked(exp.WorkspaceID).MaxFlags {
+		return nil, fmt.Errorf("%w: max flags in workspace", ErrQuotaExceeded)
+	}
+	submittedHash, err := draftHash(content, RiskHigh, false, expectedRevision)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	now := s.now()
+	draft := &FlagDraft{
+		WorkspaceID: exp.WorkspaceID, EnvironmentID: exp.EnvironmentID, Key: exp.FlagKey,
+		Content: content, State: DraftSubmitted, Risk: RiskHigh,
+		UpdatedBy: actor, UpdatedAt: now, BaseRevision: expectedRevision,
+		SubmittedBy: actor, SubmittedAt: &now, SubmittedHash: submittedHash,
+	}
+	s.data.FlagDrafts[scope] = draft
+	currentExp.State = model.ExperimentScheduled
+	currentExp.UpdatedAt = now
+	s.changes.markDirty(collFlagDrafts, scope)
+	s.changes.markDirty(collExperiments, experimentID)
+	return draft, s.commitLocked()
+}
+
 // MarkFlagDraftDeleted flags a draft for tombstone publication. The draft
 // still goes through submit/approve/publish so deletions are auditable.
 func (s *Store) MarkFlagDraftDeleted(workspaceID, environmentID, key, actor string) error {

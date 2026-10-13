@@ -2,7 +2,7 @@
 
 范围：`openapi.yaml` 中的 `/api/v1/admin/` 管理操作（共 62 项）。`GET /api/v1/health` 是健康检查，不属于管理操作。SDK config/eval/collect、原生 Nacos 协议及 HMAC 原始密钥为数据面或运维密钥，刻意不进入管理 UI。
 
-下表说明 Web 是否提供入口及代码契约，**不表示每项都已在浏览器执行**。真实浏览器的操作、截图、HTTP 结果与未覆盖项见 [2026-10-08 验收报告](acceptance/web-2026-10-08/report.md)、[跨角色发布验收](acceptance/web-2026-10-13-roles/report.md)、[故障状态模拟验收](acceptance/web-2026-10-13-failures/report.md)、[会话恢复验收](acceptance/web-2026-10-13-reauth/report.md)及 [实验列表摘要验收](acceptance/web-2026-10-13-exp-list/report.md)。
+下表说明 Web 是否提供入口及代码契约，**不表示每项都已在浏览器执行**。真实浏览器的操作、截图、HTTP 结果与未覆盖项见 [2026-10-08 验收报告](acceptance/web-2026-10-08/report.md)、[跨角色发布验收](acceptance/web-2026-10-13-roles/report.md)、[故障状态模拟验收](acceptance/web-2026-10-13-failures/report.md)、[会话恢复验收](acceptance/web-2026-10-13-reauth/report.md)、[实验列表摘要验收](acceptance/web-2026-10-13-exp-list/report.md)及 [实验绑定并发冲突验收](acceptance/web-2026-10-13-bind-conflict/report.md)。
 
 | 方法 | 管理端点 | 分类 | Web 入口 / 行为或仅 API 理由 | 验证证据 |
 |---|---|---|---|---|
@@ -49,7 +49,7 @@
 | `GET` | `/api/v1/admin/experiments/{id}` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/experiments/{id}/review` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/experiments/{id}/bind` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
-| `GET` | `/api/v1/admin/experiments/{id}/bind-check` | 已覆盖 | 实验详情：绑定前逐项准备检查与重新检查 | i18n DOM；绑定准备检查 DOM；API 路由契约 |
+| `GET` | `/api/v1/admin/experiments/{id}/bind-check` | 已覆盖 | 实验详情：绑定前逐项准备检查；409 后重新读取并显示变化项 | i18n DOM；绑定准备检查及冲突 DOM；跨身份浏览器验收 |
 | `POST` | `/api/v1/admin/experiments/{id}/transition` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/experiments/{id}/report` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/experiments/{id}/report/export` | 已覆盖 | 实验详情：只读 JSON/CSV 报告导出 | 报告 DOM；API 路由契约 |

@@ -1803,12 +1803,12 @@ async function viewExpDetail(m) {
   const p = '/api/v1/admin/experiments/' + encodeURIComponent(id);
   const e = await api(p);
   if (S.expTab === 'diagnostics') return viewExpDiagnostics(m, e, p);
-  m.innerHTML =
+  const heading =
     '<div class="view-head"><button class="btn sm" id="exp-back">' + esc(t('exp.back')) + '</button>' +
     '<h2 class="mono">' + esc(e.id) + '</h2>' + chip(e.state, EXP_CHIP[e.state] || 'gray') +
     '<span class="muted">' + esc(t('exp.meta', { flag: e.flagKey, rev: e.flagRevision || 0, epoch: e.epoch || 0, by: e.createdBy || '—' })) + '</span>' +
-    '<button class="btn" id="exp-diagnostics">' + esc(t('exp.openDiagnostics')) + '</button></div>' +
-    '<div class="cols"><section class="card"><h3>' + esc(t('exp.prereg')) + '</h3><table class="kv">' +
+    '<button class="btn" id="exp-diagnostics">' + esc(t('exp.openDiagnostics')) + '</button></div>';
+  const prereg = '<section class="card"><h3>' + esc(t('exp.prereg')) + '</h3><table class="kv">' +
       '<tr><th>' + esc(t('th.unit')) + '</th><td class="mono">' + esc(e.unit) + '</td></tr>' +
       '<tr><th>' + esc(t('exp.layerShort')) + '</th><td>' + esc(e.layer || '—') + (e.layerSlot ? ' <span class="muted">' + esc(t('exp.slot', { json: JSON.stringify(e.layerSlot) })) + '</span>' : '') + '</td></tr>' +
       '<tr><th>' + esc(t('exp.eligShort')) + '</th><td>' + (e.eligibility ? esc(e.eligibility) + '%' : '100%') + '</td></tr>' +
@@ -1836,8 +1836,9 @@ async function viewExpDetail(m) {
       ' · ' + esc(e.registrationVersion || '—') + '</p><ul class="plain">' +
       (e.holmFamily.hypotheses || []).map(h => '<li>' + esc(h.id) + ': ' + esc(h.metric.key) +
         ' (' + esc(h.control) + ' → ' + esc(h.treatment) + ')</li>').join('') + '</ul>' : '') +
-    '</section>' +
-    '<section class="card"><h3>' + esc(t('exp.lifecycle')) + '</h3>' +
+    '</section>';
+  m.innerHTML = heading +
+    '<div class="cols exp-detail-cols"><section class="card"><h3>' + esc(t('exp.lifecycle')) + '</h3>' +
       '<div class="bind-readiness" id="exp-bind-check" role="status">' + esc(t('exp.bindCheckLoading')) + '</div>' +
       '<div class="row actions" style="border:0;padding:0;margin:0">' +
       '<button class="btn" id="exp-review">' + esc(t('btn.review')) + '</button>' +
@@ -1857,7 +1858,7 @@ async function viewExpDetail(m) {
         '<button class="btn" id="exp-export-json">' + esc(t('report.exportJson')) + '</button>' : '') +
       '<label class="inline"><input type="checkbox" id="exp-auto"> ' + esc(t('exp.autoRefresh')) + '</label></div>' +
       '<div id="report-box"><p class="muted">' + esc(t('exp.notLoaded')) + '</p></div>' +
-    '</section></div>' +
+    '</section>' + prereg + '</div>' +
     '<section class="card"><h3>' + esc(t('ro.title')) + ' <span class="muted">' + esc(t('ro.subtitle')) + '</span></h3>' +
     '<div id="rollout-box">' + renderRollout(e) + '</div></section>';
   $('#exp-back', m).onclick = () => { S.expId = null; S.expTab = 'summary'; route(); };
@@ -1877,7 +1878,7 @@ async function viewExpDetail(m) {
       if (S.expId !== id || S.view !== 'experiments') return false;
       bindReadiness = readiness;
       box.innerHTML = renderBindReadiness(readiness);
-      $('#exp-bind', m).disabled = !readiness.ready;
+      $('#exp-bind', m).disabled = !readiness.ready || !can('flag.write');
       return readiness.ready;
     } catch (err) {
       bindReadiness = null;
@@ -1894,6 +1895,7 @@ async function viewExpDetail(m) {
       toast(t('exp.bindNotReady'), false);
       return;
     }
+    const checkedReadiness = bindReadiness;
     try {
       await api(p + '/bind', { method: 'POST', body: {} });
       toast(t('toast.expBound'));
@@ -1901,6 +1903,9 @@ async function viewExpDetail(m) {
     } catch (err) {
       reportError(err);
       await loadBindCheck();
+      if (err.status === 409) {
+        $('#exp-bind-check', m).insertAdjacentHTML('afterbegin', renderBindConflict(checkedReadiness, bindReadiness));
+      }
     }
   };
   if (can('flag.read')) loadBindCheck();
@@ -2062,8 +2067,8 @@ function renderDiagnostics(d) {
     '</section>';
 }
 
-function renderBindReadiness(readiness) {
-  const names = {
+function bindCheckNames() {
+  return {
     state: t('exp.bindCheckState'),
     published_flag: t('exp.bindCheckPublished'),
     draft_clear: t('exp.bindCheckDraft'),
@@ -2074,6 +2079,10 @@ function renderBindReadiness(readiness) {
     bandit_rule: t('exp.bindCheckBandit'),
     existing_binding: t('exp.bindCheckExisting'),
   };
+}
+
+function renderBindReadiness(readiness) {
+  const names = bindCheckNames();
   const checks = Array.isArray(readiness.checks) ? readiness.checks : [];
   return '<div class="banner ' + (readiness.ready ? 'ok' : 'warn') + '">' +
     '<strong>' + esc(t(readiness.ready ? 'exp.bindReady' : 'exp.bindNotReady')) + '</strong>' +
@@ -2083,6 +2092,19 @@ function renderBindReadiness(readiness) {
     '<ul class="bind-check-list">' + checks.map(check =>
       '<li><span class="bind-check-state">' + esc(t(check.ready ? 'exp.bindCheckPass' : 'exp.bindCheckFail')) +
       '</span> ' + esc(names[check.code] || check.code) + '</li>').join('') + '</ul>' +
+    '</div>';
+}
+
+function renderBindConflict(previous, latest) {
+  const changed = (latest?.checks || []).filter(check => !check.ready &&
+    (previous?.checks || []).some(before => before.code === check.code && before.ready));
+  const names = bindCheckNames();
+  return '<div class="banner warn" id="exp-bind-conflict" role="alert"><strong>' +
+    esc(t('exp.bindConflictTitle')) + '</strong><p>' + esc(t(latest ? 'exp.bindConflictLoaded' : 'exp.bindConflictFailed')) + '</p>' +
+    (latest ? '<p>' + esc(t('exp.bindConflictRevision', {
+      before: previous?.currentRevision || '—', now: latest.currentRevision || '—',
+    })) + '</p>' : '') +
+    (changed.length ? '<ul>' + changed.map(check => '<li>' + esc(names[check.code] || check.code) + '</li>').join('') + '</ul>' : '') +
     '</div>';
 }
 

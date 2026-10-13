@@ -161,6 +161,10 @@ func (s *Service) BindExperimentFlag(actor Actor, experimentID string) (*platfor
 			return nil, fmt.Errorf("%w: binding precheck %s: %s", kind, check.Code, check.Detail)
 		}
 	}
+	expectedDraftHash, err := platform.FlagDraftFingerprint(draft)
+	if err != nil {
+		return nil, err
+	}
 
 	content := *current.Content
 	// Deep-copy rules so we never mutate the immutable revision in place.
@@ -174,21 +178,13 @@ func (s *Service) BindExperimentFlag(actor Actor, experimentID string) (*platfor
 		// Inside a layer the slot is the eligibility mechanism.
 		binding.Eligibility = 100
 	}
-	// Transition to Scheduled BEFORE stamping the binding so the published
-	// snapshot reflects the state the experiment is actually in.
-	if _, err := s.Store.TransitionExperiment(experimentID, model.ExperimentScheduled, actor.Name); err != nil {
-		return nil, err
-	}
 	binding.State = model.ExperimentScheduled
 	content.Experiment = binding
 	content.Version = "" // set at publish time
 
-	draft, err = s.Store.SaveFlagDraft(exp.WorkspaceID, exp.EnvironmentID, &content,
-		platform.RiskHigh, actor.Name, current.Revision)
+	draft, err = s.Store.ScheduleExperimentBinding(experimentID, exp.State, &content,
+		actor.Name, current.Revision, expectedDraftHash)
 	if err != nil {
-		return nil, err
-	}
-	if err := s.Store.SubmitFlagDraft(exp.WorkspaceID, exp.EnvironmentID, exp.FlagKey, actor.Name); err != nil {
 		return nil, err
 	}
 	s.audit(actor, "experiment.bind", exp.WorkspaceID, exp.EnvironmentID, experimentID,
