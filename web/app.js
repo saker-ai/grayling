@@ -1354,6 +1354,7 @@ async function viewExpDetail(m) {
       '<div class="bind-readiness" id="exp-bind-check" role="status">' + esc(t('exp.bindCheckLoading')) + '</div>' +
       '<div class="row actions" style="border:0;padding:0;margin:0">' +
       '<button class="btn" id="exp-review">' + esc(t('btn.review')) + '</button>' +
+      '<button class="btn" id="exp-open-flag">' + esc(t('exp.openFlag')) + '</button>' +
       '<button class="btn" id="exp-recheck">' + esc(t('exp.bindRecheck')) + '</button>' +
       '<button class="btn" id="exp-bind" disabled>' + esc(t('btn.bind')) + '</button></div>' +
       '<p class="muted">' + t('exp.bindHint') + '</p>' +
@@ -1398,6 +1399,9 @@ async function viewExpDetail(m) {
     }
   };
   $('#exp-recheck', m).onclick = loadBindCheck;
+  $('#exp-open-flag', m).onclick = () => {
+    S.view = 'flags'; S.flagKey = e.flagKey; route();
+  };
   $('#exp-bind', m).onclick = async () => {
     if (!await loadBindCheck() || !bindReadiness?.ready) {
       toast(t('exp.bindNotReady'), false);
