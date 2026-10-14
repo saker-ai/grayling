@@ -200,4 +200,96 @@ func TestTwoProcessPlanConflictAndReportEvidence(t *testing.T) {
 	if resumeAudit != 1 {
 		t.Fatalf("current evidence audit count=%d", resumeAudit)
 	}
+
+	status, body, err = post(h.srv.URL, base+"/takeover", map[string]any{
+		"enabled": true, "reason": "operator hold",
+	})
+	if err != nil || status != http.StatusOK {
+		t.Fatalf("enable takeover: status=%d body=%s err=%v", status, body, err)
+	}
+	openedVersion = h.reportVersion(t, expID)
+	h.feedTraffic(t, expID, 200, 100, 0.3, 0.1, nil)
+	h.fakeNow = time.Now().UTC()
+	currentVersion = h.reportVersion(t, expID)
+	if currentVersion == openedVersion {
+		t.Fatal("second event batch did not change report evidence")
+	}
+	status, body, err = post(address, base+"/takeover", map[string]any{
+		"enabled": false, "expectedReportVersion": openedVersion,
+	})
+	if err != nil || status != http.StatusConflict {
+		t.Fatalf("stale takeover return: status=%d body=%s err=%v", status, body, err)
+	}
+	if err := store.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if plan = h.getPlan(t, expID); !plan.ManualOverride {
+		t.Fatalf("stale evidence released manual control: %+v", plan)
+	}
+	status, body, err = post(address, base+"/takeover", map[string]any{
+		"enabled": false, "expectedReportVersion": currentVersion,
+	})
+	if err != nil || status != http.StatusOK {
+		t.Fatalf("current takeover return: status=%d body=%s err=%v", status, body, err)
+	}
+	if err := store.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if plan = h.getPlan(t, expID); plan.ManualOverride {
+		t.Fatalf("current evidence did not return automatic control: %+v", plan)
+	}
+	takeoverVersion := currentVersion
+
+	if code := h.do(http.MethodPost, base+"/advance", h.owner, map[string]any{
+		"reason": "move to final step", "expectedReportVersion": h.reportVersion(t, expID),
+	}, nil); code != http.StatusOK {
+		t.Fatalf("first advance: status=%d", code)
+	}
+	openedVersion = h.reportVersion(t, expID)
+	h.feedTraffic(t, expID, 300, 100, 0.3, 0.1, nil)
+	h.fakeNow = time.Now().UTC()
+	currentVersion = h.reportVersion(t, expID)
+	if currentVersion == openedVersion {
+		t.Fatal("third event batch did not change report evidence")
+	}
+	status, body, err = post(address, base+"/advance", map[string]any{
+		"reason": "old evidence", "expectedReportVersion": openedVersion,
+	})
+	if err != nil || status != http.StatusConflict {
+		t.Fatalf("stale final advance: status=%d body=%s err=%v", status, body, err)
+	}
+	if err := store.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if plan = h.getPlan(t, expID); plan.CurrentStep != 1 || plan.State != platform.ReleasePlanRunning {
+		t.Fatalf("stale evidence advanced plan: %+v", plan)
+	}
+	status, body, err = post(address, base+"/advance", map[string]any{
+		"reason": "finish rollout", "expectedReportVersion": currentVersion,
+	})
+	if err != nil || status != http.StatusOK {
+		t.Fatalf("current final advance: status=%d body=%s err=%v", status, body, err)
+	}
+	if err := store.ReloadFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if plan = h.getPlan(t, expID); plan.State != platform.ReleasePlanCompleted {
+		t.Fatalf("current evidence did not complete plan: %+v", plan)
+	}
+	for _, action := range []string{"release_plan.takeover", "release_plan.manual_complete"} {
+		version := currentVersion
+		if action == "release_plan.takeover" {
+			version = takeoverVersion
+		}
+		found := false
+		for _, entry := range store.AuditList(h.ws.ID, 100) {
+			if entry.Action == action && entry.Object == expID &&
+				strings.Contains(entry.Detail, version) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s lacks checked report evidence version", action)
+		}
+	}
 }
