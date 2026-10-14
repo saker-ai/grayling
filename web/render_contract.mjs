@@ -39,7 +39,7 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderDiagnostics = renderDiagnostics; globalThis.__renderExpDecisionHero = renderExpDecisionHero; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__renderExpStatusBand = renderExpStatusBand; globalThis.__renderExpZoneNav = renderExpZoneNav; globalThis.__renderHealthZone = renderHealthZone; globalThis.__renderHealthReportCard = renderHealthReportCard; globalThis.__fmtTime = fmtTime; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagExperimentImpact = renderFlagExperimentImpact; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail; globalThis.__renderOverviewRiskBand = renderOverviewRiskBand; globalThis.__renderOverviewStats = renderOverviewStats; globalThis.__renderOverviewApprovals = renderOverviewApprovals; globalThis.__renderOverviewReleases = renderOverviewReleases; globalThis.__renderOverviewModuleFailure = renderOverviewModuleFailure;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderDiagnostics = renderDiagnostics; globalThis.__renderExpDecisionHero = renderExpDecisionHero; globalThis.__classifyExpStatus = classifyExpStatus; globalThis.__renderExpHero = renderExpHero; globalThis.__S = S; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__renderExpStatusBand = renderExpStatusBand; globalThis.__renderExpZoneNav = renderExpZoneNav; globalThis.__renderHealthZone = renderHealthZone; globalThis.__renderHealthReportCard = renderHealthReportCard; globalThis.__fmtTime = fmtTime; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagExperimentImpact = renderFlagExperimentImpact; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail; globalThis.__renderOverviewRiskBand = renderOverviewRiskBand; globalThis.__renderOverviewStats = renderOverviewStats; globalThis.__renderOverviewApprovals = renderOverviewApprovals; globalThis.__renderOverviewReleases = renderOverviewReleases; globalThis.__renderOverviewModuleFailure = renderOverviewModuleFailure;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
 
 const delivered = sandbox.__renderDiagnostics({ exposureMode: 'onRender', perVariant: [
@@ -187,11 +187,193 @@ assert(bindConflict.includes('source changed') && bindConflict.includes('Current
   '409 binding recovery must show the latest changed prerequisites');
 assert(sandbox.__renderBindConflict({ currentRevision: 2 }, null).includes('could not be loaded'),
   '409 binding recovery must explain failed reload');
-assert(sandbox.__renderExpDecisionHero(null, 'reviewed').includes('No experiment results yet'),
+assert(sandbox.__renderExpDecisionHero(null, 'reviewed').includes('No experiment results are being collected yet.'),
   'pre-launch experiment must not be presented as an unhealthy result');
 const unavailableHero = sandbox.__renderExpDecisionHero({ healthy: true, generatedAt: 'old-time' }, 'running', new Error('offline'));
 assert(unavailableHero.includes('Current analysis is unavailable') && !unavailableHero.includes('Report healthy'),
   'failed refresh must not present an older report as a current healthy decision');
+
+// ---------------------------------------------------------------------------
+// Six-state hero classification (§4.4 状态×文案). The classifier reads only
+// real server fields; every kind renders its own first-screen copy, missing
+// data degrades to explicit unknown copy, and no number, time or victory
+// claim is ever invented.
+// ---------------------------------------------------------------------------
+sandbox.__S.capabilities = { permissions: { 'report.read': true, 'flag.publish': true } };
+const heroExp = { id: 'exp-1', state: 'running', flagKey: 'my-flag', environmentId: 'prod', epoch: 3 };
+const classify = (e, report, diag, transition, meta = {}) =>
+  sandbox.__classifyExpStatus(e, report, diag, transition, { canRead: true, ...meta });
+
+// 1. not_started — state-derived, needs no report.
+for (const st of ['draft', 'reviewed', 'scheduled']) {
+  assert.strictEqual(classify({ ...heroExp, state: st }, null, null, null).kind, 'not_started',
+    st + ' must classify as not_started');
+}
+const notStartedHero = sandbox.__renderExpHero(classify({ ...heroExp, state: 'draft' }, null, null, null), null);
+assert(notStartedHero.includes('No experiment results are being collected yet.') &&
+  notStartedHero.includes('Complete the readiness checks, then submit for review and launch.') &&
+  notStartedHero.includes('View readiness checks') && notStartedHero.includes('data-hero-goto="settings"'),
+  'not_started hero shows the collection-not-started copy with the readiness action');
+
+// 2. no_samples — the server issue string verbatim plus two real diagnostics
+//    sub-branches; missing assignment facts never guess a sub-branch.
+const noSamplesReport = { healthy: false, healthIssues: ['no randomized exposures recorded yet'],
+  minRuntimeSatisfied: false, decision: { verdict: 'hold',
+    reasons: ['pre-registered minimum runtime not yet satisfied'] } };
+const cAssigned = classify(heroExp, noSamplesReport, { exposureMode: 'onRender', perVariant: [
+  { variant: 'control', assignments: 120, exposures: 0, unexposed: 120, conversions: 0 },
+  { variant: 'treatment', assignments: 0, exposures: 0, unexposed: 0, conversions: 0 }] }, null);
+assert.strictEqual(cAssigned.kind, 'no_samples', 'no-exposure health issue classifies as no_samples');
+assert.strictEqual(cAssigned.params.subBranch, 'assigned');
+const assignedHero = sandbox.__renderExpHero(cAssigned, noSamplesReport);
+assert(assignedHero.includes('Waiting for the first real exposures.') &&
+  assignedHero.includes('120 units assigned but none exposed yet') &&
+  assignedHero.includes('data-hero-goto="health"'),
+  'assigned-not-exposed sub-branch quotes the real assignment total');
+const cNone = classify(heroExp, noSamplesReport, { exposureMode: 'onRender', perVariant: [
+  { variant: 'control', assignments: 0, exposures: 0, unexposed: 0, conversions: 0 }] }, null);
+assert.strictEqual(cNone.params.subBranch, 'none');
+assert(sandbox.__renderExpHero(cNone, noSamplesReport).includes('No assignments recorded yet'),
+  'zero-assignment sub-branch copy missing');
+const cNoFacts = classify(heroExp, noSamplesReport, { exposureMode: 'onDecision', perVariant: [
+  { variant: 'control', assignments: 0, exposures: 0, unexposed: 0, conversions: 0 }] }, null);
+assert.strictEqual(cNoFacts.params.subBranch, 'unknown',
+  'onDecision histories without assignment facts must not fake a zero');
+const noFactsHero = sandbox.__renderExpHero(cNoFacts, noSamplesReport);
+assert(noFactsHero.includes('Waiting for the first real exposures.') &&
+  !noFactsHero.includes('No assignments recorded yet') && !noFactsHero.includes('units assigned'),
+  'missing assignment facts degrade to the generic waiting copy, never a guessed sub-branch');
+const cDiagFailed = classify(heroExp, noSamplesReport, null, null, { diagFailed: true });
+assert.strictEqual(cDiagFailed.params.subBranch, 'unknown');
+const diagFailedHero = sandbox.__renderExpHero(cDiagFailed, noSamplesReport);
+assert(diagFailedHero.includes('Waiting for the first real exposures.') &&
+  diagFailedHero.includes('data-hero-goto="retry-diagnostics"'),
+  'a failed diagnostics fetch keeps the generic copy and offers a retry');
+
+// 3. immature — ETA from real fields only; missing startedAt degrades to the
+//    explicit unknown copy with zero invented numbers.
+const immatureReport = { healthy: true, minRuntimeSatisfied: false,
+  decision: { verdict: 'hold', reasons: ['pre-registered minimum runtime not yet satisfied'] } };
+const startedExp = { ...heroExp, startedAt: '2026-10-14T00:00:00Z', minRuntime: 86_400_000_000_000 };
+const cEta = classify(startedExp, immatureReport, null, undefined);
+assert.strictEqual(cEta.kind, 'immature');
+assert.strictEqual(cEta.params.eta.toISOString(), '2026-10-15T00:00:00.000Z',
+  'ETA = startedAt + minRuntime from the real registered fields');
+const etaHero = sandbox.__renderExpHero(cEta, immatureReport);
+assert(etaHero.includes('Results are not mature yet; current numbers are for observation only.') &&
+  etaHero.includes('Earliest decidable time: ' + sandbox.__fmtTime('2026-10-15T00:00:00.000Z')) &&
+  etaHero.includes('pre-registered minimum runtime not yet satisfied') &&
+  etaHero.includes('data-hero-goto="health"'),
+  'immature hero shows the observation-only copy, the real ETA and the server reason verbatim');
+const cGate = classify({ ...startedExp, releasePlan: { state: 'running', currentStep: 0,
+  stepStartedAt: '2026-10-14T00:00:00Z',
+  steps: [{ name: 'canary', ratio: 5, minRuntime: 3_600_000_000_000, observationWindow: 0,
+    autoAdvance: true }] } }, immatureReport, null, undefined);
+assert.strictEqual(cGate.params.eta.toISOString(), '2026-10-14T01:00:00.000Z',
+  'a running plan takes the ETA from planNextGate, not startedAt + minRuntime');
+const cNoStart = classify({ ...heroExp, minRuntime: 86_400_000_000_000 }, immatureReport, null, undefined);
+assert.strictEqual(cNoStart.params.eta, null, 'missing startedAt must not produce an ETA');
+const noStartHero = sandbox.__renderExpHero(cNoStart, immatureReport);
+assert(noStartHero.includes('Start time is not recorded; the earliest decidable time is unavailable.') &&
+  !noStartHero.includes('Earliest decidable time:') && !/[0-9]/.test(noStartHero),
+  'unknown ETA degrades to explicit copy with no invented time numbers');
+assert.strictEqual(classify(heroExp, { healthy: true, minRuntimeSatisfied: true,
+  decision: { verdict: 'hold',
+    reasons: ['insufficient sample: NA=12 NB=9 below pre-registered minimum 100 per arm'] } },
+  null, undefined).kind, 'immature', 'an insufficient-sample hold is immature, not blocked');
+assert.strictEqual(classify(heroExp, { healthy: true, minRuntimeSatisfied: true,
+  decision: { verdict: 'continue', reasons: ['primary metric not significant'] } },
+  null, undefined).kind, 'immature', 'a healthy continue verdict keeps observing');
+
+// 4. blocked — unhealthy pipeline/SRM/guardrails or a rollback verdict; the
+//    server reasons appear verbatim with the bound scope.
+const srmReason = 'SRM alarm: observed [30 10] vs expected [20 20] (p=0.0016) — delivery pipeline suspect';
+const blockedReport = { healthy: false, healthIssues: [srmReason], minRuntimeSatisfied: true,
+  decision: { verdict: 'hold', reasons: ['data pipeline unhealthy'],
+    guardrailBreaches: [{ metric: 'latency_p95', detail: '+12% over cap' }] } };
+const cBlocked = classify(heroExp, blockedReport, null, undefined);
+assert.strictEqual(cBlocked.kind, 'blocked');
+const blockedHero = sandbox.__renderExpHero(cBlocked, blockedReport);
+assert(blockedHero.includes('Automatic advancement is blocked.') && blockedHero.includes(srmReason) &&
+  blockedHero.includes('data pipeline unhealthy') && blockedHero.includes('latency_p95') &&
+  blockedHero.includes('+12% over cap') &&
+  blockedHero.includes('Affected: flag my-flag · environment prod · epoch 3') &&
+  blockedHero.includes('data-hero-goto="health"') && blockedHero.includes('data-hero-goto="rollout"') &&
+  blockedHero.includes('data-hero-goto="audit"'),
+  'blocked hero quotes server reasons verbatim, names the server-bound scope and offers diagnostics / pause-rollback / recent changes');
+assert.strictEqual(classify(heroExp, { healthy: true, minRuntimeSatisfied: true,
+  decision: { verdict: 'rollback',
+    reasons: ['primary metric significantly worse in treatment: diff=-0.2'] } },
+  null, undefined).kind, 'blocked', 'a rollback verdict blocks even when the pipeline is healthy');
+
+// 5. can_advance — healthy ship with the minimum runtime satisfied; the copy
+//    shows real evidence and never claims absolute victory.
+const shipReport = { healthy: true, minRuntimeSatisfied: true,
+  primary: { type: 'welch', pValue: 0.001, diff: 0.2, relativeDiff: 0.1, ciLow: 0.1, ciHigh: 0.3,
+    significant: true },
+  guardrails: [{ metric: 'latency_p95', detail: 'ok', breached: false }],
+  decision: { verdict: 'ship', reasons: ['primary metric significantly better in treatment'] } };
+const cShip = classify(heroExp, shipReport, null, undefined);
+assert.strictEqual(cShip.kind, 'can_advance');
+assert(cShip.actions.some(a => a.goto === 'evidence') && cShip.actions.some(a => a.goto === 'rollout'),
+  'can_advance offers the evidence action and, with flag.publish, the rollout action');
+const shipHero = sandbox.__renderExpHero(cShip, shipReport);
+assert(shipHero.includes('Data meets the current rollout gate.') && shipHero.includes('p = 0.001') &&
+  shipHero.includes('CI [0.1, 0.3]') && shipHero.includes('latency_p95') &&
+  shipHero.includes('This is not a claim of absolute victory'),
+  'can_advance shows the real primary/guardrail evidence with the no-absolute-victory note');
+assert(!/\bwinner\b|has won|declared victor|胜出|获胜方|宣布获胜/i.test(shipHero),
+  'can_advance copy must not contain a victory claim');
+sandbox.__S.capabilities = { permissions: { 'report.read': true } };
+assert(!classify(heroExp, shipReport, null, undefined).actions.some(a => a.goto === 'rollout'),
+  'the advance action is gated behind flag.publish');
+sandbox.__S.capabilities = { permissions: { 'report.read': true, 'flag.publish': true } };
+
+// 6. ended — operator/time/reason from the real transition audit; a missing
+//    or failed audit degrades to the explicit unknown copy with a link.
+const pausedExp = { ...heroExp, state: 'paused' };
+for (const st of ['paused', 'stopped', 'archived']) {
+  assert.strictEqual(classify({ ...heroExp, state: st }, null, null, null).kind, 'ended',
+    st + ' is an ended state');
+}
+const transition = { actor: 'alice (tok-1)', time: '2026-10-14T09:00:00Z', to: 'paused',
+  reason: 'guardrail investigation' };
+const endedHero = sandbox.__renderExpHero(classify(pausedExp, null, null, transition), null);
+assert(endedHero.includes('paused: alice (tok-1) at ' + sandbox.__fmtTime('2026-10-14T09:00:00Z') +
+    ' — reason: guardrail investigation') &&
+  endedHero.includes('data-hero-goto="audit"') && endedHero.includes('data-hero-goto="settings"'),
+  'ended hero names the real operator, time and reason and links the audit + transition controls');
+const endedUnknownHero = sandbox.__renderExpHero(classify(pausedExp, null, null, null), null);
+assert(endedUnknownHero.includes('Transition details are unavailable; check the audit log.') &&
+  endedUnknownHero.includes('data-hero-goto="audit"') &&
+  !endedUnknownHero.includes('alice'),
+  'a missing transition audit degrades to the unknown copy with an audit link, never a guessed operator');
+const rolledHero = sandbox.__renderExpHero(classify({ ...heroExp, state: 'stopped',
+  releasePlan: { state: 'rolled_back', currentStep: 1,
+    steps: [{ name: 'canary', ratio: 5 }, { name: 'ramp', ratio: 50 }] } }, null, null, transition), null);
+assert(rolledHero.includes('Rollback position: ramp · 50%'),
+  'a rolled-back plan shows the real step it stopped at');
+
+// Priority: report error outranks every state kind; missing report.read shows
+// the restricted copy; a granted permission with no report yet keeps the
+// existing loading copy.
+const errCls = sandbox.__classifyExpStatus(pausedExp, { healthy: true, generatedAt: 'old-time' },
+  null, transition, { error: new Error('offline'), canRead: true });
+assert.strictEqual(errCls.kind, 'error', 'a report fetch failure outranks the six state kinds');
+const errHero = sandbox.__renderExpHero(errCls, { healthy: true, generatedAt: 'old-time' }, new Error('offline'));
+assert(errHero.includes('Current analysis is unavailable') && errHero.includes('Showing the last successful report') &&
+  !errHero.includes('Report healthy'), 'the error hero keeps the existing stale-report semantics');
+assert.strictEqual(sandbox.__classifyExpStatus(heroExp, null, null, null, { canRead: false }).kind,
+  'restricted', 'missing report.read shows the restricted copy');
+assert(sandbox.__renderExpHero(classify(heroExp, null, null, null, { canRead: false }), null)
+  .includes('Report read access is required'), 'restricted hero copy missing');
+assert.strictEqual(classify(heroExp, null, null, null).kind, 'loading',
+  'a granted permission with no report yet keeps the loading copy');
+// Defensive: a shape matching no rule renders no banner — the decision
+// snapshot below carries the raw server verdict instead of an invented state.
+assert.strictEqual(sandbox.__renderExpHero({ kind: 'unknown', params: {}, actions: [] }, null), '',
+  'an unclassified report shape must not invent a status banner');
+sandbox.__S.capabilities = null;
 
 // ---------------------------------------------------------------------------
 // Experiment zones (§4.4): status band, zone navigation, data-health zone.
@@ -519,4 +701,4 @@ assert(moduleFailure.includes('Recent releases is unavailable: audit_unavailable
   moduleFailure.includes('data-overview-retry') && moduleFailure.includes('banner warn'),
   'module failure banner must state name, reason, status, coverage and retry');
 
-console.log('renderReport DOM contract: all assertions passed (9 report shapes)');
+console.log('renderReport DOM contract: all assertions passed (9 report shapes + six-state hero matrix)');

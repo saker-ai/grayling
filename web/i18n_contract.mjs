@@ -34,7 +34,7 @@ const indexHTML = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const code = i18nCode + '\n' + flagEditorCode + '\n' + segmentEditorCode + '\n' + approvalsCode + '\n' + expWorkbenchCode + '\n' + appCode;
 
 const BRIDGE = '\n;globalThis.__x = { I18N, t, setLang, detectLang, localeFor, fmtTime, fmtDurNs,' +
-  ' S, VIEWS, route, renderReport, renderRollout, lintFlag, applyStaticI18n, bindLangSwitch, registerI18nHooks, applyTheme, themePreference, consoleHash, restoreConsoleHash };';
+  ' S, VIEWS, route, renderReport, renderRollout, lintFlag, applyStaticI18n, bindLangSwitch, registerI18nHooks, applyTheme, themePreference, consoleHash, restoreConsoleHash, classifyExpStatus, renderExpHero };';
 
 // --- sandbox factory --------------------------------------------------------
 // Rich element stub: tolerates property writes, records classList.toggle and
@@ -182,6 +182,16 @@ const diagnostics = {
   crossVariantUnits: 0, assignmentMismatch: 0, lastCollectedAt: TS,
   issues: ['10 assigned units have no recorded exposure'],
 };
+// Paused fixture for the six-state hero: the ended copy renders synchronously
+// from the experiment state and the transition audit is fetched with an exact
+// object filter (asserted below via fetchCalls).
+const expDetailEnded = {
+  ...expDetail, id: 'exp-2', state: 'paused', epoch: 2, releasePlan: null,
+};
+const endedReport = {
+  ...report, state: 'paused', epoch: 2,
+  decision: { verdict: 'continue', reasons: ['primary metric not significant'], guardrailBreaches: [] },
+};
 const tokens = [
   { id: 'tk1', name: 'ci-token', kind: 'sdk', role: 'viewer', prefix: 'glab_sdk_ab', environmentId: 'prod', createdAt: TS, revoked: false },
   { id: 'tk2', name: 'old-admin', kind: 'admin', role: 'owner', prefix: 'glab_adm_cd', environmentId: '', createdAt: TS, revoked: true },
@@ -235,6 +245,9 @@ function mockResponse(url) {
   if (url.includes('/experiments/exp-1/report')) return json(report);
   if (url.includes('/experiments/exp-1/diagnostics')) return json(diagnostics);
   if (url.includes('/experiments/exp-1')) return json(expDetail);
+  if (url.includes('/experiments/exp-2/report')) return json(endedReport);
+  if (url.includes('/experiments/exp-2/diagnostics')) return json(diagnostics);
+  if (url.includes('/experiments/exp-2')) return json(expDetailEnded);
   if (url.includes('/experiment-summaries?')) return json({ items: [{ experiment: expSummary,
     report: { status: 'ready', healthy: false, verdict: 'hold', issue: 'watermark pending', generatedAt: TS } }],
     total: 1, offset: 0, limit: 20 });
@@ -380,6 +393,15 @@ const SWEEPS = [
     shared: ['exp-1', 'my-flag', 'sha256:reg-fixture'],
     ids: ['exp-statusband', 'exp-zone-nav', 'exp-decision', 'exp-band-report-time',
       'exp-view-prereg', 'exp-auto'] },
+  { name: 'experiments-detail-ended', view: 'experiments',
+    setup: S => { S.expCreate = false; S.expId = 'exp-2'; S.expTab = 'summary'; },
+    en: ['Transition details are unavailable; check the audit log.', 'View audit',
+      'Settings &amp; audit'],
+    zh: ['未获取到状态变更详情，请查看审计记录。', '查看审计',
+      '设置与审计'],
+    shared: ['exp-2', 'paused', 'my-flag'],
+    ids: ['exp-statusband', 'exp-zone-nav', 'exp-decision', 'exp-hero-actions',
+      'exp-summary-snapshot'] },
   { name: 'experiments-health', view: 'experiments',
     setup: S => { S.expCreate = false; S.expId = 'exp-1'; S.expTab = 'health'; },
     en: ['Experiment diagnostics', 'Data status', 'Blocking issues', 'Assignment to delivery', 'Not exposed',
@@ -500,6 +522,110 @@ for (const s of SWEEPS) {
   assert.deepStrictEqual(idsOf(htmlZh[s.name]), idList,
     'layout node IDs must not change across languages: ' + s.name);
   for (const id of s.ids) assert(idList.includes(id), s.name + ' missing layout id: ' + id);
+}
+
+// the ended hero fetches the transition audit with an exact object filter
+assert(main.fetchCalls.some(call => call.url.includes('/audit?') &&
+  call.url.includes('object=exp-2') && call.url.includes('limit=20')),
+  'the ended hero must fetch the object-filtered transition audit');
+
+// ---------------------------------------------------------------------------
+// Six-state hero copy (§4.4 状态×文案): every classified state renders its own
+// localized first-screen copy in BOTH languages; server reasons, operator
+// strings and metric numbers pass through verbatim.
+// ---------------------------------------------------------------------------
+{
+  const heroExp = { id: 'exp-1', state: 'running', flagKey: 'my-flag', environmentId: 'prod', epoch: 3 };
+  const srmReason = 'SRM alarm: observed [30 10] vs expected [20 20] (p=0.0016) — delivery pipeline suspect';
+  const noSamplesReport = { healthy: false, healthIssues: ['no randomized exposures recorded yet'],
+    minRuntimeSatisfied: false, decision: { verdict: 'hold', reasons: [] } };
+  const heroCases = [
+    { name: 'not_started', kind: 'not_started', e: { ...heroExp, state: 'draft' },
+      report: null, diag: null, transition: null,
+      en: ['No experiment results are being collected yet.',
+        'Complete the readiness checks, then submit for review and launch.', 'View readiness checks'],
+      zh: ['还未开始采集实验结果。', '完成准备检查后提交评审并启动。', '查看准备检查'] },
+    { name: 'no_samples_assigned', kind: 'no_samples', e: heroExp, report: noSamplesReport,
+      diag: { exposureMode: 'onRender',
+        perVariant: [{ variant: 'control', assignments: 120, exposures: 0, unexposed: 120, conversions: 0 }] },
+      transition: null,
+      en: ['Waiting for the first real exposures.', '120 units assigned but none exposed yet',
+        'View SDK setup and collection diagnostics'],
+      zh: ['等待首批实际曝光。', '已分配 120 个单元但尚无实际曝光', '查看 SDK 接入和采集诊断'] },
+    { name: 'no_samples_none', kind: 'no_samples', e: heroExp, report: noSamplesReport,
+      diag: { exposureMode: 'onRender',
+        perVariant: [{ variant: 'control', assignments: 0, exposures: 0, unexposed: 0, conversions: 0 }] },
+      transition: null,
+      en: ['No assignments recorded yet'], zh: ['尚无分配记录'] },
+    { name: 'immature_eta', kind: 'immature',
+      e: { ...heroExp, startedAt: '2026-10-14T00:00:00Z', minRuntime: 24 * NS_H },
+      report: { healthy: true, minRuntimeSatisfied: false,
+        decision: { verdict: 'hold', reasons: ['pre-registered minimum runtime not yet satisfied'] } },
+      diag: null, transition: null,
+      en: ['Results are not mature yet; current numbers are for observation only.',
+        'Earliest decidable time: ', 'View watermark'],
+      zh: ['结果未成熟，当前仅供观察。', '预计可判定时间：', '查看水位'],
+      shared: ['pre-registered minimum runtime not yet satisfied'] },
+    { name: 'immature_eta_unknown', kind: 'immature', e: heroExp,
+      report: { healthy: true, minRuntimeSatisfied: false, decision: { verdict: 'hold', reasons: [] } },
+      diag: null, transition: null,
+      en: ['Start time is not recorded; the earliest decidable time is unavailable.'],
+      zh: ['未记录启动时间，无法给出预计可判定时间。'] },
+    { name: 'blocked', kind: 'blocked', e: heroExp,
+      report: { healthy: false, healthIssues: [srmReason], minRuntimeSatisfied: true,
+        decision: { verdict: 'hold', reasons: [],
+          guardrailBreaches: [{ metric: 'latency_p95', detail: '+12% over cap' }] } },
+      diag: null, transition: null,
+      en: ['Automatic advancement is blocked.', 'Affected: flag my-flag · environment prod · epoch 3',
+        'View diagnostics', 'Pause / rollback flow', 'View recent changes'],
+      zh: ['自动推进已阻止。', '影响范围：Flag my-flag · 环境 prod · epoch 3',
+        '查看诊断', '暂停/回滚流程', '查看最近变化'],
+      shared: [srmReason, 'latency_p95', '+12% over cap'] },
+    { name: 'can_advance', kind: 'can_advance', e: heroExp,
+      report: { healthy: true, minRuntimeSatisfied: true,
+        primary: { type: 'welch', pValue: 0.001, diff: 0.2, relativeDiff: 0.1, ciLow: 0.1, ciHigh: 0.3 },
+        guardrails: [{ metric: 'latency_p95', detail: 'ok', breached: false }],
+        decision: { verdict: 'ship', reasons: [] } },
+      diag: null, transition: null,
+      en: ['Data meets the current rollout gate.', 'This is not a claim of absolute victory', 'View evidence'],
+      zh: ['数据满足当前放量门槛。', '这不宣称绝对获胜', '查看证据'],
+      shared: ['p = 0.001', 'latency_p95'] },
+    { name: 'ended', kind: 'ended', e: { ...heroExp, state: 'paused' }, report: null, diag: null,
+      transition: { actor: 'alice (tok-1)', time: '2026-10-14T09:00:00Z', to: 'paused',
+        reason: 'guardrail investigation' },
+      en: ['paused: alice (tok-1) at ', 'reason: guardrail investigation', 'View audit'],
+      zh: ['paused：alice (tok-1) 于 ', '原因：guardrail investigation', '查看审计'],
+      shared: ['guardrail investigation', 'alice (tok-1)'] },
+    { name: 'ended_unknown', kind: 'ended', e: { ...heroExp, state: 'stopped' },
+      report: null, diag: null, transition: null,
+      en: ['Transition details are unavailable; check the audit log.'],
+      zh: ['未获取到状态变更详情，请查看审计记录。'] },
+  ];
+  const hs = makeSandbox({ navLang: 'en-US' });
+  hs.x.S.capabilities = { workspaceId: 'acme',
+    permissions: { 'report.read': true, 'flag.publish': true } };
+  const classifyCase = c => hs.x.classifyExpStatus(c.e, c.report, c.diag, c.transition, { canRead: true });
+  const renderCase = c => hs.x.renderExpHero(classifyCase(c), c.report, null);
+  heroCases.forEach(c => {
+    assert.strictEqual(classifyCase(c).kind, c.kind,
+      'hero case ' + c.name + ' must classify as ' + c.kind);
+  });
+  const enHeroes = heroCases.map(renderCase);
+  heroCases.forEach((c, i) => {
+    for (const str of c.en) assert(enHeroes[i].includes(str), '[en] hero ' + c.name + ' missing: ' + str);
+  });
+  hs.x.setLang('zh');
+  const zhHeroes = heroCases.map(renderCase);
+  heroCases.forEach((c, i) => {
+    for (const str of c.zh) assert(zhHeroes[i].includes(str), '[zh] hero ' + c.name + ' missing: ' + str);
+    for (const str of c.shared || []) {
+      assert(enHeroes[i].includes(str) && zhHeroes[i].includes(str),
+        'server content must pass through verbatim in both languages: hero ' + c.name + ': ' + str);
+    }
+    for (const str of c.en) {
+      assert(!zhHeroes[i].includes(str), '[zh] hero ' + c.name + ' must not render the en sample: ' + str);
+    }
+  });
 }
 
 // Quota editor uses the GET values as its complete PUT body; validation and

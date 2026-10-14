@@ -14,12 +14,13 @@
 //
 // Contents: experiment detail — the always-visible status band
 // (renderExpStatusBand), the deep-linkable zone navigation
-// (renderExpZoneNav; S.expTab ∈ EXP_TABS, router lives in app.js) and the
-// five zone loaders (decision summary / data health / effect evidence /
-// rollout timeline / settings & audit) — plus report, health and
-// bind-readiness renderers and the staged-rollout section (PLAN_*
-// constants, renderRollout family, bindRollout). The experiments list and
-// the creation wizard stay in app.js.
+// (renderExpZoneNav; S.expTab ∈ EXP_TABS, router lives in app.js), the
+// six-state first-screen hero (classifyExpStatus + renderExpHero, §4.4
+// 状态×文案) and the five zone loaders (decision summary / data health /
+// effect evidence / rollout timeline / settings & audit) — plus report,
+// health and bind-readiness renderers and the staged-rollout section
+// (PLAN_* constants, renderRollout family, bindRollout). The experiments
+// list and the creation wizard stay in app.js.
 // ---------------------------------------------------------------------------
 
 async function viewExpDetail(m) {
@@ -51,10 +52,95 @@ async function viewExpDetail(m) {
   let lastReport = null;
   let reportDetailOpen = false;
   let reportRequest = 0;
+  let lastReportError = null;
+  // Six-state hero extras (§4.4). undefined = not fetched yet, null = fetch
+  // failed / nothing found, object = real payload. Both fetchers carry
+  // staleness guards (view + experiment + request counter) and only ever
+  // re-render the hero.
+  let heroDiagnostics;
+  let heroDiagRequest = 0;
+  let latestTransition;
+  let transitionRequest = 0;
   const preLaunch = ['draft', 'reviewed', 'scheduled'].includes(e.state);
   // The rollout gate status lives on m.dataset so the rollout zone replays the
   // latest known report status whenever it renders (pre-zoning pattern).
   setRolloutReportStatus(m, preLaunch ? 'not_required' : can('report.read') ? 'pending' : 'restricted');
+  const heroClass = () => classifyExpStatus(e, lastReport, heroDiagnostics, latestTransition,
+    { error: lastReportError, canRead: can('report.read'), diagFailed: heroDiagnostics === null });
+  const snapshotHtml = () =>
+    lastReport && !lastReportError ? renderReportSummary(lastReport) : '';
+  const heroGoto = goto => {
+    if (goto === 'audit') {
+      S.view = 'audit'; S.auditObject = id; S.auditQuery = '';
+      S.auditCursors = [0]; S.auditPage = 0;
+      route();
+    } else if (goto === 'retry-diagnostics') {
+      heroDiagnostics = undefined;
+      fetchHeroDiagnostics();
+    } else if (EXP_TABS.includes(goto)) gotoZone(goto);
+  };
+  const bindHeroActions = root => {
+    for (const button of $$('[data-hero-goto]', root)) {
+      button.onclick = () => heroGoto(button.dataset.heroGoto);
+    }
+  };
+  // parseTransition reads the real experiment.transition audit entry: the
+  // actor/time come from the audit record, to/reason from its JSON detail
+  // ({"to":…,"reason":…} written by the transition handler).
+  const parseTransition = entry => {
+    let detail = {};
+    try {
+      detail = typeof entry.detail === 'string' && entry.detail
+        ? JSON.parse(entry.detail) : (entry.detail || {});
+    } catch { detail = {}; }
+    return { actor: entry.actor || '', time: entry.time || '',
+      to: detail.to || '', reason: detail.reason || '' };
+  };
+  const fetchLatestTransition = async () => {
+    const request = ++transitionRequest;
+    try {
+      const page = (await api(wsPath() + '/audit?object=' + encodeURIComponent(id) + '&limit=20')) || [];
+      if (S.expId !== id || S.view !== 'experiments' || request !== transitionRequest) return;
+      const entry = page.find(a => a && a.action === 'experiment.transition');
+      latestTransition = entry ? parseTransition(entry) : null;
+    } catch {
+      if (S.expId !== id || S.view !== 'experiments' || request !== transitionRequest) return;
+      latestTransition = null; // degraded endedUnknown copy, never a guess
+    }
+    renderHero();
+  };
+  const fetchHeroDiagnostics = async () => {
+    const request = ++heroDiagRequest;
+    try {
+      const d = await api(p + '/diagnostics');
+      if (S.expId !== id || S.view !== 'experiments' || request !== heroDiagRequest) return;
+      heroDiagnostics = d;
+    } catch {
+      if (S.expId !== id || S.view !== 'experiments' || request !== heroDiagRequest) return;
+      heroDiagnostics = null; // generic waiting copy + retry, no guessed sub-branch
+    }
+    renderHero();
+  };
+  // ensureHeroData lazily fetches the extra sources the classified kind
+  // needs: the diagnostics payload for the no_samples sub-branch (only when
+  // the report carries no embedded diagnostics) and the transition audit for
+  // the ended copy. Guards make each fetch happen at most once per retry.
+  const ensureHeroData = cls => {
+    if (!cls) return;
+    if (cls.kind === 'no_samples' && cls.params.subBranch === 'unknown' &&
+        heroDiagnostics === undefined && !(lastReport && lastReport.diagnostics)) {
+      fetchHeroDiagnostics();
+    }
+    if (cls.kind === 'ended' && latestTransition === undefined) fetchLatestTransition();
+  };
+  const renderHero = () => {
+    const hero = $('#exp-decision', m);
+    if (!hero) return;
+    const cls = heroClass();
+    hero.innerHTML = renderExpHero(cls, lastReport, lastReportError);
+    bindHeroActions(hero);
+    ensureHeroData(cls);
+  };
   const loadReport = async (showDetail = false) => {
     if (showDetail) reportDetailOpen = true;
     const request = ++reportRequest;
@@ -62,8 +148,10 @@ async function viewExpDetail(m) {
       const report = await api(p + '/report');
       if (S.expId !== id || S.view !== 'experiments' || request !== reportRequest) return false;
       lastReport = report;
-      const hero = $('#exp-decision', m);
-      if (hero) hero.innerHTML = renderExpDecisionHero(report, e.state);
+      lastReportError = null;
+      renderHero();
+      const snapshot = $('#exp-summary-snapshot', m);
+      if (snapshot) snapshot.innerHTML = snapshotHtml();
       const reportTime = $('#exp-band-report-time', m);
       if (reportTime) reportTime.textContent = fmtTime(report.generatedAt);
       const healthCard = $('#diag-report-card', m);
@@ -74,8 +162,10 @@ async function viewExpDetail(m) {
       return true;
     } catch (err) {
       if (request !== reportRequest) return false;
-      const hero = $('#exp-decision', m);
-      if (hero) hero.innerHTML = renderExpDecisionHero(lastReport, e.state, err);
+      lastReportError = err;
+      renderHero();
+      const snapshot = $('#exp-summary-snapshot', m);
+      if (snapshot) snapshot.innerHTML = snapshotHtml(); // cleared — a stale report is never presented as current
       setRolloutReportStatus(m, 'unavailable');
       const box = $('#report-box', m);
       if (reportDetailOpen && box) {
@@ -113,11 +203,12 @@ async function viewExpDetail(m) {
     failures = 0;
     if (autoRefresh) poll();
   };
-  // --- zone: decision summary (hero + primary actions + prereg link) -------
+  // --- zone: decision summary (six-state hero + snapshot + actions) --------
   const loadZoneSummary = () => {
     zone.innerHTML =
       '<div class="exp-decision" id="exp-decision" role="status" aria-live="polite">' +
-      renderExpDecisionHero(lastReport, e.state) + '</div>' +
+      renderExpHero(heroClass(), lastReport, lastReportError) + '</div>' +
+      '<div id="exp-summary-snapshot">' + snapshotHtml() + '</div>' +
       '<div class="row actions" id="exp-zone-actions">' +
       '<button class="btn" id="exp-goto-health" type="button">' + esc(t('exp.zone.health')) + '</button>' +
       '<button class="btn" id="exp-goto-evidence" type="button">' + esc(t('exp.zone.evidence')) + '</button>' +
@@ -125,12 +216,14 @@ async function viewExpDetail(m) {
       '<button class="btn" id="exp-goto-settings" type="button">' + esc(t('exp.tab.settings')) + '</button>' +
       '</div>' +
       '<p><button class="row-link" id="exp-view-prereg" type="button">' + esc(t('exp.viewPrereg')) + '</button></p>';
+    bindHeroActions(zone);
     for (const next of ['health', 'evidence', 'rollout', 'settings']) {
       const button = $('#exp-goto-' + next, zone);
       if (button) button.onclick = () => gotoZone(next);
     }
     const preregLink = $('#exp-view-prereg', zone);
     if (preregLink) preregLink.onclick = () => gotoZone('settings');
+    ensureHeroData(heroClass());
   };
   // --- zone: data health (merged diagnostics view) --------------------------
   const loadZoneHealth = async () => {
@@ -332,15 +425,217 @@ function renderExpZoneNav(activeTab) {
     }).join('') + '</nav>';
 }
 
-function renderExpDecisionHero(report, state, error = null) {
-  if (error) return '<div class="banner warn">' + esc(t('exp.reportUnavailable')) + '</div>' +
-    (report ? '<p class="muted">' + esc(t('report.stale')) + ' · ' + esc(t('report.generatedAt')) + ': ' +
-      esc(fmtTime(report.generatedAt)) + '</p>' : '');
-  if (report) return renderReportSummary(report);
-  if (['draft', 'reviewed', 'scheduled'].includes(state)) {
-    return '<div class="banner">' + esc(t('exp.awaitingStart')) + '</div>';
+// ---------------------------------------------------------------------------
+// Six-state first-screen copy (§4.4 状态×文案). classifyExpStatus is a pure
+// function over REAL server data only: the experiment JSON, the loaded
+// report, the diagnostics payload and the latest experiment.transition audit
+// entry. Priority: report-fetch error (never present a stale report as a
+// current conclusion) > missing report.read > state-derived kinds
+// (not_started, ended) > report-derived kinds (no_samples, immature, blocked,
+// can_advance) > loading. Hard rules: a missing ETA degrades to explicit
+// unknown copy (never an estimate), assignment counts are only quoted when
+// the diagnostics payload carries real assignment facts, server reasons and
+// health issues are quoted verbatim, and can_advance never claims absolute
+// victory. Any shape that matches no rule renders no banner at all — the
+// decision snapshot below the hero carries the raw server verdict instead.
+// ---------------------------------------------------------------------------
+const EXP_PRELAUNCH_STATES = ['draft', 'reviewed', 'scheduled'];
+const EXP_ENDED_STATES = ['paused', 'stopped', 'archived'];
+
+// heroDiagTotals sums the REAL diagnostics flow fields (assignments and
+// exposures are distinct facts; evaluations never masquerade as exposures).
+function heroDiagTotals(diag) {
+  const flow = (diag && diag.perVariant) || [];
+  const sum = field => flow.reduce((total, v) => total + Number(v[field] || 0), 0);
+  const assignments = sum('assignments');
+  return {
+    present: !!diag && flow.length > 0,
+    assignments,
+    exposures: sum('exposures'),
+    // onDecision histories may carry no assignment facts at all — quoting a
+    // zero then would invent "no assignments" from missing data.
+    hasAssignmentFacts: !!diag && (diag.exposureMode === 'onRender' || assignments > 0),
+  };
+}
+
+// immatureEta derives the earliest decidable time from real fields only:
+// the running plan's next gate (stepStartedAt + step minRuntime +
+// observationWindow) when a plan is running, otherwise startedAt +
+// minRuntime. Returns null when neither is recorded — callers must show the
+// etaUnknown copy, never an estimate.
+function immatureEta(e) {
+  const gate = planNextGate(e && e.releasePlan);
+  if (gate) return gate;
+  if (e && e.startedAt) {
+    const ms = Date.parse(e.startedAt) + Number(e.minRuntime || 0) / 1e6;
+    if (!isNaN(ms)) return new Date(ms);
   }
-  return '<div class="banner">' + esc(t(can('report.read') ? 'exp.reportLoading' : 'exp.reportRestricted')) + '</div>';
+  return null;
+}
+
+// endedRollbackTarget reports where a rolled-back release plan stopped, from
+// the plan's real current step — null when there is no rolled-back plan.
+function endedRollbackTarget(e) {
+  const plan = e && e.releasePlan;
+  if (!plan || plan.state !== 'rolled_back') return null;
+  const step = (plan.steps || [])[plan.currentStep];
+  return step ? step.name + ' · ' + step.ratio + '%' : null;
+}
+
+// classifyExpStatus(e, report, diagnostics, latestTransition, meta) →
+// { kind, params, actions }. diagnostics/latestTransition: undefined = not
+// fetched yet, null = fetch failed / none found, object = real payload.
+// meta: { error, canRead, diagFailed }. actions are { goto, label } button
+// descriptors; goto ∈ EXP_TABS ∪ {audit, retry-diagnostics}.
+function classifyExpStatus(e, report, diagnostics, latestTransition, meta = {}) {
+  const state = (e && e.state) || '';
+  const canRead = meta.canRead !== undefined ? meta.canRead : can('report.read');
+  const act = (goto, label) => ({ goto, label });
+  if (meta.error) return { kind: 'error', params: { stale: !!report }, actions: [] };
+  if (EXP_PRELAUNCH_STATES.includes(state)) {
+    return { kind: 'not_started', params: { state },
+      actions: [act('settings', t('exp.hero.viewReadiness'))] };
+  }
+  if (!canRead) return { kind: 'restricted', params: {}, actions: [] };
+  if (EXP_ENDED_STATES.includes(state)) {
+    return { kind: 'ended',
+      params: { state, transition: latestTransition || null, rollbackTarget: endedRollbackTarget(e) },
+      actions: [act('audit', t('exp.hero.viewAudit')), act('settings', t('exp.tab.settings'))] };
+  }
+  if (!report) return { kind: 'loading', params: {}, actions: [] };
+  const diag = diagnostics || report.diagnostics || null;
+  const issues = report.healthIssues || [];
+  const verdict = (report.decision && report.decision.verdict) || '';
+  const reasons = (report.decision && report.decision.reasons) || [];
+  const breaches = (report.decision && report.decision.guardrailBreaches) || [];
+  const totals = heroDiagTotals(diag);
+  // no_samples — the server issue string verbatim, or a real diagnostics
+  // payload whose exposure total is zero.
+  if (issues.includes('no randomized exposures recorded yet') ||
+      (totals.present && totals.exposures === 0)) {
+    let subBranch = 'unknown';
+    if (totals.hasAssignmentFacts) subBranch = totals.assignments > 0 ? 'assigned' : 'none';
+    const actions = [act('health', t('exp.hero.viewCollection'))];
+    if (meta.diagFailed) actions.push(act('retry-diagnostics', t('btn.refresh')));
+    return { kind: 'no_samples',
+      params: { subBranch, assigned: totals.assignments, diagFailed: !!meta.diagFailed },
+      actions };
+  }
+  // immature — minimum runtime not satisfied, an insufficient-sample hold, or
+  // a healthy "keep running" verdict.
+  if (report.minRuntimeSatisfied === false ||
+      reasons.some(r => String(r).includes('minimum runtime') || String(r).includes('insufficient sample')) ||
+      (report.healthy && verdict === 'continue')) {
+    return { kind: 'immature', params: { eta: immatureEta(e), reasons },
+      actions: [act('health', t('exp.hero.viewWatermark'))] };
+  }
+  // blocked — unhealthy pipeline / SRM / contamination / guardrail breach, or
+  // a rollback verdict (which also covers a significantly worse primary).
+  if (!report.healthy || verdict === 'rollback') {
+    return { kind: 'blocked',
+      params: {
+        reasons: [...issues, ...reasons], breaches,
+        scope: { flag: (e && e.flagKey) || '—', env: (e && e.environmentId) || '—',
+          epoch: e && e.epoch !== undefined && e.epoch !== null ? e.epoch : '—' },
+      },
+      actions: [act('health', t('exp.hero.viewDiagnostics')),
+        act('rollout', t('exp.hero.blockedRollout')),
+        act('audit', t('exp.hero.blockedChanges'))] };
+  }
+  // can_advance — healthy ship verdict with the minimum runtime satisfied.
+  if (report.healthy && verdict === 'ship' && report.minRuntimeSatisfied) {
+    const actions = [act('evidence', t('exp.hero.viewEvidence'))];
+    if (can('flag.publish')) actions.push(act('rollout', t('exp.zone.rollout')));
+    return { kind: 'can_advance',
+      params: { primary: report.primary || null, guardrails: report.guardrails || [], verdict },
+      actions };
+  }
+  // Defensive: no rule matched — render no banner rather than invent a state;
+  // the decision snapshot shows the raw server verdict.
+  return { kind: 'unknown', params: { verdict }, actions: [] };
+}
+
+// renderExpHero renders the classified first-screen copy. The error /
+// restricted / loading branches keep the pre-C5 markup and semantics exactly
+// (a failed refresh never presents an older report as a current conclusion).
+function renderExpHero(cls, report, error = null) {
+  const kind = (cls && cls.kind) || 'unknown';
+  const p = (cls && cls.params) || {};
+  const actions = ((cls && cls.actions) || []).map(a =>
+    '<button class="btn sm" type="button" data-hero-goto="' + esc(a.goto) + '">' + esc(a.label) + '</button>').join('');
+  const actionRow = actions ? '<div class="row actions" id="exp-hero-actions">' + actions + '</div>' : '';
+  if (kind === 'error') {
+    return '<div class="banner warn">' + esc(t('exp.reportUnavailable')) + '</div>' +
+      (report ? '<p class="muted">' + esc(t('report.stale')) + ' · ' + esc(t('report.generatedAt')) + ': ' +
+        esc(fmtTime(report.generatedAt)) + '</p>' : '');
+  }
+  if (kind === 'restricted') return '<div class="banner">' + esc(t('exp.reportRestricted')) + '</div>';
+  if (kind === 'loading') return '<div class="banner">' + esc(t('exp.reportLoading')) + '</div>';
+  if (kind === 'not_started') {
+    return '<div class="banner" id="exp-hero-banner"><strong>' + esc(t('exp.hero.notStarted')) + '</strong>' +
+      '<div>' + esc(t('exp.hero.notStartedNext')) + '</div></div>' + actionRow;
+  }
+  if (kind === 'no_samples') {
+    const detail = p.subBranch === 'assigned'
+      ? t('exp.hero.noSamplesAssigned', { assigned: p.assigned })
+      : p.subBranch === 'none' ? t('exp.hero.noSamplesNone') : '';
+    return '<div class="banner" id="exp-hero-banner"><strong>' + esc(t('exp.hero.noSamples')) + '</strong>' +
+      (detail ? '<div>' + esc(detail) + '</div>' : '') + '</div>' + actionRow;
+  }
+  if (kind === 'immature') {
+    const eta = p.eta
+      ? t('exp.hero.immatureEta', { time: fmtTime(p.eta) })
+      : t('exp.hero.immatureEtaUnknown');
+    return '<div class="banner" id="exp-hero-banner"><strong>' + esc(t('exp.hero.immature')) + '</strong>' +
+      '<div>' + esc(eta) + '</div>' +
+      ((p.reasons || []).length
+        ? '<ul class="muted">' + p.reasons.map(r => '<li>' + esc(r) + '</li>').join('') + '</ul>' : '') +
+      '</div>' + actionRow;
+  }
+  if (kind === 'blocked') {
+    const scope = t('exp.hero.blockedScope', { flag: p.scope.flag, env: p.scope.env, epoch: p.scope.epoch });
+    return '<div class="banner err" id="exp-hero-banner"><strong>' + esc(t('exp.hero.blocked')) + '</strong>' +
+      ((p.reasons || []).length
+        ? '<ul>' + p.reasons.map(r => '<li>' + esc(r) + '</li>').join('') + '</ul>' : '') +
+      ((p.breaches || []).length
+        ? '<div>' + esc(t('report.breaches')) + '<ul>' + p.breaches.map(gb =>
+          '<li><span class="mono">' + esc(gb.metric) + '</span> — ' + esc(gb.detail || '') + '</li>').join('') + '</ul></div>' : '') +
+      '<div class="muted">' + esc(scope) + '</div></div>' + actionRow;
+  }
+  if (kind === 'can_advance') {
+    const primary = p.primary;
+    const guards = p.guardrails || [];
+    return '<div class="banner ok" id="exp-hero-banner"><strong>' + esc(t('exp.hero.canAdvance')) + '</strong>' +
+      (primary
+        ? '<div class="mono">p = ' + esc(primary.pValue ?? '—') + ' · diff = ' + esc(primary.diff ?? '—') +
+          ' · rel = ' + esc(primary.relativeDiff ?? '—') + ' · CI [' + esc(primary.ciLow ?? '—') + ', ' +
+          esc(primary.ciHigh ?? '—') + ']</div>'
+        : '') +
+      (guards.length
+        ? '<div>' + guards.map(g =>
+          chip(g.breached ? t('chip.breached') : t('chip.ok'), g.breached ? 'red' : 'green') +
+          ' <span class="mono">' + esc(g.metric ?? g.Metric ?? '—') + '</span>').join(' ') + '</div>'
+        : '') +
+      '<div class="muted">' + esc(t('exp.hero.canAdvanceNote')) + '</div></div>' + actionRow;
+  }
+  if (kind === 'ended') {
+    const tr = p.transition;
+    return '<div class="banner" id="exp-hero-banner"><strong>' + esc(tr
+      ? t('exp.hero.ended', { state: p.state, actor: tr.actor || '—', time: fmtTime(tr.time), reason: tr.reason || '—' })
+      : t('exp.hero.endedUnknown')) + '</strong>' +
+      (p.rollbackTarget ? '<div>' + esc(t('exp.hero.endedRollback', { target: p.rollbackTarget })) + '</div>' : '') +
+      '</div>' + actionRow;
+  }
+  return '';
+}
+
+// renderExpDecisionHero keeps the pre-C5 signature for the contract bridge:
+// it classifies from (report, state, error) alone — no diagnostics payload,
+// no transition audit — and renders the same hero markup.
+function renderExpDecisionHero(report, state, error = null) {
+  const cls = classifyExpStatus({ state }, report, undefined, undefined,
+    { error, canRead: can('report.read') });
+  return renderExpHero(cls, report, error);
 }
 
 function metricReferenceSummary(r) {
