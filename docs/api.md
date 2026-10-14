@@ -28,6 +28,7 @@
 | `POST/GET /api/v1/admin/workspaces/{ws}/tokens` | 铸造（secret 仅返回一次）/列出凭证 |
 | `DELETE /api/v1/admin/tokens/{id}` | 吊销（作用域 owner 只能吊销本工作空间；全局凭证仅全局 owner） |
 | `GET /api/v1/admin/workspaces/{ws}/audit?limit=` | 审计（新→旧） |
+| `GET /api/v1/admin/workspaces/{ws}/overview?env=&limit=` | 总览汇总：风险带、待我处理审批、近期发布（审计白名单）与真实计数；每模块含覆盖范围与局部失败状态，按 read 能力裁剪，不计算伪总数 |
 | `GET/PUT /api/v1/admin/workspaces/{ws}/quotas` | 读取当前生效配额（未设置时返回默认值）/设置配额（均仅 owner） |
 
 ### Flag 生命周期

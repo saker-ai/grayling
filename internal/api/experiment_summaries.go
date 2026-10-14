@@ -100,14 +100,8 @@ func (s *Server) handleExperimentSummaries(w http.ResponseWriter, r *http.Reques
 				row.Report.Status = "unavailable"
 			} else {
 				row.Report = experimentReportSummary{Status: "ready", Healthy: report.Healthy,
-					Verdict: report.Decision.Verdict, GeneratedAt: &report.GeneratedAt}
-				if len(report.HealthIssues) > 0 {
-					row.Report.Issue = report.HealthIssues[0]
-				} else if report.PrimaryError != "" {
-					row.Report.Issue = report.PrimaryError
-				} else if len(report.Decision.Reasons) > 0 && report.Decision.Verdict == stats.VerdictHold {
-					row.Report.Issue = report.Decision.Reasons[0]
-				}
+					Verdict: report.Decision.Verdict, GeneratedAt: &report.GeneratedAt,
+					Issue: reportIssueText(report)}
 			}
 		}
 		items = append(items, row)
@@ -119,4 +113,22 @@ func (s *Server) handleExperimentSummaries(w http.ResponseWriter, r *http.Reques
 		Offset int                     `json:"offset"`
 		Limit  int                     `json:"limit"`
 	}{items, total, offset, limit})
+}
+
+// reportIssueText picks the most actionable server-side reason from a
+// report: a blocking health issue first, then the primary-metric error,
+// then the hold decision's first reason. Shared by the experiment summaries
+// page and the workspace overview risk band so both quote the server
+// verbatim instead of paraphrasing it.
+func reportIssueText(report *experiment.Report) string {
+	if len(report.HealthIssues) > 0 {
+		return report.HealthIssues[0]
+	}
+	if report.PrimaryError != "" {
+		return report.PrimaryError
+	}
+	if len(report.Decision.Reasons) > 0 && report.Decision.Verdict == stats.VerdictHold {
+		return report.Decision.Reasons[0]
+	}
+	return ""
 }

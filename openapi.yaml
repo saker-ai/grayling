@@ -528,6 +528,149 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/Internal"
+  "/api/v1/admin/workspaces/{ws}/overview":
+    get:
+      tags: [workspaces]
+      summary: 总览汇总：风险带、待我处理审批、近期发布与真实计数
+      description: >-
+        总览页所需的单一只读模型。每个模块自带 status/coverage/reason
+        局部失败语义：数据源失败返回 200 + 模块级 unavailable，绝不 5xx，
+        绝不计算伪总数。risks 按更新时间降序最多检查 50 个实验
+        （coverage.total 为全量真实计数）；无 report.read（防御性场景）
+        降级为 restricted，只保留 state/plan 条目；报告构建失败成为显式
+        experiment_report_unavailable 风险项而非沉默。pendingApprovals
+        恒为工作空间级（每条带 environmentId），myAction 由服务端判定，
+        自批排除以 TokenID 为主、Name 兜底（镜像服务端自批规则），
+        actionableTotal 为全量真实计数、不受 limit 截断。recentReleases
+        对最近 500 条审计按动作白名单（flag.publish/flag.rollback/
+        flag.emergency_disable/segment.publish/release_plan.apply_ratio/
+        release_plan.rollback）有界扫描，扫描窗触顶时
+        coverage.complete=false。counts 四值为可空整数（null=数据源
+        失败）；publishedFlags 仅在 env 给定时计算。
+      operationId: getWorkspaceOverview
+      parameters:
+        - $ref: "#/components/parameters/WsPath"
+        - name: env
+          in: query
+          required: false
+          schema: {type: string}
+          description: 环境 slug 或内部 ID；给定时 risks/releases/publishedFlags 按环境过滤，未知环境 → 404。
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 50, default: 20}
+          description: pendingApprovals.items 与 recentReleases.items 条数上限；非法值 → 400。
+      responses:
+        "200":
+          description: 总览汇总；各模块独立降级。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generatedAt, workspaceId, counts, risks, pendingApprovals, recentReleases]
+                properties:
+                  generatedAt: {type: string, format: date-time}
+                  workspaceId: {type: string, description: 解析后的工作空间内部 ID。}
+                  environmentId:
+                    type: string
+                    description: 解析后的环境内部 ID；未提供 env 参数时省略。
+                  counts:
+                    type: object
+                    required: [pausedExperiments, runningExperiments, pendingApprovals, publishedFlags]
+                    properties:
+                      pausedExperiments: {type: integer, nullable: true, description: "null=实验数据源失败。"}
+                      runningExperiments: {type: integer, nullable: true}
+                      pendingApprovals: {type: integer, nullable: true, description: 全部 submitted 审批（工作空间级，与总览卡语义一致）。}
+                      publishedFlags: {type: integer, nullable: true, description: 仅 env 给定时计算，否则 null。}
+                  risks:
+                    type: object
+                    required: [status, reportCoverage, coverage, items]
+                    properties:
+                      status: {type: string, enum: [ok, partial, restricted, unavailable]}
+                      reason: {type: string, description: 模块级失败原因（机械码）；其余场景省略。}
+                      reportCoverage: {type: string, enum: [complete, partial, unavailable, restricted]}
+                      coverage:
+                        $ref: "#/components/schemas/OverviewCoverage"
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [kind, id, environmentId, severity, text]
+                          properties:
+                            kind:
+                              type: string
+                              enum: [experiment_unhealthy, experiment_report_unavailable, experiment_paused, plan_paused, plan_rolled_back]
+                            id: {type: string, description: 实验 ID。}
+                            environmentId: {type: string}
+                            severity: {type: string, enum: [block, warn]}
+                            text:
+                              type: string
+                              description: 服务端原因逐字（healthIssue/decision reason/pausedReason）；记录不含原因时为空串。
+                  pendingApprovals:
+                    type: object
+                    required: [status, actionableTotal, items]
+                    properties:
+                      status: {type: string, enum: [ok, unavailable]}
+                      reason: {type: string}
+                      actionableTotal:
+                        type: integer
+                        description: 我可处理（myAction 非空）的全量真实计数，不受 limit 截断。
+                      items:
+                        type: array
+                        description: submitted/approved 状态的审批（SubmittedAt 降序），截断到 limit。
+                        items:
+                          type: object
+                          required: [id, action, object, environmentId, submittedBy, submittedAt, risk, myAction, blockedReason]
+                          properties:
+                            id: {type: string}
+                            action: {type: string}
+                            object: {type: string}
+                            environmentId: {type: string}
+                            submittedBy: {type: string}
+                            submittedAt: {type: string, format: date-time}
+                            risk: {type: string, enum: [normal, high]}
+                            expiresAt: {type: string, format: date-time, description: 仅 approved 授权存在。}
+                            myAction:
+                              type: string
+                              enum: [review, execute, ""]
+                              description: 服务端判定；空串表示我无可用动作。
+                            blockedReason:
+                              type: string
+                              enum: [self_approval, role, expired, breakglass_review, ""]
+                  recentReleases:
+                    type: object
+                    required: [status, coverage, items]
+                    properties:
+                      status: {type: string, enum: [ok, unavailable]}
+                      reason: {type: string}
+                      coverage:
+                        $ref: "#/components/schemas/OverviewCoverage"
+                      items:
+                        type: array
+                        description: 白名单动作的审计记录（新→旧），截断到 limit。
+                        items:
+                          type: object
+                          required: [time, actor, action, object, environmentId]
+                          properties:
+                            time: {type: string, format: date-time}
+                            actor: {type: string}
+                            action:
+                              type: string
+                              enum: [flag.publish, flag.rollback, flag.emergency_disable, segment.publish, release_plan.apply_ratio, release_plan.rollback]
+                            object: {type: string}
+                            environmentId: {type: string}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
   "/api/v1/admin/workspaces/{ws}/quotas":
     get:
       tags: [workspaces]
@@ -3208,6 +3351,24 @@ components:
         detail:
           type: string
           description: JSON 字符串，可能已脱敏。
+    OverviewCoverage:
+      type: object
+      description: >-
+        模块检查范围的如实声明。complete=false 表示覆盖不完整（存在未检查
+        的记录或不可用的报告），服务端不为此估算或伪造总数。
+      required: [inspected, total, complete]
+      properties:
+        inspected:
+          type: integer
+          description: 实际检查的记录数。
+        total:
+          type: integer
+          description: 数据源全量真实计数；审计扫描窗内等于 inspected（不推算窗外总量）。
+        complete:
+          type: boolean
+        note:
+          type: string
+          description: 覆盖机制标识，如 audit-scan-window；缺省省略。
     CreateWorkspaceRequest:
       type: object
       additionalProperties: false
