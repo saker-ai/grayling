@@ -2,7 +2,7 @@
 
 范围：`openapi.yaml` 中的 `/api/v1/admin/` 管理操作（共 75 项）。`GET /api/v1/health` 是健康检查，不属于管理操作。SDK config/eval/collect、原生 Nacos 协议及 HMAC 原始密钥为数据面或运维密钥，刻意不进入管理 UI。
 
-下表说明 Web 是否提供入口及代码契约，**不表示每项都已在浏览器执行**。真实浏览器的操作、截图、HTTP 结果与未覆盖项见 [2026-10-08 验收报告](acceptance/web-2026-10-08/report.md)、[跨角色发布验收](acceptance/web-2026-10-13-roles/report.md)、[故障状态模拟验收](acceptance/web-2026-10-13-failures/report.md)、[会话恢复验收](acceptance/web-2026-10-13-reauth/report.md)、[实验列表摘要验收](acceptance/web-2026-10-13-exp-list/report.md)、[实验绑定并发冲突验收](acceptance/web-2026-10-13-bind-conflict/report.md)、[实验首屏决策验收](acceptance/web-2026-10-13-exp-decision/report.md)、[总览摘要验收](acceptance/web-2026-10-13-overview/report.md)、[放量操作报告门禁验收](acceptance/web-2026-10-13-rollout-report-gate/report.md)、[Flag 关联实验验收](acceptance/web-2026-10-13-flag-experiment-impact/report.md)、[报告证据版本验收](acceptance/web-2026-10-13-rollout-report-version/report.md)和[实验审计导航验收](acceptance/web-2026-10-13-audit-navigation/report.md)。
+下表说明 Web 是否提供入口及代码契约，**不表示每项都已在浏览器执行**。真实浏览器的操作、截图、HTTP 结果与未覆盖项见 [2026-10-08 验收报告](acceptance/web-2026-10-08/report.md)、[跨角色发布验收](acceptance/web-2026-10-13-roles/report.md)、[故障状态模拟验收](acceptance/web-2026-10-13-failures/report.md)、[会话恢复验收](acceptance/web-2026-10-13-reauth/report.md)、[实验列表摘要验收](acceptance/web-2026-10-13-exp-list/report.md)、[实验绑定并发冲突验收](acceptance/web-2026-10-13-bind-conflict/report.md)、[实验首屏决策验收](acceptance/web-2026-10-13-exp-decision/report.md)、[总览摘要验收](acceptance/web-2026-10-13-overview/report.md)、[放量操作报告门禁验收](acceptance/web-2026-10-13-rollout-report-gate/report.md)、[Flag 关联实验验收](acceptance/web-2026-10-13-flag-experiment-impact/report.md)、[报告证据版本验收](acceptance/web-2026-10-13-rollout-report-version/report.md)、[实验审计导航验收](acceptance/web-2026-10-13-audit-navigation/report.md)和[总览三模块验收](acceptance/web-2026-10-14-overview-modules/report.md)。
 
 | 方法 | 管理端点 | 分类 | Web 入口 / 行为或仅 API 理由 | 验证证据 |
 |---|---|---|---|---|
@@ -20,7 +20,7 @@
 | `GET` | `/api/v1/admin/workspaces/{ws}/tokens` | 已覆盖 | 令牌页：列表/创建/撤销 | i18n DOM；API 路由契约 |
 | `DELETE` | `/api/v1/admin/tokens/{id}` | 已覆盖 | 令牌页：列表/创建/撤销 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/audit` | 已覆盖 | 审计页：搜索、精确对象筛选、条数选择与游标翻页；实验放量时间轴可直达对象记录 | i18n DOM；作用域/精确筛选 API 测试；[桌面和手机浏览器验收](acceptance/web-2026-10-13-audit-navigation/report.md) |
-| `GET` | `/api/v1/admin/workspaces/{ws}/overview` | 仅 API | 总览页风险带/待我处理/近期发布模块的服务端汇总（Web 接线见后续提交） | API 测试；OpenAPI ↔ 路由契约 |
+| `GET` | `/api/v1/admin/workspaces/{ws}/overview` | 已覆盖 | 总览页风险带、待我处理审批与近期发布模块：单请求读取服务端汇总，真实计数（null→'—'）、每模块覆盖范围与局部失败降级横幅，不宣称无风险；风险项直达实验详情，审批项直达审批详情，发布项直达审计对象筛选 | API 测试；OpenAPI ↔ 路由契约；render/i18n DOM 契约；[总览三模块浏览器验收](acceptance/web-2026-10-14-overview-modules/report.md) |
 | `GET` | `/api/v1/admin/workspaces/{ws}/quotas` | 已覆盖 | 配额页：owner 可见，读取/编辑/校验/确认/保存 | quota API + i18n DOM |
 | `PUT` | `/api/v1/admin/workspaces/{ws}/quotas` | 已覆盖 | 配额页：owner 可见，读取/编辑/校验/确认/保存 | quota API + i18n DOM |
 | `GET` | `/api/v1/admin/workspaces/{ws}/metrics` | 已覆盖 | 指标目录列表、搜索和状态筛选 | i18n DOM；API 路由契约 |
@@ -46,7 +46,7 @@
 | `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/publish` | 已覆盖 | 分段列表/详情：草稿、预览、审批、发布 | i18n DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/experiments` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/experiments` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
-| `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/experiment-summaries` | 已覆盖 | 实验列表分页展示真实报告健康、HOLD 原因和决策；总览读取最近 50 个并明确覆盖范围 | API 作用域/分页/报告测试；双语 DOM 契约；总览浏览器验收 |
+| `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/experiment-summaries` | 已覆盖 | 实验列表分页展示真实报告健康、HOLD 原因和决策（总览风险带已改经 `{ws}/overview` 服务端汇总） | API 作用域/分页/报告测试；双语 DOM 契约；[实验列表浏览器验收](acceptance/web-2026-10-13-exp-list/report.md) |
 | `GET` | `/api/v1/admin/experiments/{id}` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/experiments/{id}/review` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/experiments/{id}/bind` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |

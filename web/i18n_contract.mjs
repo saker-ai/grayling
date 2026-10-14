@@ -197,9 +197,30 @@ const metric = { key: 'activation.complete', version: 1, displayName: 'Activatio
   description: 'Completed activation', owner: 'growth', source: 'collect', eventKeys: ['activation_complete'],
   attributionWindow: 604800000000000, spec: { key: 'activation_complete', type: 'proportion', direction: 'increase' },
   status: 'draft', hash: 'sha256:abc123' };
+// Overview aggregation fixture: every count present, one blocking risk quoting
+// the server reason verbatim, one approval waiting for my review, two release
+// records, and partial risk coverage so the degraded copy is swept too.
+const overview = {
+  generatedAt: TS, workspaceId: 'acme', environmentId: 'prod',
+  counts: { pausedExperiments: 1, runningExperiments: 2, pendingApprovals: 3, publishedFlags: 4 },
+  risks: { status: 'partial', reportCoverage: 'partial',
+    coverage: { inspected: 3, total: 7, complete: false },
+    items: [{ kind: 'experiment_unhealthy', id: 'exp-1', environmentId: 'prod',
+      severity: 'block', text: 'no randomized exposures recorded yet' }] },
+  pendingApprovals: { status: 'ok', actionableTotal: 1, items: [
+    { id: 'approval-1', action: 'flag.publish', object: 'my-flag', environmentId: 'prod',
+      submittedBy: 'alice', submittedAt: TS, risk: 'normal', expiresAt: null,
+      myAction: 'review', blockedReason: '' }] },
+  recentReleases: { status: 'ok',
+    coverage: { inspected: 2, total: 2, complete: true, note: 'audit-scan-window' },
+    items: [
+      { time: TS, actor: 'alice', action: 'flag.publish', object: 'my-flag', environmentId: 'prod' },
+      { time: TS, actor: 'rollout-engine', action: 'release_plan.apply_ratio', object: 'exp-1', environmentId: 'prod' }] },
+};
 
 function mockResponse(url) {
   const json = v => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(v)) });
+  if (url.includes('/overview')) return json(overview);
   if (url.includes('/debug/eval')) return json({ result: { value: true, variationType: 'treatment', reason: 'targeting', bucket: 42 }, manifestRevision: 7, note: '' });
   if (url.includes('/ai/resources')) return json(aiResources);
   if (url.includes('/model-allowlist')) return json(allowlist);
@@ -274,9 +295,17 @@ assert(auditRoot.querySelector('#a-box').innerHTML.includes('class="mobile-recor
 // ===========================================================================
 const SWEEPS = [
   { name: 'overview', view: 'overview',
-    en: ['Workspace overview', 'Needs attention', 'Pending approvals', 'Refresh status'],
-    zh: ['工作空间总览', '需要处理', '待审批变更', '刷新状态'],
-    ids: ['overview-refresh'] },
+    en: ['Workspace overview', 'Risk band', 'Pending approvals', 'Approvals waiting for me',
+      'Recent releases', 'Refresh status', 'Waiting for my review', 'Flag published',
+      'Rollout step applied', 'Scanned the latest 2 audit records.',
+      'most recently updated of 7 experiments'],
+    zh: ['工作空间总览', '风险带', '待审批变更', '待我处理审批',
+      '近期发布', '刷新状态', '待我审批', 'Flag 已发布',
+      '放量步骤已生效', '已扫描最近 2 条审计记录。',
+      '最近更新的 3/7 个实验'],
+    shared: ['no randomized exposures recorded yet', 'my-flag', 'alice', 'flag.publish', 'exp-1'],
+    ids: ['overview-refresh', 'overview-band', 'overview-pending', 'overview-releases',
+      'overview-coverage', 'overview-all-experiments'] },
   { name: 'metrics-list', view: 'metrics',
     setup: S => { S.metricRef = null; S.metricQuery = ''; S.metricStatus = ''; S.metricCursor = ''; },
     en: ['Metric catalog', 'New metric', 'All statuses'],

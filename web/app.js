@@ -695,74 +695,241 @@ async function probeAI() {
 }
 
 // ---------------------------------------------------------------------------
-// View: Overview
+// View: Overview — one server-owned read model (GET {ws}/overview): risk band,
+// approvals waiting for me, recent releases and real counts. Every module
+// degrades on its own with an honest "why missing" banner; the browser never
+// re-derives myAction/blockedReason and never claims "no risks" beyond the
+// coverage the server states.
 // ---------------------------------------------------------------------------
+const RELEASE_ACTION_CHIP = {
+  'flag.publish': 'green', 'flag.rollback': 'red', 'flag.emergency_disable': 'red',
+  'segment.publish': 'green', 'release_plan.apply_ratio': 'blue', 'release_plan.rollback': 'red',
+};
+
+// riskKindLabel maps the server's risk kinds to localized labels; an unknown
+// kind passes through verbatim (server content is never translated).
+function riskKindLabel(kind) {
+  switch (kind) {
+    case 'experiment_unhealthy': return t('overview.riskKind.experiment_unhealthy');
+    case 'experiment_report_unavailable': return t('overview.reportUnavailable');
+    case 'experiment_paused': return t('overview.riskKind.experiment_paused');
+    case 'plan_paused': return t('overview.riskKind.plan_paused');
+    case 'plan_rolled_back': return t('overview.riskKind.plan_rolled_back');
+    default: return kind;
+  }
+}
+
+// releaseActionLabel maps the audit whitelist actions; anything outside the
+// whitelist falls back to the raw action string.
+function releaseActionLabel(action) {
+  switch (action) {
+    case 'flag.publish': return t('release.action.flag.publish');
+    case 'flag.rollback': return t('release.action.flag.rollback');
+    case 'flag.emergency_disable': return t('release.action.flag.emergency_disable');
+    case 'segment.publish': return t('release.action.segment.publish');
+    case 'release_plan.apply_ratio': return t('release.action.release_plan.apply_ratio');
+    case 'release_plan.rollback': return t('release.action.release_plan.rollback');
+    default: return action;
+  }
+}
+
+// overviewMyActionLabel renders the server's verdict about what the caller
+// may do with a pending approval (review|execute).
+function overviewMyActionLabel(myAction) {
+  if (myAction === 'review') return t('overview.myAction.review');
+  if (myAction === 'execute') return t('overview.myAction.execute');
+  return myAction;
+}
+
+// overviewBlockedNote explains why an approval is not actionable for the
+// caller; unknown reasons pass through verbatim.
+function overviewBlockedNote(reason) {
+  switch (reason) {
+    case 'self_approval': return t('overview.blocked.self_approval');
+    case 'role': return t('overview.blocked.role');
+    case 'expired': return t('overview.blocked.expired');
+    case 'breakglass_review': return t('overview.blocked.breakglass_review');
+    default: return reason;
+  }
+}
+
+// renderOverviewModuleFailure is the module-level degradation banner: why the
+// module is missing (status/reason/coverage) plus a retry affordance. It never
+// presents a missing module as an all-clear.
+function renderOverviewModuleFailure(nameKey, module) {
+  const status = module && module.status ? module.status : 'unavailable';
+  const reason = module && module.reason ? module.reason : '—';
+  const cov = module && module.coverage;
+  return '<div class="banner warn" role="status"><p>' +
+    esc(t('overview.moduleFailed', { module: t(nameKey), reason })) + '</p>' +
+    '<p class="muted">' + esc(t('overview.moduleStatus', { status })) +
+    (cov ? ' · ' + esc(t('overview.moduleCoverage', { inspected: cov.inspected ?? '—', total: cov.total ?? '—' })) : '') +
+    '</p><button class="btn sm" type="button" data-overview-retry>' + esc(t('overview.retry')) + '</button></div>';
+}
+
+// renderOverviewRiskBand shows server-owned risk facts verbatim. The
+// "no blocking risks" all-clear appears only when status is ok AND coverage is
+// complete; every degraded state uses the partial wording instead.
+function renderOverviewRiskBand(ov) {
+  const risks = ov && ov.risks;
+  const head = '<section class="card overview-band" id="overview-band"><h3>' + esc(t('overview.riskBand')) + '</h3>';
+  if (!risks || risks.status === 'unavailable' || !risks.status) {
+    return head + renderOverviewModuleFailure('overview.riskBand', risks) + '</section>';
+  }
+  const items = risks.items || [];
+  const cov = risks.coverage || {};
+  const clear = risks.status === 'ok' && cov.complete;
+  return head +
+    (items.length ? '<ul class="attention-list">' + items.map(item => {
+      const blocked = item.severity === 'block';
+      return '<li><span>' +
+        chip(blocked ? t('overview.riskBlock') : t('overview.riskWarn'), blocked ? 'red' : 'amber') +
+        ' <strong class="mono">' + esc(item.id) + '</strong> · ' + esc(riskKindLabel(item.kind)) +
+        (item.environmentId ? ' · <span class="muted">' + esc(item.environmentId) + '</span>' : '') +
+        (item.text ? '<br><span class="muted">' + esc(item.text) + '</span>' : '') +
+        '</span><button class="btn sm" type="button" data-overview-risk="' + esc(item.id) + '">' +
+        esc(t('overview.openExperiment')) + '</button></li>';
+    }).join('') + '</ul>' :
+      '<p class="muted">' + esc(t(clear ? 'overview.riskBandClear' : 'overview.riskBandPartial')) + '</p>') +
+    (risks.reportCoverage === 'restricted' || risks.status === 'restricted'
+      ? '<p class="muted">' + esc(t('overview.reportRestricted')) + '</p>' : '') +
+    '</section>';
+}
+
+// renderOverviewStats renders the four count cards; a null count means the
+// data source failed and shows "—", never a fake zero.
+function renderOverviewStats(counts) {
+  const shown = v => v === null || v === undefined ? '—' : String(v);
+  return '<div class="overview-grid">' +
+    [[t('overview.paused'), counts ? counts.pausedExperiments : null],
+      [t('overview.running'), counts ? counts.runningExperiments : null],
+      [t('overview.pending'), counts ? counts.pendingApprovals : null],
+      [t('overview.flags'), counts ? counts.publishedFlags : null]].map(([label, value]) =>
+      '<section class="card overview-stat"><span class="muted">' + esc(label) + '</span><strong>' +
+      esc(shown(value)) + '</strong></section>').join('') + '</div>';
+}
+
+// renderOverviewApprovals consumes the server's myAction/blockedReason fields
+// as-is; the browser does not re-derive who may act.
+function renderOverviewApprovals(pending) {
+  const head = '<section class="card overview-pending" id="overview-pending"><h3>' +
+    esc(t('overview.myApprovals')) + '</h3>';
+  if (!pending || pending.status !== 'ok') {
+    return head + renderOverviewModuleFailure('overview.myApprovals', pending) + '</section>';
+  }
+  const items = pending.items || [];
+  return head +
+    (pending.actionableTotal > 0 ? '<p>' + chip(t('overview.myApprovalsTotal',
+      { n: pending.actionableTotal }), 'amber') + '</p>' : '') +
+    (items.length ? '<ul class="attention-list">' + items.map(item =>
+      '<li><span>' +
+      '<button class="row-link mono" type="button" data-overview-approval="' + esc(item.id) + '">' +
+      esc(item.action) + ' · ' + esc(item.object) + '</button> ' +
+      (item.myAction ? chip(overviewMyActionLabel(item.myAction), item.myAction === 'review' ? 'amber' : 'green') : '') +
+      (item.blockedReason ? '<span class="muted">' + esc(overviewBlockedNote(item.blockedReason)) + '</span>' : '') +
+      '<br><span class="muted">' + esc(item.environmentId || '—') + ' · ' + esc(item.submittedBy || '—') +
+      ' · ' + esc(fmtTime(item.submittedAt)) +
+      (item.risk ? ' · ' + esc(t('approval.risk')) + ': ' + esc(item.risk) : '') +
+      (item.expiresAt ? ' · ' + esc(t('approval.expires')) + ' ' + esc(fmtTime(item.expiresAt)) : '') +
+      '</span></span><button class="btn sm" type="button" data-overview-approval="' + esc(item.id) + '">' +
+      esc(t('overview.openApproval')) + '</button></li>').join('') + '</ul>' :
+      '<p class="muted">' + esc(t('overview.myApprovalsEmpty')) + '</p>') +
+    '</section>';
+}
+
+// renderOverviewReleases shows the whitelisted audit records (newest first)
+// with the scan-window coverage statement; truncation is disclosed, never
+// smoothed over with an estimated total.
+function renderOverviewReleases(releases) {
+  const head = '<section class="card overview-releases" id="overview-releases"><h3>' +
+    esc(t('overview.recentReleases')) + '</h3>';
+  if (!releases || releases.status !== 'ok') {
+    return head + renderOverviewModuleFailure('overview.recentReleases', releases) + '</section>';
+  }
+  const items = releases.items || [];
+  const cov = releases.coverage || {};
+  const row = item => '<td class="nowrap">' + esc(fmtTime(item.time)) + '</td>' +
+    '<td>' + chip(releaseActionLabel(item.action), RELEASE_ACTION_CHIP[item.action] || 'gray') +
+    ' <span class="mono">' + esc(item.action) + '</span></td>' +
+    '<td class="mono">' + esc(item.object || '—') + '</td><td>' + esc(item.actor || '—') + '</td>' +
+    '<td class="mono">' + esc(item.environmentId || '—') + '</td>' +
+    '<td><button class="btn sm" type="button" data-overview-release="' + esc(item.object || '') + '">' +
+    esc(t('overview.openRelease')) + '</button></td>';
+  return head +
+    '<p class="muted">' + esc(t('overview.recentReleasesCoverage', { scanned: cov.inspected ?? '—' })) +
+    (cov.complete ? '' : ' ' + esc(t('overview.recentReleasesTruncated'))) + '</p>' +
+    (items.length ? '<table class="grid mobile-card-table"><thead><tr><th>' + esc(t('th.time')) +
+      '</th><th>' + esc(t('th.action')) + '</th><th>' + esc(t('th.object')) + '</th><th>' +
+      esc(t('th.actor')) + '</th><th>' + esc(t('th.env')) + '</th><th></th></tr></thead><tbody>' +
+      items.map(item => '<tr>' + row(item) + '</tr>').join('') + '</tbody></table>' +
+      '<div class="mobile-record-cards">' + items.map(item =>
+        '<article class="mobile-record"><div class="row">' +
+        chip(releaseActionLabel(item.action), RELEASE_ACTION_CHIP[item.action] || 'gray') +
+        '<span class="muted">' + esc(fmtTime(item.time)) + '</span></div>' +
+        '<div><b>' + esc(t('th.object')) + ':</b> <span class="mono">' + esc(item.object || '—') + '</span></div>' +
+        '<div><b>' + esc(t('th.actor')) + ':</b> ' + esc(item.actor || '—') + '</div>' +
+        '<div><b>' + esc(t('th.env')) + ':</b> ' + esc(item.environmentId || '—') + '</div>' +
+        '<div><button class="btn sm" type="button" data-overview-release="' + esc(item.object || '') + '">' +
+        esc(t('overview.openRelease')) + '</button></div></article>').join('') + '</div>' :
+      '<p class="muted">' + esc(t('overview.recentReleasesEmpty')) + '</p>') +
+    '</section>';
+}
+
 async function viewOverview(m) {
   if (!needScope(m)) return;
-  const [experimentsRead, approvalsRead, flagsRead, summariesRead] = await Promise.allSettled([
-    api(scopePath() + '/experiments'), api(wsPath() + '/approvals'), api(scopePath() + '/flags'),
-    api(scopePath() + '/experiment-summaries?limit=50'),
-  ]);
-  const experiments = experimentsRead.status === 'fulfilled' && Array.isArray(experimentsRead.value) ? experimentsRead.value : null;
-  const approvals = approvalsRead.status === 'fulfilled' && Array.isArray(approvalsRead.value) ? approvalsRead.value : null;
-  const flags = flagsRead.status === 'fulfilled' && Array.isArray(flagsRead.value) ? flagsRead.value : null;
-  const summaryPage = summariesRead.status === 'fulfilled' && Array.isArray(summariesRead.value?.items)
-    ? summariesRead.value : null;
-  const issues = [];
-  for (const e of experiments || []) {
-    if (e.state === 'paused') issues.push({ kind: 'experiment', id: e.id, text: t('overview.paused') });
-  }
-  for (const { experiment, report } of summaryPage?.items || []) {
-    if (!experiment || !report) continue;
-    if (report.status === 'unavailable') {
-      issues.push({ kind: 'experiment', id: experiment.id, text: t('overview.reportUnavailable') });
-    } else if (report.status === 'ready' && !report.healthy) {
-      issues.push({ kind: 'experiment', id: experiment.id,
-        text: t('overview.reportIssue') + ': ' + (report.issue || report.verdict || '—') });
-    }
-  }
-  for (const a of approvals || []) {
-    if (a.state === 'submitted') issues.push({ kind: 'approval', id: a.id, text: a.action + ' · ' + a.object });
-  }
-  const partial = experiments === null || approvals === null || flags === null || summaryPage === null ||
-    summaryPage.items.some(item => item.report?.status === 'unavailable');
-  const restricted = summaryPage?.items.some(item => item.report?.status === 'restricted') || false;
-  const inspected = summaryPage?.items.length || 0;
-  const total = summaryPage?.total;
-  const count = (value, predicate) => value === null ? '—' : String(value.filter(predicate).length);
-  m.innerHTML = '<div class="view-head"><h2>' + esc(t('overview.title')) + '</h2>' +
+  const head = '<div class="view-head"><h2>' + esc(t('overview.title')) + '</h2>' +
     '<span class="muted">' + esc(t('overview.scope')) + ': ' + esc(S.ws) + ' / ' + esc(S.env) + '</span>' +
-    '<button class="btn sm" id="overview-refresh">' + esc(t('overview.refresh')) + '</button></div>' +
-    (partial ? '<div class="banner warn" role="status">' + esc(t('overview.moduleUnavailable')) + '</div>' : '') +
-    '<div class="overview-grid">' +
-    [[t('overview.paused'), count(experiments, e => e.state === 'paused')],
-      [t('overview.running'), count(experiments, e => e.state === 'running')],
-      [t('overview.pending'), count(approvals, a => a.state === 'submitted')],
-      [t('overview.flags'), count(flags, f => !!f.current)]].map(([label, value]) =>
-      '<section class="card overview-stat"><span class="muted">' + esc(label) + '</span><strong>' + esc(value) + '</strong></section>').join('') +
-    '</div><section class="card"><h3>' + esc(t('overview.attention')) + '</h3>' +
-    '<p class="muted">' + esc(summaryPage ? t(total > inspected ? 'overview.reportCoveragePartial' :
-      'overview.reportCoverageComplete', { inspected, total }) :
-      t('overview.reportCoverageUnavailable')) + '</p>' +
-    (restricted ? '<p class="muted">' + esc(t('overview.reportRestricted')) + '</p>' : '') +
-    (issues.length ? '<ul class="attention-list">' + issues.slice(0, 8).map(item =>
-      '<li><span><strong class="mono">' + esc(item.id) + '</strong> · ' + esc(item.text) + '</span><button class="btn sm" data-overview-kind="' + item.kind + '" data-overview-id="' + esc(item.id) + '">' +
-      esc(t(item.kind === 'experiment' ? 'overview.openExperiment' : 'overview.openApprovals')) + '</button></li>').join('') + '</ul>' :
-      '<p class="muted">' + esc(t(partial ? 'overview.noAttentionPartial' :
-        restricted ? 'overview.noAttentionRestricted' :
-          total > inspected ? 'overview.noAttentionMore' : 'overview.noAttention')) + '</p>') +
-    (summaryPage && (total > inspected || issues.length > 8)
-      ? '<button class="btn sm" id="overview-all-experiments">' + esc(t('overview.allExperiments')) + '</button>' : '') + '</section>';
+    '<button class="btn sm" id="overview-refresh">' + esc(t('overview.refresh')) + '</button></div>';
+  let ov;
+  try {
+    ov = await api(wsPath() + '/overview?limit=20' + (S.env ? '&env=' + encodeURIComponent(S.env) : ''));
+  } catch (e) {
+    m.innerHTML = head + errBanner(e) + '<div class="row"><button class="btn sm" id="overview-retry" type="button">' +
+      esc(t('overview.retry')) + '</button></div>';
+    $('#overview-refresh', m).onclick = () => route();
+    $('#overview-retry', m).onclick = () => route();
+    const reauth = $('#btn-reauth2', m);
+    if (reauth) reauth.onclick = () => showAuth();
+    return;
+  }
+  const risks = (ov && ov.risks) || {};
+  const cov = risks.coverage || {};
+  const coverageNote = !risks.status || risks.status === 'unavailable' || risks.status === 'restricted'
+    ? t('overview.reportCoverageUnavailable')
+    : risks.status === 'ok' && cov.complete
+      ? t('overview.reportCoverageComplete', { inspected: cov.inspected ?? '—', total: cov.total ?? '—' })
+      : t('overview.reportCoveragePartial', { inspected: cov.inspected ?? '—', total: cov.total ?? '—' });
+  m.innerHTML = head +
+    renderOverviewRiskBand(ov) +
+    renderOverviewStats(ov ? ov.counts : null) +
+    renderOverviewApprovals(ov ? ov.pendingApprovals : null) +
+    renderOverviewReleases(ov ? ov.recentReleases : null) +
+    '<section class="card" id="overview-coverage"><p class="muted">' + esc(coverageNote) + '</p>' +
+    (cov.total > cov.inspected
+      ? '<button class="btn sm" id="overview-all-experiments">' + esc(t('overview.allExperiments')) + '</button>' : '') +
+    '</section>';
   $('#overview-refresh', m).onclick = () => route();
   const allExperiments = $('#overview-all-experiments', m);
   if (allExperiments) allExperiments.onclick = () => { S.view = 'experiments'; S.expId = null; route(); };
-  $('.attention-list', m)?.addEventListener('click', ev => {
-    const button = ev.target.closest('[data-overview-kind]');
-    if (!button) return;
-    if (button.dataset.overviewKind === 'experiment') {
-      S.view = 'experiments'; S.expId = button.dataset.overviewId; S.expTab = 'summary';
-    } else S.view = 'audit';
-    route();
+  m.addEventListener('click', ev => {
+    const target = ev.target;
+    if (!target || typeof target.closest !== 'function') return;
+    if (target.closest('[data-overview-retry]')) { route(); return; }
+    const risk = target.closest('[data-overview-risk]');
+    if (risk) {
+      S.view = 'experiments'; S.expId = risk.dataset.overviewRisk;
+      S.expCreate = false; S.expTab = 'summary';
+      route();
+      return;
+    }
+    const approval = target.closest('[data-overview-approval]');
+    if (approval) { S.view = 'approvals'; S.approvalID = approval.dataset.overviewApproval; route(); return; }
+    const release = target.closest('[data-overview-release]');
+    if (release) {
+      S.view = 'audit'; S.auditObject = release.dataset.overviewRelease; S.auditQuery = '';
+      S.auditCursors = [0]; S.auditPage = 0;
+      route();
+    }
   });
 }
 

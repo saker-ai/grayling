@@ -38,7 +38,7 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderDiagnostics = renderDiagnostics; globalThis.__renderExpDecisionHero = renderExpDecisionHero; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagExperimentImpact = renderFlagExperimentImpact; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderDiagnostics = renderDiagnostics; globalThis.__renderExpDecisionHero = renderExpDecisionHero; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagExperimentImpact = renderFlagExperimentImpact; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail; globalThis.__renderOverviewRiskBand = renderOverviewRiskBand; globalThis.__renderOverviewStats = renderOverviewStats; globalThis.__renderOverviewApprovals = renderOverviewApprovals; globalThis.__renderOverviewReleases = renderOverviewReleases; globalThis.__renderOverviewModuleFailure = renderOverviewModuleFailure;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
 
 const delivered = sandbox.__renderDiagnostics({ exposureMode: 'onRender', perVariant: [
@@ -336,5 +336,121 @@ const banditDelivery = render({ ...base, exposureMode: 'onRender',
 assert(banditDelivery.includes('Not exposed') && banditDelivery.includes('propensity-aware') &&
   !banditDelivery.includes('Too few units for an SRM check'),
   'bandit delivery gap must be visible without fixed-split SRM wording');
+
+// ---------------------------------------------------------------------------
+// Overview modules — risk band / approvals waiting for me / recent releases.
+// The browser consumes server-owned myAction/blockedReason/coverage verbatim:
+// a degraded module must explain why it is missing and must NEVER claim
+// "no risks" or invent a green all-clear, a zero count or a total.
+// ---------------------------------------------------------------------------
+const OVS = '2026-10-13T10:00:00Z';
+const riskBand = sandbox.__renderOverviewRiskBand({ risks: { status: 'ok', reportCoverage: 'complete',
+  coverage: { inspected: 2, total: 2, complete: true },
+  items: [
+    { kind: 'experiment_unhealthy', id: 'exp-9', environmentId: 'prod', severity: 'block',
+      text: 'no randomized exposures recorded yet' },
+    { kind: 'plan_paused', id: 'exp-8', environmentId: 'prod', severity: 'warn',
+      text: 'data health gate: <img src=x>' }] } });
+assert(riskBand.includes('Blocking') && riskBand.includes('Warning') &&
+  riskBand.includes('no randomized exposures recorded yet') && riskBand.includes('Report unhealthy') &&
+  riskBand.includes('data health gate: &lt;img src=x&gt;') && !riskBand.includes('<img') &&
+  riskBand.includes('data-overview-risk="exp-9"'),
+  'risk band must quote server reasons verbatim, mark severity and escape text');
+const bandDown = sandbox.__renderOverviewRiskBand({ risks: { status: 'unavailable',
+  reason: 'experiments_unavailable', reportCoverage: 'unavailable',
+  coverage: { inspected: 0, total: 0, complete: false }, items: [] } });
+assert(bandDown.includes('experiments_unavailable') && bandDown.includes('unavailable') &&
+  bandDown.includes('data-overview-retry') && !bandDown.includes('No blocking risks'),
+  'unavailable risk band must explain why and never claim no risks');
+const bandPartial = sandbox.__renderOverviewRiskBand({ risks: { status: 'partial',
+  reportCoverage: 'partial', coverage: { inspected: 50, total: 120, complete: false }, items: [] } });
+assert(bandPartial.includes('not a guarantee') &&
+  !bandPartial.includes('No blocking risks in the inspected scope.'),
+  'partial coverage must not render the clear all-clear copy');
+const bandOkIncomplete = sandbox.__renderOverviewRiskBand({ risks: { status: 'ok',
+  reportCoverage: 'complete', coverage: { inspected: 50, total: 120, complete: false }, items: [] } });
+assert(bandOkIncomplete.includes('not a guarantee'),
+  'ok status with incomplete coverage still must not claim no risks');
+const bandClear = sandbox.__renderOverviewRiskBand({ risks: { status: 'ok', reportCoverage: 'complete',
+  coverage: { inspected: 0, total: 0, complete: true }, items: [] } });
+assert(bandClear.includes('No blocking risks in the inspected scope.') &&
+  !bandClear.includes('banner ok') && !bandClear.includes('chip green') && !bandClear.includes('0%'),
+  'empty data must not produce a green success state or fabricated percentages');
+const bandRestricted = sandbox.__renderOverviewRiskBand({ risks: { status: 'restricted',
+  reportCoverage: 'restricted', coverage: { inspected: 1, total: 1, complete: true }, items: [] } });
+assert(bandRestricted.includes('hidden by your permissions') &&
+  !bandRestricted.includes('No blocking risks in the inspected scope.'),
+  'restricted report coverage must stay visible and block the all-clear');
+
+const pending = sandbox.__renderOverviewApprovals({ status: 'ok', actionableTotal: 2, items: [
+  { id: 'ap-1', action: 'flag.publish', object: '<img src=x>', environmentId: 'prod',
+    submittedBy: 'alice', submittedAt: OVS, risk: 'normal', myAction: 'review', blockedReason: '' },
+  { id: 'ap-2', action: 'flag.rollback', object: 'flag-b', environmentId: 'prod',
+    submittedBy: 'alice', submittedAt: OVS, risk: 'high', expiresAt: OVS,
+    myAction: 'execute', blockedReason: '' },
+  { id: 'ap-3', action: 'flag.publish', object: 'flag-c', environmentId: 'prod',
+    submittedBy: 'bob', submittedAt: OVS, risk: 'normal', myAction: '', blockedReason: 'self_approval' },
+  { id: 'ap-4', action: 'flag.publish', object: 'flag-d', environmentId: 'prod',
+    submittedBy: 'carol', submittedAt: OVS, risk: 'normal', myAction: '', blockedReason: 'role' },
+  { id: 'ap-5', action: 'flag.publish', object: 'flag-e', environmentId: 'prod',
+    submittedBy: 'dave', submittedAt: OVS, risk: 'normal', myAction: '', blockedReason: 'expired' },
+  { id: 'ap-6', action: 'breakglass.review', object: 'flag-f', environmentId: 'prod',
+    submittedBy: 'erin', submittedAt: OVS, risk: 'high', myAction: '', blockedReason: 'breakglass_review' }] });
+assert(pending.includes('Waiting for my review') && pending.includes('Waiting for my execution') &&
+  pending.includes('2 waiting for you') && pending.includes('data-overview-approval="ap-1"'),
+  'server myAction verdicts must render as chips with the true actionable total');
+assert(pending.includes('Submitted by you') && pending.includes('cannot approve or execute') &&
+  pending.includes('Grant expired') && pending.includes('approvals inbox'),
+  'all four blocked reasons must render their localized explanations');
+assert(pending.includes('&lt;img src=x&gt;') && !pending.includes('<img'),
+  'approval objects must be escaped');
+const pendingDown = sandbox.__renderOverviewApprovals({ status: 'unavailable', reason: 'approvals_unavailable' });
+assert(pendingDown.includes('approvals_unavailable') && pendingDown.includes('data-overview-retry') &&
+  !pendingDown.includes('Nothing is waiting'),
+  'unavailable approvals module must not present an empty inbox');
+assert(sandbox.__renderOverviewApprovals({ status: 'ok', actionableTotal: 0, items: [] })
+  .includes('Nothing is waiting for your action.'), 'empty actionable inbox copy missing');
+
+const releases = sandbox.__renderOverviewReleases({ status: 'ok',
+  coverage: { inspected: 500, total: 500, complete: false, note: 'audit-scan-window' },
+  items: [
+    { time: OVS, actor: 'alice', action: 'flag.publish', object: 'flag-a', environmentId: 'prod' },
+    { time: OVS, actor: 'alice', action: 'flag.rollback', object: 'flag-a', environmentId: 'prod' },
+    { time: OVS, actor: 'bob', action: 'flag.emergency_disable', object: 'flag-b', environmentId: 'prod' },
+    { time: OVS, actor: 'bob', action: 'segment.publish', object: 'seg-1', environmentId: 'prod' },
+    { time: OVS, actor: 'rollout-engine', action: 'release_plan.apply_ratio', object: 'exp-1', environmentId: 'prod' },
+    { time: OVS, actor: 'rollout-engine', action: 'release_plan.rollback', object: 'exp-1', environmentId: 'prod' },
+    { time: OVS, actor: 'carol', action: 'metric.publish', object: 'metric-1/v2', environmentId: 'prod' }] });
+for (const label of ['Flag published', 'Flag rolled back', 'Flag emergency-disabled',
+  'Segment published', 'Rollout step applied', 'Rollout rolled back']) {
+  assert(releases.includes(label), 'release action label missing: ' + label);
+}
+assert(releases.includes('metric.publish'), 'unknown actions must fall back to the raw audit string');
+assert(releases.includes('Scanned the latest 500 audit records.') &&
+  releases.includes('Older records were not scanned.'),
+  'a full scan window must disclose truncation');
+assert(releases.includes('data-overview-release="flag-a"') && releases.includes('mobile-record'),
+  'release rows must link into the audit log and provide mobile records');
+assert(sandbox.__renderOverviewReleases({ status: 'ok',
+  coverage: { inspected: 3, total: 3, complete: true }, items: [] })
+  .includes('No releases recorded in the scanned audit window.'), 'empty release window copy missing');
+const releasesDown = sandbox.__renderOverviewReleases({ status: 'unavailable', reason: 'audit_unavailable' });
+assert(releasesDown.includes('audit_unavailable') && releasesDown.includes('data-overview-retry'),
+  'unavailable releases module must explain why and offer retry');
+
+const stats = sandbox.__renderOverviewStats({ pausedExperiments: null, runningExperiments: 3,
+  pendingApprovals: null, publishedFlags: 0 });
+assert(stats.includes('<strong>3</strong>') && stats.includes('<strong>0</strong>') &&
+  (stats.match(/<strong>—<\/strong>/g) || []).length === 2 && !stats.includes('<strong>null</strong>'),
+  'a null count means the source failed and renders as an em dash, a real zero stays zero');
+assert(sandbox.__renderOverviewStats(null).split('<strong>—</strong>').length === 5,
+  'missing counts object degrades to em dashes, never zeros');
+
+const moduleFailure = sandbox.__renderOverviewModuleFailure('overview.recentReleases',
+  { status: 'unavailable', reason: 'audit_unavailable', coverage: { inspected: 0, total: 0, complete: false } });
+assert(moduleFailure.includes('Recent releases is unavailable: audit_unavailable') &&
+  moduleFailure.includes('Status: unavailable') && moduleFailure.includes('Inspected 0 of 0') &&
+  moduleFailure.includes('data-overview-retry') && moduleFailure.includes('banner warn'),
+  'module failure banner must state name, reason, status, coverage and retry');
 
 console.log('renderReport DOM contract: all assertions passed (9 report shapes)');
