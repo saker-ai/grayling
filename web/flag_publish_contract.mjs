@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
 
-const code = ['i18n.js', 'flag_editor.js', 'segment_editor.js', 'approvals.js', 'app.js']
+const code = ['i18n.js', 'flag_editor.js', 'segment_editor.js', 'approvals.js', 'exp_workbench.js', 'app.js']
   .map(name => fs.readFileSync(new URL(name, import.meta.url), 'utf8')).join('\n');
 const reviewBox = { innerHTML: '' };
 const posts = [];

@@ -29,8 +29,9 @@ const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 const flagEditorCode = fs.readFileSync(path.join(__dirname, 'flag_editor.js'), 'utf8');
 const segmentEditorCode = fs.readFileSync(path.join(__dirname, 'segment_editor.js'), 'utf8');
 const approvalsCode = fs.readFileSync(path.join(__dirname, 'approvals.js'), 'utf8');
+const expWorkbenchCode = fs.readFileSync(path.join(__dirname, 'exp_workbench.js'), 'utf8');
 const indexHTML = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-const code = i18nCode + '\n' + flagEditorCode + '\n' + segmentEditorCode + '\n' + approvalsCode + '\n' + appCode;
+const code = i18nCode + '\n' + flagEditorCode + '\n' + segmentEditorCode + '\n' + approvalsCode + '\n' + expWorkbenchCode + '\n' + appCode;
 
 const BRIDGE = '\n;globalThis.__x = { I18N, t, setLang, detectLang, localeFor, fmtTime, fmtDurNs,' +
   ' S, VIEWS, route, renderReport, renderRollout, lintFlag, applyStaticI18n, bindLangSwitch, registerI18nHooks, applyTheme, themePreference, consoleHash, restoreConsoleHash };';
@@ -602,6 +603,7 @@ assert(!main.warns.some(w => w.includes('[i18n] missing')), 'console.warn record
   for (const mt of flagEditorCode.matchAll(/\bt\('([A-Za-z0-9._-]+)'/g)) used.add(mt[1]);
   for (const mt of segmentEditorCode.matchAll(/\bt\('([A-Za-z0-9._-]+)'/g)) used.add(mt[1]);
   for (const mt of approvalsCode.matchAll(/\bt\('([A-Za-z0-9._-]+)'/g)) used.add(mt[1]);
+  for (const mt of expWorkbenchCode.matchAll(/\bt\('([A-Za-z0-9._-]+)'/g)) used.add(mt[1]);
   assert(used.size > 100, 'static extraction should find the migrated keys, got ' + used.size);
   for (const k of used) {
     assert(k in x.I18N.catalogs.en, 'app.js uses key missing from en catalog: ' + k);
@@ -639,6 +641,7 @@ assert(!main.warns.some(w => w.includes('[i18n] missing')), 'console.warn record
   scan('flag_editor.js (code + string literals)', stripJsComments(flagEditorCode));
   scan('segment_editor.js (code + string literals)', stripJsComments(segmentEditorCode));
   scan('approvals.js (code + string literals)', stripJsComments(approvalsCode));
+  scan('exp_workbench.js (code + string literals)', stripJsComments(expWorkbenchCode));
   scan('index.html (markup + attributes)', indexHTML.replace(/<!--[\s\S]*?-->/g, ''));
 }
 
