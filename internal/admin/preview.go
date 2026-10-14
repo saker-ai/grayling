@@ -16,7 +16,7 @@ import (
 )
 
 // ReviewPreview is the evidence shown before an approval or publication.
-// EstimatedAffected is deliberately an upper bound: GoLab has no complete
+// EstimatedAffected is deliberately an upper bound: Grayling has no complete
 // census of SDK users, so a count would be misleading.
 type ReviewPreview struct {
 	TargetEnvironment string                `json:"targetEnvironment"`

@@ -1,4 +1,4 @@
 FROM scratch
-COPY golab-native-proxy /golab-native-proxy
+COPY grayling-native-proxy /grayling-native-proxy
 USER 65532:65532
-ENTRYPOINT ["/golab-native-proxy"]
+ENTRYPOINT ["/grayling-native-proxy"]

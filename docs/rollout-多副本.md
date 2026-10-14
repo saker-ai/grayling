@@ -14,4 +14,4 @@
 
 ## 验证范围
 
-`internal/platform/rollout_lease_test.go` 使用真实 PostgreSQL 验证租约过期、代际隔离、连接中断和受控 TCP 断连后的故障接管。`internal/rollout/engine_test.go` 使用共享真实 PostgreSQL 的两个引擎验证同时运行、健康决策门只推进一次、SRM 暂停、护栏回滚和切主期间的人工接管/手动推进。`test/cluster/TestRolloutLeaderProcessFailover` 使用两个真实 `cmd/golab` 进程和共享 PostgreSQL、Redis 验证主进程终止、重启和接管；计划步骤与审计断言由前述引擎测试覆盖。可运行 `GOWORK=off go test ./internal/platform ./internal/rollout ./test/cluster -count=1`。
+`internal/platform/rollout_lease_test.go` 使用真实 PostgreSQL 验证租约过期、代际隔离、连接中断和受控 TCP 断连后的故障接管。`internal/rollout/engine_test.go` 使用共享真实 PostgreSQL 的两个引擎验证同时运行、健康决策门只推进一次、SRM 暂停、护栏回滚和切主期间的人工接管/手动推进。`test/cluster/TestRolloutLeaderProcessFailover` 使用两个真实 `cmd/grayling` 进程和共享 PostgreSQL、Redis 验证主进程终止、重启和接管；计划步骤与审计断言由前述引擎测试覆盖。可运行 `GOWORK=off go test ./internal/platform ./internal/rollout ./test/cluster -count=1`。

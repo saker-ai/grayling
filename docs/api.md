@@ -1,4 +1,4 @@
-# GoLab API 参考（v1）
+# Grayling API 参考（v1）
 
 > 与实现同步的端点清单（来源：`internal/api/server.go` 路由表）。机器可读规范见仓库根 [`openapi.yaml`](../openapi.yaml)（由 `internal/api/openapi_test.go` 与路由表机械化双向核对）；本文以实际行为为准。
 
@@ -8,9 +8,9 @@
 
 | 凭证 | 前缀 | 可用端点 |
 |---|---|---|
-| admin | `glab_admin_` | `/api/v1/admin/**` |
-| sdk | `glab_sdk_` | `/api/v1/sdk/**` |
-| collect | `glab_collect_` | `/api/v1/collect` |
+| admin | `grayling_admin_` | `/api/v1/admin/**` |
+| sdk | `grayling_sdk_` | `/api/v1/sdk/**` |
+| collect | `grayling_collect_` | `/api/v1/collect` |
 
 错误响应统一为 `{"error":{"code":"...","message":"..."}}`。常见 code：`unauthorized`(401)、`wrong_audience`/`access_denied`/`self_approval_denied`(403)、`not_found`(404)、`validation_failed`/`import_failed`/`batch_too_large`(400)、`conflict`/`invalid_state`(409)、`rate_limited`/`quota_exceeded`(429)、revoked 资源(423)、`ai_unavailable`(501)。
 
@@ -148,11 +148,11 @@
 
 ## OpenAI 兼容 Chat Completions
 
-配置 `-openai-upstream-url https://api.openai.com/v1 -openai-workspace acme -openai-environment prod` 后，GoLab 在 `POST /v1/chat/completions` 使用服务端固定的工作空间和环境；`-openai-flag-key` 可覆盖默认 Flag 键 `openai-chat`。客户端只需将 `baseURL` 指向 GoLab 的 `/v1`，保留原有上游 Bearer API Key。入站 `model` 必须存在，但实际发送给上游的模型由 Flag 的 `modelRef` 决定。
+配置 `-openai-upstream-url https://api.openai.com/v1 -openai-workspace acme -openai-environment prod` 后，Grayling 在 `POST /v1/chat/completions` 使用服务端固定的工作空间和环境；`-openai-flag-key` 可覆盖默认 Flag 键 `openai-chat`。客户端只需将 `baseURL` 指向 Grayling 的 `/v1`，保留原有上游 Bearer API Key。入站 `model` 必须存在，但实际发送给上游的模型由 Flag 的 `modelRef` 决定。
 
-该环境须发布 JSON Flag，选中的 variation 须包含 `{"modelRef":{"provider":"openai","model":"gpt-4.1"},"promptRef":{"logicalId":"chat-system"}}`。先在工作空间白名单中允许该模型，再注册并固定 Prompt 版本。`promptRef.version` 可选；省略时选择最新固定版本。GoLab 对每个请求求值 Flag、验证模型白名单及 Prompt 内容摘要，把 Prompt 作为第一条 `system` 消息插入，并在发送上游前再次检查撤销。Flag 缺失、禁用或资源不可用时返回 503；Prompt 被撤销时返回 423，不请求上游。已开始的流按本次请求冻结的配置完成。实验分流单位由上游 Key 与可选 `user` 字段的组合哈希得到，不存储原始 Key。
+该环境须发布 JSON Flag，选中的 variation 须包含 `{"modelRef":{"provider":"openai","model":"gpt-4.1"},"promptRef":{"logicalId":"chat-system"}}`。先在工作空间白名单中允许该模型，再注册并固定 Prompt 版本。`promptRef.version` 可选；省略时选择最新固定版本。Grayling 对每个请求求值 Flag、验证模型白名单及 Prompt 内容摘要，把 Prompt 作为第一条 `system` 消息插入，并在发送上游前再次检查撤销。Flag 缺失、禁用或资源不可用时返回 503；Prompt 被撤销时返回 423，不请求上游。已开始的流按本次请求冻结的配置完成。实验分流单位由上游 Key 与可选 `user` 字段的组合哈希得到，不存储原始 Key。
 
-Flag 可使用 `targetingKey` 或 `user_id` 做稳定分流；二者均由上游 Key 与可选 `user` 字段哈希得到。普通 JSON 和 `stream: true` SSE 均由上游逐块返回，上游错误状态与响应体原样返回。未配置上游时返回 501，请求体（含插入的 Prompt）超过 32 MiB 返回 413，无法连接上游时返回 502。入站 Cookie 不会发给上游。此端点不接受 GoLab SDK 凭证作为模型 Key。上游 URL 只能由 GoLab 运行者配置，客户端无法覆盖。
+Flag 可使用 `targetingKey` 或 `user_id` 做稳定分流；二者均由上游 Key 与可选 `user` 字段哈希得到。普通 JSON 和 `stream: true` SSE 均由上游逐块返回，上游错误状态与响应体原样返回。未配置上游时返回 501，请求体（含插入的 Prompt）超过 32 MiB 返回 413，无法连接上游时返回 502。入站 Cookie 不会发给上游。此端点不接受 Grayling SDK 凭证作为模型 Key。上游 URL 只能由 Grayling 运行者配置，客户端无法覆盖。
 
 ## SDK 数据面（sdk 凭证）
 
@@ -179,9 +179,9 @@ Flag 可使用 `targetingKey` 或 `user_id` 做稳定分流；二者均由上游
 
 `GET /api/v1/admin/experiments/{id}/diagnostics` 增加 `duplicateEvents` 和 `rejectedByReason`。两者按凭证作用域内已知实验的当前 epoch 聚合**采集尝试次数**；重试会再次计数，不代表独立用户数。未知或跨作用域实验 ID 不进入该聚合，原因码为固定枚举，不含原始 unit 或 eventId。
 
-## 独立 proxy（cmd/golab-proxy）
+## 独立 proxy（cmd/grayling-proxy）
 
-把远程评估数据面打包为**独立部署的无状态中继**（技术方案 §3：proxy 可选，用于浏览器/瘦服务，不要求全部应用请求经过）。转发到上游 GoLab server（`-upstream`）：
+把远程评估数据面打包为**独立部署的无状态中继**（技术方案 §3：proxy 可选，用于浏览器/瘦服务，不要求全部应用请求经过）。转发到上游 Grayling server（`-upstream`）：
 
 | 端点 | 说明 |
 |---|---|
@@ -194,23 +194,23 @@ Flag 可使用 `targetingKey` 或 `user_id` 做稳定分流；二者均由上游
 | `GET /healthz` | **liveness**：proxy 自身存活，不探测上游（上游故障不应导致编排系统杀掉 proxy 机队） |
 | `GET /api/v1/health` | **readiness**：探测上游 `/api/v1/health`；不可达/不健康 → 503 |
 
-- 凭证原样透传：认证、受众分离、租户作用域与每 token 限流仍全部由上游执行；proxy 不持有中继凭证或状态，可水平扩展、随时重启。唯一例外是网关求值端点使用 `-gateway-token` 配置的自有 SDK 凭证（终端用户流量不可能携带 GoLab 凭证）。
+- 凭证原样透传：认证、受众分离、租户作用域与每 token 限流仍全部由上游执行；proxy 不持有中继凭证或状态，可水平扩展、随时重启。唯一例外是网关求值端点使用 `-gateway-token` 配置的自有 SDK 凭证（终端用户流量不可能携带 Grayling 凭证）。
 - 管理 API 与 AI 端点**不转发**（404）：proxy 的暴露面就是远程评估。
 - 错误映射：上游不可达 → 502 `upstream_unreachable`；超过 `-timeout`（一元请求，默认 10s）→ 504 `upstream_timeout`；其余状态码与响应体按上游原样透传。
 - 连接池：`-max-idle-conns-per-host`（默认 100）、`-max-conns-per-host`（0=不限）、`-dial-timeout`（默认 5s）；`-health-timeout` 约束 readiness 探测（默认 3s）。
-- client_ip 推导：`-trusted-proxy-cidrs`（逗号分隔 CIDR/裸 IP，如 `10.0.0.0/8,172.16.5.5,fd00::/8`；flag 为空时读环境变量 `GOLAB_TRUSTED_PROXY_CIDRS`，默认空）声明允许位于 proxy 之前的可信反向代理网段。两条**服务端求值路径**（forwardAuth 端点与 `POST /api/v1/sdk/eval` 中继）从连接对端（RemoteAddr）出发、仅在当前 IP 落于可信网段时逐跳向左回退 `X-Forwarded-For`，第一个不受信 IP 即 `client_ip`，其左侧条目一律丢弃（防伪造自选灰度组）；信任链中出现非法条目则 fail closed（不注入）。推导值以保留属性名 `client_ip` 注入求值上下文——中继路径上**调用方显式传入的 `attributes.client_ip` 优先，不被覆盖**；未配置时不信任任何 XFF，`client_ip` 即直连对端（现网行为不变）。安全语义与链路图见 [traefik-golab-architecture](traefik-golab-architecture.md)"按 client IP 灰度"节。
+- client_ip 推导：`-trusted-proxy-cidrs`（逗号分隔 CIDR/裸 IP，如 `10.0.0.0/8,172.16.5.5,fd00::/8`；flag 为空时读环境变量 `GRAYLING_TRUSTED_PROXY_CIDRS`，默认空）声明允许位于 proxy 之前的可信反向代理网段。两条**服务端求值路径**（forwardAuth 端点与 `POST /api/v1/sdk/eval` 中继）从连接对端（RemoteAddr）出发、仅在当前 IP 落于可信网段时逐跳向左回退 `X-Forwarded-For`，第一个不受信 IP 即 `client_ip`，其左侧条目一律丢弃（防伪造自选灰度组）；信任链中出现非法条目则 fail closed（不注入）。推导值以保留属性名 `client_ip` 注入求值上下文——中继路径上**调用方显式传入的 `attributes.client_ip` 优先，不被覆盖**；未配置时不信任任何 XFF，`client_ip` 即直连对端（现网行为不变）。安全语义与链路图见 [traefik-grayling-architecture](traefik-grayling-architecture.md)"按 client IP 灰度"节。
 - SIGTERM/SIGINT 优雅关停。
 
 ```bash
-GOWORK=off go build ./cmd/golab-proxy
-./bin/golab-proxy -addr 127.0.0.1:8689 -upstream http://127.0.0.1:8688
+GOWORK=off go build ./cmd/grayling-proxy
+./bin/grayling-proxy -addr 127.0.0.1:8689 -upstream http://127.0.0.1:8688
 ```
 
 ## Traefik 网关集成（§4，P5）
 
-Traefik ≥3.6 multi-layer routing 链路：父 router（无 service，独占 entryPoints）先剥离外部 `X-Golab-*` header，再经 forwardAuth 调用求值服务；子 router 按回写的 `X-Golab-Variant` 分流。完整链路与约束见 [traefik-golab-architecture](traefik-golab-architecture.md)；端到端验证证据见 [实施状态](实施状态.md)。
+Traefik ≥3.6 multi-layer routing 链路：父 router（无 service，独占 entryPoints）先剥离外部 `X-Grayling-*` header，再经 forwardAuth 调用求值服务；子 router 按回写的 `X-Grayling-Variant` 分流。完整链路与约束见 [traefik-grayling-architecture](traefik-grayling-architecture.md)；端到端验证证据见 [实施状态](实施状态.md)。
 
-**求值服务 = golab-proxy 的 forwardAuth 端点**（`-gateway-token` 启用）：
+**求值服务 = grayling-proxy 的 forwardAuth 端点**（`-gateway-token` 启用）：
 
 ```
 GET /api/v1/gateway/forwardauth?flagKey=<key>&defaultVariant=<v>&unitField=<f>&unitHeader=<h>&secret=<s>
@@ -218,26 +218,26 @@ GET /api/v1/gateway/forwardauth?flagKey=<key>&defaultVariant=<v>&unitField=<f>&u
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `flagKey` | 必填 | 求值的 GoLab flag |
+| `flagKey` | 必填 | 求值的 Grayling flag |
 | `defaultVariant` | 必填 | fail-open / 缺 bucketingKey 时回写的默认变体 |
 | `unitField` | `targetingKey` | bucketingKey 写入的求值上下文字段（应与 flag 的 `bucketing.unit` 一致；非 targetingKey 时同时写入 attributes 与 targetingKey）。取保留值 `client_ip` 时为**按 IP 分桶**：分桶单元=proxy 从可信代理链派生的 client IP（`-trusted-proxy-cidrs`，见上节），`unitHeader` 不被读取——客户端无法用 header 自选灰度组；派生失败（如信任链断裂）按缺 bucketingKey fail-open |
 | `unitHeader` | `X-Bucketing-Key` | 携带 bucketingKey 的请求 header |
-| `secret` | — | 路由共享密钥（proxy `-gateway-secret` 配置后强制校验，常数时间比较）；不匹配的请求**绝不上游求值**——fail-open 回默认变体（`X-Golab-Fail-Open: unauthorized`），防止任何能触达 proxy 的调用方把它当作任意 flag 探测/曝光污染 oracle |
+| `secret` | — | 路由共享密钥（proxy `-gateway-secret` 配置后强制校验，常数时间比较）；不匹配的请求**绝不上游求值**——fail-open 回默认变体（`X-Grayling-Fail-Open: unauthorized`），防止任何能触达 proxy 的调用方把它当作任意 flag 探测/曝光污染 oracle |
 
 - Traefik forwardAuth 以 GET 探测该地址（address 的 query 原样保留），原始请求信息在 `X-Forwarded-*` header 中。
 - 求值上下文恒携带（可推导时）保留属性 `client_ip` = 可信代理链派生的客户端 IP（`-trusted-proxy-cidrs`，见"独立 proxy"节；请求 header 输入永不喂给该值），flag 在 `fields` 注册 `client_ip` 即可用 `in_cidr` 按 IP 段定向；作为分桶单元允许但**实验慎用**（IP 漂移破坏粘性/归因，技术方案 §6）。端到端证据：`test/gateway/clientip_e2e_test.go`。
-- 响应恒为 200（**fail-open 契约**）：`X-Golab-Variant`（求值变体或默认变体）、`X-Golab-Flag-Key`、`X-Golab-Reason`；内部故障（上游不可达/超时/非 200/求值失败/缺 bucketingKey/未配置 token）附加 `X-Golab-Fail-Open: <reason>` 并回写默认变体——网关绝不因 GoLab 故障产生 5xx。求值服务进程整体不可用需 HA 部署兜底（Traefik forwardAuth 对不可达的 auth 服务默认拒绝请求）。
+- 响应恒为 200（**fail-open 契约**）：`X-Grayling-Variant`（求值变体或默认变体）、`X-Grayling-Flag-Key`、`X-Grayling-Reason`；内部故障（上游不可达/超时/非 200/求值失败/缺 bucketingKey/未配置 token）附加 `X-Grayling-Fail-Open: <reason>` 并回写默认变体——网关绝不因 Grayling 故障产生 5xx。求值服务进程整体不可用需 HA 部署兜底（Traefik forwardAuth 对不可达的 auth 服务默认拒绝请求）。
 - 曝光在决策点集中记录：求值走上游 `/api/v1/sdk/eval`，运行中实验的入组曝光由服务端落库（幂等 event ID）。
 - 每次求值超时 `-gateway-eval-timeout`（默认 2s，热路径宜短），超时即 fail-open。
 
-**router 配置生成器**：`internal/gateway` 由 `RouteSpec`（flag、变体→后端、entryPoint、求值服务地址、可选 `Secret`）生成三目标的动态配置——file（YAML/JSON）、KV（Consul/etcd/Redis/ZooKeeper 键值对）、Kubernetes IngressRoute CRD；所有输出先通过层级规则校验（根 router 独占 entryPoints、中间 router 无 service、叶子必须有 service、parentRefs 存在且无环——环检测覆盖多 parent 图）。比例调整只改 GoLab 分桶参数，**不触碰任何生成产物**；增删变体才需要重新生成。KV 目标的 header 剥离由 forwardAuth `authResponseHeadersRegex: ^X-Golab-` 承担（Traefik KV 解码器丢弃空值，headers middleware 置空语义在 KV 不可表达——file/IngressRoute 仍生成显式 headers middleware，两机制并存）。`RouteSpec.Secret` 会嵌入 forwardAuth address 的 `secret` 参数，与 proxy `-gateway-secret` 配对（强烈建议：proxy 网络可达即配置；仅回环/可信网格可省略，proxy 启动时对"有 token 无 secret"打 WARNING）。
+**router 配置生成器**：`internal/gateway` 由 `RouteSpec`（flag、变体→后端、entryPoint、求值服务地址、可选 `Secret`）生成三目标的动态配置——file（YAML/JSON）、KV（Consul/etcd/Redis/ZooKeeper 键值对）、Kubernetes IngressRoute CRD；所有输出先通过层级规则校验（根 router 独占 entryPoints、中间 router 无 service、叶子必须有 service、parentRefs 存在且无环——环检测覆盖多 parent 图）。比例调整只改 Grayling 分桶参数，**不触碰任何生成产物**；增删变体才需要重新生成。KV 目标的 header 剥离由 forwardAuth `authResponseHeadersRegex: ^X-Grayling-` 承担（Traefik KV 解码器丢弃空值，headers middleware 置空语义在 KV 不可表达——file/IngressRoute 仍生成显式 headers middleware，两机制并存）。`RouteSpec.Secret` 会嵌入 forwardAuth address 的 `secret` 参数，与 proxy `-gateway-secret` 配对（强烈建议：proxy 网络可达即配置；仅回环/可信网格可省略，proxy 启动时对"有 token 无 secret"打 WARNING）。
 
 ```bash
 # 网关求值服务（Traefik forwardAuth 目标）
-./bin/golab-proxy -addr 127.0.0.1:8689 -upstream http://127.0.0.1:8688 \
-  -gateway-token glab_sdk_... -gateway-secret <与 RouteSpec.Secret 相同> -gateway-eval-timeout 2s
+./bin/grayling-proxy -addr 127.0.0.1:8689 -upstream http://127.0.0.1:8688 \
+  -gateway-token grayling_sdk_... -gateway-secret <与 RouteSpec.Secret 相同> -gateway-eval-timeout 2s
 ```
 
 ## Flag DSL（schemaVersion 1）
 
-见 `pkg/model/types.go` 与技术方案 §5.2。要点：`type ∈ bool|string|number|json`；规则必须有且仅有 `variation|percentage` 之一；约束字段必须在 `fields` 注册（`targetingKey` 隐式注册）；操作符闭集 `eq,ne,in,not_in,gt,gte,lt,lte,time_before,time_after,regex,in_cidr,semver_gt,semver_gte,semver_lt,semver_lte,semver_eq`；`bucketing.algorithm` 固定 `golab-fnv1a-10000-v1`；实验绑定 flag 的 `defaultRule.variation` 必填（未入组回退）。
+见 `pkg/model/types.go` 与技术方案 §5.2。要点：`type ∈ bool|string|number|json`；规则必须有且仅有 `variation|percentage` 之一；约束字段必须在 `fields` 注册（`targetingKey` 隐式注册）；操作符闭集 `eq,ne,in,not_in,gt,gte,lt,lte,time_before,time_after,regex,in_cidr,semver_gt,semver_gte,semver_lt,semver_lte,semver_eq`；`bucketing.algorithm` 固定 `grayling-fnv1a-10000-v1`；实验绑定 flag 的 `defaultRule.variation` 必填（未入组回退）。

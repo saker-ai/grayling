@@ -1,6 +1,6 @@
 # Issue #13: isolated Kind network and native SDK fixture
 
-This fixture runs two GoLab replicas on different Kind workers with shared PostgreSQL/Redis, Cilium NetworkPolicy, and the `cmd/golab-native-proxy` TLS/L4 sidecar on each replica. The same executable is described in `deploy/kubernetes/native`; it logs the client Pod IP and opens one backend TCP connection per client connection. This is a **local simulation**, not proof of production cross-host routing or production ingress configuration.
+This fixture runs two Grayling replicas on different Kind workers with shared PostgreSQL/Redis, Cilium NetworkPolicy, and the `cmd/grayling-native-proxy` TLS/L4 sidecar on each replica. The same executable is described in `deploy/kubernetes/native`; it logs the client Pod IP and opens one backend TCP connection per client connection. This is a **local simulation**, not proof of production cross-host routing or production ingress configuration.
 
 Requirements: Linux Docker with enough free space, Kind v0.33.0, Helm v3.19.0, Go matching `go.mod`, `kubectl`, Python 3, and OpenSSL. Use a dedicated Docker daemon if the default Docker data root is full. The commands below use whichever daemon `DOCKER_HOST` selects. Do not use a shared cluster: `verify_policy.sh` briefly removes and restores the test namespace's NetworkPolicy to prove that it causes the denial.
 
@@ -9,7 +9,7 @@ From the repository root:
 ```sh
 export DOCKER_HOST=unix:///path/to/isolated/docker.sock
 export KUBECONFIG=/path/to/isolated/kubeconfig
-export ISSUE13_WORKDIR=/path/to/private/golab-issue13
+export ISSUE13_WORKDIR=/path/to/private/grayling-issue13
 mkdir -p "$ISSUE13_WORKDIR"
 chmod 700 "$ISSUE13_WORKDIR"
 test/cluster/kind/setup_cluster.sh
@@ -19,7 +19,7 @@ test/cluster/kind/verify_policy.sh
 In a separate terminal, keep the admin API port-forward running for disposable tenant provisioning and the SDK push check:
 
 ```sh
-kubectl -n golab-issue13 port-forward svc/golab-a 28688:8688
+kubectl -n grayling-issue13 port-forward svc/grayling-a 28688:8688
 ```
 
 Then:
@@ -51,9 +51,9 @@ test/cluster/kind/verify_deploy_manifest.sh
 To inspect actual source IP and backend connection mapping:
 
 ```sh
-kubectl -n golab-issue13 get pods -o wide
-kubectl -n golab-issue13 logs golab-a -c tls-l4-proxy
-kubectl -n golab-issue13 logs golab-b -c tls-l4-proxy
+kubectl -n grayling-issue13 get pods -o wide
+kubectl -n grayling-issue13 logs grayling-a -c tls-l4-proxy
+kubectl -n grayling-issue13 logs grayling-b -c tls-l4-proxy
 ```
 
 The fixed addresses in `kind.yaml` are for the isolated test cluster; change them if they overlap the host network. `setup_cluster.sh` reuses locally cached pinned base images; if registry access is unavailable, load them into the selected Docker daemon first. Before enabling the topology in another cluster, run the deployment evidence gate in `scripts/check_nacos_native_topology.py` against its TLS/L4 ingress from separate allowed and denied sources, inspect ingress connection logs, and repeat the lifecycle checks there. The deployable in-cluster example is in `deploy/kubernetes/native`.
@@ -61,5 +61,5 @@ The fixed addresses in `kind.yaml` are for the isolated test cluster; change the
 Cleanup after retaining sanitized evidence:
 
 ```sh
-kind delete cluster --name golab-issue13
+kind delete cluster --name grayling-issue13
 ```

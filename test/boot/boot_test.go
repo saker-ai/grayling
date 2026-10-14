@@ -1,4 +1,4 @@
-// Package boot verifies the compiled cmd/golab binary actually starts,
+// Package boot verifies the compiled cmd/grayling binary actually starts,
 // bootstraps an owner credential, serves the console and the health
 // endpoint, and shuts down cleanly on SIGTERM.
 package boot
@@ -35,13 +35,13 @@ func freePort(t *testing.T) int {
 
 func TestAnonymousNativeListenerRejectsNonLoopbackEvenWithOverride(t *testing.T) {
 	if testing.Short() {
-		t.Skip("builds the GoLab binary")
+		t.Skip("builds the Grayling binary")
 	}
-	bin := buildBin(t, "./cmd/golab", "golab-native-bind-check")
+	bin := buildBin(t, "./cmd/grayling", "grayling-native-bind-check")
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "-gonacos-addr", "0.0.0.0:0", "-gonacos-grpc-addr", "127.0.0.1:0")
-	cmd.Env = append(os.Environ(), "GOLAB_ALLOW_NON_LOOPBACK_GONACOS=1")
+	cmd.Env = append(os.Environ(), "GRAYLING_ALLOW_NON_LOOPBACK_GONACOS=1")
 	out, err := cmd.CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "without -nacos-native-auth=true") {
 		t.Fatalf("anonymous native non-loopback listener was not rejected: err=%v output=%s", err, out)
@@ -53,8 +53,8 @@ func TestBinaryBootsAndServes(t *testing.T) {
 		t.Skip("boot test builds and runs the binary; skipped in -short")
 	}
 	root := repoRoot(t)
-	bin := filepath.Join(t.TempDir(), "golab")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/golab")
+	bin := filepath.Join(t.TempDir(), "grayling")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/grayling")
 	build.Dir = root
 	build.Env = append(os.Environ(), "GOWORK=off")
 	if out, err := build.CombinedOutput(); err != nil {
@@ -96,7 +96,7 @@ func TestBinaryBootsAndServes(t *testing.T) {
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
 			line := sc.Text()
-			if idx := strings.Index(line, "glab_admin_"); idx >= 0 {
+			if idx := strings.Index(line, "grayling_admin_"); idx >= 0 {
 				fields := strings.Fields(line[idx:])
 				if len(fields) > 0 {
 					tokenCh <- strings.TrimSpace(fields[0])
@@ -131,7 +131,7 @@ func TestBinaryBootsAndServes(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("bootstrap owner token not printed")
 	}
-	if !strings.HasPrefix(token, "glab_admin_") {
+	if !strings.HasPrefix(token, "grayling_admin_") {
 		t.Fatalf("unexpected token format: %q", token)
 	}
 
@@ -210,7 +210,7 @@ func TestBinaryBootsAndServes(t *testing.T) {
 }
 
 // TestBinaryBootsWithPostgres runs the compiled binary against a REAL
-// PostgreSQL (docker or GOLAB_TEST_PG_DSN — see test/pgtest): schema
+// PostgreSQL (docker or GRAYLING_TEST_PG_DSN — see test/pgtest): schema
 // migration at boot, owner bootstrap into the database, admin write path
 // through PG, and a clean SIGTERM shutdown.
 func TestBinaryBootsWithPostgres(t *testing.T) {
@@ -219,8 +219,8 @@ func TestBinaryBootsWithPostgres(t *testing.T) {
 	}
 	dsn := pgtest.DSN(t) // skips with a reason when no PostgreSQL is available
 	root := repoRoot(t)
-	bin := filepath.Join(t.TempDir(), "golab-pg")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/golab")
+	bin := filepath.Join(t.TempDir(), "grayling-pg")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/grayling")
 	build.Dir = root
 	build.Env = append(os.Environ(), "GOWORK=off")
 	if out, err := build.CombinedOutput(); err != nil {
@@ -260,7 +260,7 @@ func TestBinaryBootsWithPostgres(t *testing.T) {
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
 			line := sc.Text()
-			if idx := strings.Index(line, "glab_admin_"); idx >= 0 {
+			if idx := strings.Index(line, "grayling_admin_"); idx >= 0 {
 				fields := strings.Fields(line[idx:])
 				if len(fields) > 0 {
 					tokenCh <- strings.TrimSpace(fields[0])
@@ -316,7 +316,7 @@ func TestBinaryBootsWithPostgres(t *testing.T) {
 		t.Fatalf("hmac ring not bootstrapped in postgres: %v", got)
 	}
 	// No file-store may be created when -pg is active.
-	if _, err := os.Stat(filepath.Join("data", "golab-store.json")); err == nil {
+	if _, err := os.Stat(filepath.Join("data", "grayling-store.json")); err == nil {
 		t.Fatal("file store must not be used when -pg is set")
 	}
 
@@ -337,8 +337,8 @@ func TestBinaryBootsWithSQLite(t *testing.T) {
 		t.Skip("boot test builds and runs the binary")
 	}
 	root := repoRoot(t)
-	bin := filepath.Join(t.TempDir(), "golab-sqlite")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/golab")
+	bin := filepath.Join(t.TempDir(), "grayling-sqlite")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/grayling")
 	build.Dir = root
 	build.Env = append(os.Environ(), "GOWORK=off")
 	if out, err := build.CombinedOutput(); err != nil {

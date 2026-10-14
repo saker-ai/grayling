@@ -47,7 +47,7 @@ func TestChatCompletionsPassThrough(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions?test=1", strings.NewReader(requestBody))
 	req.Header.Set("Authorization", "Bearer upstream-key")
-	req.Header.Set("Cookie", "golab_session=private")
+	req.Header.Set("Cookie", "grayling_session=private")
 	req.Header.Set("OpenAI-Organization", "org-1")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -115,7 +115,8 @@ func TestChatCompletionsRejectsMissingBearer(t *testing.T) {
 		status              int
 	}{
 		{"missing", "", http.StatusUnauthorized},
-		{"golab credential", "Bearer glab_admin_example", http.StatusForbidden},
+		{"grayling credential", "Bearer grayling_admin_example", http.StatusForbidden},
+		{"pre-rename credential", "Bearer glab_admin_example", http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)

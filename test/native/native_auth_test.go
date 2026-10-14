@@ -52,7 +52,7 @@ func TestOfficialNacosClientNativeConfigScope(t *testing.T) {
 		t.Fatal("credential B received tenant A subscription update")
 	case <-time.After(time.Second):
 	}
-	resp, err := http.Get("http://" + srv.HTTPAddr() + "/nacos/v1/cs/configs?tenant=tenant-a&group=GOLAB_FLAGS&dataId=golab.manifest")
+	resp, err := http.Get("http://" + srv.HTTPAddr() + "/nacos/v1/cs/configs?tenant=tenant-a&group=GRAYLING_FLAGS&dataId=grayling.manifest")
 	if err != nil {
 		t.Fatal(err)
 	}

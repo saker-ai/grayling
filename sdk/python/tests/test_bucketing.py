@@ -1,5 +1,5 @@
 """Cross-language bucketing contract: the Python implementation of
-golab-fnv1a-10000-v1 must reproduce EVERY golden vector shared with the Go
+grayling-fnv1a-10000-v1 must reproduce EVERY golden vector shared with the Go
 reference (P4 退出验收: 跨语言用例同值)."""
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from golab_sdk import bucketing  # noqa: E402
+from grayling_sdk import bucketing  # noqa: E402
 
 VECTORS = json.loads(
     (Path(__file__).resolve().parents[3] / "pkg" / "bucketing" / "testdata"
@@ -18,7 +18,7 @@ VECTORS = json.loads(
 
 
 def test_golden_vectors():
-    assert VECTORS["algorithm"] == "golab-fnv1a-10000-v1"
+    assert VECTORS["algorithm"] == "grayling-fnv1a-10000-v1"
     assert VECTORS["modulus"] == 10000
     assert len(VECTORS["vectors"]) >= 20
     for v in VECTORS["vectors"]:

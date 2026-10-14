@@ -383,7 +383,7 @@ func (s *Server) handleSDKAIResolve(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, content)
 }
 
-// sessionFreezeRequest asks GoLab to evaluate flags once and freeze
+// sessionFreezeRequest asks Grayling to evaluate flags once and freeze
 // resource versions for the lifetime of a conversation/task (§7).
 type sessionFreezeRequest struct {
 	SessionID string                  `json:"sessionId"`

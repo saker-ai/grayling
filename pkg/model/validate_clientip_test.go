@@ -9,7 +9,7 @@ import (
 )
 
 // clientIPFlag builds a gray-routing flag that targets the reserved
-// client_ip attribute (injected by golab-proxy from the trusted proxy
+// client_ip attribute (injected by grayling-proxy from the trusted proxy
 // chain) with in_cidr.
 func clientIPFlag(register bool) *model.Flag {
 	f := &model.Flag{

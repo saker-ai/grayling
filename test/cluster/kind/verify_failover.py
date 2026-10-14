@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep one official SDK subscription while its initial GoLab Pod is replaced."""
+"""Keep one official SDK subscription while its initial Grayling Pod is replaced."""
 
 import importlib.util
 import os
@@ -30,7 +30,7 @@ def wait_api():
                 return
         except OSError:
             time.sleep(0.2)
-    raise RuntimeError("GoLab B admin API port-forward did not start")
+    raise RuntimeError("Grayling B admin API port-forward did not start")
 
 
 def owner_token():
@@ -48,34 +48,34 @@ def main():
         raise RuntimeError("set KUBECONFIG and ISSUE13_WORKDIR")
     workdir = Path(os.environ["ISSUE13_WORKDIR"])
     for name in ("a", "b"):
-        if not (workdir / f"golab-{name}.yaml").is_file():
-            raise RuntimeError("deploy.sh must render both GoLab Pod manifests first")
+        if not (workdir / f"grayling-{name}.yaml").is_file():
+            raise RuntimeError("deploy.sh must render both Grayling Pod manifests first")
     prepare(workdir)
     owner = owner_token()
     watcher = None
     port_forward = None
     try:
-        invoke("delete", "pod", "golab-b", "--wait=true")
-        print("PASS GoLab B stopped before official SDK subscription")
+        invoke("delete", "pod", "grayling-b", "--wait=true")
+        print("PASS Grayling B stopped before official SDK subscription")
         watcher = subprocess.Popen(
-            probe("allowed-a", "golab-a,golab-b", "a", "a", "-watch", "-watch-timeout", "120s"),
+            probe("allowed-a", "grayling-a,grayling-b", "a", "a", "-watch", "-watch-timeout", "120s"),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
         subscribed(watcher)
-        invoke("apply", "-f", str(workdir / "golab-b.yaml"))
-        invoke("wait", "--for=condition=Ready", "pod/golab-b", "--timeout=90s")
+        invoke("apply", "-f", str(workdir / "grayling-b.yaml"))
+        invoke("wait", "--for=condition=Ready", "pod/grayling-b", "--timeout=90s")
         for attempt in range(15):
             try:
-                verify_grpc("allowed-b", "golab-b", workdir)
+                verify_grpc("allowed-b", "grayling-b", workdir)
                 break
             except RuntimeError:
                 if attempt == 14:
                     raise
                 time.sleep(1)
-        invoke("delete", "pod", "golab-a", "--wait=true")
-        print("PASS GoLab A stopped after B recovered")
+        invoke("delete", "pod", "grayling-a", "--wait=true")
+        print("PASS Grayling A stopped after B recovered")
         port_forward = subprocess.Popen(
-            kubectl("port-forward", "svc/golab-b", "38688:8688"),
+            kubectl("port-forward", "svc/grayling-b", "38688:8688"),
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
         wait_api()
@@ -92,9 +92,9 @@ def main():
             port_forward.terminate()
             port_forward.wait(timeout=10)
         for name in ("a", "b"):
-            subprocess.run(kubectl("apply", "-f", str(workdir / f"golab-{name}.yaml")),
+            subprocess.run(kubectl("apply", "-f", str(workdir / f"grayling-{name}.yaml")),
                            capture_output=True, text=True, timeout=30)
-        invoke("wait", "--for=condition=Ready", "pod/golab-a", "pod/golab-b", "--timeout=90s")
+        invoke("wait", "--for=condition=Ready", "pod/grayling-a", "pod/grayling-b", "--timeout=90s")
 
 
 if __name__ == "__main__":

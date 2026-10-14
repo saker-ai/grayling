@@ -46,7 +46,7 @@ const publishLockTimeout = time.Minute
 // collisions across unrelated scopes are harmless (they serialize).
 func scopeLockKey(workspaceID, environmentID string) int64 {
 	h := fnv.New64a()
-	h.Write([]byte("golab-publish\x00"))
+	h.Write([]byte("grayling-publish\x00"))
 	h.Write([]byte(workspaceID))
 	h.Write([]byte{0})
 	h.Write([]byte(environmentID))
@@ -55,7 +55,7 @@ func scopeLockKey(workspaceID, environmentID string) int64 {
 
 func planLockKey(experimentID string) int64 {
 	h := fnv.New64a()
-	h.Write([]byte("golab-release-plan\x00"))
+	h.Write([]byte("grayling-release-plan\x00"))
 	h.Write([]byte(experimentID))
 	return int64(h.Sum64())
 }

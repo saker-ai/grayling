@@ -18,10 +18,10 @@ type EvaluationEvent struct {
 func (r Result) TelemetryEvent() EvaluationEvent {
 	attrs := map[string]any{
 		"feature_flag.key":           r.FlagKey,
-		"feature_flag.provider.name": "golab",
+		"feature_flag.provider.name": "grayling",
 		"feature_flag.result.reason": strings.ToLower(string(r.Reason)),
-		"golab.manifest.revision":    r.ManifestRevision,
-		"golab.snapshot.age_ms":      r.SnapshotAgeMillis,
+		"grayling.manifest.revision": r.ManifestRevision,
+		"grayling.snapshot.age_ms":   r.SnapshotAgeMillis,
 	}
 	if r.FlagVersion != "" {
 		attrs["feature_flag.version"] = r.FlagVersion

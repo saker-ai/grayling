@@ -10,7 +10,7 @@ import (
 )
 
 // isNumber reports whether v carries a numeric value across the encodings
-// GoLab sees (JSON float64, YAML int, SDK int/int64/float64/json.Number).
+// Grayling sees (JSON float64, YAML int, SDK int/int64/float64/json.Number).
 func isNumber(v any) bool {
 	switch v.(type) {
 	case int, int8, int16, int32, int64,

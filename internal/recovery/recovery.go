@@ -1,4 +1,4 @@
-// Package recovery records and verifies a quiesced GoLab recovery point.
+// Package recovery records and verifies a quiesced Grayling recovery point.
 package recovery
 
 import (
@@ -245,7 +245,7 @@ func Write(path string, p *Point) error {
 		return err
 	}
 	b = append(b, '\n')
-	f, err := os.CreateTemp(filepath.Dir(path), ".golab-recovery-point-*")
+	f, err := os.CreateTemp(filepath.Dir(path), ".grayling-recovery-point-*")
 	if err != nil {
 		return err
 	}

@@ -1,7 +1,7 @@
 # Build artifacts
 /bin/
-/golab
-/golab-proxy
+/grayling
+/grayling-proxy
 *.exe
 
 # Test & coverage

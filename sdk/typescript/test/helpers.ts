@@ -1,5 +1,5 @@
 /**
- * Integration harness: builds and runs the REAL golab binary (GOWORK=off)
+ * Integration harness: builds and runs the REAL grayling binary (GOWORK=off)
  * and bootstraps a workspace/environment with tokens and published flags —
  * the same startup contract as test/boot (owner token scraped from stderr,
  * free ports, health poll). Nothing is mocked.
@@ -15,7 +15,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
 
-type GolabProc = ChildProcessByStdio<null, Readable, Readable>;
+type GraylingProc = ChildProcessByStdio<null, Readable, Readable>;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(HERE, "..", "..", "..");
@@ -41,15 +41,15 @@ export interface AdminResponse {
   body: any;
 }
 
-export class GolabServer {
+export class GraylingServer {
   readonly baseUrl: string;
   readonly ownerToken: string;
   reviewerToken = "";
-  readonly proc: GolabProc;
+  readonly proc: GraylingProc;
   readonly tmp: string;
 
   constructor(baseUrl: string, ownerToken: string,
-    proc: GolabProc, tmp: string) {
+    proc: GraylingProc, tmp: string) {
     this.baseUrl = baseUrl;
     this.ownerToken = ownerToken;
     this.proc = proc;
@@ -95,10 +95,10 @@ export class GolabServer {
   }
 }
 
-export async function startServer(tag: string): Promise<GolabServer> {
-  const tmp = await mkdtemp(join(tmpdir(), `golab-tssdk-${tag}-`));
-  const binary = join(tmp, "golab");
-  const build = spawnSync("go", ["build", "-o", binary, "./cmd/golab"],
+export async function startServer(tag: string): Promise<GraylingServer> {
+  const tmp = await mkdtemp(join(tmpdir(), `grayling-tssdk-${tag}-`));
+  const binary = join(tmp, "grayling");
+  const build = spawnSync("go", ["build", "-o", binary, "./cmd/grayling"],
     { cwd: REPO_ROOT, env: { ...process.env, GOWORK: "off" }, encoding: "utf8" });
   if (build.status !== 0) throw new Error(`go build failed: ${build.stderr}`);
 
@@ -110,14 +110,14 @@ export async function startServer(tag: string): Promise<GolabServer> {
     "-gonacos-data", join(tmp, "gonacos"),
     "-gonacos-addr", `127.0.0.1:${napPort}`,
     "-gonacos-grpc-addr", `127.0.0.1:${grpcPort}`,
-  ], { stdio: ["ignore", "pipe", "pipe"] }) as GolabProc;
+  ], { stdio: ["ignore", "pipe", "pipe"] }) as GraylingProc;
 
   // Scrape the one-time bootstrap owner token from stderr.
   const tokenPromise = new Promise<string>((resolve, reject) => {
     const rl = createInterface({ input: proc.stderr });
     const timer = setTimeout(() => reject(new Error("owner token not printed")), 30_000);
     rl.on("line", (line) => {
-      const idx = line.indexOf("glab_admin_");
+      const idx = line.indexOf("grayling_admin_");
       if (idx >= 0) {
         clearTimeout(timer);
         resolve(line.slice(idx).split(/\s+/)[0].trim());
@@ -126,7 +126,7 @@ export async function startServer(tag: string): Promise<GolabServer> {
     });
     proc.on("exit", (code) => {
       clearTimeout(timer);
-      reject(new Error(`golab exited early: ${code}`));
+      reject(new Error(`grayling exited early: ${code}`));
     });
   });
   const ownerToken = await tokenPromise;
@@ -144,25 +144,25 @@ export async function startServer(tag: string): Promise<GolabServer> {
     }
     await new Promise((res) => setTimeout(res, 200));
   }
-  return new GolabServer(baseUrl, ownerToken, proc, tmp);
+  return new GraylingServer(baseUrl, ownerToken, proc, tmp);
 }
 
 /** A prepared workspace/environment with tokens and published flags. */
 export class TestEnv {
   readonly ws = "tsws";
   readonly env = "prod";
-  readonly server: GolabServer;
+  readonly server: GraylingServer;
   sdkToken = "";
   collectToken = "";
   publisherToken = "";
   experimentId = "";
   epoch = 0;
 
-  constructor(server: GolabServer) {
+  constructor(server: GraylingServer) {
     this.server = server;
   }
 
-  static async create(server: GolabServer): Promise<TestEnv> {
+  static async create(server: GraylingServer): Promise<TestEnv> {
     const t = new TestEnv(server);
     await server.expect("POST", "/api/v1/admin/workspaces", 201, server.ownerToken,
       { slug: t.ws, name: t.ws });
@@ -205,7 +205,7 @@ export class TestEnv {
     // Experiment flag: 50/50 split, registered + bound + running.
     await server.publishFlag(t.ws, t.env, {
       schemaVersion: 1, key: "ts-exp", type: "string", fields: ["user_id"],
-      bucketing: { algorithm: "golab-fnv1a-10000-v1", unit: "user_id", salt: "ts-exp-salt" },
+      bucketing: { algorithm: "grayling-fnv1a-10000-v1", unit: "user_id", salt: "ts-exp-salt" },
       variations: { control: "c", treatment: "t" },
       defaultRule: { variation: "control" },
       targeting: [{ name: "split", percentage: { control: 50, treatment: 50 } }],

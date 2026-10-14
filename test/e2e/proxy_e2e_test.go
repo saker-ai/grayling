@@ -1,5 +1,5 @@
 // Proxy end-to-end acceptance: a standalone proxy relay in front of the real
-// GoLab API server (real HTTP, real gonacos substrate). Covers the P4 proxy
+// Grayling API server (real HTTP, real gonacos substrate). Covers the P4 proxy
 // deployment shape: remote evaluation with server-side exposure capture,
 // conversion collection, SSE revision fan-out, credential passthrough and
 // audience enforcement — all through the relay (docs/技术方案.md §3, §8).

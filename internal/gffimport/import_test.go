@@ -47,7 +47,7 @@ func TestImportRealisticFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ImportFlag: %v", err)
 	}
-	// The importer must never produce an invalid GoLab flag.
+	// The importer must never produce an invalid Grayling flag.
 	if err := model.ValidateFlag(f, nil); err != nil {
 		t.Fatalf("imported flag fails model.ValidateFlag: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestImportRealisticFlag(t *testing.T) {
 	if f.Version != "17" || f.Disable {
 		t.Errorf("Version/Disable = %q/%v", f.Version, f.Disable)
 	}
-	// Bucketing: unit from gff bucketingKey, GoLab algorithm, default salt.
+	// Bucketing: unit from gff bucketingKey, Grayling algorithm, default salt.
 	if f.Bucketing == nil {
 		t.Fatal("Bucketing is nil despite percentage rules")
 	}

@@ -663,7 +663,7 @@ func TestTargetingMatchInsideExperimentMarksSource(t *testing.T) {
 }
 
 // TestClientIPTargetingAndBucketing proves the reserved client_ip attribute
-// (injected by golab-proxy from the trusted proxy chain — internal/proxy/
+// (injected by grayling-proxy from the trusted proxy chain — internal/proxy/
 // clientip.go) drives in_cidr targeting and, though experiment-discouraged
 // (docs 技术方案 §6), is a fully functional bucketing unit.
 func TestClientIPTargetingAndBucketing(t *testing.T) {

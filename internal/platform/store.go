@@ -393,7 +393,7 @@ func (s *Store) CreateEnvironment(workspaceID, slug, name string) (*Environment,
 		env.Name = slug
 	}
 	// Namespace ID: server-generated components only (§5.1).
-	env.NamespaceID = "golab-" + ws.ID + "-" + env.ID
+	env.NamespaceID = "grayling-" + ws.ID + "-" + env.ID
 	s.data.Environments[env.ID] = env
 	s.data.EnvBySlugKey[slugKey] = env.ID
 	s.changes.markDirty(collEnvironments, env.ID)
@@ -459,10 +459,11 @@ func (s *Store) ProvisionRotationApprover(operatorID, checkpointSHA256 string) (
 	if _, err := rand.Read(secretRaw); err != nil {
 		return nil, err
 	}
-	secret := "glab_admin_" + base64.RawURLEncoding.EncodeToString(secretRaw)
+	kindPrefix := "grayling_admin_"
+	secret := kindPrefix + base64.RawURLEncoding.EncodeToString(secretRaw)
 	hash := hashSecret(secret)
 	tok := &Token{ID: s.nextID("tok"), Name: "hmac-rotation-approver", Kind: TokenAdmin,
-		Role: RoleOwner, SecretHash: hash, Prefix: secret[:14], CreatedAt: s.now(), CreatedBy: operatorID}
+		Role: RoleOwner, SecretHash: hash, Prefix: tokenDisplayPrefix(secret, kindPrefix), CreatedAt: s.now(), CreatedBy: operatorID}
 	s.data.Tokens[tok.ID] = tok
 	s.data.TokensByHash[hash] = tok.ID
 	s.changes.markDirty(collTokens, tok.ID)
@@ -485,8 +486,21 @@ func (s *Store) ProvisionRotationApprover(operatorID, checkpointSHA256 string) (
 	return &CreatedToken{Token: tok, Secret: secret}, nil
 }
 
+// tokenDisplayPrefix derives the display-only prefix of a freshly minted
+// secret: the full kind prefix plus a few random characters, enough to tell
+// tokens apart in listings without revealing the credential. It is computed
+// from kindPrefix rather than a fixed offset so that renaming a kind prefix
+// cannot silently truncate the stored value mid-word.
+func tokenDisplayPrefix(secret, kindPrefix string) string {
+	const tail = 3
+	if len(secret) < len(kindPrefix)+tail {
+		return secret
+	}
+	return secret[:len(kindPrefix)+tail]
+}
+
 // CreateToken mints a new credential. The secret format is
-// glab_<kind>_<43 url-safe chars>; only its SHA-256 is stored.
+// grayling_<kind>_<43 url-safe chars>; only its SHA-256 is stored.
 func (s *Store) CreateToken(kind TokenKind, name string, role Role, workspaceID, environmentID, createdBy string) (*CreatedToken, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -524,13 +538,14 @@ func (s *Store) CreateToken(kind TokenKind, name string, role Role, workspaceID,
 	if _, err := rand.Read(secretRaw); err != nil {
 		return nil, err
 	}
-	secret := fmt.Sprintf("glab_%s_%s", kind, base64.RawURLEncoding.EncodeToString(secretRaw))
+	kindPrefix := fmt.Sprintf("grayling_%s_", kind)
+	secret := kindPrefix + base64.RawURLEncoding.EncodeToString(secretRaw)
 	hash := hashSecret(secret)
 
 	tok := &Token{
 		ID: s.nextID("tok"), Name: name, Kind: kind, Role: role,
 		WorkspaceID: workspaceID, EnvironmentID: environmentID,
-		SecretHash: hash, Prefix: secret[:14],
+		SecretHash: hash, Prefix: tokenDisplayPrefix(secret, kindPrefix),
 		CreatedAt: s.now(), CreatedBy: createdBy,
 	}
 	s.data.Tokens[tok.ID] = tok

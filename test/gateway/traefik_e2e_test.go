@@ -1,16 +1,16 @@
 // Package gatewaye2e is the P5 gateway acceptance test (docs/技术方案.md §12.4,
-// docs/traefik-golab-architecture.md): a REAL official Traefik ≥3.6 binary
+// docs/traefik-grayling-architecture.md): a REAL official Traefik ≥3.6 binary
 // runs the multi-layer routing chain end to end —
 //
 //	client → Traefik parent router
-//	           ① headers middleware: strip external X-Golab-* (anti-forgery)
-//	           ② forwardAuth → golab-proxy /api/v1/gateway/forwardauth
-//	              → GoLab /api/v1/sdk/eval (real flag, real bucketing)
-//	           ③ child routers match the written-back X-Golab-Variant
+//	           ① headers middleware: strip external X-Grayling-* (anti-forgery)
+//	           ② forwardAuth → grayling-proxy /api/v1/gateway/forwardauth
+//	              → Grayling /api/v1/sdk/eval (real flag, real bucketing)
+//	           ③ child routers match the written-back X-Grayling-Variant
 //	         → stable backend / canary backend (real stub servers)
 //
-// Everything is a real process with real requests: the compiled cmd/golab
-// binary (in-process gonacos), the compiled cmd/golab-proxy binary, the
+// Everything is a real process with real requests: the compiled cmd/grayling
+// binary (in-process gonacos), the compiled cmd/grayling-proxy binary, the
 // official Traefik release binary (checksum-verified — see test/traefiktest)
 // and httptest stub backends. The dynamic configuration under test is the
 // exact output of the admin-side generator (internal/gateway), so the
@@ -20,10 +20,10 @@
 //
 //	A. 同一 bucketingKey 稳定路由到同一版本（repeated requests, one variant）
 //	B. 50/50 分布在网关层可观测（两个后端都收到流量，比例在容差内）
-//	C. 比例调整（改 GoLab 分桶参数重发布）后分布变化，Traefik 动态配置
+//	C. 比例调整（改 Grayling 分桶参数重发布）后分布变化，Traefik 动态配置
 //	   SHA-256 与进程零变更
-//	D. 外部伪造 X-Golab-Variant 被剥离，不影响路由
-//	E. 求值服务内部故障（GoLab 上游不可达）fail-open 到默认变体，网关
+//	D. 外部伪造 X-Grayling-Variant 被剥离，不影响路由
+//	E. 求值服务内部故障（Grayling 上游不可达）fail-open 到默认变体，网关
 //	   不产生 5xx
 //	F. KV(Redis) provider 目标：同一生成器输出写入真实 Redis，第二个真实
 //	   Traefik 实例经 redis provider 加载并正确分流（multi-layer routing
@@ -169,7 +169,7 @@ func scrapeOwnerToken(t *testing.T, p *proc, timeout time.Duration) string {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		text := p.stderrText()
-		if idx := strings.Index(text, "glab_admin_"); idx >= 0 {
+		if idx := strings.Index(text, "grayling_admin_"); idx >= 0 {
 			fields := strings.Fields(text[idx:])
 			if len(fields) > 0 {
 				return strings.TrimSpace(fields[0])
@@ -304,7 +304,7 @@ func newStubBackend(t *testing.T, name string) *stubBackend {
 			"flagKeyHeader": r.Header.Get(gw.FlagKeyHeader),
 			"failOpen":      r.Header.Get(gw.FailOpenHeader),
 			"reason":        r.Header.Get(gw.ReasonHeader),
-			"forgedExtra":   r.Header.Get("X-Golab-Forged"),
+			"forgedExtra":   r.Header.Get("X-Grayling-Forged"),
 		})
 	}))
 	t.Cleanup(b.srv.Close)
@@ -445,18 +445,18 @@ func gatewayFlag(stablePct, canaryPct float64) *model.Flag {
 }
 
 type fixture struct {
-	t      *testing.T
-	root   string
-	golab  *proc
-	proxy  *proc
-	admin  *adminClient
-	stable *stubBackend
-	canary *stubBackend
-	spec   *gw.RouteSpec
+	t        *testing.T
+	root     string
+	grayling *proc
+	proxy    *proc
+	admin    *adminClient
+	stable   *stubBackend
+	canary   *stubBackend
+	spec     *gw.RouteSpec
 
-	golabBase string
-	proxyBase string
-	sdkToken  string
+	graylingBase string
+	proxyBase    string
+	sdkToken     string
 }
 
 func setupFixture(t *testing.T) *fixture {
@@ -472,12 +472,12 @@ func setupFixtureOnHost(t *testing.T, listenHost string) *fixture {
 	fx.stable = newStubBackend(t, "service-stable")
 	fx.canary = newStubBackend(t, "service-canary")
 
-	// ---- golab control plane + data plane (real binary, real gonacos) ----
-	golabBin := buildBinary(t, root, "./cmd/golab", "golab")
-	golabPort := freePort(t)
+	// ---- grayling control plane + data plane (real binary, real gonacos) ----
+	graylingBin := buildBinary(t, root, "./cmd/grayling", "grayling")
+	graylingPort := freePort(t)
 	dataDir := t.TempDir()
-	fx.golab = startProc(t, "golab", golabBin,
-		"-addr", fmt.Sprintf("%s:%d", listenHost, golabPort),
+	fx.grayling = startProc(t, "grayling", graylingBin,
+		"-addr", fmt.Sprintf("%s:%d", listenHost, graylingPort),
 		"-data", filepath.Join(dataDir, "store.json"),
 		"-gonacos-data", filepath.Join(dataDir, "gonacos"),
 		"-gonacos-addr", fmt.Sprintf("127.0.0.1:%d", freePort(t)),
@@ -490,10 +490,10 @@ func setupFixtureOnHost(t *testing.T, listenHost string) *fixture {
 		// the default variant, skewing distribution assertions). Raise it.
 		"-requests-per-second", "100000",
 	)
-	fx.golabBase = fmt.Sprintf("http://127.0.0.1:%d", golabPort)
-	waitHealth(t, fx.golabBase, "/api/v1/health", 30*time.Second)
-	ownerToken := scrapeOwnerToken(t, fx.golab, 15*time.Second)
-	fx.admin = &adminClient{t: t, base: fx.golabBase, token: ownerToken}
+	fx.graylingBase = fmt.Sprintf("http://127.0.0.1:%d", graylingPort)
+	waitHealth(t, fx.graylingBase, "/api/v1/health", 30*time.Second)
+	ownerToken := scrapeOwnerToken(t, fx.grayling, 15*time.Second)
+	fx.admin = &adminClient{t: t, base: fx.graylingBase, token: ownerToken}
 
 	// ---- tenant setup ----
 	if code := fx.admin.do("POST", "/api/v1/admin/workspaces",
@@ -517,7 +517,7 @@ func setupFixtureOnHost(t *testing.T, listenHost string) *fixture {
 		map[string]any{"name": "gw-sdk", "kind": "sdk", "environment": "prod"}, &sdkCT); code != http.StatusCreated {
 		t.Fatalf("create sdk token: %d", code)
 	}
-	if !strings.HasPrefix(sdkCT.Secret, "glab_sdk_") {
+	if !strings.HasPrefix(sdkCT.Secret, "grayling_sdk_") {
 		t.Fatalf("unexpected sdk token %q", sdkCT.Secret)
 	}
 	fx.sdkToken = sdkCT.Secret
@@ -526,12 +526,12 @@ func setupFixtureOnHost(t *testing.T, listenHost string) *fixture {
 	rev := fx.admin.publishFlag(gatewayFlag(50, 50))
 	t.Logf("published %s r1 (manifest r%d) — 50/50 split", flagKey, rev)
 
-	// ---- golab-proxy as the forwardAuth eval service (real binary) ----
-	proxyBin := buildBinary(t, root, "./cmd/golab-proxy", "golab-proxy")
+	// ---- grayling-proxy as the forwardAuth eval service (real binary) ----
+	proxyBin := buildBinary(t, root, "./cmd/grayling-proxy", "grayling-proxy")
 	proxyPort := freePort(t)
-	fx.proxy = startProc(t, "golab-proxy", proxyBin,
+	fx.proxy = startProc(t, "grayling-proxy", proxyBin,
 		"-addr", fmt.Sprintf("%s:%d", listenHost, proxyPort),
-		"-upstream", fx.golabBase,
+		"-upstream", fx.graylingBase,
 		"-timeout", "5s",
 		"-gateway-token", fx.sdkToken,
 		"-gateway-secret", gatewaySecret,
@@ -554,7 +554,7 @@ func setupFixtureOnHost(t *testing.T, listenHost string) *fixture {
 			{Variant: "stable", URL: fx.stable.srv.URL, K8sService: "svc-stable", K8sPort: 80},
 			{Variant: "canary", URL: fx.canary.srv.URL, K8sService: "svc-canary", K8sPort: 80},
 		},
-		Namespace: "golab",
+		Namespace: "grayling",
 	}
 	return fx
 }
@@ -602,7 +602,7 @@ accessLog:
 
 func TestTraefikGatewayE2E(t *testing.T) {
 	if testing.Short() {
-		t.Skip("gateway e2e runs real traefik/golab/proxy processes; skipped in -short")
+		t.Skip("gateway e2e runs real traefik/grayling/proxy processes; skipped in -short")
 	}
 	traefikBin := traefiktest.Binary(t)
 	versionOut := traefiktest.VersionString(t, traefikBin)
@@ -761,7 +761,7 @@ func TestTraefikGatewayE2E(t *testing.T) {
 				t.Fatalf("forged request status %d", status)
 			}
 			if reply.Backend != "service-stable" {
-				t.Fatalf("FORGERY WORKED: key %s with forged X-Golab-Variant:canary reached %s",
+				t.Fatalf("FORGERY WORKED: key %s with forged X-Grayling-Variant:canary reached %s",
 					key, reply.Backend)
 			}
 			if reply.VariantHeader != "stable" {
@@ -773,16 +773,16 @@ func TestTraefikGatewayE2E(t *testing.T) {
 		// the forged values (stripped, then only re-set by the eval service).
 		status, reply, _ := gatewayRequest(t, tf.entryURL, "/api/forgery", stableKeys[0],
 			map[string]string{
-				gw.VariantHeader:  "canary",
-				gw.FlagKeyHeader:  "forged-flag",
-				gw.FailOpenHeader: "forged-reason",
-				"X-Golab-Forged":  "attacker",
+				gw.VariantHeader:    "canary",
+				gw.FlagKeyHeader:    "forged-flag",
+				gw.FailOpenHeader:   "forged-reason",
+				"X-Grayling-Forged": "attacker",
 			}, "GET")
 		if status != 200 || reply.Backend != "service-stable" ||
 			reply.FlagKeyHeader != flagKey || reply.FailOpen != "" || reply.ForgedExtra != "" {
 			t.Fatalf("ancillary header forgery leaked: status=%d reply=%+v", status, reply)
 		}
-		t.Logf("D PASS: %d forged X-Golab-Variant:canary requests on stable keys all stayed on service-stable; ancillary X-Golab-* forgeries stripped", len(stableKeys))
+		t.Logf("D PASS: %d forged X-Grayling-Variant:canary requests on stable keys all stayed on service-stable; ancillary X-Grayling-* forgeries stripped", len(stableKeys))
 
 		// Direct unauthenticated probe of the eval endpoint (bypassing
 		// Traefik): without the generated route secret the request must NOT
@@ -867,7 +867,7 @@ func TestTraefikGatewayE2E(t *testing.T) {
 			dynHashAfter, traefikPID)
 
 		// Restore 50/50 for the remaining subtests (also proves the reverse
-		// direction is a pure GoLab-side change).
+		// direction is a pure Grayling-side change).
 		fx.admin.publishFlag(gatewayFlag(50, 50))
 		deadline = time.Now().Add(10 * time.Second)
 		for time.Now().Before(deadline) {
@@ -968,10 +968,10 @@ func TestTraefikGatewayE2E(t *testing.T) {
 	})
 
 	// =====================================================================
-	// E. fail-open: kill the GoLab control/data plane; the eval service
+	// E. fail-open: kill the Grayling control/data plane; the eval service
 	//    (proxy) stays up and must degrade to the default variant — the
 	//    gateway keeps answering 200 from the default backend, never 5xx.
-	//    (Run LAST: it terminates golab.)
+	//    (Run LAST: it terminates grayling.)
 	// =====================================================================
 	t.Run("E_FailOpenOnEvalServiceFailure", func(t *testing.T) {
 		// Pick a key that currently routes to CANARY — after the outage it
@@ -987,9 +987,9 @@ func TestTraefikGatewayE2E(t *testing.T) {
 		if canaryKey == "" {
 			t.Fatal("no canary key found before the outage (cannot prove fallback)")
 		}
-		t.Logf("E: killing golab (upstream of the eval service); canary key = %s", canaryKey)
-		fx.golab.stop()
-		fx.golab.waitExit(t, 20*time.Second)
+		t.Logf("E: killing grayling (upstream of the eval service); canary key = %s", canaryKey)
+		fx.grayling.stop()
+		fx.grayling.waitExit(t, 20*time.Second)
 
 		// Give the proxy a moment to observe the closed upstream.
 		time.Sleep(300 * time.Millisecond)
@@ -1020,7 +1020,7 @@ func TestTraefikGatewayE2E(t *testing.T) {
 		if status != 200 || reply.Backend != "service-stable" {
 			t.Fatalf("no-key request during outage: status=%d reply=%+v", status, reply)
 		}
-		t.Logf("E PASS: GoLab outage → eval service fail-open; 5/5 requests served 200 by the default backend (reason %q), zero gateway 5xx",
+		t.Logf("E PASS: Grayling outage → eval service fail-open; 5/5 requests served 200 by the default backend (reason %q), zero gateway 5xx",
 			reply.FailOpen)
 	})
 

@@ -201,7 +201,7 @@ def probe(c, resolved, login_tokens, tenant_namespaces):
     host, port = split_address(c["tlsHTTP"])
     http_target = net_address(host, port)
     certificates[http_target] = {}
-    config_path = "/nacos/v1/cs/configs?tenant=x&group=GOLAB_FLAGS&dataId=golab.manifest"
+    config_path = "/nacos/v1/cs/configs?tenant=x&group=GRAYLING_FLAGS&dataId=grayling.manifest"
     requests = [
         ("GET", config_path, None, 404, None, {}),
         ("POST", "/nacos/v1/auth/users/login",
@@ -209,7 +209,7 @@ def probe(c, resolved, login_tokens, tenant_namespaces):
     ]
     for namespace in tenant_namespaces:
         requests.append(("GET", "/nacos/v1/cs/configs?" + urllib.parse.urlencode({
-            "tenant": namespace, "group": "GOLAB_FLAGS", "dataId": "golab.manifest"}),
+            "tenant": namespace, "group": "GRAYLING_FLAGS", "dataId": "grayling.manifest"}),
             None, 404, None, {}))
     requests = tuple(requests)
     for address in resolved[http_target]:
@@ -217,7 +217,7 @@ def probe(c, resolved, login_tokens, tenant_namespaces):
             ("POST", "/nacos/v1/auth/users/login",
              urllib.parse.urlencode({"username": "golab-sdk", "password": token}), 200, token, {}),
             ("GET", "/nacos/v1/cs/configs?" + urllib.parse.urlencode({
-                "tenant": namespace, "group": "GOLAB_FLAGS", "dataId": "golab.manifest"}),
+                "tenant": namespace, "group": "GRAYLING_FLAGS", "dataId": "grayling.manifest"}),
              None, 404, None, {"accessToken": token}),
         ))
         for method, path, body, expected, token, extra_headers in requests + authorized:
@@ -569,7 +569,7 @@ def main():
                     raise ValueError(f"two-tenant gRPC isolation failed for {target}: probe exit {completed.returncode}")
             check_probe_dns(config, resolved)
             # An approved SDK source must also be unable to bypass TLS and
-            # reach the plaintext GoLab backend on the sidecar host.
+            # reach the plaintext Grayling backend on the sidecar host.
             probe_closed_targets(backend_targets(config), resolved,
                                  label="allowed source reached plaintext backend")
             if ca_sha256(config) != ca_before:

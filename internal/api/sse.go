@@ -10,7 +10,7 @@ import (
 )
 
 // SSEHub fans out manifest-revision invalidation notices to subscribed SDKs
-// (§3: GoLab 对外 SSE 发送 revision/失效通知，客户端重拉完整快照).
+// (§3: Grayling 对外 SSE 发送 revision/失效通知，客户端重拉完整快照).
 //
 // Semantics:
 //   - Events carry id = manifest revision so reconnects can send

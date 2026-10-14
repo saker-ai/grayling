@@ -1,6 +1,6 @@
 // i18n DOM/contract test for the admin console. Loads the REAL web/i18n.js +
 // web/app.js in a Node vm (no browser needed) and asserts:
-//   1. language resolution order: localStorage golab_lang > navigator.language
+//   1. language resolution order: localStorage grayling_lang > navigator.language
 //      (zh* → zh) > en;
 //   2. every key view (flags list/detail, segments list/detail, experiments
 //      list/create/detail + report, rollout block, tokens, audit, ai, debug)
@@ -77,7 +77,7 @@ function viewRoot() {
 
 function makeSandbox({ storedLang, navLang } = {}) {
   const store = new Map();
-  if (storedLang) store.set('golab_lang', storedLang);
+  if (storedLang) store.set('grayling_lang', storedLang);
   const warns = [];
   const chrome = new Map(); // document.querySelector stubs keyed by selector
   const fetchCalls = [];
@@ -193,8 +193,8 @@ const endedReport = {
   decision: { verdict: 'continue', reasons: ['primary metric not significant'], guardrailBreaches: [] },
 };
 const tokens = [
-  { id: 'tk1', name: 'ci-token', kind: 'sdk', role: 'viewer', prefix: 'glab_sdk_ab', environmentId: 'prod', createdAt: TS, revoked: false },
-  { id: 'tk2', name: 'old-admin', kind: 'admin', role: 'owner', prefix: 'glab_adm_cd', environmentId: '', createdAt: TS, revoked: true },
+  { id: 'tk1', name: 'ci-token', kind: 'sdk', role: 'viewer', prefix: 'grayling_sdk_ab', environmentId: 'prod', createdAt: TS, revoked: false },
+  { id: 'tk2', name: 'old-admin', kind: 'admin', role: 'owner', prefix: 'grayling_adm_cd', environmentId: '', createdAt: TS, revoked: true },
 ];
 const audit = [{ time: TS, actor: 'alice', action: 'flag.publish', object: 'my-flag', environmentId: 'prod', detail: { revision: 2 } }];
 const aiResources = {
@@ -261,12 +261,12 @@ function mockResponse(url) {
 }
 
 // ===========================================================================
-// 1. Language resolution order: golab_lang > navigator.language (zh*→zh) > en
+// 1. Language resolution order: grayling_lang > navigator.language (zh*→zh) > en
 // ===========================================================================
 assert.strictEqual(makeSandbox({ storedLang: 'en', navLang: 'zh-CN' }).x.I18N.lang, 'en',
-  'localStorage golab_lang must win over navigator.language');
+  'localStorage grayling_lang must win over navigator.language');
 assert.strictEqual(makeSandbox({ storedLang: 'zh', navLang: 'en-US' }).x.I18N.lang, 'zh',
-  'localStorage golab_lang=zh must win');
+  'localStorage grayling_lang=zh must win');
 assert.strictEqual(makeSandbox({ navLang: 'zh-CN' }).x.I18N.lang, 'zh', 'zh-CN → zh');
 assert.strictEqual(makeSandbox({ navLang: 'zh-TW' }).x.I18N.lang, 'zh', 'zh-TW → zh');
 assert.strictEqual(makeSandbox({ navLang: 'en-US' }).x.I18N.lang, 'en', 'en-US → en');
@@ -492,7 +492,7 @@ const lintEn = x.lintFlag({ schemaVersion: 1, key: 'x', type: 'bad', variations:
 // the click-driven re-render path is exercised in section 3)
 x.setLang('zh');
 assert.strictEqual(x.I18N.lang, 'zh');
-assert.strictEqual(main.store.get('golab_lang'), 'zh', 'setLang must persist to localStorage');
+assert.strictEqual(main.store.get('grayling_lang'), 'zh', 'setLang must persist to localStorage');
 
 const repZh = reportHtml();
 const roRunZh = x.renderRollout(expDetail);
@@ -739,7 +739,7 @@ assert(lintZh.includes('type 必须是 bool|string|number|json'), '[zh] lint mes
   const mainEl = cs.chrome.get('#main'); // created by route() during the switch
   assert(mainEl, 'route() must render into #main on language switch');
   assert.strictEqual(cs.x.I18N.lang, 'zh', 'click on 中 must switch the language');
-  assert.strictEqual(cs.store.get('golab_lang'), 'zh', 'switch must persist to localStorage');
+  assert.strictEqual(cs.store.get('grayling_lang'), 'zh', 'switch must persist to localStorage');
   assert(zhBtn._toggles.some(([c, on]) => c === 'active' && on === true), '中 must become active');
   assert(mainEl.innerHTML.includes('请在顶栏选择工作空间与环境'),
     'switch must re-render the current view in place (zh banner), got: ' + mainEl.innerHTML);
@@ -748,7 +748,7 @@ assert(lintZh.includes('type 必须是 bool|string|number|json'), '[zh] lint mes
   enBtn.onclick();
   await tick();
   assert.strictEqual(cs.x.I18N.lang, 'en', 'click on EN must switch back');
-  assert.strictEqual(cs.store.get('golab_lang'), 'en', 'switch back must persist');
+  assert.strictEqual(cs.store.get('grayling_lang'), 'en', 'switch back must persist');
   assert(mainEl.innerHTML.includes('Select a workspace and environment'),
     'switch back must re-render the current view in en');
 }

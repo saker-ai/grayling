@@ -4,9 +4,9 @@
 //	PostgreSQL (shared platform store)  ──┐
 //	Redis (gonacos cluster sync)        ──┤
 //	                                       ▼
-//	golab replica A (in-process gonacos node A)   golab replica B (gonacos node B)
+//	grayling replica A (in-process gonacos node A)   grayling replica B (gonacos node B)
 //
-// Two REAL golab binaries run as two replicas sharing one PostgreSQL and one
+// Two REAL grayling binaries run as two replicas sharing one PostgreSQL and one
 // external Redis; their in-process gonacos nodes form a two-node cluster
 // synced through Redis pub/sub. Everything is real: compiled binaries, real
 // PostgreSQL (test/pgtest), real Redis (test/redistest), real HTTP.
@@ -78,11 +78,11 @@ import (
 
 func TestRolloutLeaderProcessFailover(t *testing.T) {
 	if testing.Short() {
-		t.Skip("requires real PostgreSQL, Redis and two golab processes")
+		t.Skip("requires real PostgreSQL, Redis and two grayling processes")
 	}
 	dsn := pgtest.DSN(t)
 	rdb := redistest.Start(t)
-	bin := buildGolab(t, repoRoot(t))
+	bin := buildGrayling(t, repoRoot(t))
 	store, err := platform.NewPGStore(t.Context(), dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +120,7 @@ func TestRolloutLeaderProcessFailover(t *testing.T) {
 	if !strings.Contains(second.Holder, fmt.Sprintf(":%d:", B.proc.cmd.Process.Pid)) || second.Generation <= first.Generation {
 		t.Fatalf("B did not take over: %+v", second)
 	}
-	A.proc = startProc(t, "golab-rollout-A(restarted)", A.bin, A.args...)
+	A.proc = startProc(t, "grayling-rollout-A(restarted)", A.bin, A.args...)
 	waitHealth(t, A.base, 60*time.Second)
 	status, err = store.RolloutLeadership(t.Context())
 	if err != nil || status.Holder != second.Holder {
@@ -161,14 +161,14 @@ func repoRoot(t *testing.T) string {
 	return root
 }
 
-func buildGolab(t *testing.T, root string) string {
+func buildGrayling(t *testing.T, root string) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "golab")
-	cmd := exec.Command("go", "build", "-o", bin, "./cmd/golab")
+	bin := filepath.Join(t.TempDir(), "grayling")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/grayling")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GOWORK=off")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build golab: %v\n%s", err, out)
+		t.Fatalf("build grayling: %v\n%s", err, out)
 	}
 	return bin
 }
@@ -233,7 +233,7 @@ func scrapeOwnerToken(t *testing.T, p *proc, timeout time.Duration) string {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		text := p.stderrText()
-		if idx := strings.Index(text, "glab_admin_"); idx >= 0 {
+		if idx := strings.Index(text, "grayling_admin_"); idx >= 0 {
 			fields := strings.Fields(text[idx:])
 			if len(fields) > 0 {
 				return strings.TrimSpace(fields[0])
@@ -297,7 +297,7 @@ func startReplica(t *testing.T, name, bin, dsn, redisAddr, authSecret string,
 	args = append(args, extraArgs...)
 	r := &replica{name: name, bin: bin, args: args,
 		base: fmt.Sprintf("http://127.0.0.1:%d", port), t: t}
-	r.proc = startProc(t, "golab-"+name, bin, args...)
+	r.proc = startProc(t, "grayling-"+name, bin, args...)
 	// On test failure, surface this replica's stderr (crash diagnosis).
 	t.Cleanup(func() {
 		if t.Failed() {
@@ -325,7 +325,7 @@ func (r *replica) restart(t *testing.T) {
 	t.Helper()
 	old := r.proc
 	old.terminate(t)
-	r.proc = startProc(r.t, "golab-"+r.name+"(restarted)", r.bin, r.args...)
+	r.proc = startProc(r.t, "grayling-"+r.name+"(restarted)", r.bin, r.args...)
 	waitHealth(t, r.base, 60*time.Second)
 }
 
@@ -777,12 +777,12 @@ func TestClusterMultiReplica(t *testing.T) {
 	if testing.Short() {
 		t.Skip("cluster e2e runs two real replicas + PostgreSQL + Redis; skipped in -short")
 	}
-	dsn := pgtest.DSN(t)      // real PostgreSQL (docker or GOLAB_TEST_PG_DSN)
-	rdb := redistest.Start(t) // real Redis (docker or GOLAB_TEST_REDIS_ADDR)
-	bin := buildGolab(t, repoRoot(t))
+	dsn := pgtest.DSN(t)      // real PostgreSQL (docker or GRAYLING_TEST_PG_DSN)
+	rdb := redistest.Start(t) // real Redis (docker or GRAYLING_TEST_REDIS_ADDR)
+	bin := buildGrayling(t, repoRoot(t))
 	const authSecret = "cluster-e2e-shared-secret-0123456789abcdef"
 
-	t.Logf("=== cluster: PostgreSQL + Redis(%s) + two golab replicas ===", rdb.Addr)
+	t.Logf("=== cluster: PostgreSQL + Redis(%s) + two grayling replicas ===", rdb.Addr)
 
 	// ---- Replica A (bootstraps the shared store) ----
 	A := startReplica(t, "A", bin, dsn, rdb.Addr, authSecret, time.Second)

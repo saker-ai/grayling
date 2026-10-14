@@ -1,4 +1,4 @@
-// Package api exposes GoLab's HTTP surface (docs/技术方案.md §11):
+// Package api exposes Grayling's HTTP surface (docs/技术方案.md §11):
 //
 //	/api/v1/admin/**   control plane — admin tokens + object-level RBAC
 //	/api/v1/sdk/config scoped snapshot per SDK token (ETag/304)
@@ -53,7 +53,7 @@ type Server struct {
 	consoleSessionKey    [sha256.Size]byte
 
 	// Rollout is the staged-release auto-advance engine (§5.3 P4). Created
-	// with the server; cmd/golab starts its ticker loop, tests may Tick it
+	// with the server; cmd/grayling starts its ticker loop, tests may Tick it
 	// deterministically.
 	Rollout *rollout.Engine
 
@@ -471,7 +471,7 @@ func decodeJSON(r *http.Request, dst any, maxBytes int64) error {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok", "service": "golab", "schemaVersion": model.SchemaVersion,
+		"status": "ok", "service": "grayling", "schemaVersion": model.SchemaVersion,
 	})
 }
 

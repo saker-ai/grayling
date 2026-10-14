@@ -1,4 +1,4 @@
-"""GolabClient — remote evaluation with a revision-guarded cache, polling
+"""GraylingClient — remote evaluation with a revision-guarded cache, polling
 freshness and batched collect-contract event reporting.
 
 Design (docs/技术方案.md §8, §10.1):
@@ -39,7 +39,7 @@ from urllib import request as urlrequest
 from .types import EvaluationContext, EvaluationDetails, Result
 
 
-class GolabError(Exception):
+class GraylingError(Exception):
     """Raised by explicit operations (sync, flush) on transport/HTTP failure.
 
     Variation methods never raise; they return the caller's default with a
@@ -47,7 +47,7 @@ class GolabError(Exception):
     """
 
 
-class _CollectRejected(GolabError):
+class _CollectRejected(GraylingError):
     def __init__(self, count: int, accepted: int, results: list[dict[str, Any]], message: str) -> None:
         super().__init__(message)
         self.count = count
@@ -115,12 +115,12 @@ def _canonical_context(ctx: EvaluationContext) -> str:
                       ensure_ascii=False, default=str)
 
 
-class GolabClient:
-    """Thread-safe GoLab remote-evaluation client."""
+class GraylingClient:
+    """Thread-safe Grayling remote-evaluation client."""
 
     def __init__(self, options: Options):
         if not options.base_url or not options.sdk_token:
-            raise ValueError("golab: base_url and sdk_token are required")
+            raise ValueError("grayling: base_url and sdk_token are required")
         self._opts = options
         self._base = options.base_url.rstrip("/")
         self._lock = threading.Lock()
@@ -193,17 +193,17 @@ class GolabClient:
         """Report a conversion attributed to the experiment of a prior
         evaluation. The unit is the randomization unit the SERVER echoed for
         the exposure, keeping attribution on the identical unit hash
-        (§10.1). Raises GolabError when the result carries no attribution or
+        (§10.1). Raises GraylingError when the result carries no attribution or
         no collect token is configured."""
         res = details.result
         if res.experiment is None:
-            raise GolabError(
+            raise GraylingError(
                 f"result carries no experiment attribution (reason {res.reason})")
         if not self._opts.collect_token:
-            raise GolabError("collect token not configured")
+            raise GraylingError("collect token not configured")
         unit = details.randomization_unit
         if not unit:
-            raise GolabError(
+            raise GraylingError(
                 "cannot derive randomization unit (server recorded no exposure)")
         flag_revision = 0
         if details.result.flag_version.isdigit():
@@ -231,15 +231,15 @@ class GolabClient:
         result = details.result
         exp = result.experiment
         if exp is None or exp.exposure_mode != "onRender" or not result.decision_id:
-            raise GolabError("result has no onRender assignment")
+            raise GraylingError("result has no onRender assignment")
         if not self._opts.collect_token:
-            raise GolabError("collect token not configured")
+            raise GraylingError("collect token not configured")
         try:
             expiry = datetime.fromisoformat(details.expires_at.replace("Z", "+00:00"))
         except ValueError as exc:
-            raise GolabError("exposure token is missing or invalid; evaluate again") from exc
+            raise GraylingError("exposure token is missing or invalid; evaluate again") from exc
         if not details.exposure_token or not details.randomization_unit or expiry <= datetime.now(timezone.utc):
-            raise GolabError("exposure token is missing or expired; evaluate again")
+            raise GraylingError("exposure token is missing or expired; evaluate again")
         revision = int(result.flag_version) if result.flag_version.isdigit() else 0
         if not self._enqueue({
             "eventId": f"exp-{result.decision_id}",
@@ -250,7 +250,7 @@ class GolabClient:
             "variant": exp.variant, "unit": details.randomization_unit,
             "source": exp.source, "clientTime": _utc_now_rfc3339(),
         }):
-            raise GolabError("exposure queue is full")
+            raise GraylingError("exposure queue is full")
 
     def track_exposure(self, experiment_id: str, epoch: int, flag_key: str,
                        variant: str, unit: str, *, source: str = "split",
@@ -263,9 +263,9 @@ class GolabClient:
         backfilled; duplicate units never inflate unique-unit analytics.
         """
         if not self._opts.collect_token:
-            raise GolabError("collect token not configured")
+            raise GraylingError("collect token not configured")
         if not unit:
-            raise GolabError("exposure without a randomization unit is rejected "
+            raise GraylingError("exposure without a randomization unit is rejected "
                              "(no attribution without a unit)")
         self._enqueue({
             "eventId": f"exp-{uuid.uuid4().hex}",
@@ -283,7 +283,7 @@ class GolabClient:
     def sync_revision(self) -> int:
         """Probe /api/v1/sdk/revision and invalidate the cache on change.
         Runs automatically on the poll interval; exposed for tests and
-        explicit freshness checks. Raises GolabError on failure."""
+        explicit freshness checks. Raises GraylingError on failure."""
         try:
             body = self._http_json("GET", "/api/v1/sdk/revision",
                                    token=self._opts.sdk_token)
@@ -309,7 +309,7 @@ class GolabClient:
 
     def flush(self, timeout: float = 10.0) -> int:
         """Synchronously drain queued events to /api/v1/collect.
-        Returns the number of events posted. Raises GolabError on failure."""
+        Returns the number of events posted. Raises GraylingError on failure."""
         batch = self._drain(self._opts.exposure_batch_size * 16)
         if not batch:
             return 0
@@ -330,7 +330,7 @@ class GolabClient:
                     # Re-queue what we could not deliver, then fail loudly.
                     for ev in batch:
                         self._enqueue(ev)
-                    raise GolabError("flush failed within timeout")
+                    raise GraylingError("flush failed within timeout")
                 time.sleep(0.2)
 
     def status(self) -> Dict[str, Any]:
@@ -368,10 +368,10 @@ class GolabClient:
                 th.join(timeout=5)
         try:
             self.flush(timeout=5)
-        except GolabError:
+        except GraylingError:
             pass
 
-    def __enter__(self) -> "GolabClient":
+    def __enter__(self) -> "GraylingClient":
         return self
 
     def __exit__(self, *exc: Any) -> None:
@@ -384,13 +384,13 @@ class GolabClient:
     def _start_poller(self) -> None:
         if self._poller is None:
             self._poller = threading.Thread(
-                target=self._poll_loop, name="golab-poll", daemon=True)
+                target=self._poll_loop, name="grayling-poll", daemon=True)
             self._poller.start()
 
     def _ensure_flusher(self) -> None:
         if self._flusher is None and self._opts.collect_token:
             self._flusher = threading.Thread(
-                target=self._flush_loop, name="golab-flush", daemon=True)
+                target=self._flush_loop, name="grayling-flush", daemon=True)
             self._flusher.start()
 
     def _evaluate(self, flag_key: str, targeting_key: Optional[str],
@@ -568,12 +568,12 @@ class GolabClient:
         rejected = int(result.get("rejected", 0))
         accepted = int(result.get("accepted", 0)) + int(result.get("duplicates", 0))
         if accepted + rejected != len(batch):
-            raise GolabError("collect response did not acknowledge every event")
+            raise GraylingError("collect response did not acknowledge every event")
         outcomes = result.get("results") or []
         if outcomes and (len(outcomes) != len(batch) or any(
                 item.get("eventId") != event.get("eventId")
                 for item, event in zip(outcomes, batch))):
-            raise GolabError("collect response has misaligned event results")
+            raise GraylingError("collect response has misaligned event results")
         if rejected:
             raise _CollectRejected(rejected, accepted, outcomes, f"collect rejected {rejected} events: "
                                    f"{result.get('rejectMessages', [])}")
@@ -600,13 +600,13 @@ class GolabClient:
                 detail = exc.read().decode("utf-8", "replace")[:512]
             except Exception:
                 pass
-            raise GolabError(f"{method} {path} → HTTP {exc.code}: {detail}") from exc
+            raise GraylingError(f"{method} {path} → HTTP {exc.code}: {detail}") from exc
         if not raw:
             return {}
         try:
             out = json.loads(raw)
         except ValueError as exc:
-            raise GolabError(f"{method} {path}: invalid JSON response") from exc
+            raise GraylingError(f"{method} {path}: invalid JSON response") from exc
         if not isinstance(out, dict):
-            raise GolabError(f"{method} {path}: unexpected response shape")
+            raise GraylingError(f"{method} {path}: unexpected response shape")
         return out

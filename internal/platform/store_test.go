@@ -309,7 +309,7 @@ func TestPruneKeepsCurrentAndWindow(t *testing.T) {
 		if err := s.AppendFlagRevision(&FlagRevision{
 			WorkspaceID: ws.ID, EnvironmentID: env.ID, Key: "f",
 			Revision: int64(i), Content: flag, Hash: string(rune('a' + i)),
-			DataID: "golab.flag.f.r" + string(rune('0'+i)),
+			DataID: "grayling.flag.f.r" + string(rune('0'+i)),
 			// Backdate all but the last so the time window doesn't protect them.
 			PublishedAt: time.Now().Add(-time.Duration(7-i) * 48 * time.Hour),
 		}); err != nil {

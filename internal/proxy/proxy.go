@@ -1,6 +1,6 @@
-// Package proxy is the standalone GoLab data-plane proxy: a stateless,
+// Package proxy is the standalone Grayling data-plane proxy: a stateless,
 // independently deployable relay for the remote-evaluation surface
-// (docs/技术方案.md §3: GoLab proxy 可选，用于浏览器受限快照、远程求值、SSE
+// (docs/技术方案.md §3: Grayling proxy 可选，用于浏览器受限快照、远程求值、SSE
 // 转发；不要求全部应用请求经过 proxy).
 //
 // Relayed endpoints (upstream authorization is passed through unchanged —
@@ -25,7 +25,7 @@
 //
 // The proxy keeps NO state; the only credential it holds is the optional
 // gateway evaluation token (end-user traffic through Traefik cannot carry
-// GoLab credentials). Timeouts, hop-by-hop header hygiene and connection
+// Grayling credentials). Timeouts, hop-by-hop header hygiene and connection
 // pooling are its only other concerns, plus — for the two server-side
 // evaluation paths — deriving the client IP from the trusted proxy chain
 // (Config.TrustedProxyCIDRs) and injecting it into the evaluation context
@@ -50,7 +50,7 @@ import (
 
 // Config parameterizes a Proxy.
 type Config struct {
-	// Upstream is the GoLab server base URL, e.g. http://127.0.0.1:8688.
+	// Upstream is the Grayling server base URL, e.g. http://127.0.0.1:8688.
 	Upstream string
 	// RequestTimeout bounds one unary relay (eval/collect/config);
 	// default 10s. The SSE relay is NOT bounded by it (streams are
@@ -102,7 +102,7 @@ func (c *Config) withDefaults() Config {
 	return out
 }
 
-// Proxy relays the GoLab remote-evaluation surface to an upstream server.
+// Proxy relays the Grayling remote-evaluation surface to an upstream server.
 // Safe for concurrent use.
 type Proxy struct {
 	cfg      Config
@@ -188,7 +188,7 @@ func (p *Proxy) Handler() http.Handler {
 // handleLivez answers liveness without touching the upstream: a restarting or
 // degraded upstream must not make orchestrators kill the proxy fleet.
 func (p *Proxy) handleLivez(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, `{"status":"ok","service":"golab-proxy","check":"liveness"}`)
+	writeJSON(w, http.StatusOK, `{"status":"ok","service":"grayling-proxy","check":"liveness"}`)
 }
 
 // handleReadyz probes the upstream health endpoint; 503 while unreachable.
@@ -214,7 +214,7 @@ func (p *Proxy) handleReadyz(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, fmt.Sprintf(
-		`{"status":"ok","service":"golab-proxy","check":"readiness","upstream":%s}`,
+		`{"status":"ok","service":"grayling-proxy","check":"readiness","upstream":%s}`,
 		string(body)))
 }
 

@@ -1,7 +1,7 @@
 'use strict';
 
 // ---------------------------------------------------------------------------
-// GoLab admin console — experiment workbench (detail view). Embedded static
+// Grayling admin console — experiment workbench (detail view). Embedded static
 // file, no build step; originally extracted from app.js and reorganized into
 // the four-zone layout (§4.4). Loaded BEFORE app.js (plain <script> order)
 // and concatenated with the other console scripts by the Node-VM contract

@@ -20,7 +20,7 @@ func validSpec() *RouteSpec {
 			{Variant: "stable", URL: "http://127.0.0.1:9001", K8sService: "checkout-stable", K8sPort: 8080},
 			{Variant: "canary", URL: "http://127.0.0.1:9002", K8sService: "checkout-canary", K8sPort: 8080},
 		},
-		Namespace: "golab",
+		Namespace: "grayling",
 	}
 }
 
@@ -51,7 +51,7 @@ func TestBuildValidatesAndNamesObjects(t *testing.T) {
 		t.Fatalf("default fallback child: %+v", def)
 	}
 	canary := cfg.Routers[2]
-	wantRule := "Header(`X-Golab-Variant`, `canary`)"
+	wantRule := "Header(`X-Grayling-Variant`, `canary`)"
 	if canary.Name != "checkout-api-v-canary" || canary.Rule != wantRule ||
 		canary.Service != "checkout-api-svc-canary" || canary.Priority <= def.Priority {
 		t.Fatalf("canary child: %+v (want rule %q, higher priority than default)", canary, wantRule)
@@ -93,13 +93,13 @@ func TestFileYAMLStructure(t *testing.T) {
 	if len(refs) != 1 || refs[0] != "checkout-api-parent" {
 		t.Fatalf("canary parentRefs: %v", canary["parentRefs"])
 	}
-	if canary["rule"] != "Header(`X-Golab-Variant`, `canary`)" {
+	if canary["rule"] != "Header(`X-Grayling-Variant`, `canary`)" {
 		t.Fatalf("canary rule: %v", canary["rule"])
 	}
 	strip := parsed.HTTP.Middlewares["checkout-api-strip"]
 	headers, _ := strip["headers"].(map[string]any)
 	crh, _ := headers["customRequestHeaders"].(map[string]any)
-	for _, h := range []string{"X-Golab-Variant", "X-Golab-Flag-Key", "X-Golab-Fail-Open", "X-Golab-Reason"} {
+	for _, h := range []string{"X-Grayling-Variant", "X-Grayling-Flag-Key", "X-Grayling-Fail-Open", "X-Grayling-Reason"} {
 		v, ok := crh[h]
 		if !ok || v != "" {
 			t.Fatalf("strip middleware must blank %s (empty value = remove): %v", h, crh)
@@ -117,11 +117,11 @@ func TestFileYAMLStructure(t *testing.T) {
 		}
 	}
 	arh, _ := fa["authResponseHeaders"].([]any)
-	if len(arh) != 4 || arh[0] != "X-Golab-Variant" {
+	if len(arh) != 4 || arh[0] != "X-Grayling-Variant" {
 		t.Fatalf("authResponseHeaders: %v", arh)
 	}
-	if fa["authResponseHeadersRegex"] != "^X-Golab-" {
-		t.Fatalf("authResponseHeadersRegex = %v, want ^X-Golab-", fa["authResponseHeadersRegex"])
+	if fa["authResponseHeadersRegex"] != "^X-Grayling-" {
+		t.Fatalf("authResponseHeadersRegex = %v, want ^X-Grayling-", fa["authResponseHeadersRegex"])
 	}
 	svc := parsed.HTTP.Services["checkout-api-svc-canary"]
 	lb, _ := svc["loadBalancer"].(map[string]any)
@@ -140,7 +140,7 @@ func TestFileJSONParses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FileJSON: %v", err)
 	}
-	if !strings.Contains(string(out), `"parentRefs"`) || !strings.Contains(string(out), `"X-Golab-Variant": ""`) {
+	if !strings.Contains(string(out), `"parentRefs"`) || !strings.Contains(string(out), `"X-Grayling-Variant": ""`) {
 		t.Fatalf("unexpected JSON:\n%s", out)
 	}
 }
@@ -161,10 +161,10 @@ func TestKVLayout(t *testing.T) {
 		"traefik/http/routers/checkout-api-default/parentrefs/0":                          "checkout-api-parent",
 		"traefik/http/routers/checkout-api-default/service":                               "checkout-api-svc-stable",
 		"traefik/http/routers/checkout-api-default/priority":                              "1",
-		"traefik/http/routers/checkout-api-v-canary/rule":                                 "Header(`X-Golab-Variant`, `canary`)",
+		"traefik/http/routers/checkout-api-v-canary/rule":                                 "Header(`X-Grayling-Variant`, `canary`)",
 		"traefik/http/middlewares/checkout-api-eval/forwardauth/address":                  cfg.Middlewares[1].ForwardAuth.Address,
-		"traefik/http/middlewares/checkout-api-eval/forwardauth/authresponseheaders/0":    "X-Golab-Variant",
-		"traefik/http/middlewares/checkout-api-eval/forwardauth/authresponseheadersregex": "^X-Golab-",
+		"traefik/http/middlewares/checkout-api-eval/forwardauth/authresponseheaders/0":    "X-Grayling-Variant",
+		"traefik/http/middlewares/checkout-api-eval/forwardauth/authresponseheadersregex": "^X-Grayling-",
 		"traefik/http/services/checkout-api-svc-canary/loadbalancer/servers/0/url":        "http://127.0.0.1:9002",
 	}
 	for k, v := range want {
@@ -178,14 +178,14 @@ func TestKVLayout(t *testing.T) {
 	// KV cannot represent empty header values: the blank-strip middleware is
 	// omitted and the parent references only the forwardAuth middleware
 	// (whose authResponseHeadersRegex does the stripping).
-	if _, ok := kv["traefik/http/middlewares/checkout-api-strip/headers/customrequestheaders/X-Golab-Variant"]; ok {
+	if _, ok := kv["traefik/http/middlewares/checkout-api-strip/headers/customrequestheaders/X-Grayling-Variant"]; ok {
 		t.Error("KV must omit the empty-valued strip middleware (Traefik KV drops empty values)")
 	}
 	if _, ok := kv["traefik/http/routers/checkout-api-parent/middlewares/1"]; ok {
 		t.Error("parent must reference exactly one middleware in KV (strip omitted)")
 	}
 	// Deterministic sorted rendering.
-	sorted, err := cfg.KVSorted("golab")
+	sorted, err := cfg.KVSorted("grayling")
 	if err != nil {
 		t.Fatalf("KVSorted: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestKVLayout(t *testing.T) {
 			t.Fatalf("KVSorted not sorted at %d: %s >= %s", i, sorted[i-1].Key, sorted[i].Key)
 		}
 	}
-	if !strings.HasPrefix(sorted[0].Key, "golab/") {
+	if !strings.HasPrefix(sorted[0].Key, "grayling/") {
 		t.Fatalf("custom root not applied: %s", sorted[0].Key)
 	}
 }
@@ -222,7 +222,7 @@ func TestIngressRoutes(t *testing.T) {
 		case kind == "IngressRoute" && meta["name"] == "checkout-api-v-canary":
 			childRoute = spec
 		}
-		if meta["namespace"] != "golab" {
+		if meta["namespace"] != "grayling" {
 			t.Fatalf("object %v missing namespace: %v", meta["name"], meta)
 		}
 	}
@@ -261,7 +261,7 @@ func TestIngressRoutes(t *testing.T) {
 	if len(svcs) != 1 || svcs[0].(map[string]any)["name"] != "checkout-canary" || svcs[0].(map[string]any)["port"] != 8080 {
 		t.Fatalf("child services: %v", svcs)
 	}
-	if cr["match"] != "Header(`X-Golab-Variant`, `canary`)" {
+	if cr["match"] != "Header(`X-Grayling-Variant`, `canary`)" {
 		t.Fatalf("child match: %v", cr["match"])
 	}
 

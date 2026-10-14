@@ -1,4 +1,4 @@
-// Package admin is the GoLab control plane: RBAC, the draft→review→publish
+// Package admin is the Grayling control plane: RBAC, the draft→review→publish
 // pipeline over the gonacos config substrate, rollback, deletion with
 // tombstones, experiment lifecycle operations and audit (docs/技术方案.md
 // §5.3, §9, §11).

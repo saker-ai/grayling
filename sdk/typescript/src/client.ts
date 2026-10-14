@@ -1,12 +1,12 @@
 /**
- * GolabClient — remote evaluation with a revision-guarded cache, polling
+ * GraylingClient — remote evaluation with a revision-guarded cache, polling
  * freshness and batched collect-contract event reporting.
  *
  * Design (docs/技术方案.md §8, §10.1) — identical contract to the Python and
  * Go SDKs:
  *
  * - Every evaluation is a `POST /api/v1/sdk/eval` (directly or through a
- *   cmd/golab-proxy relay). The full configuration snapshot — internal
+ *   cmd/grayling-proxy relay). The full configuration snapshot — internal
  *   rules, segments and AI content — is NEVER downloaded, so this client is
  *   safe for browser-adjacent/thin runtimes (受限投影).
  * - Freshness uses `GET /api/v1/sdk/revision` (revision number only): a
@@ -28,9 +28,9 @@ import {
 
 export * from "./types.ts";
 
-export class GolabError extends Error {}
+export class GraylingError extends Error {}
 
-class CollectRejected extends GolabError {
+class CollectRejected extends GraylingError {
   readonly count: number;
   readonly accepted: number;
   readonly results: Array<{ eventId: string; status: string; code?: string }>;
@@ -105,7 +105,7 @@ function stableStringify(value: unknown): string {
   return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(",")}}`;
 }
 
-export class GolabClient {
+export class GraylingClient {
   readonly #opts: Required<Pick<Options, "baseUrl" | "sdkToken">> & Options;
   readonly #base: string;
   readonly #pollMs: number;
@@ -130,7 +130,7 @@ export class GolabClient {
 
   constructor(opts: Options) {
     if (!opts.baseUrl || !opts.sdkToken) {
-      throw new GolabError("golab: baseUrl and sdkToken are required");
+      throw new GraylingError("grayling: baseUrl and sdkToken are required");
     }
     this.#opts = opts;
     this.#base = opts.baseUrl.replace(/\/+$/, "");
@@ -193,11 +193,11 @@ export class GolabClient {
     opts: { sessionId?: string; taskId?: string } = {}): void {
     const exp = details.result.experiment;
     if (!exp) {
-      throw new GolabError(`result carries no experiment attribution (reason ${details.result.reason})`);
+      throw new GraylingError(`result carries no experiment attribution (reason ${details.result.reason})`);
     }
-    if (!this.#opts.collectToken) throw new GolabError("collect token not configured");
+    if (!this.#opts.collectToken) throw new GraylingError("collect token not configured");
     if (!details.randomizationUnit) {
-      throw new GolabError("cannot derive randomization unit (server recorded no exposure)");
+      throw new GraylingError("cannot derive randomization unit (server recorded no exposure)");
     }
     const flagRevision = /^\d+$/.test(details.result.flagVersion)
       ? Number(details.result.flagVersion) : 0;
@@ -224,12 +224,12 @@ export class GolabClient {
   trackEvaluatedExposure(details: EvaluationDetails): void {
     const exp = details.result.experiment;
     if (!exp || exp.exposureMode !== "onRender" || !details.result.decisionId) {
-      throw new GolabError("result has no onRender assignment");
+      throw new GraylingError("result has no onRender assignment");
     }
-    if (!this.#opts.collectToken) throw new GolabError("collect token not configured");
+    if (!this.#opts.collectToken) throw new GraylingError("collect token not configured");
     if (!details.exposureToken || !details.randomizationUnit || !details.expiresAt ||
       Date.parse(details.expiresAt) <= Date.now()) {
-      throw new GolabError("exposure token is missing or expired; evaluate again");
+      throw new GraylingError("exposure token is missing or expired; evaluate again");
     }
     const flagRevision = /^\d+$/.test(details.result.flagVersion)
       ? Number(details.result.flagVersion) : 0;
@@ -241,7 +241,7 @@ export class GolabClient {
       flagKey: details.result.flagKey, flagRevision, variant: exp.variant,
       unit: details.randomizationUnit, source: exp.source,
       clientTime: new Date().toISOString(),
-    })) throw new GolabError("exposure queue is full");
+    })) throw new GraylingError("exposure queue is full");
   }
 
   /** Manually report an exposure aligned with the collect contract. NOT
@@ -250,9 +250,9 @@ export class GolabClient {
   trackExposure(experimentId: string, epoch: number, flagKey: string,
     variant: string, unit: string,
     opts: { source?: string; flagRevision?: number } = {}): void {
-    if (!this.#opts.collectToken) throw new GolabError("collect token not configured");
+    if (!this.#opts.collectToken) throw new GraylingError("collect token not configured");
     if (!unit) {
-      throw new GolabError("exposure without a randomization unit is rejected (no attribution without a unit)");
+      throw new GraylingError("exposure without a randomization unit is rejected (no attribution without a unit)");
     }
     this.#enqueue({
       eventId: `exp-${randomUUID()}`,
@@ -301,7 +301,7 @@ export class GolabClient {
         throw err;
       }
       this.#queue.push(...batch); // keep for the periodic flusher
-      throw new GolabError(`flush failed: ${String(err)}`);
+      throw new GraylingError(`flush failed: ${String(err)}`);
     }
     this.#stats.eventsFlushed += batch.length;
     return batch.length;
@@ -497,14 +497,14 @@ export class GolabClient {
     const rejected = Number(result.rejected ?? 0);
     const accepted = Number(result.accepted ?? 0) + Number(result.duplicates ?? 0);
     if (accepted + rejected !== batch.length) {
-      throw new GolabError("collect response did not acknowledge every event");
+      throw new GraylingError("collect response did not acknowledge every event");
     }
     const outcomes = Array.isArray(result.results) ? result.results as Array<{
       eventId: string; status: string; code?: string;
     }> : [];
     if (outcomes.length > 0 && (outcomes.length !== batch.length || outcomes.some(
       (item, index) => item.eventId !== batch[index].eventId))) {
-      throw new GolabError("collect response has misaligned event results");
+      throw new GraylingError("collect response has misaligned event results");
     }
     if (rejected > 0) {
       throw new CollectRejected(rejected, accepted, outcomes,
@@ -527,17 +527,17 @@ export class GolabClient {
         method, headers, body, signal: AbortSignal.timeout(this.#timeoutMs),
       });
     } catch (err) {
-      throw new GolabError(`${method} ${path}: ${String(err)}`);
+      throw new GraylingError(`${method} ${path}: ${String(err)}`);
     }
     const text = await resp.text();
     if (!resp.ok) {
-      throw new GolabError(`${method} ${path} → HTTP ${resp.status}: ${text.slice(0, 512)}`);
+      throw new GraylingError(`${method} ${path} → HTTP ${resp.status}: ${text.slice(0, 512)}`);
     }
     if (!text) return {} as T;
     try {
       return JSON.parse(text) as T;
     } catch {
-      throw new GolabError(`${method} ${path}: invalid JSON response`);
+      throw new GraylingError(`${method} ${path}: invalid JSON response`);
     }
   }
 }

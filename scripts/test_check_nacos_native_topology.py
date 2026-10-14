@@ -167,11 +167,11 @@ class NativeTopologyTest(unittest.TestCase):
             self.assertEqual([call.kwargs["headers"].get("accessToken") for call in connection.request.call_args_list],
                              [None, None, None, None, None, "tenant-a-token", None, "tenant-b-token"] * 2)
             self.assertEqual([connection.request.call_args_list[index].args[1] for index in (2, 3, 10, 11)],
-                             ["/nacos/v1/cs/configs?tenant=namespace-a&group=GOLAB_FLAGS&dataId=golab.manifest",
-                              "/nacos/v1/cs/configs?tenant=namespace-b&group=GOLAB_FLAGS&dataId=golab.manifest"] * 2)
+                             ["/nacos/v1/cs/configs?tenant=namespace-a&group=GRAYLING_FLAGS&dataId=grayling.manifest",
+                              "/nacos/v1/cs/configs?tenant=namespace-b&group=GRAYLING_FLAGS&dataId=grayling.manifest"] * 2)
             self.assertEqual([connection.request.call_args_list[index].args[1] for index in (5, 7, 13, 15)],
-                             ["/nacos/v1/cs/configs?tenant=namespace-a&group=GOLAB_FLAGS&dataId=golab.manifest",
-                              "/nacos/v1/cs/configs?tenant=namespace-b&group=GOLAB_FLAGS&dataId=golab.manifest"] * 2)
+                             ["/nacos/v1/cs/configs?tenant=namespace-a&group=GRAYLING_FLAGS&dataId=grayling.manifest",
+                              "/nacos/v1/cs/configs?tenant=namespace-b&group=GRAYLING_FLAGS&dataId=grayling.manifest"] * 2)
             self.assertEqual([call.args[0] for call in connect.call_args_list],
                              [("10.42.1.10", 9848), ("10.42.1.11", 9848)])
 

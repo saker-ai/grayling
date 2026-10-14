@@ -16,4 +16,4 @@
 
 `TestOperatorActionsRequireAvailableReport` 在真实 HTTP 服务和文件存储中创建、启动放量计划，然后让持久化实验合同中的指标引用失效，使服务端报告无法构建。人工推进、恢复和交还自动控制均返回 409，计划阶段和暂停/接管状态未被这些失败动作改变；暂停及开启人工接管仍成功。恢复有效合同后，三种动作可以继续执行。该恢复场景没有曝光，报告结论仍为 HOLD，验证“报告可构建”与“健康且可自动推进”是不同门槛；人工推进仍由具备发布权限的操作者负责并记录审计。
 
-`GOLAB_TEST_PG_SKIP=1 GOWORK=off go test ./internal/rollout -run 'TestOperatorActionsRequireAvailableReport|TestRolloutManualTakeoverPauseAdvance' -count=1` 通过。尚未在真实浏览器中以服务端报告构建失败的故障注入执行按钮提交；这一端到端拒绝路径由上述 HTTP 测试覆盖。
+`GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test ./internal/rollout -run 'TestOperatorActionsRequireAvailableReport|TestRolloutManualTakeoverPauseAdvance' -count=1` 通过。尚未在真实浏览器中以服务端报告构建失败的故障注入执行按钮提交；这一端到端拒绝路径由上述 HTTP 测试覆盖。

@@ -52,7 +52,7 @@ func New(upstreamBase string) (*Proxy, error) {
 			req.Out.URL = target.Clone()
 			req.Out.URL.RawQuery = req.In.URL.RawQuery
 			req.Out.Host = target.Host
-			// A browser may attach the GoLab console session cookie. Only the
+			// A browser may attach the Grayling console session cookie. Only the
 			// client's model credential is relevant to this upstream.
 			req.Out.Header.Del("Cookie")
 			req.Out.Header.Del("Proxy-Authorization")
@@ -94,11 +94,16 @@ func BearerKey(w http.ResponseWriter, r *http.Request) (string, bool) {
 		WriteError(w, http.StatusUnauthorized, "invalid_api_key", "a bearer API key is required")
 		return "", false
 	}
-	if strings.HasPrefix(strings.TrimSpace(key), "glab_") {
-		WriteError(w, http.StatusForbidden, "wrong_audience", "GoLab credentials cannot be sent to the model upstream")
+	key = strings.TrimSpace(key)
+	// The "glab_" form is the pre-rename prefix. Tokens minted before the
+	// rename are still valid — ResolveToken matches on the secret hash alone —
+	// so an audience guard that only knew "grayling_" would forward them to the
+	// model upstream. Both forms must be refused.
+	if strings.HasPrefix(key, "grayling_") || strings.HasPrefix(key, "glab_") {
+		WriteError(w, http.StatusForbidden, "wrong_audience", "Grayling credentials cannot be sent to the model upstream")
 		return "", false
 	}
-	return strings.TrimSpace(key), true
+	return key, true
 }
 
 // WriteError emits an OpenAI-compatible error envelope.
@@ -120,7 +125,7 @@ func Disabled(w http.ResponseWriter, _ *http.Request) {
 	WriteError(w, http.StatusNotImplemented, "not_configured", "OpenAI-compatible upstream is not configured")
 }
 
-// RateLimited reports a GoLab edge rate limit in the upstream error shape.
+// RateLimited reports a Grayling edge rate limit in the upstream error shape.
 func RateLimited(w http.ResponseWriter, _ *http.Request) {
 	WriteError(w, http.StatusTooManyRequests, "rate_limit_exceeded", "chat request rate exceeded")
 }

@@ -1,9 +1,9 @@
-"""golab_sdk — the GoLab Python SDK (remote-evaluation first version).
+"""grayling_sdk — the Grayling Python SDK (remote-evaluation first version).
 
 Contract summary (docs/技术方案.md §8 受限投影):
 
-* Evaluations call ``POST /api/v1/sdk/eval`` on the GoLab server (or a
-  ``cmd/golab-proxy`` relay). The full configuration snapshot — internal
+* Evaluations call ``POST /api/v1/sdk/eval`` on the Grayling server (or a
+  ``cmd/grayling-proxy`` relay). The full configuration snapshot — internal
   rules, segments and AI content — is NEVER downloaded by this SDK, so it
   is safe for script/edge/browser-adjacent runtimes.
 * Freshness uses the restricted projection ``GET /api/v1/sdk/revision``
@@ -15,12 +15,12 @@ Contract summary (docs/技术方案.md §8 受限投影):
   collect credential, matching the collect contract exactly.
 """
 
-from .client import GolabClient, GolabError, Options
+from .client import GraylingClient, GraylingError, Options
 from .types import EvaluationContext, EvaluationDetails, Exposure, Result
 
 __all__ = [
-    "GolabClient",
-    "GolabError",
+    "GraylingClient",
+    "GraylingError",
     "Options",
     "EvaluationContext",
     "EvaluationDetails",

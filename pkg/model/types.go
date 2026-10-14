@@ -1,11 +1,11 @@
-// Package model defines the GoLab flag DSL (schemaVersion 1), segment,
+// Package model defines the Grayling flag DSL (schemaVersion 1), segment,
 // snapshot, manifest and evaluation-result types shared by the control
 // plane, the Go SDK and remote evaluation (docs/技术方案.md §5).
 //
 // The DSL is deliberately NOT the go-feature-flag document format: the
 // importer (internal/gffimport) translates a whitelisted subset of gff
 // fields and rejects everything else. Native evaluation implements the
-// golab-fnv1a-10000-v1 fixed-bucket semantics from pkg/bucketing.
+// grayling-fnv1a-10000-v1 fixed-bucket semantics from pkg/bucketing.
 package model
 
 import (
@@ -25,7 +25,7 @@ const (
 	FlagJSON   FlagType = "json"
 )
 
-// Flag is one feature flag / experiment carrier in GoLab DSL form.
+// Flag is one feature flag / experiment carrier in Grayling DSL form.
 type Flag struct {
 	SchemaVersion int      `yaml:"schemaVersion" json:"schemaVersion"`
 	Key           string   `yaml:"key" json:"key"`
@@ -34,7 +34,7 @@ type Flag struct {
 	// with reason DISABLED; offline nodes only observe it after the next
 	// successful sync (bounded by the SDK max-staleness window).
 	Disable bool `yaml:"disable,omitempty" json:"disable,omitempty"`
-	// Version carries the GoLab release revision (informational; the
+	// Version carries the Grayling release revision (informational; the
 	// authoritative revision lives in the manifest).
 	Version string `yaml:"version,omitempty" json:"version,omitempty"`
 	// Bucketing configures the stable hash. Required when any rule uses
@@ -59,7 +59,7 @@ type Flag struct {
 
 // Bucketing pins the stable-hash configuration of a flag.
 type Bucketing struct {
-	// Algorithm must be "golab-fnv1a-10000-v1" in schema v1.
+	// Algorithm must be "grayling-fnv1a-10000-v1" in schema v1.
 	Algorithm string `yaml:"algorithm" json:"algorithm"`
 	// Unit names the context field providing the randomization unit
 	// ("targetingKey" or one of Flag.Fields). Changing it requires a new
@@ -226,7 +226,7 @@ type ManifestEntry struct {
 	Key      string `yaml:"key" json:"key"`
 	Revision int64  `yaml:"revision" json:"revision"`
 	// DataID is the gonacos dataId holding the document, e.g.
-	// golab.flag.<key>.r<revision>.
+	// grayling.flag.<key>.r<revision>.
 	DataID string `yaml:"dataId" json:"dataId"`
 	// Hash is the SHA-256 hex of the document's canonical JSON encoding.
 	Hash string `yaml:"hash" json:"hash"`
@@ -264,8 +264,8 @@ type EvaluationContext struct {
 const TargetingKeyField = "targetingKey"
 
 // ClientIPField is the RESERVED context-attribute name under which trusted
-// edge infrastructure (golab-proxy `-trusted-proxy-cidrs`,
-// docs/traefik-golab-architecture.md "按 client IP 灰度") injects the client
+// edge infrastructure (grayling-proxy `-trusted-proxy-cidrs`,
+// docs/traefik-grayling-architecture.md "按 client IP 灰度") injects the client
 // IP it derived from the trusted proxy chain. It is NOT implicitly
 // registered: a flag opts in by listing "client_ip" in Fields, after which
 // it can drive constraints (typically in_cidr) or — allowed but
@@ -294,7 +294,7 @@ func (c EvaluationContext) Field(name string) (any, bool) {
 }
 
 // Reason explains how an evaluation reached its value (OpenFeature-aligned
-// plus GoLab experiment states).
+// plus Grayling experiment states).
 type Reason string
 
 const (

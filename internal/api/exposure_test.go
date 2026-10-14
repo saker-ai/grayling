@@ -163,7 +163,7 @@ func TestLocalOnRenderAssignmentAndExposureBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	flag := &model.Flag{SchemaVersion: model.SchemaVersion, Key: "onboarding", Version: "1",
-		Type: model.FlagBool, Bucketing: &model.Bucketing{Algorithm: "golab-fnv1a-10000-v1", Unit: "user_id", Salt: "test"},
+		Type: model.FlagBool, Bucketing: &model.Bucketing{Algorithm: "grayling-fnv1a-10000-v1", Unit: "user_id", Salt: "test"},
 		Fields: []string{"user_id"}, Variations: map[string]any{"control": false, "treatment": true},
 		DefaultRule: &model.Rule{Variation: "control"},
 		Targeting:   []model.Rule{{Percentage: map[string]float64{"control": 50, "treatment": 50}}},

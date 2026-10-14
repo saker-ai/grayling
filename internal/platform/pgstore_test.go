@@ -18,7 +18,7 @@ import (
 )
 
 // openPGStore opens a PostgreSQL-backed store against a real server
-// (docker or GOLAB_TEST_PG_DSN — see test/pgtest). Skips with a reason when
+// (docker or GRAYLING_TEST_PG_DSN — see test/pgtest). Skips with a reason when
 // neither is available.
 func openPGStore(t *testing.T, dsn string) *Store {
 	t.Helper()
@@ -249,7 +249,7 @@ func TestPGChangeSyncListenerReconnect(t *testing.T) {
 	}
 	waitFor(func() bool {
 		var n int
-		err := a.persist.(*pgPersistence).pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN golab_control'`).Scan(&n)
+		err := a.persist.(*pgPersistence).pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN grayling_control'`).Scan(&n)
 		return err == nil && n > 0
 	})
 	ws, err := a.CreateWorkspace("listener", "listener")
@@ -261,7 +261,7 @@ func TestPGChangeSyncListenerReconnect(t *testing.T) {
 	// poll closes the gap even if the NOTIFY was lost during that interval.
 	var killed bool
 	err = a.persist.(*pgPersistence).pool.QueryRow(t.Context(), `SELECT pg_terminate_backend(pid)
-		FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN golab_control' LIMIT 1`).Scan(&killed)
+		FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN grayling_control' LIMIT 1`).Scan(&killed)
 	if err != nil || !killed {
 		t.Fatalf("terminate listener: %v %t", err, killed)
 	}
@@ -295,7 +295,7 @@ func TestPGChangeSyncListenerReconnect(t *testing.T) {
 	waitFor(func() bool { got, err := b.GetWorkspace(ws.ID); return err == nil && got.Name == "newer" })
 	// A late duplicate with an older version carries no state and is ignored.
 	oldHint := fmt.Sprintf(`{"type":"workspaces","id":"%s","version":1}`, changeKey(ws.ID))
-	if _, err := p.pool.Exec(t.Context(), `SELECT pg_notify('golab_control', $1)`, oldHint); err != nil {
+	if _, err := p.pool.Exec(t.Context(), `SELECT pg_notify('grayling_control', $1)`, oldHint); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(250 * time.Millisecond)
@@ -400,7 +400,7 @@ func TestPGPersistenceRoundtrip(t *testing.T) {
 	}
 	rev := &FlagRevision{
 		WorkspaceID: ws.ID, EnvironmentID: env.ID, Key: "f1", Revision: 1,
-		Content: testFlag("f1"), Hash: "h1", DataID: "golab.flag.f1.r1", PublishedBy: "root",
+		Content: testFlag("f1"), Hash: "h1", DataID: "grayling.flag.f1.r1", PublishedBy: "root",
 	}
 	if err := s1.AppendFlagRevision(rev); err != nil {
 		t.Fatalf("append revision: %v", err)
@@ -1041,7 +1041,7 @@ func TestPGFlagLifecycleAndAIPins(t *testing.T) {
 	}
 	if err := s.AppendSegmentRevision(&SegmentRevision{
 		WorkspaceID: ws.ID, EnvironmentID: env.ID, Key: "beta-users", Revision: 1,
-		Content: seg, Hash: "sh1", DataID: "golab.segment.beta-users.r1", PublishedBy: "root",
+		Content: seg, Hash: "sh1", DataID: "grayling.segment.beta-users.r1", PublishedBy: "root",
 	}); err != nil {
 		t.Fatalf("segment revision: %v", err)
 	}
@@ -1051,7 +1051,7 @@ func TestPGFlagLifecycleAndAIPins(t *testing.T) {
 	for i := int64(1); i <= 3; i++ {
 		if err := s.AppendFlagRevision(&FlagRevision{
 			WorkspaceID: ws.ID, EnvironmentID: env.ID, Key: "life", Revision: i,
-			Content: flag, Hash: fmt.Sprintf("h%d", i), DataID: fmt.Sprintf("golab.flag.life.r%d", i),
+			Content: flag, Hash: fmt.Sprintf("h%d", i), DataID: fmt.Sprintf("grayling.flag.life.r%d", i),
 			PublishedBy: "root", PublishedAt: time.Now().Add(-time.Duration(4-i) * 48 * time.Hour),
 		}); err != nil {
 			t.Fatalf("revision %d: %v", i, err)
@@ -1064,7 +1064,7 @@ func TestPGFlagLifecycleAndAIPins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prune: %v", err)
 	}
-	if len(removed) != 1 || removed[0] != "golab.flag.life.r2" {
+	if len(removed) != 1 || removed[0] != "grayling.flag.life.r2" {
 		t.Fatalf("prune removed %v, want r2 only (r1 current, r3 newest)", removed)
 	}
 
@@ -1304,9 +1304,9 @@ func TestPGManagementConcurrentWrites(t *testing.T) {
 // The two contenders below are separate OS processes with independent pools
 // and memory images, both connected to the same real PostgreSQL database.
 func TestPGManagementSubprocess(t *testing.T) {
-	if dsn := os.Getenv("GOLAB_PG_CHILD_DSN"); dsn != "" {
+	if dsn := os.Getenv("GRAYLING_PG_CHILD_DSN"); dsn != "" {
 		store := openPGStore(t, dsn)
-		ready, start := os.Getenv("GOLAB_PG_CHILD_READY"), os.Getenv("GOLAB_PG_CHILD_START")
+		ready, start := os.Getenv("GRAYLING_PG_CHILD_READY"), os.Getenv("GRAYLING_PG_CHILD_START")
 		if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -1321,17 +1321,17 @@ func TestPGManagementSubprocess(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 		var err error
-		switch os.Getenv("GOLAB_PG_CHILD_ACTION") {
+		switch os.Getenv("GRAYLING_PG_CHILD_ACTION") {
 		case "create":
 			_, err = store.CreateWorkspace("process-shared", "")
 		case "update":
 			q := DefaultQuotas()
 			q.MaxFlags = 77
-			err = store.SetQuotas(os.Getenv("GOLAB_PG_CHILD_WS"), q)
+			err = store.SetQuotas(os.Getenv("GRAYLING_PG_CHILD_WS"), q)
 		case "revoke":
-			err = store.RevokeToken(os.Getenv("GOLAB_PG_CHILD_TOKEN"))
+			err = store.RevokeToken(os.Getenv("GRAYLING_PG_CHILD_TOKEN"))
 		case "audit":
-			err = store.Audit("child", RoleOwner, "child.concurrent", os.Getenv("GOLAB_PG_CHILD_WS"), "", "", "")
+			err = store.Audit("child", RoleOwner, "child.concurrent", os.Getenv("GRAYLING_PG_CHILD_WS"), "", "", "")
 		default:
 			t.Fatal("unknown child action")
 		}
@@ -1358,10 +1358,10 @@ func TestPGManagementSubprocess(t *testing.T) {
 		for i := range 2 {
 			ready := filepath.Join(dir, fmt.Sprintf("ready-%d", i))
 			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestPGManagementSubprocess$", "-test.v")
-			cmd.Env = append(os.Environ(), "GOLAB_PG_CHILD_DSN="+dsn,
-				"GOLAB_PG_CHILD_ACTION="+action, "GOLAB_PG_CHILD_WS="+wsID,
-				"GOLAB_PG_CHILD_TOKEN="+tokenID,
-				"GOLAB_PG_CHILD_READY="+ready, "GOLAB_PG_CHILD_START="+start)
+			cmd.Env = append(os.Environ(), "GRAYLING_PG_CHILD_DSN="+dsn,
+				"GRAYLING_PG_CHILD_ACTION="+action, "GRAYLING_PG_CHILD_WS="+wsID,
+				"GRAYLING_PG_CHILD_TOKEN="+tokenID,
+				"GRAYLING_PG_CHILD_READY="+ready, "GRAYLING_PG_CHILD_START="+start)
 			go func() { output, err := cmd.CombinedOutput(); results <- outcome{output, err} }()
 		}
 		deadline := time.Now().Add(20 * time.Second)

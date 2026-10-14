@@ -9,7 +9,7 @@ import sys
 import time
 
 
-NAMESPACE = "golab-issue13"
+NAMESPACE = "grayling-issue13"
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
@@ -139,17 +139,17 @@ def main():
         raise RuntimeError("set KUBECONFIG and ISSUE13_WORKDIR")
     workdir = Path(os.environ["ISSUE13_WORKDIR"])
     prepare(workdir)
-    eventually(lambda: verify_grpc("allowed-a", "golab-a", workdir))
-    eventually(lambda: verify_grpc("allowed-b", "golab-b", workdir))
-    eventually(lambda: expect(probe("allowed-a", "golab-a", "a", "a"), "PASS official SDK read"))
-    eventually(lambda: expect(probe("allowed-b", "golab-b", "b", "b"), "PASS official SDK read"))
-    expect(probe("allowed-a", "golab-a", "b", "a", "-expect-denied"),
+    eventually(lambda: verify_grpc("allowed-a", "grayling-a", workdir))
+    eventually(lambda: verify_grpc("allowed-b", "grayling-b", workdir))
+    eventually(lambda: expect(probe("allowed-a", "grayling-a", "a", "a"), "PASS official SDK read"))
+    eventually(lambda: expect(probe("allowed-b", "grayling-b", "b", "b"), "PASS official SDK read"))
+    expect(probe("allowed-a", "grayling-a", "b", "a", "-expect-denied"),
            "PASS official SDK cross-tenant read denied")
-    expect(probe("allowed-b", "golab-b", "a", "b", "-expect-denied"),
+    expect(probe("allowed-b", "grayling-b", "a", "b", "-expect-denied"),
            "PASS official SDK cross-tenant read denied")
     watchers = []
     try:
-        for pod, server in (("allowed-a", "golab-a"), ("allowed-b", "golab-b")):
+        for pod, server in (("allowed-a", "grayling-a"), ("allowed-b", "grayling-b")):
             process = subprocess.Popen(
                 probe(pod, server, "a", "a", "-watch"),
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,

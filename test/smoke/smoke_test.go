@@ -46,7 +46,7 @@ func gonacosRoot(t *testing.T) string {
 
 // TestEmbeddedGonacosRoundtrip verifies the pinned gonacos sibling module can
 // start in-process (embedded miniredis) and serve Config.Publish/Get, which is
-// the storage substrate GoLab builds on (docs/技术方案.md §2, §12.1).
+// the storage substrate Grayling builds on (docs/技术方案.md §2, §12.1).
 func TestEmbeddedGonacosRoundtrip(t *testing.T) {
 	srv, err := server.New(
 		server.WithAddr("127.0.0.1:0"),
@@ -69,9 +69,9 @@ func TestEmbeddedGonacosRoundtrip(t *testing.T) {
 	}
 
 	req := config.PublishRequest{
-		NamespaceID: "golab-smoke",
-		GroupName:   "GOLAB_FLAGS",
-		DataID:      "golab.flag.smoke.r1",
+		NamespaceID: "grayling-smoke",
+		GroupName:   "GRAYLING_FLAGS",
+		DataID:      "grayling.flag.smoke.r1",
 		Content:     `{"schemaVersion":1,"key":"smoke"}`,
 		Type:        "json",
 	}
@@ -107,7 +107,7 @@ func TestEmbeddedGonacosRoundtrip(t *testing.T) {
 
 // TestGffCoreLegacyEvaluate verifies the gff core module compiles against this
 // toolchain and its native evaluation path is callable for legacy-gff-v1 mode
-// (docs/技术方案.md §5.2). It is NOT used for GoLab native fixed-bucket
+// (docs/技术方案.md §5.2). It is NOT used for Grayling native fixed-bucket
 // semantics.
 func TestGffCoreLegacyEvaluate(t *testing.T) {
 	var trueAny any = true

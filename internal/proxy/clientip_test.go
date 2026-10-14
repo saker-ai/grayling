@@ -291,7 +291,7 @@ func TestGatewayClientIPInjection(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("status = %d, want 200 (fail-open invariant)", resp.StatusCode)
 		}
-		if got := resp.Header.Get("X-Golab-Fail-Open"); got != "missing_bucket_key" {
+		if got := resp.Header.Get("X-Grayling-Fail-Open"); got != "missing_bucket_key" {
 			t.Fatalf("fail-open reason = %q, want missing_bucket_key", got)
 		}
 		if up.hits.Load() != hitsBefore {

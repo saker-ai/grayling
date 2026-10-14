@@ -21,7 +21,7 @@ import (
 )
 
 func main() {
-	server := flag.String("server", "golab-a", "TLS service DNS name")
+	server := flag.String("server", "grayling-a", "TLS service DNS name")
 	namespaceFile := flag.String("namespace-file", "", "namespace ID file")
 	tokenFile := flag.String("token-file", "", "SDK token file")
 	caFile := flag.String("ca-file", "", "trusted CA certificate")
@@ -58,7 +58,7 @@ func main() {
 		fmt.Println("PASS revoked native login denied with HTTP 401")
 		return
 	}
-	cache, err := os.MkdirTemp("", "golab-kind-sdk-")
+	cache, err := os.MkdirTemp("", "grayling-kind-sdk-")
 	if err != nil {
 		fail("create SDK cache", err)
 	}
@@ -79,7 +79,7 @@ func main() {
 	}
 	defer client.CloseClient()
 
-	param := vo.ConfigParam{DataId: "golab.manifest", Group: "GOLAB_FLAGS"}
+	param := vo.ConfigParam{DataId: "grayling.manifest", Group: "GRAYLING_FLAGS"}
 	content, err := client.GetConfig(param)
 	if *denied {
 		if err == nil {
@@ -134,7 +134,7 @@ func verifyHTTP(server, namespace, caFile string) error {
 	if err != nil {
 		return err
 	}
-	query := url.Values{"tenant": {namespace}, "group": {"GOLAB_FLAGS"}, "dataId": {"golab.manifest"}}
+	query := url.Values{"tenant": {namespace}, "group": {"GRAYLING_FLAGS"}, "dataId": {"grayling.manifest"}}
 	endpoint := "https://" + server + ":8848"
 	for _, check := range []struct {
 		request *http.Request

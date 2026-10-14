@@ -1,19 +1,19 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: golab-issue12
+  name: grayling-issue12
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: traefik
-  namespace: golab-issue12
+  namespace: grayling-issue12
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: traefik
-  namespace: golab-issue12
+  namespace: grayling-issue12
 rules:
   - apiGroups: [""]
     resources: [services, secrets, configmaps]
@@ -29,11 +29,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: traefik
-  namespace: golab-issue12
+  namespace: grayling-issue12
 subjects:
   - kind: ServiceAccount
     name: traefik
-    namespace: golab-issue12
+    namespace: grayling-issue12
 roleRef:
   kind: Role
   name: traefik
@@ -43,7 +43,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: traefik
-  namespace: golab-issue12
+  namespace: grayling-issue12
 spec:
   replicas: 1
   selector:
@@ -60,7 +60,7 @@ spec:
           args:
             - --entrypoints.web.address=:8000
             - --providers.kubernetescrd=true
-            - --providers.kubernetescrd.namespaces=golab-issue12
+            - --providers.kubernetescrd.namespaces=grayling-issue12
             - --providers.kubernetescrd.disableclusterscoperesources=true
             - --providers.kubernetescrd.allowemptyservices=true
             - --log.level=DEBUG
@@ -76,7 +76,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: traefik
-  namespace: golab-issue12
+  namespace: grayling-issue12
 spec:
   selector: {app: traefik}
   ports:
@@ -86,7 +86,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: backend
-  namespace: golab-issue12
+  namespace: grayling-issue12
 data:
   server.py: |
     import json
@@ -96,11 +96,11 @@ data:
     class Handler(BaseHTTPRequestHandler):
         def answer(self):
             data = {"backend": os.environ["BACKEND_NAME"],
-                    "variantHeader": self.headers.get("X-Golab-Variant", ""),
-                    "flagKeyHeader": self.headers.get("X-Golab-Flag-Key", ""),
-                    "failOpen": self.headers.get("X-Golab-Fail-Open", ""),
-                    "reason": self.headers.get("X-Golab-Reason", ""),
-                    "forgedExtra": self.headers.get("X-Golab-Forged", ""),
+                    "variantHeader": self.headers.get("X-Grayling-Variant", ""),
+                    "flagKeyHeader": self.headers.get("X-Grayling-Flag-Key", ""),
+                    "failOpen": self.headers.get("X-Grayling-Fail-Open", ""),
+                    "reason": self.headers.get("X-Grayling-Reason", ""),
+                    "forgedExtra": self.headers.get("X-Grayling-Forged", ""),
                     "method": self.command}
             body = json.dumps(data).encode()
             self.send_response(200)
@@ -118,7 +118,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: stable
-  namespace: golab-issue12
+  namespace: grayling-issue12
 spec:
   replicas: 1
   selector:
@@ -152,7 +152,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: canary
-  namespace: golab-issue12
+  namespace: grayling-issue12
 spec:
   replicas: 1
   selector:
@@ -186,7 +186,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: svc-stable
-  namespace: golab-issue12
+  namespace: grayling-issue12
 spec:
   selector: {app: stable}
   ports:
@@ -196,7 +196,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: svc-canary
-  namespace: golab-issue12
+  namespace: grayling-issue12
 spec:
   selector: {app: canary}
   ports:
@@ -208,20 +208,20 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: gateway
-  namespace: golab-issue12
+  namespace: grayling-issue12
 spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
   ingress:
     - from:
-        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: golab-issue12}}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: grayling-issue12}}
     - from:
         - ipBlock: {cidr: 0.0.0.0/0}
       ports:
         - {protocol: TCP, port: 8000}
   egress:
     - to:
-        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: golab-issue12}}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: grayling-issue12}}
     - to:
         - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
       ports:

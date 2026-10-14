@@ -1,18 +1,18 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: golab-__NAME__
-  namespace: golab-issue13
-  labels: {app: golab, replica: __NAME__}
+  name: grayling-__NAME__
+  namespace: grayling-issue13
+  labels: {app: grayling, replica: __NAME__}
 spec:
-  nodeSelector: {kubernetes.io/hostname: golab-issue13-__NODE__}
+  nodeSelector: {kubernetes.io/hostname: grayling-issue13-__NODE__}
   containers:
-    - name: golab
-      image: golab:issue13-local
+    - name: grayling
+      image: grayling:issue13-local
       imagePullPolicy: Never
       args:
         - -addr=0.0.0.0:8688
-        - -pg=postgres://golab:__PG_PASSWORD__@postgres:5432/golab?sslmode=disable
+        - -pg=postgres://grayling:__PG_PASSWORD__@postgres:5432/grayling?sslmode=disable
         - -redis=redis:6379
         - -auth-secret-file=/run/secrets/auth-secret
         - -gonacos-addr=127.0.0.1:18848
@@ -22,7 +22,7 @@ spec:
       volumeMounts:
         - {name: auth-secret, mountPath: /run/secrets, readOnly: true}
     - name: tls-l4-proxy
-      image: golab-native-proxy:issue13-local
+      image: grayling-native-proxy:issue13-local
       imagePullPolicy: Never
       ports:
         - {name: native-http, containerPort: 8848}
@@ -37,9 +37,9 @@ spec:
 ---
 apiVersion: v1
 kind: Service
-metadata: {name: golab-__NAME__, namespace: golab-issue13}
+metadata: {name: grayling-__NAME__, namespace: grayling-issue13}
 spec:
-  selector: {app: golab, replica: __NAME__}
+  selector: {app: grayling, replica: __NAME__}
   ports:
     - {name: api, port: 8688, targetPort: 8688}
     - {name: native-http, port: 8848, targetPort: native-http}

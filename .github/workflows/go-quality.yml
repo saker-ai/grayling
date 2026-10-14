@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 20
     env:
       GOWORK: "off"
-      GOLAB_TEST_PG_SKIP: "1"
+      GRAYLING_TEST_PG_SKIP: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -33,12 +33,12 @@ jobs:
     timeout-minutes: 20
     env:
       GOWORK: "off"
-      GOLAB_TEST_PG_DSN: postgres://postgres:golab-test@127.0.0.1:5432/postgres?sslmode=disable
+      GRAYLING_TEST_PG_DSN: postgres://postgres:grayling-test@127.0.0.1:5432/postgres?sslmode=disable
     services:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_PASSWORD: golab-test
+          POSTGRES_PASSWORD: grayling-test
         ports:
           - 5432:5432
         options: >-

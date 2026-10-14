@@ -19,13 +19,13 @@ import (
 	gw "github.com/saker-ai/grayling/internal/gateway"
 )
 
-const k8sNamespace = "golab-issue12"
+const k8sNamespace = "grayling-issue12"
 
 func kube(t *testing.T, input []byte, args ...string) string {
 	t.Helper()
-	ctx := os.Getenv("GOLAB_K8S_CONTEXT")
+	ctx := os.Getenv("GRAYLING_K8S_CONTEXT")
 	if ctx == "" {
-		t.Fatal("GOLAB_K8S_CONTEXT must name the disposable cluster")
+		t.Fatal("GRAYLING_K8S_CONTEXT must name the disposable cluster")
 	}
 	cmd := exec.CommandContext(t.Context(), "kubectl", append([]string{"--context", ctx}, args...)...)
 	cmd.Stdin = strings.NewReader(string(input))
@@ -79,23 +79,23 @@ func TestKubernetesIngressRouteE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires a disposable kind cluster")
 	}
-	if os.Getenv("GOLAB_K8S_CONTEXT") == "" || os.Getenv("GOLAB_KIND_NAME") == "" {
+	if os.Getenv("GRAYLING_K8S_CONTEXT") == "" || os.Getenv("GRAYLING_KIND_NAME") == "" {
 		t.Skip("run test/gateway/k8s/run.sh for the pinned disposable cluster")
 	}
-	hostGateway := os.Getenv("GOLAB_K8S_HOST_GATEWAY")
+	hostGateway := os.Getenv("GRAYLING_K8S_HOST_GATEWAY")
 	if hostGateway == "" {
-		t.Fatal("GOLAB_K8S_HOST_GATEWAY is required")
+		t.Fatal("GRAYLING_K8S_HOST_GATEWAY is required")
 	}
 	t.Logf("cluster version: %s", kube(t, nil, "version"))
 	t.Logf("traefik image: %s", kube(t, nil, "-n", k8sNamespace, "get", "deployment/traefik", "-o", "jsonpath={.spec.template.spec.containers[0].image}"))
 
 	fx := setupFixtureOnHost(t, "0.0.0.0")
-	port := strings.TrimPrefix(fx.golabBase, "http://127.0.0.1:")
+	port := strings.TrimPrefix(fx.graylingBase, "http://127.0.0.1:")
 	upstream := "http://" + net.JoinHostPort(hostGateway, port)
 
-	proxyBin := buildBinary(t, fx.root, "./cmd/golab-proxy", "golab-proxy-k8s")
+	proxyBin := buildBinary(t, fx.root, "./cmd/grayling-proxy", "grayling-proxy-k8s")
 	imageDir := t.TempDir()
-	imageBin := filepath.Join(imageDir, "golab-proxy")
+	imageBin := filepath.Join(imageDir, "grayling-proxy")
 	data, err := os.ReadFile(proxyBin)
 	if err != nil {
 		t.Fatal(err)
@@ -103,12 +103,12 @@ func TestKubernetesIngressRouteE2E(t *testing.T) {
 	if err := os.WriteFile(imageBin, data, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(imageDir, "Dockerfile"), []byte("FROM alpine:3.20\nCOPY golab-proxy /golab-proxy\nENTRYPOINT [\"/golab-proxy\"]\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(imageDir, "Dockerfile"), []byte("FROM alpine:3.20\nCOPY grayling-proxy /grayling-proxy\nENTRYPOINT [\"/grayling-proxy\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	image := "golab-proxy:issue12"
+	image := "grayling-proxy:issue12"
 	command(t, imageDir, "docker", "build", "-q", "-t", image, ".")
-	t.Log(command(t, fx.root, "kind", "load", "docker-image", image, "--name", os.Getenv("GOLAB_KIND_NAME")))
+	t.Log(command(t, fx.root, "kind", "load", "docker-image", image, "--name", os.Getenv("GRAYLING_KIND_NAME")))
 
 	secret := fmt.Sprintf("apiVersion: v1\nkind: Secret\nmetadata:\n  name: gateway-token\n  namespace: %s\ntype: Opaque\ndata:\n  token: %s\n", k8sNamespace,
 		base64.StdEncoding.EncodeToString([]byte(fx.sdkToken)))
@@ -127,10 +127,10 @@ spec:
         - name: proxy
           image: %s
           imagePullPolicy: IfNotPresent
-          args: ["-addr=0.0.0.0:8689", "-upstream=$(GOLAB_UPSTREAM)", "-gateway-token=$(GOLAB_TOKEN)", "-gateway-secret=%s", "-gateway-eval-timeout=200ms"]
+          args: ["-addr=0.0.0.0:8689", "-upstream=$(GRAYLING_UPSTREAM)", "-gateway-token=$(GRAYLING_TOKEN)", "-gateway-secret=%s", "-gateway-eval-timeout=200ms"]
           env:
-            - {name: GOLAB_UPSTREAM, value: %q}
-            - name: GOLAB_TOKEN
+            - {name: GRAYLING_UPSTREAM, value: %q}
+            - name: GRAYLING_TOKEN
               valueFrom: {secretKeyRef: {name: gateway-token, key: token}}
           ports: [{name: http, containerPort: 8689}]
           readinessProbe: {httpGet: {path: /healthz, port: http}}
@@ -151,7 +151,7 @@ spec:
 	}
 
 	entryPort := freePort(t)
-	pf := exec.CommandContext(t.Context(), "kubectl", "--context", os.Getenv("GOLAB_K8S_CONTEXT"), "-n", k8sNamespace,
+	pf := exec.CommandContext(t.Context(), "kubectl", "--context", os.Getenv("GRAYLING_K8S_CONTEXT"), "-n", k8sNamespace,
 		"port-forward", "service/traefik", fmt.Sprintf("%d:80", entryPort))
 	var pfLog strings.Builder
 	pf.Stdout, pf.Stderr = &pfLog, &pfLog
@@ -175,7 +175,7 @@ spec:
 	spec := *fx.spec
 	spec.Namespace = k8sNamespace
 	spec.Rule = "PathPrefix(`/api`)"
-	spec.EvalAddress = "http://proxy.golab-issue12.svc.cluster.local:8689"
+	spec.EvalAddress = "http://proxy.grayling-issue12.svc.cluster.local:8689"
 	for i := range spec.Backends {
 		spec.Backends[i].K8sService = "svc-" + spec.Backends[i].Variant
 		spec.Backends[i].K8sPort = 80
@@ -208,12 +208,12 @@ spec:
 	}
 	t.Logf("50/50 distribution: %v", counts)
 	status, forged, _ := gatewayRequest(t, entry, "/api/forged", stableKey,
-		map[string]string{gw.VariantHeader: "canary", gw.FlagKeyHeader: "fake", gw.FailOpenHeader: "fake", "X-Golab-Forged": "fake"}, "GET")
+		map[string]string{gw.VariantHeader: "canary", gw.FlagKeyHeader: "fake", gw.FailOpenHeader: "fake", "X-Grayling-Forged": "fake"}, "GET")
 	if status != 200 || forged.Backend != "service-stable" || forged.VariantHeader != "stable" ||
 		forged.FlagKeyHeader != flagKey || forged.FailOpen != "" || forged.ForgedExtra != "" {
 		t.Fatalf("forged headers survived: status=%d reply=%+v", status, forged)
 	}
-	t.Log("forged X-Golab-* headers stripped; stable key remains stable")
+	t.Log("forged X-Grayling-* headers stripped; stable key remains stable")
 
 	fx.admin.publishFlag(gatewayFlag(0, 100))
 	for i := range 30 {
@@ -261,7 +261,7 @@ spec:
 	waitRoute(t, entry, "/api/orders", "rolled", "service-canary")
 	t.Log("IngressRoute CRD update and rollback converged without Traefik restart")
 
-	// The auth process remains available while its GoLab upstream stalls.
+	// The auth process remains available while its Grayling upstream stalls.
 	listener, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		t.Fatal(err)
@@ -274,7 +274,7 @@ spec:
 	slow.Start()
 	defer slow.Close()
 	slowUpstream := "http://" + net.JoinHostPort(hostGateway, fmt.Sprint(listener.Addr().(*net.TCPAddr).Port))
-	kube(t, nil, "-n", k8sNamespace, "set", "env", "deployment/proxy", "GOLAB_UPSTREAM="+slowUpstream)
+	kube(t, nil, "-n", k8sNamespace, "set", "env", "deployment/proxy", "GRAYLING_UPSTREAM="+slowUpstream)
 	kube(t, nil, "-n", k8sNamespace, "rollout", "status", "deployment/proxy", "--timeout=90s")
 	var reply *backendReply
 	deadline = time.Now().Add(25 * time.Second)
@@ -291,17 +291,17 @@ spec:
 	if status != 200 || reply.Backend != "service-stable" || reply.FailOpen != "upstream_timeout" {
 		t.Fatalf("proxy timeout: status=%d reply=%+v", status, reply)
 	}
-	kube(t, nil, "-n", k8sNamespace, "set", "env", "deployment/proxy", "GOLAB_UPSTREAM="+upstream)
+	kube(t, nil, "-n", k8sNamespace, "set", "env", "deployment/proxy", "GRAYLING_UPSTREAM="+upstream)
 	kube(t, nil, "-n", k8sNamespace, "rollout", "status", "deployment/proxy", "--timeout=90s")
 	waitRoute(t, entry, "/api/orders", "healthy-again", "service-canary")
 	t.Log("proxy evaluation timeout: 200 default stable with upstream_timeout")
 
-	fx.golab.stop()
+	fx.grayling.stop()
 	status, reply, _ = gatewayRequest(t, entry, "/api/outage", "outage-key", nil, "GET")
 	if status != 200 || reply.Backend != "service-stable" || reply.FailOpen != "upstream_unreachable" {
-		t.Fatalf("GoLab outage: status=%d reply=%+v", status, reply)
+		t.Fatalf("Grayling outage: status=%d reply=%+v", status, reply)
 	}
-	t.Log("GoLab outage: 200 default stable with upstream_unreachable")
+	t.Log("Grayling outage: 200 default stable with upstream_unreachable")
 
 	kube(t, nil, "-n", k8sNamespace, "scale", "deployment/proxy", "--replicas=0")
 	kube(t, nil, "-n", k8sNamespace, "rollout", "status", "deployment/proxy", "--timeout=60s")

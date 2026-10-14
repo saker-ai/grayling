@@ -25,7 +25,7 @@ import (
 // starts it after preparing PostgreSQL, so its store begins with a separate
 // in-memory snapshot that must be refreshed under the plan lock.
 func TestRolloutReplicaProcessHelper(t *testing.T) {
-	dsn := os.Getenv("GOLAB_ROLLOUT_REPLICA_DSN")
+	dsn := os.Getenv("GRAYLING_ROLLOUT_REPLICA_DSN")
 	if dsn == "" {
 		t.Skip("helper process only")
 	}
@@ -61,7 +61,7 @@ func TestTwoProcessPlanConflictAndReportEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(t.Context(), executable, "-test.run=^TestRolloutReplicaProcessHelper$")
-	cmd.Env = append(os.Environ(), "GOLAB_ROLLOUT_REPLICA_DSN="+dsn)
+	cmd.Env = append(os.Environ(), "GRAYLING_ROLLOUT_REPLICA_DSN="+dsn)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)

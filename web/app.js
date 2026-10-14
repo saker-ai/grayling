@@ -1,7 +1,7 @@
 'use strict';
 
 // ---------------------------------------------------------------------------
-// GoLab admin console — plain fetch + DOM, no frameworks, no build step.
+// Grayling admin console — plain fetch + DOM, no frameworks, no build step.
 // All dynamic data is injected via esc()/textContent, never raw innerHTML.
 // ---------------------------------------------------------------------------
 
@@ -100,7 +100,7 @@ function toast(msg, ok = true) {
 class ApiError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
 }
-function baseUrl() { return (localStorage.getItem('golab_url') || '').replace(/\/+$/, ''); }
+function baseUrl() { return (localStorage.getItem('grayling_url') || '').replace(/\/+$/, ''); }
 let memoryToken = '';
 let cookieSession = false;
 const sameOriginConsole = () => !baseUrl() || baseUrl() === location.origin;
@@ -203,8 +203,8 @@ async function run(fn, okMsg, savedEditor = false) {
 // ---------------------------------------------------------------------------
 const S = {
   view: 'overview',
-  ws: localStorage.getItem('golab_ws') || '',
-  env: localStorage.getItem('golab_env') || '',
+  ws: localStorage.getItem('grayling_ws') || '',
+  env: localStorage.getItem('grayling_env') || '',
   workspaces: [], envs: [],
   capabilities: null,
   globalCapabilities: null,
@@ -575,7 +575,7 @@ async function route() {
 // ---------------------------------------------------------------------------
 function showAuth(msg, preserveEditor = false) {
   if (preserveEditor) captureReauthDraft();
-  $('#auth-url').value = localStorage.getItem('golab_url') || '';
+  $('#auth-url').value = localStorage.getItem('grayling_url') || '';
   $('#auth-token').value = '';
   if (msg !== undefined) $('#auth-error').textContent = msg;
   $('#app').classList.add('hidden');
@@ -585,7 +585,7 @@ function showAuth(msg, preserveEditor = false) {
 async function doConnect() {
   const tok = $('#auth-token').value.trim();
   if (!tok) { $('#auth-error').textContent = t('auth.enterToken'); return; }
-  localStorage.setItem('golab_url', $('#auth-url').value.trim());
+  localStorage.setItem('grayling_url', $('#auth-url').value.trim());
   $('#auth-error').textContent = t('auth.connecting');
   try {
     const target = new URL(baseUrl() || location.origin);
@@ -648,7 +648,7 @@ async function loadWorkspaces() {
     if (S.deepLinkRequested && S.ws) S.deepLinkDenied = true;
     S.ws = S.workspaces.length ? S.workspaces[0].slug : '';
   }
-  localStorage.setItem('golab_ws', S.ws);
+  localStorage.setItem('grayling_ws', S.ws);
   sel.value = S.ws;
   await loadEnvs();
   await refreshCapabilities();
@@ -664,7 +664,7 @@ async function loadEnvs() {
     if (S.deepLinkRequested && S.env) S.deepLinkDenied = true;
     S.env = S.envs.length ? S.envs[0].slug : '';
   }
-  localStorage.setItem('golab_env', S.env);
+  localStorage.setItem('grayling_env', S.env);
   sel.value = S.env;
 }
 
@@ -949,7 +949,7 @@ const OPS = ['eq', 'ne', 'in', 'not_in', 'gt', 'gte', 'lt', 'lte', 'time_before'
 function flagTemplate(key) {
   return {
     schemaVersion: 1, key, type: 'bool', disable: false,
-    bucketing: { algorithm: 'golab-fnv1a-10000-v1', unit: 'user_id', salt: 's1' },
+    bucketing: { algorithm: 'grayling-fnv1a-10000-v1', unit: 'user_id', salt: 's1' },
     fields: ['user_id'],
     variations: { control: false, treatment: true },
     defaultRule: { variation: 'control' },
@@ -2761,7 +2761,7 @@ function init() {
     S.auditObject = ''; S.auditQuery = ''; S.auditCursors = [0]; S.auditPage = 0;
     S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;
     S.expCreate = S.wizardDirty = false;
-    localStorage.setItem('golab_ws', S.ws);
+    localStorage.setItem('grayling_ws', S.ws);
     try { await loadEnvs(); await refreshCapabilities(); } catch (e) { reportError(e); }
     route();
     probeAI();
@@ -2774,7 +2774,7 @@ function init() {
     S.deepLinkRequested = false;
     S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;
     S.expCreate = S.wizardDirty = false;
-    localStorage.setItem('golab_env', S.env);
+    localStorage.setItem('grayling_env', S.env);
     route();
     probeAI();
   };
@@ -2787,7 +2787,7 @@ function init() {
     await api('/api/v1/admin/workspaces', { method: 'POST', body: { slug, name: v.name.trim() || slug } });
     toast(t('toast.wsCreated'));
     S.ws = slug;
-    localStorage.setItem('golab_ws', S.ws);
+    localStorage.setItem('grayling_ws', S.ws);
     await loadWorkspaces();
     route();
     probeAI();
@@ -2803,14 +2803,14 @@ function init() {
       await api(wsPath() + '/environments', { method: 'POST', body: { slug, name: v.name.trim() || slug } });
       toast(t('toast.envCreated'));
       S.env = slug;
-      localStorage.setItem('golab_env', S.env);
+      localStorage.setItem('grayling_env', S.env);
       await loadEnvs();
       route();
       probeAI();
     });
   };
 
-  localStorage.removeItem('golab_token'); // remove credentials saved by older console versions
+  localStorage.removeItem('grayling_token'); // remove credentials saved by older console versions
   if (sameOriginConsole()) {
     cookieSession = true;
     api('/api/v1/admin/session').then(() => boot()).catch(() => { cookieSession = false; showAuth(''); });

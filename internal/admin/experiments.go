@@ -128,7 +128,7 @@ func (s *Service) ReviewExperiment(actor Actor, experimentID string, note string
 // new draft and fast-tracks it through submit+approve so the publisher can
 // publish it. The flag must already contain a percentage rule matching the
 // registered proportions and a deterministic defaultRule.variation (§6:
-// non-enrolled fallback). GoLab does not silently rewrite human-authored
+// non-enrolled fallback). Grayling does not silently rewrite human-authored
 // rules; it validates the structure and only adds the binding block.
 func (s *Service) BindExperimentFlag(actor Actor, experimentID string) (*platform.FlagDraft, error) {
 	exp, err := s.Store.GetExperiment(experimentID)

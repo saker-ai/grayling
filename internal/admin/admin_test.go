@@ -331,7 +331,7 @@ func TestRollbackDetectsPrunedRevision(t *testing.T) {
 	v2.Bucketing.Salt = "v2"
 	fullPublishFlow(t, f, f.publisher, f.owner, v2)
 
-	// Simulate substrate pruning: remove the r1 document behind GoLab's back.
+	// Simulate substrate pruning: remove the r1 document behind Grayling's back.
 	if err := f.svc.Config.DeleteDoc(f.env.NamespaceID, configstore.FlagDataID("prune", 1)); err != nil {
 		t.Fatalf("DeleteDoc: %v", err)
 	}
@@ -787,7 +787,7 @@ func TestTokenScopingAndResolution(t *testing.T) {
 
 func TestNamespaceMappingGenerated(t *testing.T) {
 	f := newFixture(t)
-	if f.env.NamespaceID != "golab-"+f.ws.ID+"-"+f.env.ID {
+	if f.env.NamespaceID != "grayling-"+f.ws.ID+"-"+f.env.ID {
 		t.Fatalf("namespace mapping = %q", f.env.NamespaceID)
 	}
 	// Two workspaces with same env slug get different namespaces.

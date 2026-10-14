@@ -83,7 +83,7 @@ func (s *Server) handleSDKConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func snapshotETag(revision int64) string {
-	return fmt.Sprintf(`"golab-r%d"`, revision)
+	return fmt.Sprintf(`"grayling-r%d"`, revision)
 }
 
 // ---------------------------------------------------------------------------

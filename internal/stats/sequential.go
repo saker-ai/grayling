@@ -18,7 +18,7 @@ import "math"
 //      the error rate across a PRE-PLANNED number/timing of interim analyses;
 //      deviating from that schedule breaks validity. The mSPRT is valid for a
 //      CONTINUUM of looks at arbitrary, data-dependent times — exactly how
-//      GoLab's console refreshes a report on demand (§11) and how the rollout
+//      Grayling's console refreshes a report on demand (§11) and how the rollout
 //      engine consults the gate every tick (§5.3). We cannot promise operators
 //      will look a fixed number of times.
 //   2. Single closed form. The mSPRT p-value and confidence sequence are one

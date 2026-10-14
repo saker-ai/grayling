@@ -12,18 +12,18 @@ import urllib.request
 
 
 API = "http://127.0.0.1:28688"
-NAMESPACE = "golab-issue13"
+NAMESPACE = "grayling-issue13"
 
 
 def owner_token():
-    for pod in ("golab-a", "golab-b"):
+    for pod in ("grayling-a", "grayling-b"):
         result = subprocess.run(
-            ["kubectl", "-n", NAMESPACE, "logs", pod, "-c", "golab"],
+            ["kubectl", "-n", NAMESPACE, "logs", pod, "-c", "grayling"],
             check=True, capture_output=True, text=True,
         )
         for line in result.stdout.splitlines():
             for word in line.split():
-                if word.startswith("glab_admin_"):
+                if word.startswith("grayling_admin_"):
                     return word
     raise RuntimeError("bootstrap owner token was not found in test Pod logs")
 

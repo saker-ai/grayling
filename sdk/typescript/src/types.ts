@@ -1,5 +1,5 @@
 /**
- * Wire types mirroring the GoLab evaluation contract (pkg/model).
+ * Wire types mirroring the Grayling evaluation contract (pkg/model).
  */
 
 /** Randomization unit + targeting attributes for one evaluation (§6). */

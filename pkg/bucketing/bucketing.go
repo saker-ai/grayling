@@ -1,5 +1,5 @@
-// Package bucketing implements the GoLab stable-bucketing specification
-// golab-fnv1a-10000-v1 (docs/技术方案.md §6).
+// Package bucketing implements the Grayling stable-bucketing specification
+// grayling-fnv1a-10000-v1 (docs/技术方案.md §6).
 //
 // # Specification (normative)
 //
@@ -49,7 +49,7 @@ import (
 )
 
 // AlgorithmID is the version tag stored in flag bucketing configs.
-const AlgorithmID = "golab-fnv1a-10000-v1"
+const AlgorithmID = "grayling-fnv1a-10000-v1"
 
 // Buckets is the fixed modulus of the v1 specification.
 const Buckets = 10000

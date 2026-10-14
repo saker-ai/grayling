@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	consoleCookieName = "golab_admin_session"
+	consoleCookieName = "grayling_admin_session"
 	consoleSessionTTL = 8 * time.Hour
 )
 
@@ -26,7 +26,7 @@ func (s *Server) initConsoleSessionKey(secret string) error {
 		_, err := rand.Read(s.consoleSessionKey[:])
 		return err
 	}
-	s.consoleSessionKey = sha256.Sum256([]byte("golab console session v1\x00" + secret))
+	s.consoleSessionKey = sha256.Sum256([]byte("grayling console session v1\x00" + secret))
 	return nil
 }
 

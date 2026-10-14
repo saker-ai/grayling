@@ -2,7 +2,7 @@
 // specs) stored in embedded gonacos or external Nacos config documents.
 //
 // gonacos AI resources are indexed by GLOBAL IDs without any namespace
-// field, so tenant isolation cannot come from the substrate. GoLab provides
+// field, so tenant isolation cannot come from the substrate. Grayling provides
 // it instead:
 //
 //   - every logical resource is registered in the platform ownership index
@@ -42,7 +42,7 @@ var (
 	ErrUnauthorized     = errors.New("ai: resource not resolvable in this scope")
 	ErrRevoked          = errors.New("ai: resource revoked")
 	ErrDigestDrift      = errors.New("ai: published content digest changed (refusing to serve)")
-	ErrVersionNotPinned = errors.New("ai: version was never pinned by GoLab")
+	ErrVersionNotPinned = errors.New("ai: version was never pinned by Grayling")
 	ErrTypeUnsupported  = errors.New("ai: resource type not supported for managed hosting")
 	ErrModelNotAllowed  = errors.New("ai: model not in workspace allowlist")
 )
@@ -102,17 +102,17 @@ func (s *Service) RegisterResource(workspaceID, environmentID, typ, logicalID, n
 	switch typ {
 	case platform.AITypePrompt:
 		if _, err := s.Gonacos.CreatePromptDraft(ref.PhysicalID, name, "placeholder", actor,
-			[]string{"golab-managed"}, nil, "GoLab-managed resource "+typ+"/"+logicalID, nil); err != nil {
+			[]string{"grayling-managed"}, nil, "Grayling-managed resource "+typ+"/"+logicalID, nil); err != nil {
 			return nil, fmt.Errorf("ai: gonacos create prompt: %w", err)
 		}
 	case platform.AITypeSkill:
 		if _, err := s.Gonacos.CreateSkillDraft(ref.PhysicalID, name, "placeholder", actor,
-			[]string{"golab-managed"}, nil, "GoLab-managed resource "+typ+"/"+logicalID, nil); err != nil {
+			[]string{"grayling-managed"}, nil, "Grayling-managed resource "+typ+"/"+logicalID, nil); err != nil {
 			return nil, fmt.Errorf("ai: gonacos create skill: %w", err)
 		}
 	case platform.AITypeAgentSpec:
 		if _, err := s.Gonacos.CreateAgentSpecDraft(ref.PhysicalID, name, "placeholder", actor,
-			[]string{"golab-managed"}, nil, "GoLab-managed resource "+typ+"/"+logicalID, nil); err != nil {
+			[]string{"grayling-managed"}, nil, "Grayling-managed resource "+typ+"/"+logicalID, nil); err != nil {
 			return nil, fmt.Errorf("ai: gonacos create agentspec: %w", err)
 		}
 	}
@@ -120,7 +120,7 @@ func (s *Service) RegisterResource(workspaceID, environmentID, typ, logicalID, n
 }
 
 // PublishVersion writes new content, publishes it as the next immutable
-// gonacos version and pins (version, digest) in the GoLab index.
+// gonacos version and pins (version, digest) in the Grayling index.
 //
 // gonacos lifecycle quirks handled here:
 //   - Upload* helpers silently publish an already-open draft when
@@ -205,7 +205,7 @@ func (s *Service) PublishVersionContext(ctx context.Context, workspaceID, enviro
 }
 
 func externalDataID(typ, physicalID, version string) string {
-	return "golab.ai." + typ + "." + physicalID + "." + version
+	return "grayling.ai." + typ + "." + physicalID + "." + version
 }
 
 func (s *Service) publishExternal(ctx context.Context, workspaceID, environmentID, typ, logicalID, content, actor string, ref *platform.AIResourceRef) (*platform.PinnedVersion, error) {
@@ -251,7 +251,7 @@ func (s *Service) redraftUpdatePublish(redraft, updateDraft, publish func() (*go
 }
 
 // md5Hex mirrors gonacos's internal digest (hex(md5(content))) — it is the
-// digest recorded on every gonacos Version, so GoLab must compute it
+// digest recorded on every gonacos Version, so Grayling must compute it
 // identically for drift checks.
 func md5Hex(content string) string {
 	sum := md5.Sum([]byte(content))
@@ -348,7 +348,7 @@ func (s *Service) ResolveContext(ctx context.Context, workspaceID, environmentID
 }
 
 // ResolveModelRef validates one modelRef against the workspace allowlist
-// (§7: modelRef 是 GoLab 适配器维护的 provider/model/参数白名单).
+// (§7: modelRef 是 Grayling 适配器维护的 provider/model/参数白名单).
 func (s *Service) ResolveModelRef(workspaceID, provider, modelName string) (platform.ModelAllowEntry, error) {
 	entry, ok := s.Store.ModelAllowed(workspaceID, provider, modelName)
 	if !ok {

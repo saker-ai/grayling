@@ -1,7 +1,7 @@
 {
-  "name": "@golab/sdk",
+  "name": "@grayling/sdk",
   "version": "0.1.0",
-  "description": "GoLab feature-flag & experiment SDK for TypeScript/Node — remote evaluation with config cache/polling and collect-contract event reporting",
+  "description": "Grayling feature-flag & experiment SDK for TypeScript/Node — remote evaluation with config cache/polling and collect-contract event reporting",
   "type": "module",
   "private": true,
   "main": "./src/client.ts",

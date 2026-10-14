@@ -165,7 +165,7 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		envID = env.ID
 	}
 	// Tokens are always scoped to the workspace in the path. Global owner
-	// tokens are bootstrap-only (minted by cmd/golab), never via this
+	// tokens are bootstrap-only (minted by cmd/grayling), never via this
 	// endpoint — a workspace owner cannot escalate to global.
 	ct, err := s.Store.CreateToken(req.Kind, req.Name, req.Role, resolved.ID, envID, actor.Name)
 	if err != nil {
@@ -507,7 +507,7 @@ func (s *Server) handleMarkDeleted(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleImportGff converts a pasted gff document into a GoLab draft. The
+// handleImportGff converts a pasted gff document into a Grayling draft. The
 // import is strict: unsupported fields are errors, never silent drops
 // (§5.2). Warnings are returned alongside the draft.
 func (s *Server) handleImportGff(w http.ResponseWriter, r *http.Request) {
@@ -539,7 +539,7 @@ func (s *Server) handleImportGff(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"flag": flag, "warnings": warnings, "draft": draft,
-		"note": "imported drafts are HIGH risk: GoLab's fixed-bucket algorithm does not reproduce gff assignments (§2)",
+		"note": "imported drafts are HIGH risk: Grayling's fixed-bucket algorithm does not reproduce gff assignments (§2)",
 	})
 }
 

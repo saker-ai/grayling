@@ -505,7 +505,7 @@ func (s *Store) RunChangeSync(ctx context.Context, interval time.Duration, logf 
 		connectCtx, connectCancel := context.WithTimeout(ctx, interval)
 		conn, err := pgx.Connect(connectCtx, p.pool.Config().ConnConfig.ConnString())
 		if err == nil {
-			_, err = conn.Exec(connectCtx, `LISTEN golab_control`)
+			_, err = conn.Exec(connectCtx, `LISTEN grayling_control`)
 		}
 		connectCancel()
 		if err != nil {

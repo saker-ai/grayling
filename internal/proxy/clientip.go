@@ -1,5 +1,5 @@
 // Trusted-proxy-chain client IP derivation for the evaluation paths
-// (docs/traefik-golab-architecture.md "按 client IP 灰度").
+// (docs/traefik-grayling-architecture.md "按 client IP 灰度").
 //
 // The proxy can inject the client IP it derives from the connection into
 // the evaluation context under the reserved attribute name

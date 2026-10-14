@@ -60,7 +60,7 @@ func TestBanditReplicaAndOfflineFallback(t *testing.T) {
 
 func BenchmarkBanditEvaluation(b *testing.B) {
 	f := &model.Flag{SchemaVersion: model.SchemaVersion, Key: "bandit", Type: model.FlagString,
-		Fields: []string{"user_id"}, Bucketing: &model.Bucketing{Algorithm: "golab-fnv1a-10000-v1", Unit: "user_id"},
+		Fields: []string{"user_id"}, Bucketing: &model.Bucketing{Algorithm: "grayling-fnv1a-10000-v1", Unit: "user_id"},
 		Variations: map[string]any{"a": "a", "b": "b"}, DefaultRule: &model.Rule{Variation: "a"},
 		Targeting: []model.Rule{{Percentage: map[string]float64{"a": 50, "b": 50}}},
 		Experiment: &model.ExperimentBinding{ID: "e", Epoch: 1, State: model.ExperimentRunning,

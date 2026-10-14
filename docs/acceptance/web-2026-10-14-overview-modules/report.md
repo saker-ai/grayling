@@ -4,7 +4,7 @@
 
 验收 C2 提交：总览页风险带、待我处理审批、近期发布三模块（单请求读取服务端汇总端点 `GET {ws}/overview`，模块级降级与覆盖范围声明）。
 
-- 服务：本仓库 `GOWORK=off make build` 产出的 `bin/golab`，隔离数据目录 `/tmp/golab-c2-acceptance/store.json`（全新初始化，未触碰仓库 `data/` 下真实文件），监听 `127.0.0.1:19090`，`GOLAB_ADMIN_PASSWORD` 设固定密码；内置 gonacos 绑定 `127.0.0.1:19091/19092`。验收结束已 kill 服务进程并删除临时目录。
+- 服务：本仓库 `GOWORK=off make build` 产出的 `bin/grayling`，隔离数据目录 `/tmp/grayling-c2-acceptance/store.json`（全新初始化，未触碰仓库 `data/` 下真实文件），监听 `127.0.0.1:19090`，`GRAYLING_ADMIN_PASSWORD` 设固定密码；内置 gonacos 绑定 `127.0.0.1:19091/19092`。验收结束已 kill 服务进程并删除临时目录。
 - 浏览器：`agent-browser` CLI 驱动 headless Chromium（本机 userns 限制要求 `--no-sandbox` 启动参数）。界面语言为中文，截图不含令牌明文。
 - 预置数据全部经真实管理 API 走真实业务流程产生（curl + admin token，未直接改存储）：
   - 工作空间 `acceptance` / 环境 `prod`；bootstrap owner、`alice`（owner）、`carol-viewer`（viewer）三个 admin 令牌。
@@ -34,5 +34,5 @@
 ## 验证
 
 - `node web/render_contract.mjs && node web/i18n_contract.mjs && node web/rollout_contract.mjs && node web/capability_contract.mjs && node web/flag_publish_contract.mjs`：全部通过。
-- `GOLAB_TEST_PG_DSN='postgres://postgres:golab-test@127.0.0.1:15500/golab_test?sslmode=disable' GOWORK=off go test ./web ./internal/api -count=1`：`ok` ×2。
+- `GRAYLING_TEST_PG_DSN='postgres://postgres:grayling-test@127.0.0.1:15500/grayling_test?sslmode=disable' GOWORK=off go test ./web ./internal/api -count=1`：`ok` ×2。
 - `GOWORK=off go build ./...`、`git diff --check`：通过。

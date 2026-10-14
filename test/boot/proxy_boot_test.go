@@ -1,5 +1,5 @@
-// Proxy deployment boot test: builds BOTH binaries (cmd/golab and
-// cmd/golab-proxy), runs the proxy as an independent process in front of the
+// Proxy deployment boot test: builds BOTH binaries (cmd/grayling and
+// cmd/grayling-proxy), runs the proxy as an independent process in front of the
 // real server, and verifies the deployment shape end to end — readiness vs
 // liveness, remote evaluation, collection relay and clean shutdowns
 // (docs/技术方案.md §3: 独立 proxy 部署形态).
@@ -92,8 +92,8 @@ func TestProxyBinaryDeployment(t *testing.T) {
 		t.Skip("boot test builds and runs binaries; skipped in -short")
 	}
 	root := repoRoot(t)
-	golabBin := buildBin(t, "./cmd/golab", "golab")
-	proxyBin := buildBin(t, "./cmd/golab-proxy", "golab-proxy")
+	graylingBin := buildBin(t, "./cmd/grayling", "grayling")
+	proxyBin := buildBin(t, "./cmd/grayling-proxy", "grayling-proxy")
 	gonacosRoot := resolveGonacosRoot(t, root)
 
 	dataDir := t.TempDir()
@@ -103,14 +103,14 @@ func TestProxyBinaryDeployment(t *testing.T) {
 	grpcPort := freePort(t)
 
 	tokenCh := make(chan string, 1)
-	golabCmd := startProcess(t, golabBin, []string{
+	graylingCmd := startProcess(t, graylingBin, []string{
 		"-addr", fmt.Sprintf("127.0.0.1:%d", apiPort),
 		"-data", filepath.Join(dataDir, "store.json"),
 		"-gonacos-root", gonacosRoot,
 		"-gonacos-data", filepath.Join(dataDir, "gonacos"),
 		"-gonacos-addr", fmt.Sprintf("127.0.0.1:%d", napPort),
 		"-gonacos-grpc-addr", fmt.Sprintf("127.0.0.1:%d", grpcPort),
-	}, "glab_admin_", tokenCh)
+	}, "grayling_admin_", tokenCh)
 
 	apiBase := fmt.Sprintf("http://127.0.0.1:%d", apiPort)
 	waitHealthy(t, apiBase, 20*time.Second)
@@ -289,14 +289,14 @@ func TestProxyBinaryDeployment(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("proxy did not exit after SIGTERM")
 	}
-	if err := golabCmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatalf("golab sigterm: %v", err)
+	if err := graylingCmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("grayling sigterm: %v", err)
 	}
 	done2 := make(chan error, 1)
-	go func() { done2 <- golabCmd.Wait() }()
+	go func() { done2 <- graylingCmd.Wait() }()
 	select {
 	case <-done2:
 	case <-time.After(20 * time.Second):
-		t.Fatal("golab did not exit after SIGTERM")
+		t.Fatal("grayling did not exit after SIGTERM")
 	}
 }

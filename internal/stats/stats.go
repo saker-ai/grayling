@@ -1,5 +1,5 @@
 // Package stats implements the fixed-sample frequentist statistics engine for
-// GoLab experiments: sufficient-statistic aggregation, Welch's t-test for mean
+// Grayling experiments: sufficient-statistic aggregation, Welch's t-test for mean
 // metrics, a two-proportion z-test for proportion metrics, Sample Ratio
 // Mismatch (SRM) detection, and the ship/rollback decision gate.
 //

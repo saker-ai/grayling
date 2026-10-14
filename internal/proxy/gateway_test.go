@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// evalUpstream mimics the GoLab /api/v1/sdk/eval contract and records what
+// evalUpstream mimics the Grayling /api/v1/sdk/eval contract and records what
 // the gateway endpoint sent.
 type evalUpstream struct {
 	t        *testing.T
@@ -57,7 +57,7 @@ const gwPath = "/api/v1/gateway/forwardauth?flagKey=checkout-router&defaultVaria
 func TestGatewayForwardAuthHappyPath(t *testing.T) {
 	up, srv := newEvalUpstream(t, "canary", "SPLIT")
 	px := newTestProxy(t, srv.URL, func(c *Config) {
-		c.Gateway = GatewayConfig{Token: "glab_sdk_test", EvalTimeout: 2 * time.Second}
+		c.Gateway = GatewayConfig{Token: "grayling_sdk_test", EvalTimeout: 2 * time.Second}
 	})
 
 	req, _ := http.NewRequest("GET", px.URL+gwPath, nil)
@@ -70,22 +70,22 @@ func TestGatewayForwardAuthHappyPath(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
-	if got := resp.Header.Get("X-Golab-Variant"); got != "canary" {
-		t.Fatalf("X-Golab-Variant = %q, want canary", got)
+	if got := resp.Header.Get("X-Grayling-Variant"); got != "canary" {
+		t.Fatalf("X-Grayling-Variant = %q, want canary", got)
 	}
-	if got := resp.Header.Get("X-Golab-Reason"); got != "SPLIT" {
-		t.Fatalf("X-Golab-Reason = %q", got)
+	if got := resp.Header.Get("X-Grayling-Reason"); got != "SPLIT" {
+		t.Fatalf("X-Grayling-Reason = %q", got)
 	}
-	if got := resp.Header.Get("X-Golab-Flag-Key"); got != "checkout-router" {
-		t.Fatalf("X-Golab-Flag-Key = %q", got)
+	if got := resp.Header.Get("X-Grayling-Flag-Key"); got != "checkout-router" {
+		t.Fatalf("X-Grayling-Flag-Key = %q", got)
 	}
-	if got := resp.Header.Get("X-Golab-Fail-Open"); got != "" {
-		t.Fatalf("healthy evaluation must not set X-Golab-Fail-Open: %q", got)
+	if got := resp.Header.Get("X-Grayling-Fail-Open"); got != "" {
+		t.Fatalf("healthy evaluation must not set X-Grayling-Fail-Open: %q", got)
 	}
 
 	// The upstream call must carry the proxy's own SDK credential and the
 	// bucketing key in BOTH targetingKey and the configured unit field.
-	if auth, _ := up.lastAuth.Load().(string); auth != "Bearer glab_sdk_test" {
+	if auth, _ := up.lastAuth.Load().(string); auth != "Bearer grayling_sdk_test" {
 		t.Fatalf("upstream auth = %q", auth)
 	}
 	body, _ := up.lastBody.Load().(string)
@@ -117,8 +117,8 @@ func TestGatewayForwardAuthTargetingKeyOnly(t *testing.T) {
 	}
 	resp.Body.Close()
 	// unitField=targetingKey + no unit header → fail-open, upstream untouched.
-	if resp.Header.Get("X-Golab-Fail-Open") != "missing_bucket_key" {
-		t.Fatalf("fail-open reason: %q", resp.Header.Get("X-Golab-Fail-Open"))
+	if resp.Header.Get("X-Grayling-Fail-Open") != "missing_bucket_key" {
+		t.Fatalf("fail-open reason: %q", resp.Header.Get("X-Grayling-Fail-Open"))
 	}
 	if up.hits.Load() != 0 {
 		t.Fatal("upstream must not be called without a bucketing key")
@@ -155,7 +155,7 @@ func TestGatewayForwardAuthTargetingKeyOnly(t *testing.T) {
 
 func TestGatewayFailOpenMatrix(t *testing.T) {
 	// Every internal failure must answer 200 with the default variant and
-	// an X-Golab-Fail-Open reason — never a 4xx/5xx (the gateway would
+	// an X-Grayling-Fail-Open reason — never a 4xx/5xx (the gateway would
 	// reject or 5xx the client request).
 	cases := []struct {
 		name       string
@@ -233,12 +233,12 @@ func TestGatewayFailOpenMatrix(t *testing.T) {
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("fail-open must answer 200, got %d", resp.StatusCode)
 			}
-			if got := resp.Header.Get("X-Golab-Fail-Open"); got != tc.wantReason {
-				t.Fatalf("X-Golab-Fail-Open = %q, want %q", got, tc.wantReason)
+			if got := resp.Header.Get("X-Grayling-Fail-Open"); got != tc.wantReason {
+				t.Fatalf("X-Grayling-Fail-Open = %q, want %q", got, tc.wantReason)
 			}
 			// Every matrix case configures defaultVariant=stable; the
 			// fail-open answer must carry it.
-			if got := resp.Header.Get("X-Golab-Variant"); got != "stable" {
+			if got := resp.Header.Get("X-Grayling-Variant"); got != "stable" {
 				t.Fatalf("fail-open variant = %q, want stable", got)
 			}
 			if up.hits.Load() != tc.wantHits {
@@ -252,7 +252,7 @@ func TestGatewayFailOpenUpstreamDown(t *testing.T) {
 	// Upstream unreachable (real closed port) → fail-open, not 5xx.
 	_, dead := newEvalUpstream(t, "", "")
 	deadURL := dead.URL
-	dead.Close() // the eval service keeps running while GoLab is down
+	dead.Close() // the eval service keeps running while Grayling is down
 	px := newTestProxy(t, deadURL, func(c *Config) {
 		c.Gateway = GatewayConfig{Token: "tok", EvalTimeout: time.Second}
 	})
@@ -267,10 +267,10 @@ func TestGatewayFailOpenUpstreamDown(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if got := resp.Header.Get("X-Golab-Fail-Open"); got != "upstream_unreachable" {
+	if got := resp.Header.Get("X-Grayling-Fail-Open"); got != "upstream_unreachable" {
 		t.Fatalf("fail-open reason = %q", got)
 	}
-	if got := resp.Header.Get("X-Golab-Variant"); got != "stable" {
+	if got := resp.Header.Get("X-Grayling-Variant"); got != "stable" {
 		t.Fatalf("variant = %q, want stable", got)
 	}
 }
@@ -295,7 +295,7 @@ func TestGatewayFailOpenTimeout(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	if got := resp.Header.Get("X-Golab-Fail-Open"); got != "upstream_timeout" {
+	if got := resp.Header.Get("X-Grayling-Fail-Open"); got != "upstream_timeout" {
 		t.Fatalf("fail-open reason = %q, want upstream_timeout", got)
 	}
 }
@@ -328,10 +328,10 @@ func TestGatewaySecretEnforcement(t *testing.T) {
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("status = %d, want 200 (fail-open invariant)", resp.StatusCode)
 			}
-			if got := resp.Header.Get("X-Golab-Fail-Open"); got != "unauthorized" {
+			if got := resp.Header.Get("X-Grayling-Fail-Open"); got != "unauthorized" {
 				t.Fatalf("fail-open reason = %q, want unauthorized", got)
 			}
-			if got := resp.Header.Get("X-Golab-Variant"); got != "stable" {
+			if got := resp.Header.Get("X-Grayling-Variant"); got != "stable" {
 				t.Fatalf("variant = %q, want the static default stable", got)
 			}
 			if up.hits.Load() != hitsBefore {
@@ -351,10 +351,10 @@ func TestGatewaySecretEnforcement(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("status = %d", resp.StatusCode)
 		}
-		if got := resp.Header.Get("X-Golab-Variant"); got != "canary" {
+		if got := resp.Header.Get("X-Grayling-Variant"); got != "canary" {
 			t.Fatalf("variant = %q, want the evaluated canary", got)
 		}
-		if got := resp.Header.Get("X-Golab-Fail-Open"); got != "" {
+		if got := resp.Header.Get("X-Grayling-Fail-Open"); got != "" {
 			t.Fatalf("authorized evaluation must not fail open: %q", got)
 		}
 		if up.hits.Load() == 0 {

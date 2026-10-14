@@ -4,7 +4,7 @@
 
 验收 C5 提交：实验详情决策摘要区首屏按六类状态（未启动 / 无样本 / 未成熟 / 已阻止 / 可推进 / 已结束）渲染独立主文案与主动作；纯函数 `classifyExpStatus` 分类，优先级为“报告读取失败 > 无 report.read > 六类”；ETA 缺失只给降级文案不做估算；no_samples 子分支只引用 diagnostics 真实分配/曝光字段；blocked 逐字引用服务端 reasons/healthIssues 与服务端维护的影响范围；ended 的操作者/时间/原因取最新 `experiment.transition` 审计，取不到给降级文案+审计链接；can_advance 展示真实主指标与护栏摘要且不宣称绝对获胜。
 
-- 服务：本仓库 `go build ./cmd/golab` 产出的 `bin/golab`，隔离数据目录 `/tmp/golab-c5-acceptance/store.json`（全新初始化，未触碰仓库 `data/`），监听 `127.0.0.1:19095`（内置 gonacos `19096/19097`），`GOLAB_ADMIN_PASSWORD` 设固定 12+ 字节密码。验收结束已 kill 服务进程、删除临时目录（含 gonacos 子目录）并关闭两个浏览器会话。
+- 服务：本仓库 `go build ./cmd/grayling` 产出的 `bin/grayling`，隔离数据目录 `/tmp/grayling-c5-acceptance/store.json`（全新初始化，未触碰仓库 `data/`），监听 `127.0.0.1:19095`（内置 gonacos `19096/19097`），`GRAYLING_ADMIN_PASSWORD` 设固定 12+ 字节密码。验收结束已 kill 服务进程、删除临时目录（含 gonacos 子目录）并关闭两个浏览器会话。
 - 浏览器：`agent-browser` CLI 驱动 headless Chromium（`AGENT_BROWSER_ARGS="--no-sandbox"`），界面语言中文，桌面 1440×900、手机 390×844；截图不含令牌明文（登录用密码，viewer 场景登录在独立 session）。
 - 预置数据全部经真实管理 API 走真实业务流程产生（curl + owner/alice 令牌，未直接改存储）：
   - 工作空间 `acceptance` / 环境 `prod`；令牌 `alice-publisher`（publisher，负责批准与暂停操作）、`vince-viewer`（viewer，角色裁剪）、`sdk-eval`（sdk）、`collect-writer`（collect）。

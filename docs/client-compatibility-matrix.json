@@ -28,10 +28,10 @@
     },
     {
       "id": "tls-l4-two-node",
-      "topology": "host-local TLS/L4 proxy, two GoLab nodes with real PostgreSQL and Redis",
+      "topology": "host-local TLS/L4 proxy, two Grayling nodes with real PostgreSQL and Redis",
       "features": ["subscribe", "node failover", "tenant isolation", "credential revocation", "HTTP/2 shared-connection negative probe"],
       "package": "./test/cluster",
-      "tests": ["TestOfficialNacosClientFailsOverAcrossGolabNodes"],
+      "tests": ["TestOfficialNacosClientFailsOverAcrossGraylingNodes"],
       "tier": "cluster"
     }
   ],

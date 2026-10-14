@@ -11,7 +11,7 @@
 命令：
 
 ```sh
-GOLAB_TEST_PG_SKIP=1 GOWORK=off go test ./internal/experiment ./internal/rollout ./internal/api ./web -count=1
+GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test ./internal/experiment ./internal/rollout ./internal/api ./web -count=1
 git diff --check
 ```
 

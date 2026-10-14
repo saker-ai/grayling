@@ -1,4 +1,4 @@
-// Command golab-proxy runs the GoLab remote-evaluation proxy as a standalone,
+// Command grayling-proxy runs the Grayling remote-evaluation proxy as a standalone,
 // stateless deployment (docs/技术方案.md §3, §8): it relays
 //
 //	POST /api/v1/sdk/eval    remote evaluation (server-side exposure capture)
@@ -6,7 +6,7 @@
 //	POST /api/v1/collect     exposure/conversion ingestion
 //	GET  /api/v1/sdk/config  scoped snapshot pull (ETag/304 passthrough)
 //
-// to an upstream GoLab server, and adds proxy-owned endpoints:
+// to an upstream Grayling server, and adds proxy-owned endpoints:
 //
 //	GET /healthz             liveness (no upstream dependency)
 //	GET /api/v1/health       readiness (probes the upstream)
@@ -16,7 +16,7 @@
 //	                         key, evaluates via the upstream, returns the
 //	                         variant header; fail-opens to the configured
 //	                         default variant on ANY internal error so the
-//	                         gateway never 5xx on a GoLab outage. Requires
+//	                         gateway never 5xx on a Grayling outage. Requires
 //	                         -gateway-token (the proxy's own SDK credential —
 //	                         end-user traffic cannot carry one).
 //
@@ -53,17 +53,17 @@ import (
 func main() {
 	var (
 		listenAddr   = flag.String("addr", "127.0.0.1:8689", "proxy listen address")
-		upstream     = flag.String("upstream", "http://127.0.0.1:8688", "upstream GoLab server base URL")
+		upstream     = flag.String("upstream", "http://127.0.0.1:8688", "upstream Grayling server base URL")
 		reqTimeout   = flag.Duration("timeout", 10*time.Second, "per-request timeout for eval/collect/config relays")
 		healthTO     = flag.Duration("health-timeout", 3*time.Second, "upstream readiness probe timeout")
 		maxIdle      = flag.Int("max-idle-conns-per-host", 100, "keep-alive pool size toward the upstream")
 		maxConns     = flag.Int("max-conns-per-host", 0, "total upstream connection cap (0 = unlimited)")
 		dialTimeout  = flag.Duration("dial-timeout", 5*time.Second, "TCP dial timeout toward the upstream")
-		gwToken      = flag.String("gateway-token", "", "GoLab SDK token for the Traefik forwardAuth evaluation endpoint (empty = endpoint fail-opens to default variants)")
+		gwToken      = flag.String("gateway-token", "", "Grayling SDK token for the Traefik forwardAuth evaluation endpoint (empty = endpoint fail-opens to default variants)")
 		gwSecret     = flag.String("gateway-secret", "", "shared secret the router-config generator embeds in the forwardAuth address (internal/gateway RouteSpec.Secret); when set, requests without a matching secret are never evaluated upstream — STRONGLY recommended whenever the proxy is network-reachable")
 		gwTimeout    = flag.Duration("gateway-eval-timeout", 2*time.Second, "per-evaluation upstream timeout on the gateway forwardAuth hot path (fail-open after)")
 		trustedCIDRs = flag.String("trusted-proxy-cidrs", "",
-			"comma-separated CIDRs and/or bare IPs (e.g. \"10.0.0.0/8,172.16.5.5,fd00::/8\") of the reverse proxies allowed to sit in front of this proxy (Traefik/LB subnets); env GOLAB_TRUSTED_PROXY_CIDRS is used when the flag is empty. "+
+			"comma-separated CIDRs and/or bare IPs (e.g. \"10.0.0.0/8,172.16.5.5,fd00::/8\") of the reverse proxies allowed to sit in front of this proxy (Traefik/LB subnets); env GRAYLING_TRUSTED_PROXY_CIDRS is used when the flag is empty. "+
 				"SECURITY SEMANTICS: the \"client_ip\" evaluation-context attribute (in_cidr targeting / IP bucketing) is derived by walking X-Forwarded-For from the connection peer right-to-left ONLY while the current IP lies inside these ranges; the first IP outside the set becomes client_ip and every XFF entry further left is DISCARDED — a client cannot forge its way into another IP's gray group. "+
 				"Empty (default) trusts NO XFF at all: client_ip is the direct connection peer (RemoteAddr) only, preserving current behavior. "+
 				"NEVER list ranges clients can connect from (e.g. 0.0.0.0/0): trusting a range means believing the XFF entries it \"appended\", which lets anyone speaking from it self-select gray groups.")
@@ -71,15 +71,15 @@ func main() {
 	)
 	flag.Parse()
 
-	logger := log.New(os.Stderr, "golab-proxy ", log.LstdFlags|log.Lmsgprefix)
+	logger := log.New(os.Stderr, "grayling-proxy ", log.LstdFlags|log.Lmsgprefix)
 	if *version {
-		fmt.Println("golab-proxy dev")
+		fmt.Println("grayling-proxy dev")
 		return
 	}
 
 	trusted := *trustedCIDRs
 	if trusted == "" {
-		trusted = os.Getenv("GOLAB_TRUSTED_PROXY_CIDRS")
+		trusted = os.Getenv("GRAYLING_TRUSTED_PROXY_CIDRS")
 	}
 
 	p, err := proxy.New(proxy.Config{

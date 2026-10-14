@@ -74,7 +74,7 @@ function readFlagStructured(root, current) {
   const unit = $('#flag-unit', root).value.trim();
   const salt = $('#flag-salt', root).value.trim();
   if (next.bucketing || unit || salt) {
-    next.bucketing = { ...next.bucketing, algorithm: next.bucketing?.algorithm || 'golab-fnv1a-10000-v1',
+    next.bucketing = { ...next.bucketing, algorithm: next.bucketing?.algorithm || 'grayling-fnv1a-10000-v1',
       unit, salt };
   }
   next.fields = [...new Set($('#flag-fields', root).value.split(',').map(value => value.trim()).filter(Boolean))];

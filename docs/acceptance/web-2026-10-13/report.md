@@ -2,7 +2,7 @@
 
 日期：2026-10-13。代码基线：本次独立诊断页改动（提交前工作树）。
 
-使用本机 GoLab 服务、SQLite 存储和 Chromium 检查。数据为合成的 `diagnostic-qa/dev` 工作空间、已发布的 `qa-experiment` Flag 与 Draft 状态的 `exp-5` onRender 实验。服务端诊断请求 `GET /api/v1/admin/experiments/exp-5/diagnostics` 返回 200；页面没有使用接口模拟。浏览器通过同源会话登录，截图不含令牌明文。
+使用本机 Grayling 服务、SQLite 存储和 Chromium 检查。数据为合成的 `diagnostic-qa/dev` 工作空间、已发布的 `qa-experiment` Flag 与 Draft 状态的 `exp-5` onRender 实验。服务端诊断请求 `GET /api/v1/admin/experiments/exp-5/diagnostics` 返回 200；页面没有使用接口模拟。浏览器通过同源会话登录，截图不含令牌明文。
 
 | 场景 | 证据 | 结果 |
 | --- | --- | --- |

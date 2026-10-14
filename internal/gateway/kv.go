@@ -42,7 +42,7 @@ const DefaultKVRoot = "traefik"
 // decoder drops empty values, so the middleware would vanish and the router
 // referencing it would be rejected ("middleware does not exist"). The
 // generated forwardAuth middleware therefore carries AuthResponseHeadersRegex,
-// which strips every incoming X-Golab-* header on ALL providers; the KV
+// which strips every incoming X-Grayling-* header on ALL providers; the KV
 // renderer relies on that and omits the unrepresentable blank-headers
 // middleware (and its router references). file/IngressRoute keep the explicit
 // headers middleware because those providers represent empty values fine.

@@ -10,8 +10,8 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 mkdir -p -- "$ISSUE13_WORKDIR/images" "$ISSUE13_WORKDIR/go-tmp"
 chmod 700 -- "$ISSUE13_WORKDIR"
 
-if ! kind get clusters | grep -qx 'golab-issue13'; then
-  kind create cluster --name golab-issue13 --config "$script_dir/kind.yaml" --image kindest/node:v1.37.0
+if ! kind get clusters | grep -qx 'grayling-issue13'; then
+  kind create cluster --name grayling-issue13 --config "$script_dir/kind.yaml" --image kindest/node:v1.37.0
 fi
 
 for image in quay.io/cilium/cilium:v1.20.2 quay.io/cilium/operator-generic:v1.20.2; do
@@ -19,7 +19,7 @@ for image in quay.io/cilium/cilium:v1.20.2 quay.io/cilium/operator-generic:v1.20
     docker pull "$image"
   fi
 done
-kind load docker-image --name golab-issue13 \
+kind load docker-image --name grayling-issue13 \
   quay.io/cilium/cilium:v1.20.2 quay.io/cilium/operator-generic:v1.20.2
 
 cilium_chart="$(helm env HELM_REPOSITORY_CACHE)/cilium-1.20.2.tgz"
@@ -38,26 +38,26 @@ helm upgrade --install cilium "$cilium_chart" --version 1.20.2 \
   --wait --timeout 5m
 
 GOWORK=off CGO_ENABLED=0 GOTMPDIR="$ISSUE13_WORKDIR/go-tmp" \
-  go build -o "$ISSUE13_WORKDIR/images/golab" ./cmd/golab
+  go build -o "$ISSUE13_WORKDIR/images/grayling" ./cmd/grayling
 GOWORK=off CGO_ENABLED=0 GOTMPDIR="$ISSUE13_WORKDIR/go-tmp" \
-  go build -o "$ISSUE13_WORKDIR/images/tls-l4-proxy" ./cmd/golab-native-proxy
+  go build -o "$ISSUE13_WORKDIR/images/tls-l4-proxy" ./cmd/grayling-native-proxy
 GOWORK=off CGO_ENABLED=0 GOTMPDIR="$ISSUE13_WORKDIR/go-tmp" \
   go build -o "$ISSUE13_WORKDIR/sdk-probe" "$script_dir/sdk_probe"
 GOWORK=off CGO_ENABLED=0 GOTMPDIR="$ISSUE13_WORKDIR/go-tmp" \
   go build -o "$ISSUE13_WORKDIR/native-grpc-probe" ./cmd/nacos-native-grpc-probe
 
-printf 'FROM scratch\nCOPY golab /golab\nENTRYPOINT ["/golab"]\n' |
-  docker build -t golab:issue13-local -f - "$ISSUE13_WORKDIR/images"
+printf 'FROM scratch\nCOPY grayling /grayling\nENTRYPOINT ["/grayling"]\n' |
+  docker build -t grayling:issue13-local -f - "$ISSUE13_WORKDIR/images"
 printf 'FROM scratch\nCOPY tls-l4-proxy /tls-l4-proxy\nENTRYPOINT ["/tls-l4-proxy"]\n' |
-  docker build -t golab-native-proxy:issue13-local -f - "$ISSUE13_WORKDIR/images"
+  docker build -t grayling-native-proxy:issue13-local -f - "$ISSUE13_WORKDIR/images"
 
 for image in postgres:16-alpine redis:8-alpine busybox:1.36; do
   if ! docker image inspect "$image" >/dev/null 2>&1; then
     docker pull "$image"
   fi
 done
-kind load docker-image --name golab-issue13 \
-  golab:issue13-local golab-native-proxy:issue13-local \
+kind load docker-image --name grayling-issue13 \
+  grayling:issue13-local grayling-native-proxy:issue13-local \
   postgres:16-alpine redis:8-alpine busybox:1.36
 
 "$script_dir/deploy.sh"

@@ -1,6 +1,6 @@
 /**
  * Cross-language bucketing contract: the TypeScript implementation of
- * golab-fnv1a-10000-v1 must reproduce EVERY golden vector shared with the
+ * grayling-fnv1a-10000-v1 must reproduce EVERY golden vector shared with the
  * Go reference implementation (P4 退出验收: 跨语言用例同值).
  */
 
@@ -28,7 +28,7 @@ const doc = JSON.parse(readFileSync(
   join(REPO_ROOT, "pkg", "bucketing", "testdata", "golden_vectors.json"), "utf8"));
 
 test("golden vectors match the Go reference", () => {
-  assert.equal(doc.algorithm, "golab-fnv1a-10000-v1");
+  assert.equal(doc.algorithm, "grayling-fnv1a-10000-v1");
   assert.equal(doc.modulus, 10000);
   assert.ok(doc.vectors.length >= 20);
   for (const v of doc.vectors as Vector[]) {

@@ -5,8 +5,8 @@
 //
 // Resolution order:
 //
-//  1. GOLAB_TEST_TRAEFIK_BIN — an explicit traefik binary path (must be ≥3.6).
-//  2. Cache — $GOLAB_TEST_TRAEFIK_DIR or os.UserCacheDir()/golab-test-bin,
+//  1. GRAYLING_TEST_TRAEFIK_BIN — an explicit traefik binary path (must be ≥3.6).
+//  2. Cache — $GRAYLING_TEST_TRAEFIK_DIR or os.UserCacheDir()/grayling-test-bin,
 //     downloaded once from the official GitHub release and checksum-verified.
 //  3. Neither available (no network, non-linux/amd64) — tests skip with an
 //     explicit reason.
@@ -46,15 +46,15 @@ const (
 // an explicit reason when no binary can be provided.
 func Binary(t *testing.T) string {
 	t.Helper()
-	if bin := os.Getenv("GOLAB_TEST_TRAEFIK_BIN"); bin != "" {
+	if bin := os.Getenv("GRAYLING_TEST_TRAEFIK_BIN"); bin != "" {
 		checkVersion(t, bin)
 		return bin
 	}
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		t.Skipf("traefiktest: pinned release %s is linux/amd64 (host: %s/%s) — set GOLAB_TEST_TRAEFIK_BIN",
+		t.Skipf("traefiktest: pinned release %s is linux/amd64 (host: %s/%s) — set GRAYLING_TEST_TRAEFIK_BIN",
 			Version, runtime.GOOS, runtime.GOARCH)
 	}
-	dir := os.Getenv("GOLAB_TEST_TRAEFIK_DIR")
+	dir := os.Getenv("GRAYLING_TEST_TRAEFIK_DIR")
 	if dir == "" {
 		cache, err := os.UserCacheDir()
 		if err != nil {
@@ -64,7 +64,7 @@ func Binary(t *testing.T) string {
 			}
 			cache = filepath.Join(home, ".cache")
 		}
-		dir = filepath.Join(cache, "golab-test-bin")
+		dir = filepath.Join(cache, "grayling-test-bin")
 	}
 	bin := filepath.Join(dir, "traefik-"+strings.TrimPrefix(Version, "v"))
 	if _, err := os.Stat(bin); err == nil {
@@ -131,11 +131,11 @@ func download(t *testing.T, dest string) {
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Get(releaseURL)
 	if err != nil {
-		t.Skipf("traefiktest: cannot download %s (offline?): %v — set GOLAB_TEST_TRAEFIK_BIN", releaseURL, err)
+		t.Skipf("traefiktest: cannot download %s (offline?): %v — set GRAYLING_TEST_TRAEFIK_BIN", releaseURL, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Skipf("traefiktest: download %s: HTTP %d — set GOLAB_TEST_TRAEFIK_BIN", releaseURL, resp.StatusCode)
+		t.Skipf("traefiktest: download %s: HTTP %d — set GRAYLING_TEST_TRAEFIK_BIN", releaseURL, resp.StatusCode)
 	}
 	tmp := dest + ".download"
 	f, err := os.Create(tmp)

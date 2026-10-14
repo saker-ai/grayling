@@ -4,7 +4,7 @@
 
 验收 C4 提交：实验详情重构为“状态带 + 四个可直达区域（决策摘要 / 数据健康 / 效果证据 / 放量时间轴）+ 设置与审计页签”，每区域独立 hash 深链，旧 `…/diagnostics` 深链归一化到数据健康区域；预注册契约卡原样迁入设置与审计页签；放量门禁行为不变。
 
-- 服务：本仓库 `make build` 产出的 `bin/golab`，隔离数据目录 `/tmp/golab-c4-acceptance/store.json`（全新初始化，未触碰仓库 `data/`），监听 `127.0.0.1:19093`（内置 gonacos `19094/19095`），`GOLAB_ADMIN_PASSWORD` 设固定密码，`-rollout-interval 5s` 让放量引擎尽快启动计划。验收结束已 kill 服务进程、删除临时目录并关闭浏览器会话。
+- 服务：本仓库 `make build` 产出的 `bin/grayling`，隔离数据目录 `/tmp/grayling-c4-acceptance/store.json`（全新初始化，未触碰仓库 `data/`），监听 `127.0.0.1:19093`（内置 gonacos `19094/19095`），`GRAYLING_ADMIN_PASSWORD` 设固定密码，`-rollout-interval 5s` 让放量引擎尽快启动计划。验收结束已 kill 服务进程、删除临时目录并关闭浏览器会话。
 - 浏览器：`agent-browser` CLI 驱动 headless Chromium（`AGENT_BROWSER_ARGS="--no-sandbox"`），界面语言中文，桌面 1440×900、手机 390×844，截图不含令牌明文。
 - 预置数据全部经真实管理 API 走真实业务流程产生（curl + 管理员/ alice 令牌，未直接改存储）：
   - 工作空间 `acceptance` / 环境 `prod`；令牌 `alice-publisher`（publisher）、`carol-viewer`（viewer）、`sdk-collect`（sdk）、`collect-writer`（collect）。

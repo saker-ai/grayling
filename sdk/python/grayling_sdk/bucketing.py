@@ -1,4 +1,4 @@
-"""golab-fnv1a-10000-v1 — the GoLab bucketing contract in Python.
+"""grayling-fnv1a-10000-v1 — the Grayling bucketing contract in Python.
 
 This module exists to prove cross-language determinism (P4 退出验收: 跨语言
 用例同值): it is validated against the SAME golden vectors as the Go
@@ -11,7 +11,7 @@ offline (analysis, migrations, tests).
 
 from __future__ import annotations
 
-ALGORITHM_ID = "golab-fnv1a-10000-v1"
+ALGORITHM_ID = "grayling-fnv1a-10000-v1"
 BUCKETS = 10000
 
 _FNV_OFFSET = 0xCBF29CE484222325

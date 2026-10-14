@@ -12,6 +12,6 @@
 | 2.8.2–2.8.3：初始化方法返回前必须发 READY/ERROR | 当前 `Init` 启动异步同步监控，冷启动可在无快照时正常返回；首次 READY/ERROR 在其后发送。`TestOFNotReadyWithoutInit` 和 `TestOFInitValidation` 约束当前行为，但**不满足** v0.9.0 的初始化事件时序。需要改造初始化/等待语义及官方 Go SDK 的事件配合，再增加时序断言 | 已知缺口 |
 | 2.8.4：上下文重整事件 | Provider 按调用逐次使用动态上下文，没有 `on context changed` 生命周期方法 | 不适用 |
 
-GoLab 内部的 `NOT_ENROLLED`、`EXPERIMENT_NOT_RUNNING` 映射为 OpenFeature `DEFAULT`，原值保留在 `FlagMetadata.golabReason`；`MISSING_BUCKET_KEY` 映射为 `TARGETING_KEY_MISSING`。object 解析只接受 JSON 对象或数组，标量与 `null` 返回调用方默认值和 `TYPE_MISMATCH`。这些映射由上表测试锁定。
+Grayling 内部的 `NOT_ENROLLED`、`EXPERIMENT_NOT_RUNNING` 映射为 OpenFeature `DEFAULT`，原值保留在 `FlagMetadata.graylingReason`；`MISSING_BUCKET_KEY` 映射为 `TARGETING_KEY_MISSING`。object 解析只接受 JSON 对象或数组，标量与 `null` 返回调用方默认值和 `TYPE_MISMATCH`。这些映射由上表测试锁定。
 
 `SetProviderAndWait` 应由调用方设置截止时间；Provider 的首次同步为异步过程。由于上述 2.8 初始化时序缺口，本实现目前只能声明通过表中已覆盖的 v0.9.0 Provider 契约项，不能标作 v0.9.0 全量符合。

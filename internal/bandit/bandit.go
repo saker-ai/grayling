@@ -1,5 +1,5 @@
 // Package bandit implements exploration/exploitation traffic allocation for
-// GoLab experiments (docs/技术方案.md §10.3: Bandit 是探索优化策略，不与固定比例
+// Grayling experiments (docs/技术方案.md §10.3: Bandit 是探索优化策略，不与固定比例
 // A/B 共用传统 p 值结论；分配概率及时间必须逐次记录). It is deliberately
 // SEPARATE from the fixed-sample statistics engine: a bandit's adaptive
 // allocation invalidates the classic p-value/CI, so bandit experiments must not

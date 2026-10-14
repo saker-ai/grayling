@@ -1,4 +1,4 @@
-// Package platform is the GoLab control-plane domain store: workspaces,
+// Package platform is the Grayling control-plane domain store: workspaces,
 // environments, credentials, flag/segment drafts and immutable revisions,
 // experiments, collected events with unit-level aggregates, audit trail and
 // the AI-resource ownership index (docs/技术方案.md §5, §9, §10).
@@ -50,7 +50,7 @@ type Workspace struct {
 
 // Environment belongs to one workspace. The pair (workspace, environment)
 // maps to exactly one gonacos namespace ID, generated server-side (§5.1:
-// 映射由 GoLab 持久化，不把用户提供的字符串直接拼进底座 ID).
+// 映射由 Grayling 持久化，不把用户提供的字符串直接拼进底座 ID).
 type Environment struct {
 	ID          string    `json:"id"`
 	WorkspaceID string    `json:"workspaceId"`
@@ -486,7 +486,7 @@ type PinnedVersion struct {
 }
 
 // ModelAllowEntry is one row of the provider/model allowlist (§7: modelRef
-// 是 GoLab 适配器维护的白名单).
+// 是 Grayling 适配器维护的白名单).
 type ModelAllowEntry struct {
 	WorkspaceID string            `json:"workspaceId"`
 	Provider    string            `json:"provider"`

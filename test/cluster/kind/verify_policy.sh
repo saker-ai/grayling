@@ -7,7 +7,7 @@ if [[ -z "${KUBECONFIG:-}" ]]; then
 fi
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-namespace=golab-issue13
+namespace=grayling-issue13
 policy_restored=true
 
 restore_policy() {
@@ -40,10 +40,10 @@ expect_connection() {
 }
 
 for replica in a b; do
-  pod_ip=$(kubectl -n "$namespace" get pod "golab-$replica" -o jsonpath='{.status.podIP}')
+  pod_ip=$(kubectl -n "$namespace" get pod "grayling-$replica" -o jsonpath='{.status.podIP}')
   for port in 8848 9848; do
-    expect_connection open "allowed-$replica" "golab-$replica" "$port"
-    expect_connection closed "denied-$replica" "golab-$replica" "$port"
+    expect_connection open "allowed-$replica" "grayling-$replica" "$port"
+    expect_connection closed "denied-$replica" "grayling-$replica" "$port"
   done
   for port in 18848 19848; do
     expect_connection closed "allowed-$replica" "$pod_ip" "$port"
@@ -52,9 +52,9 @@ done
 
 kubectl -n "$namespace" delete networkpolicy native-allow-listed-clients >/dev/null
 policy_restored=false
-expect_connection open denied-a golab-a 8848
-expect_connection open denied-b golab-b 9848
+expect_connection open denied-a grayling-a 8848
+expect_connection open denied-b grayling-b 9848
 restore_policy
 policy_restored=true
-expect_connection closed denied-a golab-a 8848
-expect_connection closed denied-b golab-b 9848
+expect_connection closed denied-a grayling-a 8848
+expect_connection closed denied-b grayling-b 9848

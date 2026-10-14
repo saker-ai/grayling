@@ -1,22 +1,22 @@
 // Gateway forwardAuth evaluation endpoint — the Traefik ≥3.6 multi-layer
-// routing 求值服务 (docs/技术方案.md §4, docs/traefik-golab-architecture.md).
+// routing 求值服务 (docs/技术方案.md §4, docs/traefik-grayling-architecture.md).
 //
 // Traefik's forwardAuth middleware sends the (already header-stripped)
 // request to this endpoint. It extracts the bucketing key, derives the
 // client IP from the trusted proxy chain (clientip.go — injected into the
 // evaluation context as the reserved "client_ip" attribute for in_cidr
-// targeting / IP bucketing), evaluates the configured GoLab flag through
+// targeting / IP bucketing), evaluates the configured Grayling flag through
 // the upstream /api/v1/sdk/eval (which records exposures at this decision
-// point — 曝光集中记录), and returns the variation name in X-Golab-Variant.
+// point — 曝光集中记录), and returns the variation name in X-Grayling-Variant.
 // Traefik copies the response headers listed in authResponseHeaders back
 // onto the request; the child routers then match on
-// Header(`X-Golab-Variant`, ...).
+// Header(`X-Grayling-Variant`, ...).
 //
 // Fail-open contract (P5 acceptance): internal errors — upstream
 // unreachable, timeout, non-200, failed evaluation, missing bucketing key,
 // missing gateway credential — NEVER produce a non-2xx from this endpoint.
 // It answers 200 with the configured default variant plus an
-// X-Golab-Fail-Open reason header, so a GoLab outage degrades to "everyone
+// X-Grayling-Fail-Open reason header, so a Grayling outage degrades to "everyone
 // on the default backend" instead of gateway 5xx. (Total unavailability of
 // THIS process is answered by HA deployment: Traefik forwardAuth denies the
 // request when the auth service cannot be reached at all.)
@@ -40,10 +40,10 @@ import (
 
 // GatewayConfig configures the forwardAuth evaluation endpoint. The proxy
 // holds this SDK credential itself: gateway clients are end users and cannot
-// carry GoLab tokens. The token decides workspace/environment (§9), so one
+// carry Grayling tokens. The token decides workspace/environment (§9), so one
 // proxy instance serves exactly one environment scope.
 type GatewayConfig struct {
-	// Token is the GoLab SDK token used for upstream eval calls. Empty
+	// Token is the Grayling SDK token used for upstream eval calls. Empty
 	// disables evaluation: every request fail-opens to the default variant
 	// (logged).
 	Token string
@@ -65,10 +65,10 @@ type GatewayConfig struct {
 // configuration) — kept as literals here to avoid an import cycle between
 // the proxy and the admin-side generator.
 const (
-	gwVariantHeader  = "X-Golab-Variant"
-	gwFlagKeyHeader  = "X-Golab-Flag-Key"
-	gwFailOpenHeader = "X-Golab-Fail-Open"
-	gwReasonHeader   = "X-Golab-Reason"
+	gwVariantHeader  = "X-Grayling-Variant"
+	gwFlagKeyHeader  = "X-Grayling-Flag-Key"
+	gwFailOpenHeader = "X-Grayling-Fail-Open"
+	gwReasonHeader   = "X-Grayling-Reason"
 
 	gwDefaultUnitHeader = "X-Bucketing-Key"
 	gwDefaultUnitField  = "targetingKey"
@@ -91,7 +91,7 @@ func (p *Proxy) logGateway(format string, args ...any) {
 // Per-route configuration travels in the forwardAuth address query string
 // (Traefik preserves it verbatim — verified against v3.7.13):
 //
-//	flagKey        required — the GoLab flag to evaluate
+//	flagKey        required — the Grayling flag to evaluate
 //	defaultVariant the fail-open / missing-key variant value
 //	unitField      evaluation-context field for the bucketing key
 //	               (default "targetingKey"); the reserved value

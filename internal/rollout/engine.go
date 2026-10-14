@@ -26,7 +26,7 @@
 //   - ManualOverride is the 人工接管开关 (§9): while set, the engine takes
 //     no automatic action; operators drive the plan through the admin API.
 //
-// Each GoLab replica may run an engine. Plan actions take a per-experiment
+// Each Grayling replica may run an engine. Plan actions take a per-experiment
 // PostgreSQL advisory lock and reload state before deciding; the in-process
 // mutex covers concurrent ticks and manual operations on one replica.
 // The engine holds no credentials — it acts as an internal system identity that is

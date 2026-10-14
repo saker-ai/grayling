@@ -1,5 +1,5 @@
 // Package gffimport translates go-feature-flag (gff) v0.7.x flag documents
-// into the GoLab DSL (docs/技术方案.md §5.2) and provides the legacy-gff-v1
+// into the Grayling DSL (docs/技术方案.md §5.2) and provides the legacy-gff-v1
 // compatibility evaluation mode.
 //
 // Import policy (§5.2, normative):
@@ -13,15 +13,15 @@
 //   - gff nikunjy query strings are convertible only in the simple binary
 //     forms `<field> <op> <value>` and `<field> in [<v1> <v2> ...]`;
 //     anything richer (and/or/parentheses/contains/matches...) is rejected.
-//   - Percentage splits are copied numerically but REBASED onto the GoLab
-//     fixed-bucket algorithm golab-fnv1a-10000-v1 (§6). The two algorithms
+//   - Percentage splits are copied numerically but REBASED onto the Grayling
+//     fixed-bucket algorithm grayling-fnv1a-10000-v1 (§6). The two algorithms
 //     do not promise identical per-user assignments (两种算法不承诺同一用户
 //     的分配相同), so every import carries that warning and migrating a
 //     running experiment requires a new epoch (§5.2).
 //
 // The legacy mode (legacy.go) keeps evaluating old gff documents with the
 // original gff algorithm via gff core, for compatibility and contrast tests
-// only — GoLab native evaluation never calls gff's Evaluate (§2 设计决定).
+// only — Grayling native evaluation never calls gff's Evaluate (§2 设计决定).
 package gffimport
 
 import (
@@ -44,7 +44,7 @@ const DefaultSalt = "imported-gff-v1"
 
 // Options controls one import.
 type Options struct {
-	// Workspace and Environment name the destination scope. The GoLab DSL
+	// Workspace and Environment name the destination scope. The Grayling DSL
 	// flag document itself does not embed them (bucketing coordinates are
 	// taken from the published snapshot at evaluation time, §6); they are
 	// used for diagnostics/warnings and audit context.
@@ -81,9 +81,9 @@ var (
 )
 
 // ImportFlag strictly converts ONE gff flag document (YAML or JSON bytes)
-// into a validated GoLab model.Flag. The document is either a single flag
+// into a validated Grayling model.Flag. The document is either a single flag
 // object or a one-key map {"flag-name": {...}} (the gff multi-flag file
-// format); a multi-key map is rejected because GoLab imports one flag at a
+// format); a multi-key map is rejected because Grayling imports one flag at a
 // time. The returned []string collects warnings (never nil-on-success
 // semantics: warnings do not imply failure). The produced flag always
 // passes model.ValidateFlag; if it would not, the error is returned instead
@@ -170,14 +170,14 @@ func convertFlag(key string, body map[string]any, opts Options) (*model.Flag, []
 			return nil, nil, fmt.Errorf("gffimport: trackEvents must be a bool, got %T", v)
 		}
 		warnings = append(warnings, fmt.Sprintf(
-			"gff trackEvents=%v accepted but not representable in GoLab DSL: exposure tracking is governed by the experiment binding (docs/技术方案.md §5.3, §8)", v))
+			"gff trackEvents=%v accepted but not representable in Grayling DSL: exposure tracking is governed by the experiment binding (docs/技术方案.md §5.3, §8)", v))
 	}
 	if v, ok := body["metadata"]; ok {
 		if _, ok := v.(map[string]any); !ok {
 			return nil, nil, fmt.Errorf("gffimport: metadata must be a mapping, got %T", v)
 		}
 		warnings = append(warnings,
-			"gff metadata accepted but dropped: the GoLab DSL flag document has no metadata field (docs/技术方案.md §5.2)")
+			"gff metadata accepted but dropped: the Grayling DSL flag document has no metadata field (docs/技术方案.md §5.2)")
 	}
 	bucketingKey := ""
 	if v, ok := body["bucketingKey"]; ok {
@@ -239,7 +239,7 @@ func convertFlag(key string, body map[string]any, opts Options) (*model.Flag, []
 				}
 				if !warnQueryConverted {
 					warnings = append(warnings,
-						"gff nikunjy query expressions converted to GoLab constraints; matching of missing or differently-typed context fields may differ from gff")
+						"gff nikunjy query expressions converted to Grayling constraints; matching of missing or differently-typed context fields may differ from gff")
 				}
 			}
 			hasPercentage = hasPercentage || pct
@@ -249,8 +249,8 @@ func convertFlag(key string, body map[string]any, opts Options) (*model.Flag, []
 	}
 
 	// Bucketing: required iff any percentage split exists (§5.2/§6). The
-	// split values are copied 1:1 but the ALGORITHM changes: GoLab rebases
-	// percentages onto golab-fnv1a-10000-v1 fixed buckets.
+	// split values are copied 1:1 but the ALGORITHM changes: Grayling rebases
+	// percentages onto grayling-fnv1a-10000-v1 fixed buckets.
 	if hasPercentage {
 		unit := bucketingKey
 		if unit == "" {
@@ -271,8 +271,8 @@ func convertFlag(key string, body map[string]any, opts Options) (*model.Flag, []
 			fieldSet[unit] = true
 		}
 		warnings = append(warnings,
-			"percentage rebased to GoLab algorithm; user assignments will differ from gff",
-			"GoLab golab-fnv1a-10000-v1 fixed-bucket assignment does NOT reproduce gff assignments for the same users (docs/技术方案.md §2, §5.2: 两种算法不承诺同一用户的分配相同); migrating a running experiment requires a new epoch")
+			"percentage rebased to Grayling algorithm; user assignments will differ from gff",
+			"Grayling grayling-fnv1a-10000-v1 fixed-bucket assignment does NOT reproduce gff assignments for the same users (docs/技术方案.md §2, §5.2: 两种算法不承诺同一用户的分配相同); migrating a running experiment requires a new epoch")
 	}
 
 	if len(fieldSet) > 0 {
@@ -284,14 +284,14 @@ func convertFlag(key string, body map[string]any, opts Options) (*model.Flag, []
 		flag.Fields = fields
 	}
 
-	// The importer must never produce an invalid GoLab flag.
+	// The importer must never produce an invalid Grayling flag.
 	if err := model.ValidateFlag(flag, nil); err != nil {
-		return nil, nil, fmt.Errorf("gffimport: imported flag %q is not valid GoLab DSL: %w", key, err)
+		return nil, nil, fmt.Errorf("gffimport: imported flag %q is not valid Grayling DSL: %w", key, err)
 	}
 	return flag, warnings, nil
 }
 
-// convertVariations fills flag.Variations and infers the GoLab flag type:
+// convertVariations fills flag.Variations and infers the Grayling flag type:
 // all bool → FlagBool, all string → FlagString, all numeric → FlagNumber,
 // mixed / objects / arrays → FlagJSON. A null variation value is an error.
 func convertVariations(body map[string]any, flag *model.Flag) (model.FlagType, error) {
@@ -310,7 +310,7 @@ func convertVariations(body map[string]any, flag *model.Flag) (model.FlagType, e
 	for _, name := range sortedKeys(vm) {
 		v := vm[name]
 		if v == nil {
-			return "", fmt.Errorf("gffimport: variation %q has a null value (gff and GoLab both reject null variations)", name)
+			return "", fmt.Errorf("gffimport: variation %q has a null value (gff and Grayling both reject null variations)", name)
 		}
 		flag.Variations[name] = v
 		kinds[valueKind(v)] = true
@@ -420,7 +420,7 @@ func collectConstraintFields(r *model.Rule, fields map[string]bool) {
 // --- gff nikunjy query subset ---------------------------------------------
 
 // queryOps maps the gff/nikunjy operator spellings (word and symbolic
-// forms) onto the closed GoLab operator set (§5.2).
+// forms) onto the closed Grayling operator set (§5.2).
 var queryOps = map[string]string{
 	"eq": model.OpEq, "==": model.OpEq,
 	"ne": model.OpNe, "!=": model.OpNe,
@@ -622,7 +622,7 @@ func checkWhitelist(where string, m map[string]any, whitelist map[string]bool) e
 	if where != "" {
 		prefix = fmt.Sprintf("gffimport: %s: ", where)
 	}
-	return fmt.Errorf("%sunsupported gff field(s): %s — the GoLab importer accepts only: %s (docs/技术方案.md §5.2)",
+	return fmt.Errorf("%sunsupported gff field(s): %s — the Grayling importer accepts only: %s (docs/技术方案.md §5.2)",
 		prefix, strings.Join(unknown, ", "), strings.Join(sortedWhitelist(whitelist), ", "))
 }
 
@@ -657,7 +657,7 @@ func sortedKeys(m map[string]any) []string {
 	return out
 }
 
-// stringifyScalar renders gff scalar fields that GoLab stores as strings
+// stringifyScalar renders gff scalar fields that Grayling stores as strings
 // (version, rule name). YAML/JSON may encode them numerically.
 func stringifyScalar(where string, v any) (string, error) {
 	switch t := v.(type) {

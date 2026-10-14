@@ -1,12 +1,12 @@
 'use strict';
 
 // ---------------------------------------------------------------------------
-// GoLab admin console — i18n catalogs + helpers. Embedded static file, no
+// Grayling admin console — i18n catalogs + helpers. Embedded static file, no
 // build step; loaded BEFORE app.js (plain <script> order) and concatenated
 // with app.js by the Node-VM contract harnesses, so both files share one
 // script scope.
 //
-// Language resolution: localStorage "golab_lang" > navigator.language
+// Language resolution: localStorage "grayling_lang" > navigator.language
 // (zh* → zh, anything else → en) > en. t(key, params) interpolates {name}
 // placeholders, falls back to the en catalog on a gap and records every
 // miss (console.warn + I18N.missing) so contract tests can assert zero
@@ -21,7 +21,7 @@
 // en catalog — values are byte-identical to the historical hardcoded UI
 // strings (the DOM contract tests assert on them in the default language).
 const I18N_EN = {
-  'app.title': 'GoLab Admin',
+  'app.title': 'Grayling Admin',
   'auth.subtitle': 'admin console',
   'auth.hint': 'Enter the configured admin password or an admin token.',
   'auth.urlLabel': 'Server base URL',
@@ -982,7 +982,7 @@ const I18N_EN = {
 // asserts key-set parity). Technical identifiers, API field names and enum
 // values stay verbatim; surrounding prose is translated.
 const I18N_ZH = {
-  'app.title': 'GoLab 管理控制台',
+  'app.title': 'Grayling 管理控制台',
   'auth.subtitle': '管理控制台',
   'auth.hint': '请输入配置的管理员密码或管理员令牌。',
   'auth.urlLabel': '服务端基础 URL',
@@ -1949,11 +1949,11 @@ const I18N = {
   catalogs: { en: I18N_EN, zh: I18N_ZH },
 };
 
-// detectLang resolves the UI language: localStorage "golab_lang" (explicit
+// detectLang resolves the UI language: localStorage "grayling_lang" (explicit
 // user choice) > navigator.language (zh* → zh) > en.
 function detectLang() {
   try {
-    const stored = typeof localStorage !== 'undefined' && localStorage.getItem('golab_lang');
+    const stored = typeof localStorage !== 'undefined' && localStorage.getItem('grayling_lang');
     if (stored === 'en' || stored === 'zh') return stored;
   } catch { /* storage unavailable (private mode / vm) */ }
   const nav = (typeof navigator !== 'undefined' && navigator.language) || '';
@@ -1987,7 +1987,7 @@ function setLang(lang) {
   if (lang !== 'en' && lang !== 'zh') return;
   I18N.lang = lang;
   try {
-    if (typeof localStorage !== 'undefined') localStorage.setItem('golab_lang', lang);
+    if (typeof localStorage !== 'undefined') localStorage.setItem('grayling_lang', lang);
   } catch { /* storage unavailable */ }
   if (typeof I18N.onLangChange === 'function') I18N.onLangChange();
 }

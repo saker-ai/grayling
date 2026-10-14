@@ -1,16 +1,16 @@
 openapi: 3.0.3
 info:
-  title: GoLab API
+  title: Grayling API
   version: v1
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
   description: |-
-    GoLab 功能灰度 / AB 实验平台的 HTTP API（权威路由清单：`internal/api/server.go` 的 `Handler()`）。
+    Grayling 功能灰度 / AB 实验平台的 HTTP API（权威路由清单：`internal/api/server.go` 的 `Handler()`）。
 
     ## 认证与受众（三受众互斥）
 
-    GoLab API 端点（除健康检查与浏览器会话创建）要求管理凭证：
+    Grayling API 端点（除健康检查与浏览器会话创建）要求管理凭证：
     `Authorization: Bearer <token>`；同源 Web 控制台也可通过 HttpOnly、
     SameSite=Strict 的加密会话 Cookie 访问管理端点。浏览器会话创建要求
     同源 Origin，写请求使用 Cookie 时也要求同源 Origin。
@@ -19,9 +19,9 @@ info:
 
     | 受众 | secret 前缀 | 可访问端点 |
     |---|---|---|
-    | admin | `glab_admin_` | `/api/v1/admin/**` |
-    | sdk | `glab_sdk_` | `/api/v1/sdk/**` |
-    | collect | `glab_collect_` | `/api/v1/collect` |
+    | admin | `grayling_admin_` | `/api/v1/admin/**` |
+    | sdk | `grayling_sdk_` | `/api/v1/sdk/**` |
+    | collect | `grayling_collect_` | `/api/v1/collect` |
 
     `POST /v1/chat/completions` 是可选的 OpenAI 兼容入口：客户端原有
     Bearer API Key 原样传给配置的模型上游，工作空间和环境由服务端固定；
@@ -57,9 +57,9 @@ info:
     - `stats.GuardrailCheck` 的 `Metric`/`Detail` 无 json tag（大写开头），
       `Breached` 为 `breached`。
 
-    ## 独立 proxy（cmd/golab-proxy）
+    ## 独立 proxy（cmd/grayling-proxy）
 
-    proxy 以**相同路径**无状态中继数据面子集到上游 GoLab server：
+    proxy 以**相同路径**无状态中继数据面子集到上游 Grayling server：
     `POST /api/v1/sdk/eval`、`GET /api/v1/sdk/stream`（逐块 flush 的 SSE
     中继，客户端断开即取消上游订阅）、`GET /api/v1/sdk/config`（ETag/304
     透传）、`GET /api/v1/sdk/revision`（受限新鲜度探针）、
@@ -72,10 +72,10 @@ info:
     504 `upstream_timeout`；其余状态与响应体按上游原样透传。
 servers:
   - url: http://127.0.0.1:8688
-    description: GoLab server（默认本地部署，全部端点）
+    description: Grayling server（默认本地部署，全部端点）
   - url: http://127.0.0.1:8689
     description: >-
-      cmd/golab-proxy 无状态中继——仅同路径转发 POST /api/v1/sdk/eval、
+      cmd/grayling-proxy 无状态中继——仅同路径转发 POST /api/v1/sdk/eval、
       GET /api/v1/sdk/stream、GET /api/v1/sdk/config、
       GET /api/v1/sdk/revision、POST /api/v1/collect，
       另有自有 GET /healthz（liveness）与 GET /api/v1/health（readiness，
@@ -396,7 +396,7 @@ paths:
       summary: 铸造凭证（secret 仅此一次返回）
       description: >-
         凭证总是作用域绑定到路径中的工作空间；全局 owner 凭证只能由
-        cmd/golab 引导铸造，不能经此端点获得（工作空间 owner 无法提权为全局）。
+        cmd/grayling 引导铸造，不能经此端点获得（工作空间 owner 无法提权为全局）。
         kind=admin 时 role 必填（owner/publisher/analyst/viewer）；
         kind=sdk/collect 时 environment 必填（slug 或 ID）。
       operationId: createToken
@@ -1027,11 +1027,11 @@ paths:
   "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/import-gff":
     post:
       tags: [flags]
-      summary: 严格导入 go-feature-flag 文档为 GoLab 草稿（HIGH 风险）
+      summary: 严格导入 go-feature-flag 文档为 Grayling 草稿（HIGH 风险）
       description: >-
         白名单式转换：不支持的字段报错（400 import_failed），绝不静默丢弃；
         warnings 随草稿返回（含"两种算法分配不一致"提示）。导入的草稿强制
-        risk=high——GoLab 固定桶算法不复现 gff 的分配，发布即重抽签。
+        risk=high——Grayling 固定桶算法不复现 gff 的分配，发布即重抽签。
       operationId: importGffFlag
       parameters:
         - $ref: "#/components/parameters/WsPath"
@@ -2274,7 +2274,7 @@ paths:
         workspace/environment 只来自 sdk 凭证，无任何租户选择参数。响应是该
         环境的完整服务端快照（Snapshot）；浏览器侧应改用受限投影
         （/sdk/revision）或远程求值（/sdk/eval）。ETag 即 manifest revision
-        （形如 "golab-r<revision>"），带匹配 If-None-Match 的请求得到 304。
+        （形如 "grayling-r<revision>"），带匹配 If-None-Match 的请求得到 304。
         响应头恒为 Cache-Control: no-store。快照损坏 → 500 snapshot_invalid
         （客户端保留上一份好快照）。
       operationId: getSDKConfig
@@ -2285,7 +2285,7 @@ paths:
           description: 当前快照。
           headers:
             ETag:
-              description: 快照实体标签（"golab-r<manifestRevision>"）。
+              description: 快照实体标签（"grayling-r<manifestRevision>"）。
               schema:
                 type: string
             Cache-Control:
@@ -2322,7 +2322,7 @@ paths:
         远程求值 SDK（浏览器相邻运行时）轮询此端点判断缓存的求值结果是否基于
         已被取代的配置，从而在不下载全量快照的情况下失效重估。尚未发布过
         manifest 的环境返回 revision 0。响应头 Cache-Control: no-store。
-        cmd/golab-proxy 以相同路径中继此端点（一元转发）。
+        cmd/grayling-proxy 以相同路径中继此端点（一元转发）。
       operationId: getSDKRevision
       responses:
         "200":
@@ -2854,15 +2854,15 @@ components:
     cookieSession:
       type: apiKey
       in: cookie
-      name: golab_admin_session
+      name: grayling_admin_session
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: GoLab token (glab_admin_* / glab_sdk_* / glab_collect_*)
+      bearerFormat: Grayling token (grayling_admin_* / grayling_sdk_* / grayling_collect_*)
       description: >-
-        Authorization: Bearer <token>。三受众互斥：admin（前缀 glab_admin_）
-        仅可用于 /api/v1/admin/**；sdk（glab_sdk_）仅可用于
-        /api/v1/sdk/**；collect（glab_collect_）仅可用于 /api/v1/collect。
+        Authorization: Bearer <token>。三受众互斥：admin（前缀 grayling_admin_）
+        仅可用于 /api/v1/admin/**；sdk（grayling_sdk_）仅可用于
+        /api/v1/sdk/**；collect（grayling_collect_）仅可用于 /api/v1/collect。
         持错误受众的凭证 → 403 wrong_audience；缺失/无效/已吊销 →
         401 unauthorized。租户作用域（workspace/environment）由凭证本身
         决定，任何端点不接受 query/body 参数选择租户。admin 凭证另带角色
@@ -3208,7 +3208,7 @@ components:
           example: ok
         service:
           type: string
-          example: golab
+          example: grayling
         schemaVersion:
           type: integer
           description: 当前 DSL/快照 schema 代际（model.SchemaVersion = 1）。
@@ -3294,7 +3294,7 @@ components:
           $ref: "#/components/schemas/Token"
         Secret:
           type: string
-          description: 明文 secret（glab_<kind>_<43 个 url-safe 字符>），此后不可再取。
+          description: 明文 secret（grayling_<kind>_<43 个 url-safe 字符>），此后不可再取。
     Quotas:
       type: object
       additionalProperties: false
@@ -3413,7 +3413,7 @@ components:
           example: revoked
     Flag:
       type: object
-      description: GoLab Flag DSL（schemaVersion 1）。
+      description: Grayling Flag DSL（schemaVersion 1）。
       required: [schemaVersion, key, type, variations, defaultRule]
       properties:
         schemaVersion:
@@ -3429,7 +3429,7 @@ components:
           description: 急停开关；禁用时按 defaultRule 出值，reason=DISABLED。
         version:
           type: string
-          description: GoLab 发布 revision（信息性；权威值在 manifest）。
+          description: Grayling 发布 revision（信息性；权威值在 manifest）。
         bucketing:
           $ref: "#/components/schemas/Bucketing"
         fields:
@@ -3458,7 +3458,7 @@ components:
       properties:
         algorithm:
           type: string
-          enum: [golab-fnv1a-10000-v1]
+          enum: [grayling-fnv1a-10000-v1]
         unit:
           type: string
           description: 提供随机化单元的上下文字段；更改须开新实验 epoch。
@@ -3643,7 +3643,7 @@ components:
           format: int64
         dataId:
           type: string
-          description: 承载文档的 gonacos dataId，如 golab.flag.<key>.r<revision>。
+          description: 承载文档的 gonacos dataId，如 grayling.flag.<key>.r<revision>。
         hash:
           type: string
           description: 文档规范 JSON 编码的 SHA-256 hex。
@@ -5579,7 +5579,7 @@ components:
           description: 当前 manifest revision；从未发布过 manifest 的环境为 0。
         etag:
           type: string
-          description: 对应实体标签（"golab-r<revision>"）。
+          description: 对应实体标签（"grayling-r<revision>"）。
     CollectEvent:
       type: object
       additionalProperties: false

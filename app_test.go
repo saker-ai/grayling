@@ -1,4 +1,4 @@
-package golab_test
+package grayling_test
 
 import (
 	"context"
@@ -16,15 +16,15 @@ import (
 
 func TestEmbeddedAppCanBeMountedAndRestarted(t *testing.T) {
 	dir := t.TempDir()
-	opts := golab.Options{
-		SQLitePath: filepath.Join(dir, "golab.db"), GonacosData: filepath.Join(dir, "gonacos"),
+	opts := grayling.Options{
+		SQLitePath: filepath.Join(dir, "grayling.db"), GonacosData: filepath.Join(dir, "gonacos"),
 		AuthSecret: "stable-secret-for-test", ReconcileInterval: 0,
 	}
-	app, err := golab.Start(t.Context(), opts)
+	app, err := grayling.Start(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(app.BootstrapOwnerToken(), "glab_admin_") {
+	if !strings.HasPrefix(app.BootstrapOwnerToken(), "grayling_admin_") {
 		t.Fatal("missing bootstrap owner credential")
 	}
 	httpAddr, grpcAddr := app.GonacosAddrs()
@@ -71,7 +71,7 @@ func TestEmbeddedAppCanBeMountedAndRestarted(t *testing.T) {
 		t.Fatalf("second close: %v", err)
 	}
 
-	app, err = golab.Start(t.Context(), opts)
+	app, err = grayling.Start(t.Context(), opts)
 	if err != nil {
 		t.Fatalf("restart: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestExternalAppUsesHostHTTPListener(t *testing.T) {
 	}))
 	defer nacos.Close()
 	ctx, cancel := context.WithCancel(t.Context())
-	app, err := golab.Start(ctx, golab.Options{NacosURL: nacos.URL, NacosToken: "test-token"})
+	app, err := grayling.Start(ctx, grayling.Options{NacosURL: nacos.URL, NacosToken: "test-token"})
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -117,14 +117,14 @@ func TestExternalAppUsesHostHTTPListener(t *testing.T) {
 }
 
 func TestStartRejectsConflictingOptions(t *testing.T) {
-	for _, opts := range []golab.Options{
+	for _, opts := range []grayling.Options{
 		{SQLitePath: "x", PostgresDSN: "postgres://example"},
 		{NacosURL: "http://example.com", NativeConfigAuth: true},
 		{GonacosAddr: "0.0.0.0:1234"},
 		{RecoveryPoint: "point.json", NacosURL: "http://example.com"},
 		{OpenAIUpstreamURL: "https://example.com/not-v1"},
 	} {
-		if app, err := golab.Start(t.Context(), opts); err == nil {
+		if app, err := grayling.Start(t.Context(), opts); err == nil {
 			_ = app.Close(t.Context())
 			t.Fatalf("expected invalid options: %+v", opts)
 		}
@@ -140,7 +140,7 @@ func TestOpenAICompatibleRouteThroughEmbeddedApp(t *testing.T) {
 		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}]}`)
 	}))
 	defer upstream.Close()
-	app, err := golab.Start(t.Context(), golab.Options{
+	app, err := grayling.Start(t.Context(), grayling.Options{
 		OpenAIUpstreamURL: upstream.URL + "/v1", OpenAIWorkspace: "acme", OpenAIEnvironment: "prod", GonacosData: t.TempDir(),
 	})
 	if err != nil {

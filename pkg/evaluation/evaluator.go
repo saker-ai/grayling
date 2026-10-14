@@ -1,4 +1,4 @@
-// Package evaluation implements the GoLab native evaluator over a validated
+// Package evaluation implements the Grayling native evaluator over a validated
 // model.Snapshot (docs/技术方案.md §5.2, §6).
 //
 // Normative evaluation order for one flag:

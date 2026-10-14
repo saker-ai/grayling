@@ -198,7 +198,7 @@ func TestPGScopedIdleAndListenerRecovery(t *testing.T) {
 	}
 	wait(func() bool { _, err := b.GetEnvironment(ws.ID, env.ID); return err == nil })
 	// Terminating LISTEN tests lost notification while the independent poll runs.
-	_, err = a.persist.(*pgPersistence).pool.Exec(t.Context(), `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN golab_control'`)
+	_, err = a.persist.(*pgPersistence).pool.Exec(t.Context(), `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN grayling_control'`)
 	if err != nil {
 		t.Fatal(err)
 	}

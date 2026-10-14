@@ -1,13 +1,13 @@
-// Command golab starts the GoLab control plane + data plane:
+// Command grayling starts the Grayling control plane + data plane:
 //
-//   - the GoLab HTTP API (admin, SDK config/eval/stream, collect) and the
+//   - the Grayling HTTP API (admin, SDK config/eval/stream, collect) and the
 //     embedded web console;
 //   - an embedded gonacos server or external Nacos 3 instance providing the
 //     Config and AI content substrate. Embedded listeners bind to loopback
 //     by default. The native-auth mode scopes embedded SDK-token reads and
 //     subscriptions (docs/Nacos原生客户端.md).
 //
-// Storage topology (docs/技术方案.md §3): GoLab server + Nacos substrate +
+// Storage topology (docs/技术方案.md §3): Grayling server + Nacos substrate +
 // platform store. The dev/default platform store is the
 // file-backed JSON store; -sqlite and -pg select the GORM-backed SQLite and
 // PostgreSQL stores (docs/storage.md).
@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"github.com/godeps/gonacos/pkg/server"
-	golabapp "github.com/saker-ai/grayling"
+	graylingapp "github.com/saker-ai/grayling"
 	"github.com/saker-ai/grayling/internal/configstore"
 	"github.com/saker-ai/grayling/internal/platform"
 	"github.com/saker-ai/grayling/internal/recovery"
@@ -36,9 +36,9 @@ import (
 
 func main() {
 	var (
-		listenAddr            = flag.String("addr", "127.0.0.1:8688", "GoLab HTTP listen address")
-		dataFile              = flag.String("data", filepath.Join("data", "golab-store.json"), "platform store file ('' = memory-only; ignored when -pg or -sqlite is set)")
-		pgDSN                 = flag.String("pg", "", "PostgreSQL DSN for the production platform store (e.g. postgres://golab:secret@127.0.0.1:5432/golab); overrides -data")
+		listenAddr            = flag.String("addr", "127.0.0.1:8688", "Grayling HTTP listen address")
+		dataFile              = flag.String("data", filepath.Join("data", "grayling-store.json"), "platform store file ('' = memory-only; ignored when -pg or -sqlite is set)")
+		pgDSN                 = flag.String("pg", "", "PostgreSQL DSN for the production platform store (e.g. postgres://grayling:secret@127.0.0.1:5432/grayling); overrides -data")
 		sqlitePath            = flag.String("sqlite", "", "pure-Go SQLite database path for the platform store; overrides -data")
 		gonacosRoot           = flag.String("gonacos-root", "", "gonacos contract root (repo with api/openapi/upstream); empty disables 501-stub registration")
 		gonacosData           = flag.String("gonacos-data", "", "gonacos embedded-redis dump dir (default <data dir>/gonacos)")
@@ -83,9 +83,9 @@ func main() {
 		log.Fatal("external Nacos is incompatible with embedded native auth, Redis, recovery checkpoints, and offline key rotation")
 	}
 
-	logger := log.New(os.Stderr, "golab ", log.LstdFlags|log.Lmsgprefix)
+	logger := log.New(os.Stderr, "grayling ", log.LstdFlags|log.Lmsgprefix)
 	if *printVersion {
-		fmt.Println("golab dev (schema v1)")
+		fmt.Println("grayling dev (schema v1)")
 		return
 	}
 	if *authSecretFile != "" {
@@ -105,8 +105,8 @@ func main() {
 			logger.Fatal("auth secret file is empty")
 		}
 	}
-	adminPassword := os.Getenv("GOLAB_ADMIN_PASSWORD")
-	if passwordFile := os.Getenv("GOLAB_ADMIN_PASSWORD_FILE"); passwordFile != "" && adminPassword == "" {
+	adminPassword := os.Getenv("GRAYLING_ADMIN_PASSWORD")
+	if passwordFile := os.Getenv("GRAYLING_ADMIN_PASSWORD_FILE"); passwordFile != "" && adminPassword == "" {
 		info, err := os.Stat(passwordFile)
 		if err != nil {
 			logger.Fatalf("admin password file: %v", err)
@@ -130,8 +130,8 @@ func main() {
 		if !*nativeConfigAuth {
 			logger.Fatal("refusing non-loopback gonacos listeners without -nacos-native-auth=true: anonymous native access cannot be exposed to a tenant-reachable network")
 		}
-		if os.Getenv("GOLAB_ALLOW_NON_LOOPBACK_GONACOS") != "1" {
-			logger.Fatalf("refusing to bind gonacos to non-loopback address (%s / %s): set GOLAB_ALLOW_NON_LOOPBACK_GONACOS=1 only behind verified TLS termination and network policy", *gonacosAddr, *gonacosGRPC)
+		if os.Getenv("GRAYLING_ALLOW_NON_LOOPBACK_GONACOS") != "1" {
+			logger.Fatalf("refusing to bind gonacos to non-loopback address (%s / %s): set GRAYLING_ALLOW_NON_LOOPBACK_GONACOS=1 only behind verified TLS termination and network policy", *gonacosAddr, *gonacosGRPC)
 		}
 		logger.Printf("WARNING: native Nacos bound to non-loopback addresses %s / %s — TLS termination and network policy MUST be verified", *gonacosAddr, *gonacosGRPC)
 	}
@@ -140,17 +140,17 @@ func main() {
 		defer stop()
 		appCtx, appCancel := context.WithCancel(context.Background())
 		defer appCancel()
-		app, err := golabapp.Start(appCtx, golabapp.Options{
+		app, err := graylingapp.Start(appCtx, graylingapp.Options{
 			DataFile: *dataFile, SQLitePath: *sqlitePath, PostgresDSN: *pgDSN,
-			NacosURL: *nacosURL, NacosUsername: os.Getenv("GOLAB_NACOS_USERNAME"),
-			NacosPassword: os.Getenv("GOLAB_NACOS_PASSWORD"), NacosToken: os.Getenv("GOLAB_NACOS_TOKEN"),
+			NacosURL: *nacosURL, NacosUsername: os.Getenv("GRAYLING_NACOS_USERNAME"),
+			NacosPassword: os.Getenv("GRAYLING_NACOS_PASSWORD"), NacosToken: os.Getenv("GRAYLING_NACOS_TOKEN"),
 			OpenAIUpstreamURL: *openAIUpstreamURL,
 			OpenAIWorkspace:   *openAIWorkspace, OpenAIEnvironment: *openAIEnvironment,
 			OpenAIFlagKey: *openAIFlagKey,
 			GonacosAddr:   *gonacosAddr, GonacosGRPCAddr: *gonacosGRPC,
 			GonacosRoot: *gonacosRoot, GonacosData: *gonacosData, RedisAddr: *redisAddr,
 			NativeConfigAuth:        *nativeConfigAuth,
-			AllowNonLoopbackGonacos: os.Getenv("GOLAB_ALLOW_NON_LOOPBACK_GONACOS") == "1",
+			AllowNonLoopbackGonacos: os.Getenv("GRAYLING_ALLOW_NON_LOOPBACK_GONACOS") == "1",
 			AuthSecret:              *authSecret, AdminPassword: adminPassword, RecoveryPoint: *recoveryPoint,
 			BootstrapOwnerName: *bootstrapName, RolloutInterval: *rolloutIv,
 			RolloutLeaseDuration: *rolloutLease, ReconcileInterval: *reconcileIv,
@@ -158,7 +158,7 @@ func main() {
 			Logger: logger,
 		})
 		if err != nil {
-			logger.Fatalf("start GoLab: %v", err)
+			logger.Fatalf("start Grayling: %v", err)
 		}
 		if httpAddr, grpcAddr := app.GonacosAddrs(); httpAddr != "" {
 			logger.Printf("gonacos substrate: http=%s grpc=%s", httpAddr, grpcAddr)
@@ -169,7 +169,7 @@ func main() {
 		httpSrv := &http.Server{Addr: *listenAddr, Handler: app.Handler(), ReadHeaderTimeout: 10 * time.Second}
 		serveErr := make(chan error, 1)
 		go func() {
-			logger.Printf("golab API + console listening on http://%s", *listenAddr)
+			logger.Printf("grayling API + console listening on http://%s", *listenAddr)
 			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				serveErr <- err
 			}
@@ -178,10 +178,10 @@ func main() {
 		case <-ctx.Done():
 		case err := <-app.Errors():
 			if err != nil {
-				logger.Printf("GoLab background error: %v", err)
+				logger.Printf("Grayling background error: %v", err)
 			}
 		case err := <-serveErr:
-			logger.Printf("GoLab HTTP error: %v", err)
+			logger.Printf("Grayling HTTP error: %v", err)
 		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -189,7 +189,7 @@ func main() {
 			logger.Printf("HTTP shutdown: %v", err)
 		}
 		if err := app.Close(shutdownCtx); err != nil {
-			logger.Printf("GoLab shutdown: %v", err)
+			logger.Printf("Grayling shutdown: %v", err)
 		}
 		return
 	}

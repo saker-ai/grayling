@@ -1,10 +1,10 @@
-# GoLab
+# Grayling
 
 [简体中文](README.zh-CN.md) · [API reference](docs/api.md) · [OpenAPI](openapi.yaml) · [Contributing](CONTRIBUTING.md)
 
-GoLab is a self-hosted platform for feature flags, gradual rollouts, and A/B experiments. It also versions and gates AI resources such as prompts, skills, and agent specifications. The control plane, web console, and HTTP API can run as a standalone service or inside another Go service. This repository is named **Grayling**; the application and Go package remain **GoLab**.
+Grayling is a self-hosted platform for feature flags, gradual rollouts, and A/B experiments. It also versions and gates AI resources such as prompts, skills, and agent specifications. The control plane, web console, and HTTP API can run as a standalone service or inside another Go service. This repository is named **Grayling**; the application and Go package remain **Grayling**.
 
-![GoLab experiment and staged rollout console](docs/acceptance/web-2026-10-08/23-rollout-plan.png)
+![Grayling experiment and staged rollout console](docs/acceptance/web-2026-10-08/23-rollout-plan.png)
 
 ## What it includes
 
@@ -12,7 +12,7 @@ GoLab is a self-hosted platform for feature flags, gradual rollouts, and A/B exp
 - **Experimentation:** pre-registered A/B tests, exposure and conversion collection, sample-ratio mismatch checks, guardrails, reports, and staged rollout plans with manual or automatic progression.
 - **AI resource control:** versioned prompts, skills, and agent specifications; pinned versions, session-level configuration freeze, digest verification, and emergency revocation.
 - **Clients:** local evaluation with the Go SDK, remote evaluation with Python and TypeScript SDKs, and an OpenFeature Go provider. An optional proxy supports remote evaluation and gateway integration.
-- **Deployment choices:** embedded gonacos or external Nacos 3.2.1+ for configuration distribution; JSON file, pure-Go SQLite, or PostgreSQL for GoLab platform data. The web console is embedded and needs no frontend build.
+- **Deployment choices:** embedded gonacos or external Nacos 3.2.1+ for configuration distribution; JSON file, pure-Go SQLite, or PostgreSQL for Grayling platform data. The web console is embedded and needs no frontend build.
 - **OpenAI client compatibility:** optionally relay Chat Completions, including SSE streams, to a configured OpenAI-compatible upstream by changing only the client's `baseURL`.
 
 ## Quick start
@@ -25,19 +25,19 @@ cd grayling
 make run
 ```
 
-Open <http://127.0.0.1:19080/>. On the first run, `make run` creates a local administrator password in `data/admin-password`; in another terminal, run `make show-admin-password` to view it. The password file and runtime data are ignored by Git. The server also prints a one-time global owner token when it creates the first owner. Store that token securely if you plan to use it.
+Open <http://127.0.0.1:27002/>. On the first run, `make run` creates a local administrator password in `data/admin-password`; in another terminal, run `make show-admin-password` to view it. The password file and runtime data are ignored by Git. The server also prints a one-time global owner token when it creates the first owner. Store that token securely if you plan to use it.
 
-`make run` listens on loopback and starts embedded gonacos on ephemeral loopback ports. Its default platform store is a JSON file under `data/`. To use SQLite for a persistent single-node installation:
+`make run` binds `:27002` on every interface — the console and API are reachable from any network over plaintext HTTP, so put TLS termination in front before exposing them beyond a trusted network (override with `make run RUN_PORT=...`). Embedded gonacos still starts on ephemeral loopback ports. Its default platform store is a JSON file under `data/`. To use SQLite for a persistent single-node installation:
 
 ```bash
-make run RUN_ARGS='-sqlite data/golab.db'
+make run RUN_ARGS='-sqlite data/grayling.db'
 ```
 
-For multi-replica PostgreSQL deployments, use `-pg` and a shared auth secret; see [platform storage](docs/storage.md) and [multi-replica writes](docs/多副本管理写入.md). Set `-nacos-url` to use an external Nacos service; see [external Nacos](docs/external-nacos.md) for credentials, permissions, and data layout. The storage flag selects GoLab's platform database; Nacos stores the published configuration separately.
+For multi-replica PostgreSQL deployments, use `-pg` and a shared auth secret; see [platform storage](docs/storage.md) and [multi-replica writes](docs/多副本管理写入.md). Set `-nacos-url` to use an external Nacos service; see [external Nacos](docs/external-nacos.md) for credentials, permissions, and data layout. The storage flag selects Grayling's platform database; Nacos stores the published configuration separately.
 
-## Use GoLab in your application
+## Use Grayling in your application
 
-The root package is importable as `github.com/saker-ai/grayling`. `golab.Start` owns the stores and background jobs, while your service owns the HTTP listener and shutdown sequence. Mount `App.Handler()` for the API and console, or `App.APIHandler()` for the API alone. See the [complete embedding example](docs/embedding.md).
+The root package is importable as `github.com/saker-ai/grayling`. `grayling.Start` owns the stores and background jobs, while your service owns the HTTP listener and shutdown sequence. Mount `App.Handler()` for the API and console, or `App.APIHandler()` for the API alone. See the [complete embedding example](docs/embedding.md).
 
 | Client | Evaluation path | Documentation |
 | --- | --- | --- |
@@ -47,17 +47,17 @@ The root package is importable as `github.com/saker-ai/grayling`. `golab.Start` 
 | TypeScript SDK | Remote evaluation with bounded cache and polling | [TypeScript SDK](sdk/typescript/README.md) |
 | Standalone proxy | Remote evaluation, SSE, and event collection relay | [Proxy and API reference](docs/api.md) |
 
-The GoLab API issues separate credentials for administration, SDK reads, and event collection. Do not expose administrative credentials to browser clients.
+The Grayling API issues separate credentials for administration, SDK reads, and event collection. Do not expose administrative credentials to browser clients.
 
 ### OpenAI-compatible Chat Completions
 
-Start with `make run RUN_ARGS='-openai-upstream-url https://api.openai.com/v1 -openai-workspace acme -openai-environment prod'` after creating that workspace, environment, a published JSON flag named `openai-chat`, a pinned prompt, and a model allowlist entry. Point an existing OpenAI client at `http://127.0.0.1:19080/v1`; keep its existing upstream API key and request, including `stream: true`. GoLab evaluates the flag, selects its allowlisted `modelRef`, prepends the pinned `promptRef` as a system message, checks revocation, and forwards the original Bearer key and JSON or SSE response. See [API details](docs/api.md).
+Start with `make run RUN_ARGS='-openai-upstream-url https://api.openai.com/v1 -openai-workspace acme -openai-environment prod'` after creating that workspace, environment, a published JSON flag named `openai-chat`, a pinned prompt, and a model allowlist entry. Point an existing OpenAI client at `http://127.0.0.1:27002/v1`; keep its existing upstream API key and request, including `stream: true`. Grayling evaluates the flag, selects its allowlisted `modelRef`, prepends the pinned `promptRef` as a system message, checks revocation, and forwards the original Bearer key and JSON or SSE response. See [API details](docs/api.md).
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Admin[Web console / Admin API] --> Core[GoLab]
+    Admin[Web console / Admin API] --> Core[Grayling]
     Core --> DB[(JSON / SQLite / PostgreSQL)]
     Core --> Nacos[(Embedded gonacos / external Nacos)]
     GoSDK[Go SDK / OpenFeature] -->|snapshot sync and events| Core
@@ -78,7 +78,7 @@ Published flag and segment documents are immutable; a manifest identifies the ac
 
 ```bash
 make build
-GOLAB_TEST_PG_SKIP=1 GOWORK=off go test -short ./ ./cmd/... ./internal/... ./pkg/... ./web
+GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test -short ./ ./cmd/... ./internal/... ./pkg/... ./web
 make sdk-test
 make license-check
 ```
@@ -103,4 +103,4 @@ make license-check
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and checks, and [SECURITY.md](SECURITY.md) for private vulnerability reports.
 
-GoLab is licensed under [Apache-2.0](LICENSE). Third-party attribution and the pinned dependency license inventory are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [`third_party/licenses.json`](third_party/licenses.json). Run `make release-check` before redistributing binaries.
+Grayling is licensed under [Apache-2.0](LICENSE). Third-party attribution and the pinned dependency license inventory are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [`third_party/licenses.json`](third_party/licenses.json). Run `make release-check` before redistributing binaries.

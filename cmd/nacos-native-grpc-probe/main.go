@@ -153,13 +153,13 @@ func probe(ctx context.Context, address, serverName, caFile string, tenants []te
 		body              any
 	}{
 		{"query", "ConfigQueryRequest", map[string]string{
-			"tenant": "golab-unauthorized-probe", "group": "GOLAB_FLAGS", "dataId": "golab.manifest",
+			"tenant": "grayling-unauthorized-probe", "group": "GRAYLING_FLAGS", "dataId": "grayling.manifest",
 		}},
 		{"subscription", "ConfigBatchListenRequest", map[string]any{
 			"listen": true,
 			"configListenContexts": []map[string]string{{
-				"tenant": "golab-unauthorized-probe", "group": "GOLAB_FLAGS",
-				"dataId": "golab.manifest", "md5": "",
+				"tenant": "grayling-unauthorized-probe", "group": "GRAYLING_FLAGS",
+				"dataId": "grayling.manifest", "md5": "",
 			}},
 		}},
 	} {
@@ -173,13 +173,13 @@ func probe(ctx context.Context, address, serverName, caFile string, tenants []te
 			body              any
 		}{
 			{"revoked query", "ConfigQueryRequest", map[string]string{
-				"tenant": revoked.namespace, "group": "GOLAB_FLAGS", "dataId": "golab.manifest",
+				"tenant": revoked.namespace, "group": "GRAYLING_FLAGS", "dataId": "grayling.manifest",
 			}},
 			{"revoked subscription", "ConfigBatchListenRequest", map[string]any{
 				"listen": true,
 				"configListenContexts": []map[string]string{{
-					"tenant": revoked.namespace, "group": "GOLAB_FLAGS",
-					"dataId": "golab.manifest", "md5": "",
+					"tenant": revoked.namespace, "group": "GRAYLING_FLAGS",
+					"dataId": "grayling.manifest", "md5": "",
 				}},
 			}},
 		} {
@@ -204,11 +204,11 @@ func probe(ctx context.Context, address, serverName, caFile string, tenants []te
 				body              any
 			}{
 				{"query", "ConfigQueryRequest", map[string]string{
-					"tenant": target.namespace, "group": "GOLAB_FLAGS", "dataId": "golab.manifest",
+					"tenant": target.namespace, "group": "GRAYLING_FLAGS", "dataId": "grayling.manifest",
 				}},
 				{"subscription", "ConfigBatchListenRequest", map[string]any{
 					"listen": true, "configListenContexts": []map[string]string{{
-						"tenant": target.namespace, "group": "GOLAB_FLAGS", "dataId": "golab.manifest", "md5": "",
+						"tenant": target.namespace, "group": "GRAYLING_FLAGS", "dataId": "grayling.manifest", "md5": "",
 					}},
 				}},
 			} {

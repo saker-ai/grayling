@@ -72,7 +72,7 @@ func newPGPersistence(ctx context.Context, dsn string) (*pgPersistence, error) {
 	}
 	cfg.MaxConnLifetime = 30 * time.Minute
 	cfg.MaxConnIdleTime = 5 * time.Minute
-	cfg.ConnConfig.RuntimeParams["application_name"] = "golab"
+	cfg.ConnConfig.RuntimeParams["application_name"] = "grayling"
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("platform: postgres pool: %w", err)
@@ -694,7 +694,7 @@ func (p *pgPersistence) notifyChange(ctx context.Context, tx pgx.Tx, version int
 	if len(payload) > 7900 {
 		return nil
 	}
-	if _, err := tx.Exec(ctx, `SELECT pg_notify('golab_control', $1)`, string(payload)); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_notify('grayling_control', $1)`, string(payload)); err != nil {
 		return fmt.Errorf("platform: notify control change: %w", err)
 	}
 	return nil

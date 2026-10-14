@@ -12,10 +12,10 @@ import (
 )
 
 // LegacyResult is the normalized outcome of one legacy-gff-v1 evaluation.
-// It mirrors the fields of gff's model.VariationResult that GoLab surfaces
+// It mirrors the fields of gff's model.VariationResult that Grayling surfaces
 // (docs/技术方案.md §5.2: 可提供 legacy-gff-v1 兼容模式继续按 gff 原算法求值
 // 旧实验). Reason/ErrorCode carry the gff (OpenFeature-aligned) spellings,
-// NOT the GoLab native ones.
+// NOT the Grayling native ones.
 type LegacyResult struct {
 	// Value is the resolved variation value, or the caller default on any
 	// failure. Failed results must never be interpreted as an assignment.
@@ -34,7 +34,7 @@ type LegacyResult struct {
 
 // LegacyEvaluator evaluates pre-import gff flag documents with the ORIGINAL
 // gff algorithm (gff core v0.7.2). It exists for the legacy-gff-v1
-// compatibility mode and for contrast tests against the GoLab native
+// compatibility mode and for contrast tests against the Grayling native
 // fixed-bucket evaluator; the two algorithms do NOT promise identical
 // per-user assignments (§2 设计决定, §5.2).
 type LegacyEvaluator struct {

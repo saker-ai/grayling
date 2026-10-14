@@ -1,4 +1,4 @@
-// Package internal is the root of GoLab's private implementation packages.
+// Package internal is the root of Grayling's private implementation packages.
 //
 // Layout:
 //

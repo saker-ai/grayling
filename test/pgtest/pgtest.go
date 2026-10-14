@@ -1,10 +1,10 @@
 // Package pgtest provides a real PostgreSQL server for tests (no mocks, no
 // interface-level substitutes). Resolution order:
 //
-//  1. GOLAB_TEST_PG_DSN — an admin DSN (any reachable PostgreSQL ≥ 14); a
+//  1. GRAYLING_TEST_PG_DSN — an admin DSN (any reachable PostgreSQL ≥ 14); a
 //     unique scratch database is created per test and dropped on cleanup.
 //  2. Docker — a throwaway postgres:16-alpine container bound to loopback
-//     (image override: GOLAB_TEST_PG_IMAGE).
+//     (image override: GRAYLING_TEST_PG_IMAGE).
 //  3. Neither available — tests skip with an explicit reason.
 package pgtest
 
@@ -28,10 +28,10 @@ var dbCounter atomic.Int64
 // registers teardown. It blocks until the server accepts SQL connections.
 func DSN(t *testing.T) string {
 	t.Helper()
-	if os.Getenv("GOLAB_TEST_PG_SKIP") == "1" {
+	if os.Getenv("GRAYLING_TEST_PG_SKIP") == "1" {
 		t.Skip("pgtest: PostgreSQL integration tests are disabled for this job")
 	}
-	if admin := os.Getenv("GOLAB_TEST_PG_DSN"); admin != "" {
+	if admin := os.Getenv("GRAYLING_TEST_PG_DSN"); admin != "" {
 		return scratchDatabase(t, admin)
 	}
 	return dockerPostgres(t)
@@ -43,10 +43,10 @@ func scratchDatabase(t *testing.T, adminDSN string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	name := fmt.Sprintf("golab_pgtest_%d_%d", os.Getpid(), dbCounter.Add(1))
+	name := fmt.Sprintf("grayling_pgtest_%d_%d", os.Getpid(), dbCounter.Add(1))
 	conn, err := pgx.Connect(ctx, adminDSN)
 	if err != nil {
-		t.Fatalf("pgtest: connect to GOLAB_TEST_PG_DSN: %v", err)
+		t.Fatalf("pgtest: connect to GRAYLING_TEST_PG_DSN: %v", err)
 	}
 	defer conn.Close(ctx)
 	if _, err := conn.Exec(ctx, "CREATE DATABASE "+name); err != nil {
@@ -80,33 +80,33 @@ func rewriteDB(dsn, dbname string) string {
 func dockerPostgres(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skipf("pgtest: no docker and no GOLAB_TEST_PG_DSN — real-PostgreSQL tests skipped: %v", err)
+		t.Skipf("pgtest: no docker and no GRAYLING_TEST_PG_DSN — real-PostgreSQL tests skipped: %v", err)
 	}
 	probe := exec.Command("docker", "info")
 	probe.Stdout, probe.Stderr = nil, nil
 	if err := probe.Run(); err != nil {
-		t.Skipf("pgtest: docker daemon unavailable and no GOLAB_TEST_PG_DSN — real-PostgreSQL tests skipped: %v", err)
+		t.Skipf("pgtest: docker daemon unavailable and no GRAYLING_TEST_PG_DSN — real-PostgreSQL tests skipped: %v", err)
 	}
-	image := os.Getenv("GOLAB_TEST_PG_IMAGE")
+	image := os.Getenv("GRAYLING_TEST_PG_IMAGE")
 	if image == "" {
 		image = "postgres:16-alpine"
 	}
 	port := freePort(t)
-	name := fmt.Sprintf("golab-pg-%d-%d", os.Getpid(), dbCounter.Add(1))
+	name := fmt.Sprintf("grayling-pg-%d-%d", os.Getpid(), dbCounter.Add(1))
 	run := exec.Command("docker", "run", "-d", "--rm",
 		"--name", name,
-		"-e", "POSTGRES_PASSWORD=golab-test",
-		"-e", "POSTGRES_DB=golab_test",
+		"-e", "POSTGRES_PASSWORD=grayling-test",
+		"-e", "POSTGRES_DB=grayling_test",
 		"-p", fmt.Sprintf("127.0.0.1:%d:5432", port),
 		image)
 	if out, err := run.CombinedOutput(); err != nil {
-		t.Skipf("pgtest: cannot run %s (docker pull/start failed) and no GOLAB_TEST_PG_DSN — real-PostgreSQL tests skipped: %v\n%s", image, err, out)
+		t.Skipf("pgtest: cannot run %s (docker pull/start failed) and no GRAYLING_TEST_PG_DSN — real-PostgreSQL tests skipped: %v\n%s", image, err, out)
 	}
 	t.Cleanup(func() {
 		c := exec.Command("docker", "rm", "-f", name)
 		_, _ = c.CombinedOutput()
 	})
-	dsn := fmt.Sprintf("postgres://postgres:golab-test@127.0.0.1:%d/golab_test?sslmode=disable", port)
+	dsn := fmt.Sprintf("postgres://postgres:grayling-test@127.0.0.1:%d/grayling_test?sslmode=disable", port)
 	waitReady(t, dsn)
 	return dsn
 }

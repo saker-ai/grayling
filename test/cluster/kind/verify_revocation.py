@@ -28,7 +28,7 @@ def wait_api():
                 return
         except OSError:
             time.sleep(0.2)
-    raise RuntimeError("GoLab A admin API port-forward did not start")
+    raise RuntimeError("Grayling A admin API port-forward did not start")
 
 
 def expect(command, fragment, timeout=20):
@@ -43,7 +43,7 @@ def wait_shared_revision():
     last = None
     while time.monotonic() < deadline:
         revisions = []
-        for pod, server in (("allowed-a", "golab-a"), ("allowed-b", "golab-b")):
+        for pod, server in (("allowed-a", "grayling-a"), ("allowed-b", "grayling-b")):
             result = subprocess.run(probe(pod, server, "a", "a"),
                                     capture_output=True, text=True, timeout=15)
             match = re.search(r"PASS official SDK read revision (\d+)", result.stdout)
@@ -53,10 +53,10 @@ def wait_shared_revision():
             revisions.append(int(match.group(1)))
         last = revisions
         if len(revisions) == 2 and revisions[0] == revisions[1] and revisions[0] > 0:
-            print(f"PASS both GoLab entries serve tenant-a revision {revisions[0]}")
+            print(f"PASS both Grayling entries serve tenant-a revision {revisions[0]}")
             return
         time.sleep(1)
-    raise RuntimeError(f"GoLab entries did not converge before revocation: {last}")
+    raise RuntimeError(f"Grayling entries did not converge before revocation: {last}")
 
 
 def main():
@@ -69,7 +69,7 @@ def main():
     prepare(workdir)
     wait_shared_revision()
     port_forward = subprocess.Popen(
-        ["kubectl", "-n", NAMESPACE, "port-forward", "svc/golab-a", "48688:8688"],
+        ["kubectl", "-n", NAMESPACE, "port-forward", "svc/grayling-a", "48688:8688"],
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
     )
     watcher = None
@@ -87,7 +87,7 @@ def main():
         run("cp", str(secret), "allowed-a:/tmp/revocation-token")
         watcher = subprocess.Popen(
             ["kubectl", "-n", NAMESPACE, "exec", "allowed-a", "--", "/tmp/sdk-probe",
-             "-server", "golab-a", "-namespace-file", "/tmp/tenant-a-namespace",
+             "-server", "grayling-a", "-namespace-file", "/tmp/tenant-a-namespace",
              "-token-file", "/tmp/revocation-token", "-ca-file", "/tmp/tls.crt",
              "-watch", "-watch-timeout", "20s"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -96,14 +96,14 @@ def main():
         provision.request("DELETE", "/api/v1/admin/tokens/" + issued["Token"]["id"], owner)
         print("PASS disposable SDK token revoked")
         expect(["kubectl", "-n", NAMESPACE, "exec", "allowed-a", "--", "/tmp/sdk-probe",
-                "-server", "golab-a", "-namespace-file", "/tmp/tenant-a-namespace",
+                "-server", "grayling-a", "-namespace-file", "/tmp/tenant-a-namespace",
                 "-token-file", "/tmp/revocation-token", "-ca-file", "/tmp/tls.crt",
                 "-expect-revoked-login"],
                "PASS revoked native login denied with HTTP 401")
-        service_ip = run("get", "svc", "golab-a", "-o", "jsonpath={.spec.clusterIP}")
+        service_ip = run("get", "svc", "grayling-a", "-o", "jsonpath={.spec.clusterIP}")
         namespace = (workdir / "tenant-a-namespace").read_text().strip()
         expect(["kubectl", "-n", NAMESPACE, "exec", "allowed-a", "--", "/tmp/native-grpc-probe",
-                "-address", f"{service_ip}:9848", "-server-name", "golab-a", "-ca-file", "/tmp/tls.crt",
+                "-address", f"{service_ip}:9848", "-server-name", "grayling-a", "-ca-file", "/tmp/tls.crt",
                 "-revoked-namespace", namespace, "-revoked-token-file", "/tmp/revocation-token"],
                "PASS: anonymous and revoked native gRPC reads and subscriptions rejected with status 16")
         publish_next_revision(api=provision.API, owner=owner)

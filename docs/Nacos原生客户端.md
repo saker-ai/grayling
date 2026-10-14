@@ -9,7 +9,7 @@
 | v2.3.5，单节点 loopback 直连 | manifest 读取、订阅、撤销订阅、服务重启、网络黑洞恢复、显式鉴权的租户隔离和凭证撤销；默认匿名模式跨租户可读的负向边界用例 | 本机实验兼容性验证；撤销订阅须处理 SDK 在途监听任务，不能承诺单次调用后立即停止回调；默认匿名模式不作为租户可达接口 |
 | v2.3.5，双节点本机 TLS/L4 一对一转发，共享真实 PostgreSQL/Redis | 订阅、节点故障切换、租户隔离、凭证撤销及 HTTP/2 后端连接复用的负向探针 | 不是跨主机生产网络策略验收；L7 复用不支持 |
 
-完整官方客户端 `-race` 不能宣称通过。可选最小复现命令为 `GOWORK=off go test -race -tags sdk_race_repro ./test/native -run '^TestOfficialSDKClientMapRaceReproducer$' -count=1`；该用例只并发关闭和新建官方 SDK 客户端，服务端使用真实 gonacos，预期 race detector 定位到 SDK 的全局 `rpc.clientMap`。此命令**预期非零退出**，不作为通过项；见上游 [#861](https://github.com/nacos-group/nacos-sdk-go/issues/861)（v2.3.5 的并发 client map 写）和 [#833](https://github.com/nacos-group/nacos-sdk-go/issues/833)（Start/health-check 内部竞态）。这两个上游 issue 当前已关闭，但固定的 v2.3.5 仍能复现上述 client map 竞态；升级时必须重新检查。GoLab/gonacos 自身竞态仍由各自 `-race` 检查处理，不能把第三方竞态忽略后称整个客户端通过。
+完整官方客户端 `-race` 不能宣称通过。可选最小复现命令为 `GOWORK=off go test -race -tags sdk_race_repro ./test/native -run '^TestOfficialSDKClientMapRaceReproducer$' -count=1`；该用例只并发关闭和新建官方 SDK 客户端，服务端使用真实 gonacos，预期 race detector 定位到 SDK 的全局 `rpc.clientMap`。此命令**预期非零退出**，不作为通过项；见上游 [#861](https://github.com/nacos-group/nacos-sdk-go/issues/861)（v2.3.5 的并发 client map 写）和 [#833](https://github.com/nacos-group/nacos-sdk-go/issues/833)（Start/health-check 内部竞态）。这两个上游 issue 当前已关闭，但固定的 v2.3.5 仍能复现上述 client map 竞态；升级时必须重新检查。Grayling/gonacos 自身竞态仍由各自 `-race` 检查处理，不能把第三方竞态忽略后称整个客户端通过。
 
 `CancelListenConfig` 在 v2.3.5 中只从本地缓存表移除监听器；与正在执行的监听任务并发时，旧任务可能把监听器再写回。固定用例等待该任务收敛后第二次撤销，再发布新 revision 并确认没有回调。业务调用方若需要严格撤销，应关闭整个客户端或采用这类收敛后复核流程；**单次撤销调用后的即时无回调不在已验证范围内**。
 
@@ -21,17 +21,17 @@
 
 `TestOfficialNacosClientConvergesAfterNetworkBlackhole` 在官方客户端与真实 gonacos 之间放置 HTTP/gRPC 双向 TCP 代理，故障期间静默丢弃流量而不主动关闭连接。期间发布两个新 revision，同一客户端保持旧的已验证求值；恢复网络后按 manifest 复核收敛到最新 revision。此测试已连续运行三次通过，覆盖单节点网络黑洞恢复。
 
-`TestOfficialNacosClientFailsOverAcrossGolabNodes` 在共享真实 PostgreSQL 与 Redis 的两个独立 GoLab 进程上启用 `-nacos-native-auth=true`，验证跨节点恢复。客户端凭 GoLab SDK token 配置 B、A 两个地址，B 先离线，首次从 A 读取完整 revision；B 恢复且两个 GoLab SDK 副本确认共享状态后，终止 A，改从 B 发布新 revision。保留同一个官方客户端和 manifest 订阅，反复获取 manifest 及其引用文档并校验 hash、key，最终从 B 读到新 revision。另一租户的 SDK token 从 A、B 均无法读取该 manifest；撤销凭证后，B 的原生登录返回 401。它验证直连拓扑下的连接切换、跨租户拒绝、撤销和新版本可读性；客户端侧的多文档原子换入由 `TestNativeSnapshotAtomicityAndStatus` 单独验证。
+`TestOfficialNacosClientFailsOverAcrossGraylingNodes` 在共享真实 PostgreSQL 与 Redis 的两个独立 Grayling 进程上启用 `-nacos-native-auth=true`，验证跨节点恢复。客户端凭 Grayling SDK token 配置 B、A 两个地址，B 先离线，首次从 A 读取完整 revision；B 恢复且两个 Grayling SDK 副本确认共享状态后，终止 A，改从 B 发布新 revision。保留同一个官方客户端和 manifest 订阅，反复获取 manifest 及其引用文档并校验 hash、key，最终从 B 读到新 revision。另一租户的 SDK token 从 A、B 均无法读取该 manifest；撤销凭证后，B 的原生登录返回 401。它验证直连拓扑下的连接切换、跨租户拒绝、撤销和新版本可读性；客户端侧的多文档原子换入由 `TestNativeSnapshotAtomicityAndStatus` 单独验证。
 
-**原生订阅的正式支持范围限于下文已验收的集群内 TLS/L4 参考拓扑，并要求目标集群通过同一部署门禁。** 默认 gonacos 仍仅绑定 loopback，默认模式没有原生客户端租户鉴权；`TestNativeClientCanReadOtherTenantWithoutAuthorization` 保留为默认模式的安全边界用例。GoLab 新增显式 `-nacos-native-auth` 模式：官方客户端使用用户名 `golab-sdk`、密码为 GoLab SDK token，经原生 HTTP 登录；该模式的 HTTP 端口只提供登录，其他 gonacos HTTP 路由一律 404。gRPC 只允许连接维护、配置查询和批量订阅；每次配置读/订阅以服务端 `ResolveToken` 的 SDK audience 与 `(workspace, environment)` 推导唯一 namespace，Group 限定 `GOLAB_FLAGS`，dataId 限定 manifest/不可变文档；推送前再次核验凭证，撤销后不再发送通知。官方 Go SDK 的真实客户端测试已验证 A 凭证读取 A、B 凭证不能读取 A 的 manifest/文档或订阅 A 更新，以及撤销已建立订阅后的推送停止。SDK 在网络读取失败时可能返回本地 last-known-good 缓存，因此调用方不能仅用 `GetConfig` 的成功返回推断凭证仍有效。
+**原生订阅的正式支持范围限于下文已验收的集群内 TLS/L4 参考拓扑，并要求目标集群通过同一部署门禁。** 默认 gonacos 仍仅绑定 loopback，默认模式没有原生客户端租户鉴权；`TestNativeClientCanReadOtherTenantWithoutAuthorization` 保留为默认模式的安全边界用例。Grayling 新增显式 `-nacos-native-auth` 模式：官方客户端使用用户名 `golab-sdk`、密码为 Grayling SDK token，经原生 HTTP 登录；该模式的 HTTP 端口只提供登录，其他 gonacos HTTP 路由一律 404。gRPC 只允许连接维护、配置查询和批量订阅；每次配置读/订阅以服务端 `ResolveToken` 的 SDK audience 与 `(workspace, environment)` 推导唯一 namespace，Group 限定 `GRAYLING_FLAGS`，dataId 限定 manifest/不可变文档；推送前再次核验凭证，撤销后不再发送通知。官方 Go SDK 的真实客户端测试已验证 A 凭证读取 A、B 凭证不能读取 A 的 manifest/文档或订阅 A 更新，以及撤销已建立订阅后的推送停止。SDK 在网络读取失败时可能返回本地 last-known-good 缓存，因此调用方不能仅用 `GetConfig` 的成功返回推断凭证仍有效。
 
-gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f) 将推送订阅从客户端 IP 改为服务端连接 ID 并串行化双向流写入；[`dee1d72`](https://github.com/godeps/gonacos/commit/dee1d72) 增加逐帧鉴权钩子，[`3836219`](https://github.com/godeps/gonacos/commit/3836219) 增加原生配置限定模式及推送时复核，[`ea39c83`](https://github.com/godeps/gonacos/commit/ea39c83) 消除了嵌入式实例之间共享 gRPC Server 导致的鉴权状态污染。相关 gonacos 包的 `go test -race` 通过。完整原生客户端 `-race` 仍报告官方 `nacos-sdk-go/v2 v2.3.5` 内部竞态：`CloseClient` 与其全局 client map 访问并发，以及断线重连时连接状态的并发读写；这不是 GoLab 或 gonacos 服务端栈。原生订阅的订阅关联依赖服务端连接 ID，已验证直连 TCP 与本机 TLS/L4 一对一转发；L7 HTTP/2 代理若复用不同租户到同一后端连接，当前不属于支持拓扑。默认保持 loopback，外部访问必须另行验证网络隔离与 TLS 终止边界。
+gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f) 将推送订阅从客户端 IP 改为服务端连接 ID 并串行化双向流写入；[`dee1d72`](https://github.com/godeps/gonacos/commit/dee1d72) 增加逐帧鉴权钩子，[`3836219`](https://github.com/godeps/gonacos/commit/3836219) 增加原生配置限定模式及推送时复核，[`ea39c83`](https://github.com/godeps/gonacos/commit/ea39c83) 消除了嵌入式实例之间共享 gRPC Server 导致的鉴权状态污染。相关 gonacos 包的 `go test -race` 通过。完整原生客户端 `-race` 仍报告官方 `nacos-sdk-go/v2 v2.3.5` 内部竞态：`CloseClient` 与其全局 client map 访问并发，以及断线重连时连接状态的并发读写；这不是 Grayling 或 gonacos 服务端栈。原生订阅的订阅关联依赖服务端连接 ID，已验证直连 TCP 与本机 TLS/L4 一对一转发；L7 HTTP/2 代理若复用不同租户到同一后端连接，当前不属于支持拓扑。默认保持 loopback，外部访问必须另行验证网络隔离与 TLS 终止边界。
 
 ## Issue #13：支持矩阵与当前验收范围
 
-截至 2026-10-07，已验收的参考拓扑是普通集群内 Pod 经 Cilium NetworkPolicy 访问双副本 GoLab TLS/L4 侧车，使用官方 Go Nacos SDK v2.3.5。目标集群须按部署门禁验证实际证书、镜像、策略及允许/拒绝源，才可启用此支持范围。外部主机入口、其他 CNI、明文跨主机与 L7 HTTP/2 后端复用没有验收，均不属于此支持范围。以下较早的试验记录是过程记录，以本段和下表的当前结论为准。
+截至 2026-10-07，已验收的参考拓扑是普通集群内 Pod 经 Cilium NetworkPolicy 访问双副本 Grayling TLS/L4 侧车，使用官方 Go Nacos SDK v2.3.5。目标集群须按部署门禁验证实际证书、镜像、策略及允许/拒绝源，才可启用此支持范围。外部主机入口、其他 CNI、明文跨主机与 L7 HTTP/2 后端复用没有验收，均不属于此支持范围。以下较早的试验记录是过程记录，以本段和下表的当前结论为准。
 
-2026-10-07 预检增强：允许源除 `h2` 握手外，须用 `cmd/nacos-native-grpc-probe` 对每个 gRPC 入口 IP 直发无凭证配置查询及批量订阅请求，两者均须得到 gRPC status 16；否则不写 PASS 证据。配对核验要求 `anonymousGRPCDenied` 与 `anonymousGRPCSubscriptionDenied`。探针的读与订阅拒绝路径由本地真实 TLS/HTTP2 服务测试覆盖；双 GoLab 进程本机 TLS/L4 定向用例也验证无凭证订阅返回 status 16。本轮拓扑预检器 33/33、`make all` 与 `make client-compatibility` 通过。没有跨主机现场入口与代理/网络策略日志，生产支持结论不变。
+2026-10-07 预检增强：允许源除 `h2` 握手外，须用 `cmd/nacos-native-grpc-probe` 对每个 gRPC 入口 IP 直发无凭证配置查询及批量订阅请求，两者均须得到 gRPC status 16；否则不写 PASS 证据。配对核验要求 `anonymousGRPCDenied` 与 `anonymousGRPCSubscriptionDenied`。探针的读与订阅拒绝路径由本地真实 TLS/HTTP2 服务测试覆盖；双 Grayling 进程本机 TLS/L4 定向用例也验证无凭证订阅返回 status 16。本轮拓扑预检器 33/33、`make all` 与 `make client-compatibility` 通过。没有跨主机现场入口与代理/网络策略日志，生产支持结论不变。
 
 2026-10-07 双节点本机 TLS/L4 回归补充：真实进程测试在同一条 HTTP/2 连接上，确认 A 撤销前订阅返回 gRPC status 0、B 对 A 命名空间订阅返回 status 7；撤销 A 的 SDK token 后，A 再次订阅返回 status 16。原有测试还确认撤销后直接读取返回 status 16、旧订阅不再收到新 revision 推送。这样同时检查了既有订阅与新订阅的撤销边界；它仍不是跨主机网络策略或现场代理验收。
 
@@ -39,63 +39,63 @@ gonacos 提交 [`b001ebd`](https://github.com/godeps/gonacos/commit/b001ebd8082f
 
 | 拓扑 | 现有证据 | 正式支持 |
 | --- | --- | --- |
-| 默认匿名 gonacos、仅 loopback | 原生功能测试显示知道 namespace 即可跨租户读取；启动时即使设置 `GOLAB_ALLOW_NON_LOOPBACK_GONACOS=1` 也拒绝匿名非 loopback 绑定 | 不作为租户可达接口 |
+| 默认匿名 gonacos、仅 loopback | 原生功能测试显示知道 namespace 即可跨租户读取；启动时即使设置 `GRAYLING_ALLOW_NON_LOOPBACK_GONACOS=1` 也拒绝匿名非 loopback 绑定 | 不作为租户可达接口 |
 | `-nacos-native-auth=true`、单/双节点直连 TCP | 官方 Go SDK v2.3.5 真实进程读、订阅、跨租户拒绝、撤销与双节点切换（#11） | 仅实验兼容性验证；明文连接不能跨主机部署 |
-| 双节点 TLS 终止 + 每个客户端 TCP 连接对应独立后端 TCP 连接，gonacos 后端仅 loopback | `test/cluster/TestOfficialNacosClientFailsOverAcrossGolabNodes` 使用真实 GoLab/PG/Redis 及 TLS/L4 代理，验证两个租户、故障切换、HTTP 绕过、撤销；直接向同一 TLS HTTP/2 连接发送原生配置查询，验证有效凭证成功、匿名及撤销后的凭证均被拒；代理与后端在同一测试主机 | 仅本机进程级兼容性证据；不单独构成已支持部署拓扑 |
-| 本机 Kind 三节点，Cilium NetworkPolicy + 双 GoLab TLS/L4 sidecar | 两个 GoLab Pod 分处不同 worker；跨 worker 的允许源官方 Go SDK v2.3.5 读取两租户配置、跨租户读取被拒，并在两入口订阅收到新 revision；保留同一订阅，在 B 先离线、恢复后 A 离线的过程中从 B 收到新修订；临时 SDK token 撤销后 HTTP 登录 401、gRPC 读/订阅 status 16 且不再接收发布推送。两端口拒绝源被策略阻断，临时撤销策略后可连接、恢复策略后再次阻断；代理日志记录实际 Pod 源 IP、`h2` 与每条连接独立的 loopback 后端 TCP 地址。复现见 [`test/cluster/kind/README.md`](../test/cluster/kind/README.md)。 | **已验收的集群内参考拓扑**：正式 `golab-native-proxy` 可执行文件、Kubernetes TLS/L4 侧车和 Cilium NetworkPolicy；目标集群仍须通过相同门禁。外部主机入口不在范围内 |
+| 双节点 TLS 终止 + 每个客户端 TCP 连接对应独立后端 TCP 连接，gonacos 后端仅 loopback | `test/cluster/TestOfficialNacosClientFailsOverAcrossGraylingNodes` 使用真实 Grayling/PG/Redis 及 TLS/L4 代理，验证两个租户、故障切换、HTTP 绕过、撤销；直接向同一 TLS HTTP/2 连接发送原生配置查询，验证有效凭证成功、匿名及撤销后的凭证均被拒；代理与后端在同一测试主机 | 仅本机进程级兼容性证据；不单独构成已支持部署拓扑 |
+| 本机 Kind 三节点，Cilium NetworkPolicy + 双 Grayling TLS/L4 sidecar | 两个 Grayling Pod 分处不同 worker；跨 worker 的允许源官方 Go SDK v2.3.5 读取两租户配置、跨租户读取被拒，并在两入口订阅收到新 revision；保留同一订阅，在 B 先离线、恢复后 A 离线的过程中从 B 收到新修订；临时 SDK token 撤销后 HTTP 登录 401、gRPC 读/订阅 status 16 且不再接收发布推送。两端口拒绝源被策略阻断，临时撤销策略后可连接、恢复策略后再次阻断；代理日志记录实际 Pod 源 IP、`h2` 与每条连接独立的 loopback 后端 TCP 地址。复现见 [`test/cluster/kind/README.md`](../test/cluster/kind/README.md)。 | **已验收的集群内参考拓扑**：正式 `grayling-native-proxy` 可执行文件、Kubernetes TLS/L4 侧车和 Cilium NetworkPolicy；目标集群仍须通过相同门禁。外部主机入口不在范围内 |
 | L7 HTTP/2 代理多路复用不同租户到同一后端 gRPC 连接 | 双租户各自发布 manifest 后，共享一条后端连接：B 读取 A 的 namespace 返回 status 7，读取 B 自己的 namespace 返回 status 0，但订阅 B 自己的 namespace 返回 status 7；B 换用独立后端连接订阅返回 status 0。订阅读取行为不一致，且真实 L7 代理的推送身份隔离未证明；`scripts/check_nacos_native_topology.py` 对复用配置报错 | **不支持** |
 | 其他语言或官方 SDK 其他版本 | 未测试 | 不支持 |
 
-2026-10-07 完整部署清单验收：在独立 Kind v0.33.0 / Kubernetes v1.37 / Cilium v1.20.2 集群中，`test/cluster/kind/setup_cluster.sh` 构建正式 `cmd/golab-native-proxy` 可执行文件。`verify_policy.sh` 对两个 GoLab 入口的 8848/9848 验证允许源可连、拒绝源不可连，临时撤销策略后拒绝源可连、恢复后再次阻断；18848/19848 明文后端从 Pod IP 不可达。`verify_sdk.py` 用官方 Go SDK v2.3.5 对两个租户完成两节点读取、订阅及推送，跨租户直接 gRPC 读取和订阅分别返回 status 7，匿名返回 status 16，HTTP 配置绕过返回 404。`verify_failover.py` 保留同一个官方订阅，在 B 离线、恢复后 A 离线的过程中收到从 B 发布的新 revision；`verify_revocation.py` 验证已建立订阅的临时 SDK token 撤销后登录 401、直接 gRPC 读和订阅 status 16，后续无推送。
+2026-10-07 完整部署清单验收：在独立 Kind v0.33.0 / Kubernetes v1.37 / Cilium v1.20.2 集群中，`test/cluster/kind/setup_cluster.sh` 构建正式 `cmd/grayling-native-proxy` 可执行文件。`verify_policy.sh` 对两个 Grayling 入口的 8848/9848 验证允许源可连、拒绝源不可连，临时撤销策略后拒绝源可连、恢复后再次阻断；18848/19848 明文后端从 Pod IP 不可达。`verify_sdk.py` 用官方 Go SDK v2.3.5 对两个租户完成两节点读取、订阅及推送，跨租户直接 gRPC 读取和订阅分别返回 status 7，匿名返回 status 16，HTTP 配置绕过返回 404。`verify_failover.py` 保留同一个官方订阅，在 B 离线、恢复后 A 离线的过程中收到从 B 发布的新 revision；`verify_revocation.py` 验证已建立订阅的临时 SDK token 撤销后登录 401、直接 gRPC 读和订阅 status 16，后续无推送。
 
-同一集群又实际应用 [`deploy/kubernetes/native/manifest.yaml`](../deploy/kubernetes/native/manifest.yaml) 的双副本 StatefulSet、独立 TLS 证书和 NetworkPolicy。两个副本位于不同 worker；`verify_deploy_manifest.sh` 对两个稳定 DNS 入口验证允许/拒绝源、明文后端不可达，官方 SDK 两个租户经两个副本读取成功。首次实跑发现 Secret 文件默认权限会让 GoLab 拒绝启动，清单已改为 `0600`；官方 SDK 的 HTTP/1.1 客户端可能不发送 ALPN，侧车现允许 HTTP 入口无 ALPN，gRPC 入口仍强制 `h2`。侧车日志保留客户端 Pod IP、ALPN 和每条连接独立的 loopback 后端本地端口。该证据构成**普通集群内 Pod → Cilium NetworkPolicy → GoLab TLS/L4 侧车**的参考验收；Kind worker 在同一物理主机，不能据此声明外部主机入口或任意生产集群 CNI 已通过。
+同一集群又实际应用 [`deploy/kubernetes/native/manifest.yaml`](../deploy/kubernetes/native/manifest.yaml) 的双副本 StatefulSet、独立 TLS 证书和 NetworkPolicy。两个副本位于不同 worker；`verify_deploy_manifest.sh` 对两个稳定 DNS 入口验证允许/拒绝源、明文后端不可达，官方 SDK 两个租户经两个副本读取成功。首次实跑发现 Secret 文件默认权限会让 Grayling 拒绝启动，清单已改为 `0600`；官方 SDK 的 HTTP/1.1 客户端可能不发送 ALPN，侧车现允许 HTTP 入口无 ALPN，gRPC 入口仍强制 `h2`。侧车日志保留客户端 Pod IP、ALPN 和每条连接独立的 loopback 后端本地端口。该证据构成**普通集群内 Pod → Cilium NetworkPolicy → Grayling TLS/L4 侧车**的参考验收；Kind worker 在同一物理主机，不能据此声明外部主机入口或任意生产集群 CNI 已通过。
 
-本机 Kind 验收记录（2026-10-07）：Kind v0.33.0 创建 1 个 control plane 和 2 个 worker；Cilium v1.20.2 在 3 节点就绪。GoLab A 与 B、各自允许源和拒绝源分处相反 worker，两个 GoLab Pod 均为 `2/2 Ready`。`test/cluster/kind/verify_policy.sh` 对 A、B 的 8848/9848 入口均验证允许源可连、拒绝源不可连，18848/19848 后端端口不可从 Pod 直接连接；临时删除策略时拒绝源转为可连，恢复后再次不可连。`test/cluster/kind/verify_sdk.py` 从跨 worker Pod 对两入口验证匿名 gRPC 读/订阅为 status 16、双租户各自读/订阅成功、跨租户读/订阅为 status 7；HTTP 配置绕过为 404、无效登录为 401；官方 Go SDK 对两租户读取成功，发布租户 A 新 revision 后，A/B 的同一批订阅均收到 revision 6。代理日志记录 A 入口客户端 Pod IP `10.211.2.216`、B 入口 `10.211.1.110`、ALPN `h2` 及各条连接到 `127.0.0.1:19848` 的独立后端本地端口。原始无凭证结果保存在本机隔离测试目录；复现步骤见测试 README。这些 IP 属于同一物理主机上的 Kind 网络；该轮仍未验收可部署清单。随后在同一隔离集群实际应用了下文清单并完成独立验收，外部主机入口仍不在支持范围内。
+本机 Kind 验收记录（2026-10-07）：Kind v0.33.0 创建 1 个 control plane 和 2 个 worker；Cilium v1.20.2 在 3 节点就绪。Grayling A 与 B、各自允许源和拒绝源分处相反 worker，两个 Grayling Pod 均为 `2/2 Ready`。`test/cluster/kind/verify_policy.sh` 对 A、B 的 8848/9848 入口均验证允许源可连、拒绝源不可连，18848/19848 后端端口不可从 Pod 直接连接；临时删除策略时拒绝源转为可连，恢复后再次不可连。`test/cluster/kind/verify_sdk.py` 从跨 worker Pod 对两入口验证匿名 gRPC 读/订阅为 status 16、双租户各自读/订阅成功、跨租户读/订阅为 status 7；HTTP 配置绕过为 404、无效登录为 401；官方 Go SDK 对两租户读取成功，发布租户 A 新 revision 后，A/B 的同一批订阅均收到 revision 6。代理日志记录 A 入口客户端 Pod IP `10.211.2.216`、B 入口 `10.211.1.110`、ALPN `h2` 及各条连接到 `127.0.0.1:19848` 的独立后端本地端口。原始无凭证结果保存在本机隔离测试目录；复现步骤见测试 README。这些 IP 属于同一物理主机上的 Kind 网络；该轮仍未验收可部署清单。随后在同一隔离集群实际应用了下文清单并完成独立验收，外部主机入口仍不在支持范围内。
 
 本机生命周期补测（同日，独立重建的临时命名空间）：`verify_failover.py` 在 B 离线时让同一个官方 SDK 客户端从 A 读取并订阅，恢复 B、停 A 后经 B 发布，原订阅收到新的 revision 4；两个 Pod 均恢复就绪。`verify_revocation.py` 先等待 A/B 对同一租户 revision 收敛，再让新建的临时 SDK token 订阅，撤销后验证原生登录 HTTP 401、直接 gRPC 读与订阅 status 16，后续发布未触发旧订阅。临时管理员令牌仅存于权限受限的本机夹具目录，证据文件不包含明文凭证。这个补测加强了本机模拟的生命周期证据，但不能证明生产入口或跨物理主机的网络隔离。
 
-2026-10-07 先前复核：`GOWORK=off go test ./test/cluster -run '^TestOfficialNacosClientFailsOverAcrossGolabNodes$' -count=1` 通过，当时的负向探针只让 B 读取、订阅 A 的 namespace，均返回 status 7；这不能证明 B 在复用连接上访问自己的 namespace 的行为。`make all`、`make client-compatibility`（直连 9/9、双节点本机 TLS/L4 1/1）和拓扑检查器 25 个单元测试通过。测试使用现有 PostgreSQL、测试自管 Redis，并将已满 `/data` 上的 Go 临时构建目录改设为 `GOTMPDIR=/tmp`。此结果不包含跨主机 TLS/网络策略或真实 L7 代理验收。
+2026-10-07 先前复核：`GOWORK=off go test ./test/cluster -run '^TestOfficialNacosClientFailsOverAcrossGraylingNodes$' -count=1` 通过，当时的负向探针只让 B 读取、订阅 A 的 namespace，均返回 status 7；这不能证明 B 在复用连接上访问自己的 namespace 的行为。`make all`、`make client-compatibility`（直连 9/9、双节点本机 TLS/L4 1/1）和拓扑检查器 25 个单元测试通过。测试使用现有 PostgreSQL、测试自管 Redis，并将已满 `/data` 上的 Go 临时构建目录改设为 `GOTMPDIR=/tmp`。此结果不包含跨主机 TLS/网络策略或真实 L7 代理验收。
 
-2026-10-07 本轮补充：真实双 GoLab 进程、PostgreSQL、Redis 与官方 Go SDK 的定向用例增加 B 自己发布的 manifest。共享后端 HTTP/2 连接上 B 可以读取自己的 manifest（status 0），却不能订阅自己的 manifest（status 7）；换用独立连接后 B 订阅成功（status 0）。一条连接及两条连接分别由 TLS/L4 代理的接受计数确认。由此明确：跨租户读取被拒不等于 L7 连接复用可用，更不能证明推送隔离；运维部署仍须维持一客户端 TCP 连接对应一条后端 TCP 连接。该用例的 TLS/L4 代理与后端仍在同一测试主机。
+2026-10-07 本轮补充：真实双 Grayling 进程、PostgreSQL、Redis 与官方 Go SDK 的定向用例增加 B 自己发布的 manifest。共享后端 HTTP/2 连接上 B 可以读取自己的 manifest（status 0），却不能订阅自己的 manifest（status 7）；换用独立连接后 B 订阅成功（status 0）。一条连接及两条连接分别由 TLS/L4 代理的接受计数确认。由此明确：跨租户读取被拒不等于 L7 连接复用可用，更不能证明推送隔离；运维部署仍须维持一客户端 TCP 连接对应一条后端 TCP 连接。该用例的 TLS/L4 代理与后端仍在同一测试主机。
 
 撤销后连接身份检查：同一 TLS HTTP/2 连接在 A 凭证撤销后继续拒绝 A 的读与订阅（status 16）；B 在该连接上读取自己的 manifest 仍可成功，但订阅仍返回 status 7，不能因为 A 已撤销就接管其连接。B 建立独立连接后订阅返回 status 0，代理计数从一条增至两条。这项本机回归约束 L7 复用和撤销交互；它不代表真实 L7 代理或跨主机生产网络已验收。
 
-2026-10-07 HTTP 绕过检查补强：现场允许源探针对每个 TLS HTTP 解析 IP 完成两租户有效登录后，分别携带其 token 的 `accessToken` 请求头读取**对应真实 namespace 的 manifest**，均须得到 404；`--verify-pair` 拒绝缺少 `authenticatedHTTPDenied` 的旧证据。本机双 GoLab 进程 TLS/L4 用例也验证有效 token 的 HTTP 配置请求仍返回 404。token 只放请求头和登录请求体，不放配置查询 URL 或证据 JSON；这项检查不能代替跨主机真实代理与策略日志。
+2026-10-07 HTTP 绕过检查补强：现场允许源探针对每个 TLS HTTP 解析 IP 完成两租户有效登录后，分别携带其 token 的 `accessToken` 请求头读取**对应真实 namespace 的 manifest**，均须得到 404；`--verify-pair` 拒绝缺少 `authenticatedHTTPDenied` 的旧证据。本机双 Grayling 进程 TLS/L4 用例也验证有效 token 的 HTTP 配置请求仍返回 404。token 只放请求头和登录请求体，不放配置查询 URL 或证据 JSON；这项检查不能代替跨主机真实代理与策略日志。
 
 ### 运维部署模板与预检
 
-仓库现提供 [`deploy/kubernetes/native`](../deploy/kubernetes/native/README.md) 中的双副本 StatefulSet、正式 `golab-native-proxy` TLS/L4 侧车和 NetworkPolicy 示例。侧车的 gRPC 入口强制协商 `h2` ALPN；HTTP 入口允许 `http/1.1` 或无 ALPN 的标准 HTTP/1.1 客户端，拒绝非 loopback 后端；每个客户端 TLS 连接只建立一条后端 TCP 连接。`test/cluster/kind` 使用同一个侧车可执行文件在独立 Kind/Cilium 集群中做本机多节点模拟。示例只面向普通集群内 Pod；是否列为正式支持，仍须将实际部署的 TLS 证书、镜像、策略、允许与拒绝源及完整生命周期证据通过下述现场门禁核对，不能把 Kind 模拟等同于生产集群验收。
+仓库现提供 [`deploy/kubernetes/native`](../deploy/kubernetes/native/README.md) 中的双副本 StatefulSet、正式 `grayling-native-proxy` TLS/L4 侧车和 NetworkPolicy 示例。侧车的 gRPC 入口强制协商 `h2` ALPN；HTTP 入口允许 `http/1.1` 或无 ALPN 的标准 HTTP/1.1 客户端，拒绝非 loopback 后端；每个客户端 TLS 连接只建立一条后端 TCP 连接。`test/cluster/kind` 使用同一个侧车可执行文件在独立 Kind/Cilium 集群中做本机多节点模拟。示例只面向普通集群内 Pod；是否列为正式支持，仍须将实际部署的 TLS 证书、镜像、策略、允许与拒绝源及完整生命周期证据通过下述现场门禁核对，不能把 Kind 模拟等同于生产集群验收。
 
 允许源登录探针要求 HTTP TLS 入口协商 `http/1.1` ALPN，再核对 HTTP 200 并解析 Nacos 登录 JSON：`accessToken` 必须等于本次提交的 SDK token，`tokenTtl` 必须为正整数。未协商 `http/1.1`、通用 200 页面、空令牌或错误 TTL 均报 `ALERT`，不会写入 PASS 证据。响应体上限为 16 KiB；令牌值只在进程内比较，不写入错误输出或证据文件。允许源还须提交两个不同 namespace ID；原生 gRPC 探针对每个入口解析 IP 用两个独立 TLS/HTTP2 连接，分别检查两租户在自己 namespace 的 manifest 读取和订阅 status 0，以及对方 namespace 的读取和订阅 status 7，并检查匿名读取、订阅 status 16。对于自身读取与订阅，探针还验证实际 gRPC 响应帧、响应类型、`resultCode: 200` 和 `success: true`；自身读取必须有可解析的 manifest，且包含正 revision 与工作空间、环境 ID。仅返回 HTTP 200/gRPC status 0 的空响应不能通过。namespace ID 必须对应 token 所属环境，两个环境都应已有 manifest；探针只读和注册监听，不发布配置。`tenantGRPCIsolation` 标记这些检查通过。此门禁仍不证明后续推送、凭证撤销或双节点故障切换，现场须完成这些生命周期验收。
 
 允许源证据还记录每个入口解析 IP 上实际验证过的服务端叶证书 SHA-256（`tlsCertSHA256`）；HTTP 登录探针的多次 TLS 连接若在一次运行中看到证书变化，会报 `ALERT`。`--verify-pair` 拒绝缺少这些指纹的旧证据，因此需要重新采集允许源记录。指纹是探针时的快照，须与现场代理证书部署记录核对；它不能单独证明后续连接继续使用同一证书，也不能代替代理连接日志与网络策略验收。
 
-2026-10-07 先前验证：`python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'` 34/34、示例拓扑声明、`make all` 和 `make client-compatibility` 通过；真实双 GoLab 进程、PostgreSQL/Redis、本机 TLS/L4 用例调用新增探针，对两个实际 SDK token 的自身读取/订阅及交叉拒绝通过。后续提交已让原生 gRPC 探针核对响应帧、成功载荷及 manifest 的基本字段；正式现场验收还须由官方 SDK 核对完整正文、推送、撤销、重连和故障切换。本机证据不能替代跨主机网络策略、真实代理连接日志或生产支持批准。
+2026-10-07 先前验证：`python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'` 34/34、示例拓扑声明、`make all` 和 `make client-compatibility` 通过；真实双 Grayling 进程、PostgreSQL/Redis、本机 TLS/L4 用例调用新增探针，对两个实际 SDK token 的自身读取/订阅及交叉拒绝通过。后续提交已让原生 gRPC 探针核对响应帧、成功载荷及 manifest 的基本字段；正式现场验收还须由官方 SDK 核对完整正文、推送、撤销、重连和故障切换。本机证据不能替代跨主机网络策略、真实代理连接日志或生产支持批准。
 
 2026-10-07 预检复核：`python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'` 30/30 通过，覆盖 HTTP TLS 未协商 ALPN 与误协商 `h2` 的拒绝路径；`python3 scripts/check_nacos_native_topology.py docs/nacos-native-topology.example.json`、`make all` 和 `make client-compatibility` 通过。后两项使用已有 PostgreSQL 与测试自管 Redis，兼容矩阵为直连 9/9、本机双节点 TLS/L4 1/1，保留 SDK 竞态和跨主机部署未验收的 LIMIT。未取得现场两节点策略或代理证据，正式支持状态不变。
 
 2026-10-07 本次补强的核验：拓扑预检 Python 单元测试 29/29、示例声明检查、`git diff --check`、`make all`（vet、全量 Go 测试、构建）与 `make client-compatibility`（直连 9/9、本机双节点 TLS/L4 1/1）均通过。全量 Go 测试使用已有 PostgreSQL 的隔离临时数据库与测试自管 Redis。此轮没有取得跨主机两节点的现场允许/拒绝源记录，正式支持边界保持上表所述。
 
-一个 GoLab 节点需提供两个独立的原生端口：HTTP 只用于 `/nacos/v1/auth/users/login`，gRPC 用于配置读取和订阅。以下是**待环境验证**的 TLS/L4 侧车示例，HAProxy 与 GoLab 在同一主机或同一网络命名空间；每个节点分别配置一份，负载均衡客户端持有两个节点的地址。`mode tcp` 保留客户端到后端的一对一 TCP 连接，禁止改成汇聚多租户后端连接的 L7 HTTP/2 路由。
+一个 Grayling 节点需提供两个独立的原生端口：HTTP 只用于 `/nacos/v1/auth/users/login`，gRPC 用于配置读取和订阅。以下是**待环境验证**的 TLS/L4 侧车示例，HAProxy 与 Grayling 在同一主机或同一网络命名空间；每个节点分别配置一份，负载均衡客户端持有两个节点的地址。`mode tcp` 保留客户端到后端的一对一 TCP 连接，禁止改成汇聚多租户后端连接的 L7 HTTP/2 路由。
 
 ```haproxy
 frontend nacos_login
     mode tcp
     bind 10.42.1.10:8848 ssl crt /etc/haproxy/nacos.pem alpn http/1.1
-    default_backend golab_nacos_http
-backend golab_nacos_http
+    default_backend grayling_nacos_http
+backend grayling_nacos_http
     mode tcp
     server local 127.0.0.1:18848
 frontend nacos_grpc
     mode tcp
     bind 10.42.1.10:9848 ssl crt /etc/haproxy/nacos.pem alpn h2
-    default_backend golab_nacos_grpc
-backend golab_nacos_grpc
+    default_backend grayling_nacos_grpc
+backend grayling_nacos_grpc
     mode tcp
     server local 127.0.0.1:19848
 ```
 
-GoLab 使用 `-nacos-native-auth=true -gonacos-addr 127.0.0.1:18848 -gonacos-grpc-addr 127.0.0.1:19848`。TLS 证书必须由客户端信任的 CA 签发并匹配入口主机名；官方 SDK 同时设置 HTTP `https` scheme、显式 gRPC 端口和 `WithTLS(NewTLSConfig(WithCA(...)))`。入口防火墙/NetworkPolicy 只允许获批 SDK 工作负载源访问 8848/9848，拒绝其他源；后端 18848/19848 不得从容器或主机外部路由。不要对公众暴露默认匿名模式，不要把 SDK token 写进 URL、日志或探针参数。
+Grayling 使用 `-nacos-native-auth=true -gonacos-addr 127.0.0.1:18848 -gonacos-grpc-addr 127.0.0.1:19848`。TLS 证书必须由客户端信任的 CA 签发并匹配入口主机名；官方 SDK 同时设置 HTTP `https` scheme、显式 gRPC 端口和 `WithTLS(NewTLSConfig(WithCA(...)))`。入口防火墙/NetworkPolicy 只允许获批 SDK 工作负载源访问 8848/9848，拒绝其他源；后端 18848/19848 不得从容器或主机外部路由。不要对公众暴露默认匿名模式，不要把 SDK token 写进 URL、日志或探针参数。
 
 复制并填写 [`nacos-native-topology.example.json`](nacos-native-topology.example.json)，然后在**每个节点**运行：
 
@@ -134,17 +134,17 @@ python3 scripts/check_nacos_native_topology.py deployment-node-a.json --verify-c
 在允许源和拒绝源各自执行相同的连通性探针，保留原始输出；将主机名和 CA 路径替换为部署值：
 
 ```sh
-openssl s_client -connect nacos.example.internal:9848 -servername nacos.example.internal -CAfile /etc/golab/nacos-ca.pem -alpn h2 </dev/null
-curl --cacert /etc/golab/nacos-ca.pem -sS -o /dev/null -w '%{http_code}\n' 'https://nacos.example.internal:8848/nacos/v1/cs/configs?tenant=x&group=GOLAB_FLAGS&dataId=golab.manifest'
+openssl s_client -connect nacos.example.internal:9848 -servername nacos.example.internal -CAfile /etc/grayling/nacos-ca.pem -alpn h2 </dev/null
+curl --cacert /etc/grayling/nacos-ca.pem -sS -o /dev/null -w '%{http_code}\n' 'https://nacos.example.internal:8848/nacos/v1/cs/configs?tenant=x&group=GRAYLING_FLAGS&dataId=grayling.manifest'
 ```
 
 允许源应通过证书校验并协商 `h2`，HTTP 绕过返回 404；拒绝源应无法建立 TLS/TCP 连接。还要从侧车外部对 18848/19848 做 TCP 连接测试，必须失败。由于本工作环境不能创建网络命名空间（`ip netns add` 返回 `Permission denied`），这些跨主机拒绝源检查本轮**没有实测证据**。
 
-2026-10-07 复核：使用现有 PostgreSQL、独立 Redis Docker 测试实例、真实 GoLab 双进程和官方 Go SDK 运行上述定向用例，通过（28.30s）；同一环境的 `make all`（`go vet ./...`、`go test ./... -count=1`、`go build ./...` 及两个命令二进制构建）通过。部署预检的 7 个 Python 单元测试通过；示例域名未配置 DNS 时运行 `--probe-denied` 得到 `ALERT: ... Name or service not known`，按预期拒绝记录伪证据。Docker 可创建两个独立 bridge 网络：同网络 Alpine 客户端连接测试 TCP 服务成功，异网络客户端连接同一容器 IP 失败；这只确认隔离试验可搭建，**没有**让两个 GoLab 节点、TLS/L4 代理及 SDK 客户端在该拓扑上完成端到端验收。本机 `/data`（Docker 根目录）已满；该试验未拉取或构建新镜像。待部署环境按上文分别保存两节点的允许源和拒绝源原始输出、证书/代理/策略配置及有效凭证生命周期证据，才具备正式支持审查条件。
+2026-10-07 复核：使用现有 PostgreSQL、独立 Redis Docker 测试实例、真实 Grayling 双进程和官方 Go SDK 运行上述定向用例，通过（28.30s）；同一环境的 `make all`（`go vet ./...`、`go test ./... -count=1`、`go build ./...` 及两个命令二进制构建）通过。部署预检的 7 个 Python 单元测试通过；示例域名未配置 DNS 时运行 `--probe-denied` 得到 `ALERT: ... Name or service not known`，按预期拒绝记录伪证据。Docker 可创建两个独立 bridge 网络：同网络 Alpine 客户端连接测试 TCP 服务成功，异网络客户端连接同一容器 IP 失败；这只确认隔离试验可搭建，**没有**让两个 Grayling 节点、TLS/L4 代理及 SDK 客户端在该拓扑上完成端到端验收。本机 `/data`（Docker 根目录）已满；该试验未拉取或构建新镜像。待部署环境按上文分别保存两节点的允许源和拒绝源原始输出、证书/代理/策略配置及有效凭证生命周期证据，才具备正式支持审查条件。
 
-后续同日复核：部署预检新增路由源 IP 分类、DNS 所有地址的拒绝测试与五分钟证据配对门禁，10 个单元测试通过；真实双 GoLab 进程官方 SDK TLS/L4 定向用例通过（26.65s）。`make all` 使用现有 PostgreSQL 与测试自管 Redis Docker 容器完整通过；`make client-compatibility` 直连 9/9、本机 TLS/L4 双节点 1/1 通过，并保留 SDK 竞态及生产跨主机网络策略未验收的 LIMIT。若改用外部 Redis 地址，`TestClusterMultiReplica/ConvergenceRedisDown` 因无法执行 Redis 停机操作而跳过，其后续子测试会以未设置的 revision 0 失败；因此全量检查必须让测试管理 Redis 生命周期。新增预检尚未取得真实跨主机允许源/拒绝源记录，不能改变上表的正式支持结论。
+后续同日复核：部署预检新增路由源 IP 分类、DNS 所有地址的拒绝测试与五分钟证据配对门禁，10 个单元测试通过；真实双 Grayling 进程官方 SDK TLS/L4 定向用例通过（26.65s）。`make all` 使用现有 PostgreSQL 与测试自管 Redis Docker 容器完整通过；`make client-compatibility` 直连 9/9、本机 TLS/L4 双节点 1/1 通过，并保留 SDK 竞态及生产跨主机网络策略未验收的 LIMIT。若改用外部 Redis 地址，`TestClusterMultiReplica/ConvergenceRedisDown` 因无法执行 Redis 停机操作而跳过，其后续子测试会以未设置的 revision 0 失败；因此全量检查必须让测试管理 Redis 生命周期。新增预检尚未取得真实跨主机允许源/拒绝源记录，不能改变上表的正式支持结论。
 
-本轮复核：部署预检新增双节点四份证据同窗口门禁，并将拒绝源的“无路由”结果判为探针失败，12 个 Python 单元测试通过，声明文件检查通过。`go vet ./...` 通过。此共享环境的 Docker 根目录 `/data` 无可用空间；`make all` 中新起的 PostgreSQL 容器无法完成初始化，`TestQuotaAdminReplicaRead` 与 `TestPostgresJourneyReportReplaysAcceptedEvents` 均在 90 秒后因 TCP 连接拒绝失败，故本轮**没有**全量测试通过的结论。`ip netns add golab-issue13-probe` 返回 `mkdir /run/netns failed: Permission denied`。既有本机 TLS/L4 双节点测试记录仍有效，但本轮没有新增跨主机双节点、真实入口网络策略与代理源 IP 日志，因此 Issue #13 继续开放。
+本轮复核：部署预检新增双节点四份证据同窗口门禁，并将拒绝源的“无路由”结果判为探针失败，12 个 Python 单元测试通过，声明文件检查通过。`go vet ./...` 通过。此共享环境的 Docker 根目录 `/data` 无可用空间；`make all` 中新起的 PostgreSQL 容器无法完成初始化，`TestQuotaAdminReplicaRead` 与 `TestPostgresJourneyReportReplaysAcceptedEvents` 均在 90 秒后因 TCP 连接拒绝失败，故本轮**没有**全量测试通过的结论。`ip netns add grayling-issue13-probe` 返回 `mkdir /run/netns failed: Permission denied`。既有本机 TLS/L4 双节点测试记录仍有效，但本轮没有新增跨主机双节点、真实入口网络策略与代理源 IP 日志，因此 Issue #13 继续开放。
 
 同日新增预检复核：证据现在记录每个目标的 DNS 解析 IP；配对要求允许源与拒绝源解析一致，双节点要求两个 TLS 入口解析 IP 集合不重叠，拒绝源在路由检查与 TCP 探针之间的 DNS 变化会报错。`python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'` 13/13 通过，`GOWORK=off go test ./test/native -count=1` 通过（43.5 秒），`go vet ./...` 与 `go build ./...` 通过。`make all` 在当前主机仍因 `/data` Docker 根目录无可用空间导致新 PostgreSQL 容器未就绪，不能报告全量测试通过。`unshare -Urn true` 返回 `Operation not permitted`，`ip netns add` 返回 `/run/netns` 权限不足；没有新增跨主机、真实网络策略或代理日志证据，正式支持声明仍未扩大。
 
@@ -163,12 +163,12 @@ curl --cacert /etc/golab/nacos-ca.pem -sS -o /dev/null -w '%{http_code}\n' 'http
 2026-10-07 明文后端绕过门禁复核：允许源在线探针新增对 `backendExternalHost` 的 HTTP/gRPC 后端端口 TCP 拒绝检查；任何一个端口可连都会使 `--probe` 报 `ALERT`。允许源证据新增 `backendDirectDenied`，旧证据不能通过配对核验。`python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'` 24/24、示例声明、`git diff --check`、`make all`（vet、全部 Go 包测试、构建）和 `make client-compatibility`（直连 9/9、本机 TLS/L4 双节点 1/1）通过。全量测试复用了已有 PostgreSQL 并由测试管理 Redis；新建 PostgreSQL 容器因 `/data` 满无法就绪。仍缺跨主机两节点、允许源/拒绝源与现场网络策略及代理日志，原生订阅不扩大生产正式支持声明。
 
 ```sh
-GOWORK=off go test ./test/cluster -run '^TestOfficialNacosClientFailsOverAcrossGolabNodes$' -count=1 -v
+GOWORK=off go test ./test/cluster -run '^TestOfficialNacosClientFailsOverAcrossGraylingNodes$' -count=1 -v
 GOWORK=off go test ./test/native -count=1
 python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'
 ```
 
-`test/cluster` 需要可用 PostgreSQL 和 Redis；设置 `GOLAB_TEST_PG_DSN` / `GOLAB_TEST_REDIS_ADDR` 可使用现有服务，否则测试基座尝试 Docker。该测试中的 TLS 代理是 Go 实现的透明 TCP 转发，不是 HAProxy 生产配置的实测。测试验证有效登录、文档 hash、两个租户隔离、共享连接上 B 读取自己配置成功但订阅自己配置被拒、独立连接订阅成功、订阅收到更新、失效后的无推送、TLS 证书、HTTP 404/401、双节点切换；还在同一条 TLS HTTP/2 连接上直接发送原生配置查询，确认两个租户各自的有效凭证 gRPC status 0、跨租户凭证 status 7、无凭证及撤销后的凭证 status 16，并确认撤销一个租户后另一个租户仍可读取自己的配置且不能读取被撤销租户的配置。这个直读绕过官方 SDK 的本地缓存；官方 SDK 的 `GetConfig` 在远端读取失败时可能返回 last-known-good，不能以其返回旧值证明凭证有效。排查撤销请看原生登录是否 401、直连 gRPC 是否拒绝、服务端授权日志及新 revision 推送是否停止；排查重连请核对 gRPC 端口和 h2 ALPN、证书 SAN/CA、两节点地址、后端一对一连接以及最新 manifest revision/文档 hash。
+`test/cluster` 需要可用 PostgreSQL 和 Redis；设置 `GRAYLING_TEST_PG_DSN` / `GRAYLING_TEST_REDIS_ADDR` 可使用现有服务，否则测试基座尝试 Docker。该测试中的 TLS 代理是 Go 实现的透明 TCP 转发，不是 HAProxy 生产配置的实测。测试验证有效登录、文档 hash、两个租户隔离、共享连接上 B 读取自己配置成功但订阅自己配置被拒、独立连接订阅成功、订阅收到更新、失效后的无推送、TLS 证书、HTTP 404/401、双节点切换；还在同一条 TLS HTTP/2 连接上直接发送原生配置查询，确认两个租户各自的有效凭证 gRPC status 0、跨租户凭证 status 7、无凭证及撤销后的凭证 status 16，并确认撤销一个租户后另一个租户仍可读取自己的配置且不能读取被撤销租户的配置。这个直读绕过官方 SDK 的本地缓存；官方 SDK 的 `GetConfig` 在远端读取失败时可能返回 last-known-good，不能以其返回旧值证明凭证有效。排查撤销请看原生登录是否 401、直连 gRPC 是否拒绝、服务端授权日志及新 revision 推送是否停止；排查重连请核对 gRPC 端口和 h2 ALPN、证书 SAN/CA、两节点地址、后端一对一连接以及最新 manifest revision/文档 hash。
 
 ## 试验协议
 
@@ -176,18 +176,18 @@ python3 -m unittest discover -s scripts -p 'test_check_nacos_native_topology.py'
 | --- | --- |
 | 客户端 | 官方 `nacos-sdk-go/v2 v2.3.5`；其他版本、Java/Python 客户端未验证 |
 | 连接 | gonacos HTTP 端口及其独立 gRPC 端口；默认仅 loopback；鉴权模式已在直连 TCP 与本机 TLS/L4 双节点实测，L7 HTTP/2 后端连接复用不在支持范围 |
-| 认证 | `-nacos-native-auth` 模式用 `golab-sdk` + GoLab SDK token 登录；每次读/订阅/推送复核 workspace/environment，默认模式不启用此接口 |
+| 认证 | `-nacos-native-auth` 模式用 `golab-sdk` + Grayling SDK token 登录；每次读/订阅/推送复核 workspace/environment，默认模式不启用此接口。用户名是内嵌 gonacos 登录端点的既有常量（`pkg/server/native_config_auth.go` 硬编码），**不随 Grayling 改名而变**；客户端必须原样使用，若需改名须先发布新的 gonacos 版本 |
 | 命名空间 | 每个 `(workspace, environment)` 使用平台生成的独立 namespace ID，不能用用户输入的名字推导 |
-| Group | 固定 `GOLAB_FLAGS` |
-| 订阅入口 | `golab.manifest`；`schemaVersion=1`，`revision` 单调递增，`flags` / `segments` 条目给出 `key`、`revision`、`dataId`、SHA-256 `hash` 和可选 `deleted` tombstone |
-| 不可变文档 | `golab.flag.<key>.r<revision>`、`golab.segment.<key>.r<revision>`，JSON 正文字节的 SHA-256 必须匹配 manifest |
+| Group | 固定 `GRAYLING_FLAGS` |
+| 订阅入口 | `grayling.manifest`；`schemaVersion=1`，`revision` 单调递增，`flags` / `segments` 条目给出 `key`、`revision`、`dataId`、SHA-256 `hash` 和可选 `deleted` tombstone |
+| 不可变文档 | `grayling.flag.<key>.r<revision>`、`grayling.segment.<key>.r<revision>`，JSON 正文字节的 SHA-256 必须匹配 manifest |
 
-启动 GoLab 时加 `-nacos-native-auth=true`，为目标 workspace/environment 创建 `kind=sdk` 的 GoLab token。官方 Go 客户端设置 `constant.WithUsername("golab-sdk")`、`constant.WithPassword(sdkToken)` 和该环境的 `constant.WithNamespaceId(namespaceID)`，同时配置 GoLab 的 gonacos HTTP 与 gRPC 端口。不要将 SDK token 或原生端口交给浏览器；跨主机部署需先完成独立的 TLS 和网络策略验收。复现已验证范围：`GOWORK=off go test ./test/native -count=1` 与配置真实 PostgreSQL/Redis 后的 `GOWORK=off go test ./test/cluster -run TestOfficialNacosClientFailsOverAcrossGolabNodes -count=1`。
+启动 Grayling 时加 `-nacos-native-auth=true`，为目标 workspace/environment 创建 `kind=sdk` 的 Grayling token。官方 Go 客户端设置 `constant.WithUsername("golab-sdk")`、`constant.WithPassword(sdkToken)` 和该环境的 `constant.WithNamespaceId(namespaceID)`，同时配置 Grayling 的 gonacos HTTP 与 gRPC 端口。不要将 SDK token 或原生端口交给浏览器；跨主机部署需先完成独立的 TLS 和网络策略验收。复现已验证范围：`GOWORK=off go test ./test/native -count=1` 与配置真实 PostgreSQL/Redis 后的 `GOWORK=off go test ./test/cluster -run TestOfficialNacosClientFailsOverAcrossGraylingNodes -count=1`。
 
-收到通知后只能把它视为失效提示：重新 `GetConfig(golab.manifest)`，按该 manifest 获取全部活动文档，逐一校验 hash、key 和 schema，再通过 GoLab evaluator 编译。候选 revision 高于当前 revision 且全部成功，才一次性换入。任何读取、hash、JSON 或编译失败都保留 last-known-good，记录最新错误及生效 revision；超时未复核时应按调用方设定的最大陈旧期降级。连接恢复和定期轮询都要重新读取 manifest，不能仅等推送。测试中的试验代码展示了取数和校验，**并未作为新的可复用 SDK 发布**。
+收到通知后只能把它视为失效提示：重新 `GetConfig(grayling.manifest)`，按该 manifest 获取全部活动文档，逐一校验 hash、key 和 schema，再通过 Grayling evaluator 编译。候选 revision 高于当前 revision 且全部成功，才一次性换入。任何读取、hash、JSON 或编译失败都保留 last-known-good，记录最新错误及生效 revision；超时未复核时应按调用方设定的最大陈旧期降级。连接恢复和定期轮询都要重新读取 manifest，不能仅等推送。测试中的试验代码展示了取数和校验，**并未作为新的可复用 SDK 发布**。
 
-## 与正式 GoLab SDK 的差异
+## 与正式 Grayling SDK 的差异
 
-GoLab Go SDK 使用受 GoLab token 约束的 `/api/v1/sdk/config` 全量快照、ETag/304、SSE 失效提示及定期轮询；服务端从凭证导出 scope，客户端不能任意指定 namespace。它已提供原子换入、last-known-good、`Status()`（revision、陈旧状态、错误）与最大陈旧期处理，并支持曝光上报。原生 Nacos 客户端只提供配置读取和通知；原生协议本身不提供这些 GoLab 语义，租户授权仅在显式 `-nacos-native-auth` 模式由 GoLab 附加。浏览器、Python/TypeScript SDK 继续走 GoLab 远程求值接口。
+Grayling Go SDK 使用受 Grayling token 约束的 `/api/v1/sdk/config` 全量快照、ETag/304、SSE 失效提示及定期轮询；服务端从凭证导出 scope，客户端不能任意指定 namespace。它已提供原子换入、last-known-good、`Status()`（revision、陈旧状态、错误）与最大陈旧期处理，并支持曝光上报。原生 Nacos 客户端只提供配置读取和通知；原生协议本身不提供这些 Grayling 语义，租户授权仅在显式 `-nacos-native-auth` 模式由 Grayling 附加。浏览器、Python/TypeScript SDK 继续走 Grayling 远程求值接口。
 
 当前兼容验证覆盖直连 TCP 与本机 TLS/L4 的单节点或双节点、跨租户拒绝和撤销；网络黑洞、乱序、缺文档及无部分快照分别由对应原生用例验证。`test/native` 的默认模式越权特征用例继续约束未授权底座的边界，安全模式负向用例约束可支持路径。若要扩大到 L7 代理或将原生订阅列为通用正式接口，还需验证后端连接不跨客户端复用、TLS 与网络策略，并处理官方 SDK 的竞态限制。

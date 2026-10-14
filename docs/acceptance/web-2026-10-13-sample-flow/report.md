@@ -5,7 +5,7 @@
 已执行：
 
 ```sh
-GOLAB_TEST_PG_SKIP=1 GOWORK=off go test ./web -count=1
+GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test ./web -count=1
 git diff --check
 ```
 

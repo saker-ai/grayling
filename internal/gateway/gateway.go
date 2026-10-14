@@ -1,17 +1,17 @@
 // Package gateway generates Traefik ≥3.6 multi-layer routing configuration
-// for GoLab-driven traffic splitting (docs/技术方案.md §4,
-// docs/traefik-golab-architecture.md).
+// for Grayling-driven traffic splitting (docs/技术方案.md §4,
+// docs/traefik-grayling-architecture.md).
 //
 // The generated hierarchy implements the P5 gateway chain:
 //
 //	parent router (no service, owns entryPoints)
-//	  ├─ middleware ①: headers — strip client-supplied X-Golab-* headers
+//	  ├─ middleware ①: headers — strip client-supplied X-Grayling-* headers
 //	  │                (variant headers are ONLY trusted from the eval service)
-//	  └─ middleware ②: forwardAuth → GoLab 求值服务 (golab-proxy
+//	  └─ middleware ②: forwardAuth → Grayling 求值服务 (grayling-proxy
 //	                   /api/v1/gateway/forwardauth), authResponseHeaders
-//	                   write X-Golab-Variant back onto the request
+//	                   write X-Grayling-Variant back onto the request
 //	child routers (parentRefs → parent)
-//	  ├─ Header(`X-Golab-Variant`, `<variant>`) → variant backend
+//	  ├─ Header(`X-Grayling-Variant`, `<variant>`) → variant backend
 //	  └─ fallback (parent rule)                 → default variant backend
 //
 // Multi-layer routing is only supported by the file, KV and Kubernetes CRD
@@ -23,7 +23,7 @@
 //
 // Ratio changes never touch the generated configuration: the child routers
 // match on the header the eval service writes, and the eval service reads the
-// split from the GoLab flag. Only adding/removing variants changes routers.
+// split from the Grayling flag. Only adding/removing variants changes routers.
 package gateway
 
 import (
@@ -34,32 +34,32 @@ import (
 	"strings"
 )
 
-// Header contract between the generated configuration and the GoLab
+// Header contract between the generated configuration and the Grayling
 // forwardAuth evaluation service (internal/proxy gateway endpoint).
 const (
 	// VariantHeader carries the evaluated variation name; child routers
 	// match on it. Stripped from external requests, re-written only via
 	// forwardAuth authResponseHeaders.
-	VariantHeader = "X-Golab-Variant"
+	VariantHeader = "X-Grayling-Variant"
 	// FlagKeyHeader echoes the evaluated flag key (diagnostics/attribution).
-	FlagKeyHeader = "X-Golab-Flag-Key"
+	FlagKeyHeader = "X-Grayling-Flag-Key"
 	// FailOpenHeader is set by the eval service when it fail-opens to the
 	// default variant (reason code). Never set on a healthy evaluation.
-	FailOpenHeader = "X-Golab-Fail-Open"
-	// ReasonHeader carries the GoLab evaluation reason (SPLIT/DEFAULT/...).
-	ReasonHeader = "X-Golab-Reason"
+	FailOpenHeader = "X-Grayling-Fail-Open"
+	// ReasonHeader carries the Grayling evaluation reason (SPLIT/DEFAULT/...).
+	ReasonHeader = "X-Grayling-Reason"
 	// DefaultUnitHeader carries the bucketing key on client requests.
 	DefaultUnitHeader = "X-Bucketing-Key"
 	// DefaultUnitField is the default evaluation-context field the bucketing
 	// key is placed into.
 	DefaultUnitField = "targetingKey"
-	// ForwardAuthPath is the golab-proxy endpoint the generated forwardAuth
+	// ForwardAuthPath is the grayling-proxy endpoint the generated forwardAuth
 	// middlewares point at.
 	ForwardAuthPath = "/api/v1/gateway/forwardauth"
 )
 
 // managedHeaders are the headers stripped from external requests by the
-// generated parent-router middleware: routing-relevant GoLab headers must
+// generated parent-router middleware: routing-relevant Grayling headers must
 // only ever come from the eval service response.
 var managedHeaders = []string{VariantHeader, FlagKeyHeader, FailOpenHeader, ReasonHeader}
 
@@ -68,22 +68,22 @@ var managedHeaders = []string{VariantHeader, FlagKeyHeader, FailOpenHeader, Reas
 var AuthResponseHeaders = []string{VariantHeader, FlagKeyHeader, FailOpenHeader, ReasonHeader}
 
 // AuthResponseHeadersRegex is set on the forwardAuth middleware so Traefik
-// strips EVERY incoming X-Golab-* header before copying back only the headers
+// strips EVERY incoming X-Grayling-* header before copying back only the headers
 // the eval service actually returned. This is the provider-portable anti-
 // forgery mechanism: unlike a headers middleware with empty values (which the
 // KV providers cannot represent — empty values are dropped by Traefik's KV
 // decoder), a regex value round-trips through file, KV and IngressRoute
-// identically. It also protects future X-Golab-* headers automatically.
-const AuthResponseHeadersRegex = "^X-Golab-"
+// identically. It also protects future X-Grayling-* headers automatically.
+const AuthResponseHeadersRegex = "^X-Grayling-"
 
 var (
 	nameRe    = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 	variantRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 )
 
-// VariantBackend binds one GoLab variation name to the backend serving it.
+// VariantBackend binds one Grayling variation name to the backend serving it.
 type VariantBackend struct {
-	// Variant is the GoLab variation name (the X-Golab-Variant value the
+	// Variant is the Grayling variation name (the X-Grayling-Variant value the
 	// eval service writes for it).
 	Variant string
 	// URL is the backend server URL (file/KV targets).
@@ -110,7 +110,7 @@ type RouteSpec struct {
 	// default rule-length priority).
 	Priority int
 
-	// FlagKey is the GoLab flag the eval service evaluates.
+	// FlagKey is the Grayling flag the eval service evaluates.
 	FlagKey string
 	// DefaultVariant is the variation served when evaluation fail-opens or
 	// the unit is missing; it must be one of Backends.
@@ -121,12 +121,12 @@ type RouteSpec struct {
 	// UnitHeader is the client request header carrying the bucketing key
 	// (empty = "X-Bucketing-Key").
 	UnitHeader string
-	// EvalAddress is the base URL of the GoLab forwardAuth evaluation
-	// service (golab-proxy), e.g. "http://127.0.0.1:8689". The generated
+	// EvalAddress is the base URL of the Grayling forwardAuth evaluation
+	// service (grayling-proxy), e.g. "http://127.0.0.1:8689". The generated
 	// middleware appends ForwardAuthPath and its query parameters.
 	EvalAddress string
 	// Secret is the shared secret proving the forwardAuth call comes from
-	// this generated route (golab-proxy -gateway-secret). Without it, anyone
+	// this generated route (grayling-proxy -gateway-secret). Without it, anyone
 	// who can reach the eval service could probe arbitrary flags through the
 	// endpoint; STRONGLY recommended for any network-reachable deployment.
 	// Empty omits the parameter (loopback/trusted-mesh setups).
@@ -310,13 +310,13 @@ func Build(spec *RouteSpec) (*Configuration, error) {
 		})
 	}
 
-	// ① strip externally supplied GoLab headers (anti-forgery).
+	// ① strip externally supplied Grayling headers (anti-forgery).
 	cfg.Middlewares = append(cfg.Middlewares, &Middleware{
 		Name:         spec.StripMiddleware(),
 		StripHeaders: append([]string(nil), managedHeaders...),
 	})
-	// ② forwardAuth → GoLab eval service; the regex strips every incoming
-	// X-Golab-* header (anti-forgery) before Traefik copies back only the
+	// ② forwardAuth → Grayling eval service; the regex strips every incoming
+	// X-Grayling-* header (anti-forgery) before Traefik copies back only the
 	// headers the eval service returned, for child-router matching.
 	cfg.Middlewares = append(cfg.Middlewares, &Middleware{
 		Name: spec.EvalMiddleware(),

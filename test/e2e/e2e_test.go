@@ -1,4 +1,4 @@
-// Package e2e exercises the full GoLab loop over real HTTP against the real
+// Package e2e exercises the full Grayling loop over real HTTP against the real
 // gonacos config substrate: create → review → publish → SSE/poll sync →
 // local evaluation → exposures/conversions → rollback → kill switch → stale
 // fallback (docs/技术方案.md §13 P1/P2 acceptance).
@@ -53,7 +53,7 @@ func newHarness(t *testing.T) *harness {
 
 	h := &harness{t: t, store: store, api: apiSrv, rawCfg: rawCfg, srv: srv}
 
-	// Bootstrap global owner credential (cmd/golab does this at startup).
+	// Bootstrap global owner credential (cmd/grayling does this at startup).
 	ct, err := store.CreateToken(platform.TokenAdmin, "bootstrap-owner", platform.RoleOwner, "", "", "bootstrap")
 	if err != nil {
 		t.Fatalf("owner token: %v", err)
@@ -385,7 +385,7 @@ func TestE2EStaleFallback(t *testing.T) {
 // returns caller defaults with an explicit reason (§3).
 func TestE2EColdStartWithoutServer(t *testing.T) {
 	client, err := sdk.New(context.Background(), sdk.Options{
-		BaseURL: "http://127.0.0.1:1", Token: "glab_sdk_invalid",
+		BaseURL: "http://127.0.0.1:1", Token: "grayling_sdk_invalid",
 		PollInterval: time.Hour, MaxStaleness: time.Minute,
 	})
 	if err == nil {

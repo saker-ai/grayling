@@ -10,8 +10,8 @@ import (
 func TestRecoveryGateRejectsPartialAndWrongKey(t *testing.T) {
 	point := &Point{Version: 1, AuthSHA256: digest("correct-auth-secret"), HMACKeysSHA256: digest("pg-key-ring"),
 		Migrations: []int{1, 2, 3}, ControlVersion: 7, EventCount: 14, TokenCount: 2, PostgresSHA256: digest("postgres"), GonacosSHA256: digest("gonacos"),
-		Environments: []Environment{{Namespace: "golab-w-e", Revision: 4,
-			Flags: []model.ManifestEntry{{Key: "checkout", Revision: 2, DataID: "golab.flag.checkout.r2", Hash: "abc"}}}},
+		Environments: []Environment{{Namespace: "grayling-w-e", Revision: 4,
+			Flags: []model.ManifestEntry{{Key: "checkout", Revision: 2, DataID: "grayling.flag.checkout.r2", Hash: "abc"}}}},
 	}
 	path := t.TempDir() + "/point.json"
 	if err := Write(path, point); err != nil {
@@ -36,7 +36,7 @@ func TestRecoveryGateRejectsPartialAndWrongKey(t *testing.T) {
 		t.Fatalf("changed postgres content: %v", err)
 	}
 	oldNacos := *point
-	oldNacos.Environments = []Environment{{Namespace: "golab-w-e", Revision: 3}}
+	oldNacos.Environments = []Environment{{Namespace: "grayling-w-e", Revision: 3}}
 	if err := Verify(path, &oldNacos); err == nil || !strings.Contains(err.Error(), "recovery point mismatch") {
 		t.Fatalf("old gonacos: %v", err)
 	}

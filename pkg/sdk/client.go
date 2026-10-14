@@ -1,4 +1,4 @@
-// Package sdk is the GoLab Go SDK: local evaluation over a synchronized,
+// Package sdk is the Grayling Go SDK: local evaluation over a synchronized,
 // validated configuration snapshot (docs/技术方案.md §3, §8).
 //
 // Data-plane contract:
@@ -54,7 +54,7 @@ var (
 
 // Options configures a Client.
 type Options struct {
-	// BaseURL of the GoLab server, e.g. http://127.0.0.1:8688
+	// BaseURL of the Grayling server, e.g. http://127.0.0.1:8688
 	BaseURL string
 	// Token is an SDK-scope credential; workspace/environment are derived
 	// from it server-side.

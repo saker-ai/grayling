@@ -85,17 +85,17 @@ func TestSyncIgnoresStaleRevision(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch n {
 		case 1: // first sync: revision 2
-			w.Header().Set("ETag", `"golab-r2"`)
+			w.Header().Set("ETag", `"grayling-r2"`)
 			_, _ = w.Write(snapshotJSON(t, 2, map[string]*model.Flag{"f": boolFlag("f", "2")}))
 		default: // racing late response: revision 1 (stale)
-			w.Header().Set("ETag", `"golab-r1"`)
+			w.Header().Set("ETag", `"grayling-r1"`)
 			_, _ = w.Write(snapshotJSON(t, 1, map[string]*model.Flag{"f": boolFlag("f", "1")}))
 		}
 	}))
 	defer srv.Close()
 
 	c, err := New(context.Background(), Options{
-		BaseURL: srv.URL, Token: "glab_sdk_test", PollInterval: time.Hour,
+		BaseURL: srv.URL, Token: "grayling_sdk_test", PollInterval: time.Hour,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -137,7 +137,7 @@ func TestSyncRejectsInvalidSnapshot(t *testing.T) {
 	defer srv.Close()
 
 	c, err := New(context.Background(), Options{
-		BaseURL: srv.URL, Token: "glab_sdk_test", PollInterval: time.Hour,
+		BaseURL: srv.URL, Token: "grayling_sdk_test", PollInterval: time.Hour,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -160,7 +160,7 @@ func TestSyncRejectsInvalidSnapshot(t *testing.T) {
 // with an explicit reason (§3 cold-start contract).
 func TestColdStartServesDefaults(t *testing.T) {
 	c, _ := New(context.Background(), Options{
-		BaseURL: "http://127.0.0.1:1", Token: "glab_sdk_test", PollInterval: time.Hour,
+		BaseURL: "http://127.0.0.1:1", Token: "grayling_sdk_test", PollInterval: time.Hour,
 	})
 	if c == nil {
 		t.Fatal("client must exist even when the first sync fails")
@@ -185,7 +185,7 @@ func TestExposureQueueBounded(t *testing.T) {
 		exposures: make(chan *collectEvent, 2),
 		closed:    make(chan struct{}),
 	}
-	c.opts.CollectToken = "glab_collect_test"
+	c.opts.CollectToken = "grayling_collect_test"
 	snap := &model.Snapshot{
 		SchemaVersion: model.SchemaVersion, Workspace: "w", Environment: "e",
 		Flags: map[string]*model.Flag{"f": {
@@ -222,13 +222,13 @@ func TestEmptyEnvironmentConverges(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("ETag", `"golab-r1"`)
+		w.Header().Set("ETag", `"grayling-r1"`)
 		_, _ = w.Write(snapshotJSON(t, 1, map[string]*model.Flag{"f": boolFlag("f", "1")}))
 	}))
 	defer srv.Close()
 
 	c, err := New(context.Background(), Options{
-		BaseURL: srv.URL, Token: "glab_sdk_test", PollInterval: time.Hour,
+		BaseURL: srv.URL, Token: "grayling_sdk_test", PollInterval: time.Hour,
 	})
 	if err != nil {
 		t.Fatalf("New on empty env: %v", err)
@@ -295,7 +295,7 @@ func TestLocalDecisionDiagnostic(t *testing.T) {
 
 func TestLocalOnRenderQueuesAssignmentThenExplicitExposure(t *testing.T) {
 	flag := &model.Flag{SchemaVersion: model.SchemaVersion, Key: "f", Version: "1", Type: model.FlagBool,
-		Bucketing: &model.Bucketing{Algorithm: "golab-fnv1a-10000-v1", Unit: "user_id", Salt: "test"},
+		Bucketing: &model.Bucketing{Algorithm: "grayling-fnv1a-10000-v1", Unit: "user_id", Salt: "test"},
 		Fields:    []string{"user_id"}, Variations: map[string]any{"a": false, "b": true},
 		DefaultRule: &model.Rule{Variation: "a"},
 		Targeting:   []model.Rule{{Percentage: map[string]float64{"a": 50, "b": 50}}},

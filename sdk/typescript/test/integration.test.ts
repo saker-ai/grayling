@@ -1,5 +1,5 @@
 /**
- * Full remote-evaluation contract against the REAL golab binary: typed
+ * Full remote-evaluation contract against the REAL grayling binary: typed
  * variations, targeting, caller-default semantics, experiment attribution
  * with server-side exposures, collect-contract alignment (dedup, unit
  * required, epoch mismatch), cache/polling freshness and the restricted
@@ -8,10 +8,10 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { startServer, TestEnv, type GolabServer } from "./helpers.ts";
-import { GolabClient, GolabError } from "../src/client.ts";
+import { startServer, TestEnv, type GraylingServer } from "./helpers.ts";
+import { GraylingClient, GraylingError } from "../src/client.ts";
 
-let server: GolabServer;
+let server: GraylingServer;
 let env: TestEnv;
 
 before(async () => {
@@ -24,7 +24,7 @@ after(async () => {
 });
 
 function makeClient(overrides: Partial<Parameters<typeof makeOptions>[0]> = {}) {
-  return new GolabClient(makeOptions(overrides));
+  return new GraylingClient(makeOptions(overrides));
 }
 
 function makeOptions(overrides: Record<string, unknown> = {}) {
@@ -97,8 +97,8 @@ test("type mismatch → caller default + TYPE_MISMATCH", async () => {
 });
 
 test("transport error → caller default + ERROR, counted", async () => {
-  const client = new GolabClient({
-    baseUrl: "http://127.0.0.1:1", sdkToken: "glab_sdk_x", autoPoll: false,
+  const client = new GraylingClient({
+    baseUrl: "http://127.0.0.1:1", sdkToken: "grayling_sdk_x", autoPoll: false,
     requestTimeoutMs: 2_000,
   });
   try {
@@ -126,7 +126,7 @@ test("remote status expires and recovers after revision probe", async () => {
 });
 
 test("wrong audience token → caller default (never crashes)", async () => {
-  const client = new GolabClient({
+  const client = new GraylingClient({
     baseUrl: env.server.baseUrl, sdkToken: env.collectToken, autoPoll: false,
   });
   try {
@@ -213,14 +213,14 @@ test("trackConversion requires attribution and collect token", async () => {
   const client = makeClient();
   try {
     const s = await client.stringVariation("ts-string", "?");
-    assert.throws(() => client.trackConversion(s.details, "conversion", 1), GolabError);
+    assert.throws(() => client.trackConversion(s.details, "conversion", 1), GraylingError);
   } finally { await client.close(); }
-  const noCollect = new GolabClient({
+  const noCollect = new GraylingClient({
     baseUrl: env.server.baseUrl, sdkToken: env.sdkToken, autoPoll: false,
   });
   try {
     const v = await noCollect.stringVariation("ts-exp", "?", { attributes: { user_id: "x-1" } });
-    assert.throws(() => noCollect.trackConversion(v.details, "conversion", 1), GolabError);
+    assert.throws(() => noCollect.trackConversion(v.details, "conversion", 1), GraylingError);
   } finally { await noCollect.close(); }
 });
 
@@ -345,7 +345,7 @@ test("partial collect counts successful and rejected events", async () => {
   try {
     client.trackExposure(env.experimentId, env.epoch, "ts-exp", "control", "partial-ok");
     client.trackExposure(env.experimentId, env.epoch + 99, "ts-exp", "control", "partial-bad");
-    await assert.rejects(client.flush(), GolabError);
+    await assert.rejects(client.flush(), GraylingError);
     assert.equal(client.status().eventsFlushed, 1);
     assert.equal(client.status().eventsDropped, 1);
   } finally { await client.close(); }
@@ -360,7 +360,7 @@ test("manual exposure reporting via collect contract", async () => {
     assert.ok(client.status().eventsFlushed >= 1);
     assert.equal(client.status().eventsDropped, 0);
     assert.throws(() => client.trackExposure(env.experimentId, env.epoch, "ts-exp", "control", ""),
-      GolabError);
+      GraylingError);
   } finally { await client.close(); }
 });
 
@@ -383,7 +383,7 @@ test("onRender records assignment before explicit exposure", async () => {
   const key = "ts-render";
   await server.publishFlag(env.ws, env.env, {
     schemaVersion: 1, key, type: "string", fields: ["user_id"],
-    bucketing: { algorithm: "golab-fnv1a-10000-v1", unit: "user_id", salt: "ts-render-salt" },
+    bucketing: { algorithm: "grayling-fnv1a-10000-v1", unit: "user_id", salt: "ts-render-salt" },
     variations: { control: "c", treatment: "t" },
     defaultRule: { variation: "control" },
     targeting: [{ name: "split", percentage: { control: 50, treatment: 50 } }],
@@ -418,7 +418,7 @@ test("onRender records assignment before explicit exposure", async () => {
     assert.ok(result.details.exposureToken);
     assert.throws(() => client.trackEvaluatedExposure({
       ...result.details, expiresAt: new Date(Date.now() - 1000).toISOString(),
-    }), GolabError);
+    }), GraylingError);
     const pending = await server.expect("GET", "/api/v1/sdk/metrics", 200, env.sdkToken);
     assert.equal(pending.exposures, before.exposures);
     client.trackEvaluatedExposure(result.details);

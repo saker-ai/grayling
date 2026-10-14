@@ -22,7 +22,7 @@ func Authorize(store *platform.Store, secret, namespace, group, dataID string) e
 	}
 	if group != configstore.Group || dataID == "" ||
 		(dataID != configstore.ManifestDataID &&
-			!strings.HasPrefix(dataID, "golab.flag.") && !strings.HasPrefix(dataID, "golab.segment.")) {
+			!strings.HasPrefix(dataID, "grayling.flag.") && !strings.HasPrefix(dataID, "grayling.segment.")) {
 		return platform.ErrAccessDenied
 	}
 	env, err := store.GetEnvironment(tok.WorkspaceID, tok.EnvironmentID)

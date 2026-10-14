@@ -1,7 +1,7 @@
 # Third-party notices
 
 Generated from `third_party/licenses.json` by `scripts/license_audit.py update`.
-The list covers modules linked by `cmd/golab` or `cmd/golab-proxy`; the JSON also records the complete selected Go module graph and the TypeScript lockfile.
+The list covers modules linked by `cmd/grayling` or `cmd/grayling-proxy`; the JSON also records the complete selected Go module graph and the TypeScript lockfile.
 A release bundle includes the full license and NOTICE texts for every linked module.
 
 | Module | Version | License | Evidence (SHA-256) |
@@ -49,4 +49,4 @@ A release bundle includes the full license and NOTICE texts for every linked mod
 | modernc.org/memory | v1.11.0 | BSD-3-Clause | LICENSE `59895e669f48f168b6b858358f6005779cdf40a265f7828813061b56af67b496`<br>LICENSE-GO `2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067`<br>LICENSE-LOGO `5ae5bee3072a841376451b48d8cfcec7188e10543926d5870828d36c8a750dc5`<br>LICENSE-MMAP-GO `c2eba69f20d05414538c3a5df7694dde392e065ff70882e1625e90f5d6659fff` |
 | modernc.org/sqlite | v1.56.0 | BSD-3-Clause | LICENSE `c6fe05491a60ae13bcd223088d2705e36dede24e5587226231d2459ada5c4822`<br>SQLITE-LICENSE `8438c9c89b849131ead81d5435cb97fcf052df5b0b286dda8a2d4c29e6cb3fd0` |
 
-GoLab itself is Apache-2.0 under `LICENSE`. The pinned gonacos commit includes Apache-2.0 `LICENSE` and `NOTICE`; its [upstream declaration](https://github.com/godeps/gonacos/commit/5ac0bf0b6806) explicitly covers project-authored contributions in the earlier pinned commit.
+Grayling itself is Apache-2.0 under `LICENSE`. The pinned gonacos commit includes Apache-2.0 `LICENSE` and `NOTICE`; its [upstream declaration](https://github.com/godeps/gonacos/commit/5ac0bf0b6806) explicitly covers project-authored contributions in the earlier pinned commit.

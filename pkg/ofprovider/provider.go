@@ -1,29 +1,29 @@
 // Package ofprovider implements the OpenFeature Go SDK provider contract
-// (github.com/open-feature/go-sdk) on top of the GoLab Go SDK
+// (github.com/open-feature/go-sdk) on top of the Grayling Go SDK
 // (docs/技术方案.md §8: OpenFeature Provider 实现布尔、字符串、数值、对象求值，
 // 映射 targetingKey 到稳定单元并返回 variant、reason、error code).
 //
 // Semantics mapping:
 //
-//   - Evaluation runs LOCALLY on the golab SDK's synchronized, validated
+//   - Evaluation runs LOCALLY on the grayling SDK's synchronized, validated
 //     snapshot — no per-request network I/O (hot path, §3).
-//   - The OpenFeature targetingKey becomes the golab randomization unit: it
+//   - The OpenFeature targetingKey becomes the grayling randomization unit: it
 //     is mirrored into the configured UnitField (default "user_id") whenever
-//     that attribute is absent, and always available as golab's implicit
+//     that attribute is absent, and always available as grayling's implicit
 //     "targetingKey" field. Explicit attributes win over the mirror.
 //   - Reasons map 1:1 where OpenFeature defines them (DEFAULT,
-//     TARGETING_MATCH, SPLIT, DISABLED, ERROR); golab-specific reasons
+//     TARGETING_MATCH, SPLIT, DISABLED, ERROR); grayling-specific reasons
 //     (NOT_ENROLLED, EXPERIMENT_NOT_RUNNING, STALE) degrade to the closest
-//     OpenFeature reason and stay verbatim in FlagMetadata["golabReason"] —
+//     OpenFeature reason and stay verbatim in FlagMetadata["graylingReason"] —
 //     OpenFeature resolution details DO carry reasons (§8).
 //   - MISSING_BUCKET_KEY maps to the spec's TARGETING_KEY_MISSING error with
 //     the caller's default value; FLAG_NOT_FOUND and TYPE_MISMATCH map to
 //     their OpenFeature equivalents.
-//   - Exposures follow "真正使用/进入实验才曝光": the underlying golab SDK
+//   - Exposures follow "真正使用/进入实验才曝光": the underlying grayling SDK
 //     enqueues an exposure only when the evaluation actually enrolled the
 //     unit in a running experiment, and flushes batches to /api/v1/collect
 //     with the separate collect credential (§8, §10.1).
-//   - Provider lifecycle: Init starts the golab client and emits
+//   - Provider lifecycle: Init starts the grayling client and emits
 //     PROVIDER_READY once the first validated snapshot is synchronized; the
 //     monitor degrades to PROVIDER_STALE when the snapshot exceeds the
 //     client's MaxStaleness (kill-switch window, §5.2) and recovers
@@ -59,30 +59,30 @@ import (
 )
 
 // Name is the provider metadata name reported to OpenFeature.
-const Name = "golab"
+const Name = "grayling"
 
-// DefaultUnitField is the golab context field that receives the OpenFeature
+// DefaultUnitField is the grayling context field that receives the OpenFeature
 // targetingKey when the caller did not set that attribute explicitly. Flags
 // bucketing on "targetingKey" itself need no mirroring.
 const DefaultUnitField = "user_id"
 
 // Options configures a Provider.
 type Options struct {
-	// Client is an existing, NOT YET STARTED golab SDK client (the provider
+	// Client is an existing, NOT YET STARTED grayling SDK client (the provider
 	// owns its lifecycle: Init starts it, Shutdown closes it). When nil, a
 	// client is created from ClientOptions during Init.
 	Client *sdk.Client
-	// ClientOptions configures the golab SDK client when Client is nil.
+	// ClientOptions configures the grayling SDK client when Client is nil.
 	// BaseURL and Token are required in that case.
 	ClientOptions sdk.Options
-	// UnitField is the golab randomization-unit attribute fed from the
+	// UnitField is the grayling randomization-unit attribute fed from the
 	// OpenFeature targetingKey (default "user_id").
 	UnitField string
 	// MonitorInterval is the state-monitor tick (default 500ms).
 	MonitorInterval time.Duration
 }
 
-// Provider is an OpenFeature FeatureProvider backed by golab local
+// Provider is an OpenFeature FeatureProvider backed by grayling local
 // evaluation. It also implements the StateHandler (Init/Shutdown) and
 // EventHandler contracts.
 type Provider struct {
@@ -109,7 +109,7 @@ var (
 )
 
 // NewProvider builds the provider. Call OpenFeature's SetProvider/SetProviderAndWait
-// to register it; Init performs the golab client startup.
+// to register it; Init performs the grayling client startup.
 func NewProvider(opts Options) *Provider {
 	if opts.UnitField == "" {
 		opts.UnitField = DefaultUnitField
@@ -127,12 +127,12 @@ func NewProvider(opts Options) *Provider {
 // Metadata implements of.FeatureProvider.
 func (p *Provider) Metadata() of.Metadata { return of.Metadata{Name: Name} }
 
-// Hooks implements of.FeatureProvider. Golab exposure capture happens inside
+// Hooks implements of.FeatureProvider. Grayling exposure capture happens inside
 // evaluation (only on real enrollment), so no OF hooks are attached.
 func (p *Provider) Hooks() []of.Hook { return nil }
 
 // Track maps an OpenFeature tracking event to the metric of a prior decision.
-// Callers pass the opaque golabDecisionId from evaluation metadata as the
+// Callers pass the opaque graylingDecisionId from evaluation metadata as the
 // tracking event detail "decisionId". The SDK resolves the unit privately.
 func (p *Provider) Track(_ context.Context, trackingEventName string,
 	_ of.EvaluationContext, details of.TrackingEventDetails) {
@@ -147,7 +147,7 @@ func (p *Provider) Track(_ context.Context, trackingEventName string,
 }
 
 // Init implements of.StateHandler: it starts (or adopts and starts) the
-// golab SDK client and launches the provider-state monitor. A failed initial
+// grayling SDK client and launches the provider-state monitor. A failed initial
 // snapshot sync is NOT fatal — the provider stays NOT_READY, evaluations
 // answer with caller defaults + PROVIDER_NOT_READY, and the client keeps
 // retrying in the background (§3 cold start).
@@ -161,7 +161,7 @@ func (p *Provider) Init(_ of.EvaluationContext) error {
 	client := p.opts.Client
 	if client == nil {
 		if p.opts.ClientOptions.BaseURL == "" || p.opts.ClientOptions.Token == "" {
-			return errors.New("golab provider: ClientOptions.BaseURL and ClientOptions.Token are required when no Client is supplied")
+			return errors.New("grayling provider: ClientOptions.BaseURL and ClientOptions.Token are required when no Client is supplied")
 		}
 		c, err := sdk.New(context.Background(), p.opts.ClientOptions)
 		if c == nil {
@@ -179,7 +179,7 @@ func (p *Provider) Init(_ of.EvaluationContext) error {
 }
 
 // Shutdown implements of.StateHandler: it stops the monitor and closes the
-// golab client (pending exposures are flushed once by Close). Safe to call
+// grayling client (pending exposures are flushed once by Close). Safe to call
 // even when Init never ran.
 func (p *Provider) Shutdown() {
 	p.stopOnce.Do(func() {
@@ -208,7 +208,7 @@ func (p *Provider) SampledEvents() <-chan model.EvaluationEvent {
 	return p.client.SampledEvents()
 }
 
-// monitor translates golab SDK sync health into OpenFeature provider state
+// monitor translates grayling SDK sync health into OpenFeature provider state
 // transitions: NOT_READY → READY on first snapshot, READY ↔ STALE across the
 // MaxStaleness kill-switch window.
 func (p *Provider) monitor() {
@@ -219,13 +219,13 @@ func (p *Provider) monitor() {
 			st := p.client.Status()
 			switch {
 			case st.LastError != "" && !st.Stale:
-				p.transition(of.ErrorState, "golab upstream synchronization failed")
+				p.transition(of.ErrorState, "grayling upstream synchronization failed")
 			case !st.Ready:
 				// no validated snapshot yet
 			case st.Stale:
-				p.transition(of.StaleState, "golab snapshot exceeded max staleness")
+				p.transition(of.StaleState, "grayling snapshot exceeded max staleness")
 			default:
-				p.transition(of.ReadyState, "golab snapshot synchronized")
+				p.transition(of.ReadyState, "grayling snapshot synchronized")
 			}
 			if st.Ready {
 				p.configurationChanged(st.ManifestRevision)
@@ -290,7 +290,7 @@ func (p *Provider) configurationChanged(revision int64) {
 	select {
 	case p.events <- of.Event{ProviderName: Name, EventType: of.ProviderConfigChange,
 		ProviderEventDetails: of.ProviderEventDetails{
-			Message:       "golab configuration changed",
+			Message:       "grayling configuration changed",
 			EventMetadata: map[string]any{"manifestRevision": revision},
 		}}:
 	default:
@@ -309,7 +309,7 @@ func (p *Provider) BooleanEvaluation(_ context.Context, flag string, defaultValu
 		return of.BoolResolutionDetail{Value: defaultValue,
 			ProviderResolutionDetail: notReady()}
 	}
-	v, res := p.client.BoolVariation(flag, toGolabContext(flatCtx, p.opts.UnitField), defaultValue)
+	v, res := p.client.BoolVariation(flag, toGraylingContext(flatCtx, p.opts.UnitField), defaultValue)
 	return of.BoolResolutionDetail{Value: v, ProviderResolutionDetail: convert(res)}
 }
 
@@ -321,11 +321,11 @@ func (p *Provider) StringEvaluation(_ context.Context, flag string, defaultValue
 		return of.StringResolutionDetail{Value: defaultValue,
 			ProviderResolutionDetail: notReady()}
 	}
-	v, res := p.client.StringVariation(flag, toGolabContext(flatCtx, p.opts.UnitField), defaultValue)
+	v, res := p.client.StringVariation(flag, toGraylingContext(flatCtx, p.opts.UnitField), defaultValue)
 	return of.StringResolutionDetail{Value: v, ProviderResolutionDetail: convert(res)}
 }
 
-// FloatEvaluation implements of.FeatureProvider: golab number flags map
+// FloatEvaluation implements of.FeatureProvider: grayling number flags map
 // directly to float64.
 func (p *Provider) FloatEvaluation(_ context.Context, flag string, defaultValue float64,
 	flatCtx of.FlattenedContext) of.FloatResolutionDetail {
@@ -334,11 +334,11 @@ func (p *Provider) FloatEvaluation(_ context.Context, flag string, defaultValue 
 		return of.FloatResolutionDetail{Value: defaultValue,
 			ProviderResolutionDetail: notReady()}
 	}
-	v, res := p.client.NumberVariation(flag, toGolabContext(flatCtx, p.opts.UnitField), defaultValue)
+	v, res := p.client.NumberVariation(flag, toGraylingContext(flatCtx, p.opts.UnitField), defaultValue)
 	return of.FloatResolutionDetail{Value: v, ProviderResolutionDetail: convert(res)}
 }
 
-// IntEvaluation implements of.FeatureProvider: golab stores all numbers as
+// IntEvaluation implements of.FeatureProvider: grayling stores all numbers as
 // float64; an integral value converts losslessly, anything else is a
 // TYPE_MISMATCH and the caller default is served (§5.2: 错误时返回显式
 // default、reason/error，不静默随机分组).
@@ -349,12 +349,12 @@ func (p *Provider) IntEvaluation(_ context.Context, flag string, defaultValue in
 		return of.IntResolutionDetail{Value: defaultValue,
 			ProviderResolutionDetail: notReady()}
 	}
-	v, res := p.client.NumberVariation(flag, toGolabContext(flatCtx, p.opts.UnitField), float64(defaultValue))
+	v, res := p.client.NumberVariation(flag, toGraylingContext(flatCtx, p.opts.UnitField), float64(defaultValue))
 	detail := convert(res)
 	if !res.Failed {
 		if v != math.Trunc(v) || v > math.MaxInt64 || v < math.MinInt64 {
 			detail.ResolutionError = of.NewTypeMismatchResolutionError(
-				"golab number value is not an integer")
+				"grayling number value is not an integer")
 			detail.Reason = of.ErrorReason
 			return of.IntResolutionDetail{Value: defaultValue, ProviderResolutionDetail: detail}
 		}
@@ -362,7 +362,7 @@ func (p *Provider) IntEvaluation(_ context.Context, flag string, defaultValue in
 	return of.IntResolutionDetail{Value: int64(v), ProviderResolutionDetail: detail}
 }
 
-// ObjectEvaluation implements of.FeatureProvider: golab json flags map to
+// ObjectEvaluation implements of.FeatureProvider: grayling json flags map to
 // OpenFeature objects.
 func (p *Provider) ObjectEvaluation(_ context.Context, flag string, defaultValue any,
 	flatCtx of.FlattenedContext) of.InterfaceResolutionDetail {
@@ -371,7 +371,7 @@ func (p *Provider) ObjectEvaluation(_ context.Context, flag string, defaultValue
 		return of.InterfaceResolutionDetail{Value: defaultValue,
 			ProviderResolutionDetail: notReady()}
 	}
-	v, res := p.client.JSONVariation(flag, toGolabContext(flatCtx, p.opts.UnitField), defaultValue)
+	v, res := p.client.JSONVariation(flag, toGraylingContext(flatCtx, p.opts.UnitField), defaultValue)
 	if !res.Failed {
 		switch res.Value.(type) {
 		case map[string]any, []any:
@@ -379,7 +379,7 @@ func (p *Provider) ObjectEvaluation(_ context.Context, flag string, defaultValue
 			return of.InterfaceResolutionDetail{Value: defaultValue,
 				ProviderResolutionDetail: of.ProviderResolutionDetail{
 					Reason:          of.ErrorReason,
-					ResolutionError: of.NewTypeMismatchResolutionError("golab value is not an object or array"),
+					ResolutionError: of.NewTypeMismatchResolutionError("grayling value is not an object or array"),
 				}}
 		}
 	}
@@ -390,11 +390,11 @@ func (p *Provider) ObjectEvaluation(_ context.Context, flag string, defaultValue
 // Mapping helpers
 // ---------------------------------------------------------------------------
 
-// toGolabContext maps the OpenFeature flattened context onto golab's
+// toGraylingContext maps the OpenFeature flattened context onto grayling's
 // evaluation context: targetingKey becomes the stable randomization unit and
 // is mirrored into unitField when the caller did not provide that attribute
 // explicitly (targetingKey IS the subject identity — OF spec §3.2.2).
-func toGolabContext(flat of.FlattenedContext, unitField string) model.EvaluationContext {
+func toGraylingContext(flat of.FlattenedContext, unitField string) model.EvaluationContext {
 	ctx := model.EvaluationContext{Attributes: map[string]any{}}
 	if flat == nil {
 		return ctx
@@ -416,7 +416,7 @@ func toGolabContext(flat of.FlattenedContext, unitField string) model.Evaluation
 	return ctx
 }
 
-// convert translates one golab Result into OpenFeature resolution details.
+// convert translates one grayling Result into OpenFeature resolution details.
 func convert(res model.Result) of.ProviderResolutionDetail {
 	detail := of.ProviderResolutionDetail{
 		Variant:      res.VariationType,
@@ -459,9 +459,9 @@ func mapReason(res model.Result) of.Reason {
 	case model.ReasonDisabled:
 		return of.DisabledReason
 	case model.ReasonDefault, model.ReasonNotEnrolled, model.ReasonExperimentNotRunning:
-		// Golab experiment gating states resolve to the deterministic
+		// Grayling experiment gating states resolve to the deterministic
 		// default rule — DEFAULT is the honest OpenFeature reason; the
-		// verbatim golab reason stays in FlagMetadata.
+		// verbatim grayling reason stays in FlagMetadata.
 		return of.DefaultReason
 	case model.ReasonStale:
 		return of.ErrorReason
@@ -470,31 +470,31 @@ func mapReason(res model.Result) of.Reason {
 	}
 }
 
-// metadata exposes golab-native resolution facts that OpenFeature has no
+// metadata exposes grayling-native resolution facts that OpenFeature has no
 // first-class fields for (values restricted to OF metadata types).
 func metadata(res model.Result) of.FlagMetadata {
 	md := of.FlagMetadata{}
 	if res.Reason != "" {
-		md["golabReason"] = string(res.Reason)
+		md["graylingReason"] = string(res.Reason)
 	}
 	if res.FlagVersion != "" {
-		md["golabFlagVersion"] = res.FlagVersion
+		md["graylingFlagVersion"] = res.FlagVersion
 	}
 	if res.Experiment != nil {
-		md["golabExperimentId"] = res.Experiment.ExperimentID
-		md["golabExperimentEpoch"] = res.Experiment.Epoch
-		md["golabExposureSource"] = res.Experiment.Source
+		md["graylingExperimentId"] = res.Experiment.ExperimentID
+		md["graylingExperimentEpoch"] = res.Experiment.Epoch
+		md["graylingExposureSource"] = res.Experiment.Source
 	}
 	if res.Bucket >= 0 {
-		md["golabBucket"] = int64(res.Bucket)
+		md["graylingBucket"] = int64(res.Bucket)
 	}
 	if res.DecisionID != "" {
-		md["golabDecisionId"] = res.DecisionID
-		md["golabManifestRevision"] = res.ManifestRevision
-		md["golabSnapshotAgeMillis"] = res.SnapshotAgeMillis
-		md["golabRule"] = res.Rule
+		md["graylingDecisionId"] = res.DecisionID
+		md["graylingManifestRevision"] = res.ManifestRevision
+		md["graylingSnapshotAgeMillis"] = res.SnapshotAgeMillis
+		md["graylingRule"] = res.Rule
 		if res.ExposureEventID != "" {
-			md["golabExposureEventId"] = res.ExposureEventID
+			md["graylingExposureEventId"] = res.ExposureEventID
 		}
 	}
 	return md
@@ -503,7 +503,7 @@ func metadata(res model.Result) of.FlagMetadata {
 func notReady() of.ProviderResolutionDetail {
 	return of.ProviderResolutionDetail{
 		Reason:          of.ErrorReason,
-		ResolutionError: of.NewProviderNotReadyResolutionError("golab provider not initialized"),
+		ResolutionError: of.NewProviderNotReadyResolutionError("grayling provider not initialized"),
 	}
 }
 

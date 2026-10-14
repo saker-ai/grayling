@@ -1,5 +1,5 @@
 /**
- * golab-fnv1a-10000-v1 — the GoLab bucketing contract in TypeScript.
+ * grayling-fnv1a-10000-v1 — the Grayling bucketing contract in TypeScript.
  *
  * Exists to prove cross-language determinism (P4 退出验收: 跨语言用例同值):
  * validated against the SAME golden vectors as the Go reference
@@ -10,7 +10,7 @@
  * (analysis, migrations, tests).
  */
 
-export const ALGORITHM_ID = "golab-fnv1a-10000-v1";
+export const ALGORITHM_ID = "grayling-fnv1a-10000-v1";
 export const BUCKETS = 10000;
 
 const FNV_OFFSET = 0xcbf29ce484222325n;

@@ -119,13 +119,13 @@ func nativeClusterRevision(c config_client.IConfigClient) (int64, error) {
 // A native client starts while B is offline, so its initial connection must
 // use A. After B catches up and A exits, the same client's original server
 // list must reach B and read a complete newly published snapshot.
-func TestOfficialNacosClientFailsOverAcrossGolabNodes(t *testing.T) {
+func TestOfficialNacosClientFailsOverAcrossGraylingNodes(t *testing.T) {
 	if testing.Short() {
-		t.Skip("requires two GoLab processes, PostgreSQL, and Redis")
+		t.Skip("requires two Grayling processes, PostgreSQL, and Redis")
 	}
 	dsn := pgtest.DSN(t)
 	redis := redistest.Start(t)
-	bin := buildGolab(t, repoRoot(t))
+	bin := buildGrayling(t, repoRoot(t))
 	const authSecret = "native-failover-shared-secret-0123456789abcdef"
 	a := startReplica(t, "native-A", bin, dsn, redis.Addr, authSecret, time.Second, "-nacos-native-auth=true")
 	owner := scrapeOwnerToken(t, a.proc, 20*time.Second)
@@ -236,7 +236,7 @@ func TestOfficialNacosClientFailsOverAcrossGolabNodes(t *testing.T) {
 		}}); err != nil {
 		t.Fatal(err)
 	}
-	b.proc = startProc(t, "golab-native-B(restarted)", b.bin, b.args...)
+	b.proc = startProc(t, "grayling-native-B(restarted)", b.bin, b.args...)
 	waitHealth(t, b.base, 60*time.Second)
 	sdkA := &client{t: t, base: a.base, token: sdkToken.Secret}
 	sdkB := &client{t: t, base: b.base, token: sdkToken.Secret}
@@ -321,7 +321,7 @@ waitPush:
 	}
 	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}}
 	baseURL := "https://" + httpAddr
-	resp, err := httpClient.Get(baseURL + "/nacos/v1/cs/configs?tenant=" + environment.NamespaceID + "&group=GOLAB_FLAGS&dataId=golab.manifest")
+	resp, err := httpClient.Get(baseURL + "/nacos/v1/cs/configs?tenant=" + environment.NamespaceID + "&group=GRAYLING_FLAGS&dataId=grayling.manifest")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ waitPush:
 		t.Fatalf("authorized TLS login: HTTP %d, want 200", resp.StatusCode)
 	}
 	request, err := http.NewRequest(http.MethodGet,
-		baseURL+"/nacos/v1/cs/configs?tenant="+environment.NamespaceID+"&group=GOLAB_FLAGS&dataId=golab.manifest", nil)
+		baseURL+"/nacos/v1/cs/configs?tenant="+environment.NamespaceID+"&group=GRAYLING_FLAGS&dataId=grayling.manifest", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

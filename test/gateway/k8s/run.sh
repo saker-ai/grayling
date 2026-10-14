@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 work_dir=$(mktemp -d)
-cluster_name=golab-issue12
+cluster_name=grayling-issue12
 context=kind-${cluster_name}
 kind_version=v0.27.0
 kind_sha=a6875aaea358acf0ac07786b1a6755d08fd640f4c79b7a2e46681cc13f49a04b
@@ -57,14 +57,14 @@ host_gateway=$(docker network inspect kind --format '{{(index .IPAM.Config 0).Ga
 kube_api=$(kubectl --context "$context" get service kubernetes -o jsonpath='{.spec.clusterIP}')
 sed -e "s/__HOST_GATEWAY__/$host_gateway/g" -e "s/__KUBE_API__/$kube_api/g" \
   "$repo_root/test/gateway/k8s/stack.yaml" | kubectl --context "$context" apply -f -
-traefik_actor=system:serviceaccount:golab-issue12:traefik
-[[ $(kubectl --context "$context" auth can-i list ingressroutes.traefik.io -n golab-issue12 --as="$traefik_actor") == yes ]]
-[[ $(kubectl --context "$context" auth can-i create ingressroutes.traefik.io -n golab-issue12 --as="$traefik_actor") == no ]]
+traefik_actor=system:serviceaccount:grayling-issue12:traefik
+[[ $(kubectl --context "$context" auth can-i list ingressroutes.traefik.io -n grayling-issue12 --as="$traefik_actor") == yes ]]
+[[ $(kubectl --context "$context" auth can-i create ingressroutes.traefik.io -n grayling-issue12 --as="$traefik_actor") == no ]]
 [[ $(kubectl --context "$context" auth can-i list nodes --as="$traefik_actor" 2>/dev/null) == no ]]
 echo "RBAC: IngressRoute read allowed; IngressRoute write and cluster Node read denied"
 
-export GOLAB_K8S_CONTEXT="$context"
-export GOLAB_KIND_NAME="$cluster_name"
-export GOLAB_K8S_HOST_GATEWAY="$host_gateway"
+export GRAYLING_K8S_CONTEXT="$context"
+export GRAYLING_KIND_NAME="$cluster_name"
+export GRAYLING_K8S_HOST_GATEWAY="$host_gateway"
 cd "$repo_root"
 GOWORK=off go test -tags=integration,k8s ./test/gateway -run '^TestKubernetesIngressRouteE2E$' -count=1 -v

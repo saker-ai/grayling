@@ -1,5 +1,5 @@
 """Integration fixtures: every test in this suite runs against a REAL
-golab binary (built from this repo with GOWORK=off) speaking real HTTP —
+grayling binary (built from this repo with GOWORK=off) speaking real HTTP —
 the same startup contract as test/boot (owner token scraped from stderr,
 free ports, health poll). Nothing is mocked."""
 
@@ -22,7 +22,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SDK_ROOT = REPO_ROOT / "sdk" / "python"
 
-# Make `import golab_sdk` work without installation.
+# Make `import grayling_sdk` work without installation.
 sys.path.insert(0, str(SDK_ROOT))
 
 
@@ -42,8 +42,8 @@ def _gonacos_root() -> str:
     return root
 
 
-class GolabServer:
-    """Handle for the running golab process + admin conveniences."""
+class GraylingServer:
+    """Handle for the running grayling process + admin conveniences."""
 
     def __init__(self, base_url: str, owner_token: str, proc: subprocess.Popen):
         self.base_url = base_url
@@ -121,10 +121,10 @@ class GolabServer:
 def server():
     if shutil.which("go") is None:
         pytest.fail("go toolchain is required for SDK integration tests")
-    tmp = Path(tempfile.mkdtemp(prefix="golab-pysdk-"))
-    binary = tmp / "golab"
+    tmp = Path(tempfile.mkdtemp(prefix="grayling-pysdk-"))
+    binary = tmp / "grayling"
     build = subprocess.run(
-        ["go", "build", "-o", str(binary), "./cmd/golab"],
+        ["go", "build", "-o", str(binary), "./cmd/grayling"],
         cwd=REPO_ROOT, env={**os.environ, "GOWORK": "off"},
         capture_output=True, text=True)
     assert build.returncode == 0, f"build failed:\n{build.stderr}"
@@ -146,10 +146,10 @@ def server():
         line = proc.stderr.readline()
         if not line:
             if proc.poll() is not None:
-                pytest.fail(f"golab exited early: {proc.poll()}")
+                pytest.fail(f"grayling exited early: {proc.poll()}")
             continue
-        if "glab_admin_" in line:
-            idx = line.index("glab_admin_")
+        if "grayling_admin_" in line:
+            idx = line.index("grayling_admin_")
             owner_token = line[idx:].split()[0].strip()
     assert owner_token, "bootstrap owner token not printed"
 
@@ -165,7 +165,7 @@ def server():
             time.sleep(0.2)
     assert healthy, "server never became healthy"
 
-    srv = GolabServer(base, owner_token, proc)
+    srv = GraylingServer(base, owner_token, proc)
     yield srv
 
     proc.terminate()
@@ -179,7 +179,7 @@ def server():
 class Env:
     """A prepared workspace/environment with tokens and published flags."""
 
-    def __init__(self, server: GolabServer):
+    def __init__(self, server: GraylingServer):
         self.server = server
         self.ws = "pyws"
         self.env = "prod"
@@ -225,7 +225,7 @@ class Env:
         server.publish_flag(self.ws, self.env, {
             "schemaVersion": 1, "key": "py-exp", "type": "string",
             "fields": ["user_id"],
-            "bucketing": {"algorithm": "golab-fnv1a-10000-v1",
+            "bucketing": {"algorithm": "grayling-fnv1a-10000-v1",
                           "unit": "user_id", "salt": "py-exp-salt"},
             "variations": {"control": "c", "treatment": "t"},
             "defaultRule": {"variation": "control"},

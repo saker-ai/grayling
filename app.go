@@ -1,7 +1,7 @@
-// Package golab embeds the GoLab control plane in a Go process. The caller
+// Package grayling embeds the Grayling control plane in a Go process. The caller
 // owns the HTTP listener and process signals; App owns its storage, Nacos
 // substrate, and background jobs.
-package golab
+package grayling
 
 import (
 	"context"
@@ -66,7 +66,7 @@ type Options struct {
 	Logger                  *log.Logger
 }
 
-// App is one running GoLab instance. Close is safe to call more than once.
+// App is one running Grayling instance. Close is safe to call more than once.
 type App struct {
 	apiHandler http.Handler
 	handler    http.Handler
@@ -103,7 +103,7 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 		var err error
 		chatProxy, err = openaiproxy.New(opts.OpenAIUpstreamURL)
 		if err != nil {
-			return nil, fmt.Errorf("golab: %w", err)
+			return nil, fmt.Errorf("grayling: %w", err)
 		}
 		chatHandler = chatProxy
 	}
@@ -118,7 +118,7 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 	}
 	if opts.NacosURL == "" && (!loopbackBind(opts.GonacosAddr) || !loopbackBind(opts.GonacosGRPCAddr)) &&
 		(!opts.NativeConfigAuth || !opts.AllowNonLoopbackGonacos) {
-		return nil, fmt.Errorf("golab: non-loopback gonacos requires native config auth and explicit allowance")
+		return nil, fmt.Errorf("grayling: non-loopback gonacos requires native config auth and explicit allowance")
 	}
 	if opts.NacosURL == "" && opts.GonacosData == "" && opts.DataFile != "" {
 		opts.GonacosData = filepath.Join(filepath.Dir(opts.DataFile), "gonacos")
@@ -128,12 +128,12 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 		var err error
 		if opts.RedisAddr == "" {
 			if opts.GonacosData == "" {
-				return nil, fmt.Errorf("golab: recovery requires a gonacos data directory")
+				return nil, fmt.Errorf("grayling: recovery requires a gonacos data directory")
 			}
 			snapshot := filepath.Join(opts.GonacosData, "snapshot.json")
 			for _, path := range []string{snapshot, snapshot + ".hmac"} {
 				if _, err := os.Stat(path); err != nil {
-					return nil, fmt.Errorf("golab: recovery snapshot %s: %w", path, err)
+					return nil, fmt.Errorf("grayling: recovery snapshot %s: %w", path, err)
 				}
 			}
 			snapshotHash, err = recovery.DigestFile(snapshot)
@@ -141,7 +141,7 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 			snapshotHash, err = recovery.DigestRedisSnapshot(ctx, opts.RedisAddr)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("golab: recovery snapshot: %w", err)
+			return nil, fmt.Errorf("grayling: recovery snapshot: %w", err)
 		}
 	}
 
@@ -172,10 +172,10 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 			Password: opts.NacosPassword, Token: opts.NacosToken,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("golab: external Nacos: %w", err)
+			return nil, fmt.Errorf("grayling: external Nacos: %w", err)
 		}
 		if err := client.PingContext(ctx); err != nil {
-			return nil, fmt.Errorf("golab: external Nacos health check: %w", err)
+			return nil, fmt.Errorf("grayling: external Nacos health check: %w", err)
 		}
 		cfg = configstore.NewNacosStore(client)
 		aiService = ai.NewExternalService(store, configstore.NewNacosAIStore(client))
@@ -203,11 +203,11 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 		}
 		gsrv, err = server.New(gopts...)
 		if err != nil {
-			return nil, fmt.Errorf("golab: embedded gonacos: %w", err)
+			return nil, fmt.Errorf("grayling: embedded gonacos: %w", err)
 		}
 		bundle := gsrv.Services()
 		if bundle == nil || bundle.Config == nil || bundle.AI == nil {
-			return nil, fmt.Errorf("golab: embedded gonacos services unavailable")
+			return nil, fmt.Errorf("grayling: embedded gonacos services unavailable")
 		}
 		cfg = configstore.NewGonacosStore(bundle.Config)
 		aiService = ai.NewService(store, bundle.AI)
@@ -215,11 +215,11 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 	if opts.RecoveryPoint != "" {
 		point, err := recovery.Capture(ctx, opts.PostgresDSN, opts.AuthSecret, store, cfg)
 		if err != nil {
-			return nil, fmt.Errorf("golab: recovery gate: %w", err)
+			return nil, fmt.Errorf("grayling: recovery gate: %w", err)
 		}
 		point.GonacosSHA256 = snapshotHash
 		if err := recovery.Verify(opts.RecoveryPoint, point); err != nil {
-			return nil, fmt.Errorf("golab: recovery gate: %w", err)
+			return nil, fmt.Errorf("grayling: recovery gate: %w", err)
 		}
 	}
 
@@ -251,7 +251,7 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 		app.wg.Go(func() {
 			if err := gsrv.Start(runCtx); err != nil && !errors.Is(err, context.Canceled) {
 				select {
-				case app.errors <- fmt.Errorf("golab: embedded gonacos stopped: %w", err):
+				case app.errors <- fmt.Errorf("grayling: embedded gonacos stopped: %w", err):
 				default:
 				}
 				cancel()
@@ -289,28 +289,28 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 
 func validateOptions(opts Options) error {
 	if opts.OpenAIUpstreamURL != "" && (opts.OpenAIWorkspace == "" || opts.OpenAIEnvironment == "") {
-		return fmt.Errorf("golab: OpenAI workspace and environment are required with an upstream")
+		return fmt.Errorf("grayling: OpenAI workspace and environment are required with an upstream")
 	}
 	if opts.OpenAIUpstreamURL == "" && (opts.OpenAIWorkspace != "" || opts.OpenAIEnvironment != "" || opts.OpenAIFlagKey != "") {
-		return fmt.Errorf("golab: OpenAI scope and flag require an upstream")
+		return fmt.Errorf("grayling: OpenAI scope and flag require an upstream")
 	}
 	if opts.SQLitePath != "" && opts.PostgresDSN != "" {
-		return fmt.Errorf("golab: SQLite and PostgreSQL stores are mutually exclusive")
+		return fmt.Errorf("grayling: SQLite and PostgreSQL stores are mutually exclusive")
 	}
 	if opts.NacosURL != "" && (opts.RedisAddr != "" || opts.NativeConfigAuth || opts.GonacosData != "" || opts.GonacosRoot != "") {
-		return fmt.Errorf("golab: external Nacos cannot use embedded gonacos options")
+		return fmt.Errorf("grayling: external Nacos cannot use embedded gonacos options")
 	}
 	if opts.RecoveryPoint != "" && (opts.PostgresDSN == "" || opts.NacosURL != "" || opts.AuthSecret == "") {
-		return fmt.Errorf("golab: recovery point requires PostgreSQL, embedded gonacos, and auth secret")
+		return fmt.Errorf("grayling: recovery point requires PostgreSQL, embedded gonacos, and auth secret")
 	}
 	if opts.EvaluationSampleRate < 0 || opts.EvaluationSampleRate > 1 {
-		return fmt.Errorf("golab: evaluation sample rate must be within [0,1]")
+		return fmt.Errorf("grayling: evaluation sample rate must be within [0,1]")
 	}
 	if opts.RolloutLeaseDuration < 0 || (opts.RolloutLeaseDuration > 0 && opts.RolloutLeaseDuration <= opts.RolloutInterval) {
-		return fmt.Errorf("golab: rollout lease must exceed rollout interval")
+		return fmt.Errorf("grayling: rollout lease must exceed rollout interval")
 	}
 	if opts.AdminPassword != "" && (len(opts.AdminPassword) < 12 || strings.TrimSpace(opts.AdminPassword) == "") {
-		return fmt.Errorf("golab: admin password must contain at least 12 bytes and non-whitespace characters")
+		return fmt.Errorf("grayling: admin password must contain at least 12 bytes and non-whitespace characters")
 	}
 	return nil
 }
@@ -319,20 +319,20 @@ func openPlatform(ctx context.Context, opts Options) (*platform.Store, error) {
 	if opts.PostgresDSN != "" {
 		store, err := platform.NewPGStore(ctx, opts.PostgresDSN)
 		if err != nil {
-			return nil, fmt.Errorf("golab: PostgreSQL store: %w", err)
+			return nil, fmt.Errorf("grayling: PostgreSQL store: %w", err)
 		}
 		return store, nil
 	}
 	if opts.SQLitePath != "" {
 		store, err := platform.NewSQLiteStore(ctx, opts.SQLitePath)
 		if err != nil {
-			return nil, fmt.Errorf("golab: SQLite store: %w", err)
+			return nil, fmt.Errorf("grayling: SQLite store: %w", err)
 		}
 		return store, nil
 	}
 	store, err := platform.NewStore(opts.DataFile)
 	if err != nil {
-		return nil, fmt.Errorf("golab: platform store: %w", err)
+		return nil, fmt.Errorf("grayling: platform store: %w", err)
 	}
 	return store, nil
 }
@@ -353,7 +353,7 @@ func loopbackBind(addr string) bool {
 // application wants to serve its own pages at non-API paths.
 func (a *App) Handler() http.Handler { return a.handler }
 
-// APIHandler serves only GoLab API routes.
+// APIHandler serves only Grayling API routes.
 func (a *App) APIHandler() http.Handler { return a.apiHandler }
 
 // BootstrapOwnerToken returns the new owner credential once at first start.

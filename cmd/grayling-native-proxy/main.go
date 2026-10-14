@@ -1,4 +1,4 @@
-// golab-native-proxy terminates TLS while preserving one backend TCP connection
+// grayling-native-proxy terminates TLS while preserving one backend TCP connection
 // for each accepted client connection. The backend must remain on loopback.
 package main
 

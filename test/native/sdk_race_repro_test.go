@@ -11,7 +11,7 @@ import (
 )
 
 // This opt-in reproducer isolates the official SDK's global rpc.clientMap
-// shutdown/create race from GoLab evaluation and authorization. It is expected
+// shutdown/create race from Grayling evaluation and authorization. It is expected
 // to fail under -race on v2.3.5; never use its failure as a passing CI gate.
 func TestOfficialSDKClientMapRaceReproducer(t *testing.T) {
 	srv := nativeServer(t)

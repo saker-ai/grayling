@@ -527,7 +527,7 @@ func TestOfficialNacosClientReconnectsAfterServerRestart(t *testing.T) {
 // This characterizes the current security gap: gonacos's gRPC config query
 // and subscription accept a caller-selected namespace without a tenant
 // credential. Until the upstream endpoint enforces ACLs, native clients must
-// remain on loopback and cannot be a public multi-tenant GoLab interface.
+// remain on loopback and cannot be a public multi-tenant Grayling interface.
 func TestNativeClientCanReadOtherTenantWithoutAuthorization(t *testing.T) {
 	srv := nativeServer(t)
 	store := configstore.NewGonacosStore(srv.Services().Config)

@@ -9,10 +9,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from golab_sdk import GolabClient, GolabError, Options  # noqa: E402
+from grayling_sdk import GraylingClient, GraylingError, Options  # noqa: E402
 
 
-def make_client(env, **overrides) -> GolabClient:
+def make_client(env, **overrides) -> GraylingClient:
     kwargs = dict(
         base_url=env.server.base_url,
         sdk_token=env.sdk_token,
@@ -21,7 +21,7 @@ def make_client(env, **overrides) -> GolabClient:
         auto_poll=False,
     )
     kwargs.update(overrides)
-    return GolabClient(Options(**kwargs))
+    return GraylingClient(Options(**kwargs))
 
 
 def test_bool_variation_targeting(env):
@@ -94,9 +94,9 @@ def test_type_mismatch_returns_caller_default(env):
 
 
 def test_transport_error_returns_caller_default(env):
-    dead = Options(base_url="http://127.0.0.1:1", sdk_token="glab_sdk_x",
+    dead = Options(base_url="http://127.0.0.1:1", sdk_token="grayling_sdk_x",
                    auto_poll=False)
-    with GolabClient(dead) as client:
+    with GraylingClient(dead) as client:
         value, details = client.bool_variation("py-bool", False)
         assert value is False
         assert details.result.failed is True
@@ -119,9 +119,9 @@ def test_remote_status_expiry_and_recovery(env):
 
 
 def test_unauthorized_token_never_crashes(env):
-    bad = Options(base_url=env.server.base_url, sdk_token="glab_sdk_invalid",
+    bad = Options(base_url=env.server.base_url, sdk_token="grayling_sdk_invalid",
                   auto_poll=False)
-    with GolabClient(bad) as client:
+    with GraylingClient(bad) as client:
         value, details = client.string_variation("py-string", "safe")
         assert value == "safe"
         assert details.result.failed is True
@@ -133,7 +133,7 @@ def test_wrong_audience_rejected(env):
     # and the SDK must fall back to the caller default (§9 三受众凭证分离).
     opts = Options(base_url=env.server.base_url, sdk_token=env.collect_token,
                    auto_poll=False)
-    with GolabClient(opts) as client:
+    with GraylingClient(opts) as client:
         value, details = client.string_variation("py-string", "safe")
         assert value == "safe"
         assert details.result.failed is True
@@ -184,16 +184,16 @@ def test_track_conversion_requires_attribution(env):
         try:
             client.track_conversion(details, "conversion", 1.0)
             raise AssertionError("conversion without attribution must raise")
-        except GolabError:
+        except GraylingError:
             pass
     # No collect token configured → explicit error.
     opts = Options(base_url=env.server.base_url, sdk_token=env.sdk_token,
                    auto_poll=False)
-    with GolabClient(opts) as client:
+    with GraylingClient(opts) as client:
         _, details = client.string_variation(
             "py-exp", "?", attributes={"user_id": "conv-user-1"})
         try:
             client.track_conversion(details, "conversion", 1.0)
             raise AssertionError("conversion without collect token must raise")
-        except GolabError:
+        except GraylingError:
             pass

@@ -151,7 +151,7 @@ def test_on_render_requires_explicit_exposure(env):
     key = "py-render"
     env.server.publish_flag(env.ws, env.env, {
         "schemaVersion": 1, "key": key, "type": "string", "fields": ["user_id"],
-        "bucketing": {"algorithm": "golab-fnv1a-10000-v1", "unit": "user_id", "salt": "py-render-salt"},
+        "bucketing": {"algorithm": "grayling-fnv1a-10000-v1", "unit": "user_id", "salt": "py-render-salt"},
         "variations": {"control": "c", "treatment": "t"},
         "defaultRule": {"variation": "control"},
         "targeting": [{"name": "split", "percentage": {"control": 50, "treatment": 50}}],

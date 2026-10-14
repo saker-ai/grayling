@@ -1,6 +1,6 @@
 # 平台存储
 
-GoLab 的控制面数据与 gonacos 配置底座分别存储。`-sqlite` 和 `-pg` 只选择 GoLab 平台存储；gonacos 仍由内嵌 Redis 或 `-redis` 指定的外部 Redis 承载。
+Grayling 的控制面数据与 gonacos 配置底座分别存储。`-sqlite` 和 `-pg` 只选择 Grayling 平台存储；gonacos 仍由内嵌 Redis 或 `-redis` 指定的外部 Redis 承载。
 
 | 参数 | 用途 | 部署范围 |
 | --- | --- | --- |
@@ -16,4 +16,4 @@ PostgreSQL 使用数据库会话锁串行化跨副本发布、计划操作和首
 
 PostgreSQL 旧版按月分区的原始事件表不属于新 GORM schema。当前使用带保留期索引的事件表；需要按月分区的大规模部署应在容量规划时单独评估。备份恢复应同时覆盖平台数据库、gonacos 快照和密钥，并使用同一恢复点校验。
 
-验证：`GOWORK=off go test ./internal/platform -run '^TestSQLite'` 检查纯 Go SQLite 与事件增量同步；提供 `GOLAB_TEST_PG_DSN` 后运行 `GOWORK=off go test ./internal/platform ./internal/experiment ./internal/api -run 'TestGORMPostgres|TestPostgresReport|TestQuotaAdminReplicaRead'` 检查真实 PostgreSQL。CI 将快速单测与 PostgreSQL 集成测试分成独立任务。旧 pgx 后端的分区、增量失效和性能报告不能作为当前 GORM 后端的容量保证；上线前仍须用实际事件速率与数据量压测。
+验证：`GOWORK=off go test ./internal/platform -run '^TestSQLite'` 检查纯 Go SQLite 与事件增量同步；提供 `GRAYLING_TEST_PG_DSN` 后运行 `GOWORK=off go test ./internal/platform ./internal/experiment ./internal/api -run 'TestGORMPostgres|TestPostgresReport|TestQuotaAdminReplicaRead'` 检查真实 PostgreSQL。CI 将快速单测与 PostgreSQL 集成测试分成独立任务。旧 pgx 后端的分区、增量失效和性能报告不能作为当前 GORM 后端的容量保证；上线前仍须用实际事件速率与数据量压测。

@@ -1,14 +1,14 @@
 # Replace the image references and namespace with deployment values. Create
-# golab-native-secrets (pg-dsn, redis-addr, auth-secret) and golab-native-tls
+# grayling-native-secrets (pg-dsn, redis-addr, auth-secret) and grayling-native-tls
 # (tls.crt, tls.key) separately; never put secret values in this manifest.
 apiVersion: v1
 kind: Service
 metadata:
-  name: golab-native-headless
-  namespace: golab
+  name: grayling-native-headless
+  namespace: grayling
 spec:
   clusterIP: None
-  selector: {app: golab-native}
+  selector: {app: grayling-native}
   ports:
     - {name: api, port: 8688, targetPort: api}
     - {name: native-http, port: 8848, targetPort: native-http}
@@ -17,16 +17,16 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: golab-native
-  namespace: golab
+  name: grayling-native
+  namespace: grayling
 spec:
-  serviceName: golab-native-headless
+  serviceName: grayling-native-headless
   replicas: 2
   selector:
-    matchLabels: {app: golab-native}
+    matchLabels: {app: grayling-native}
   template:
     metadata:
-      labels: {app: golab-native}
+      labels: {app: grayling-native}
     spec:
       hostNetwork: false
       terminationGracePeriodSeconds: 45
@@ -35,20 +35,20 @@ spec:
           topologyKey: kubernetes.io/hostname
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
-            matchLabels: {app: golab-native}
+            matchLabels: {app: grayling-native}
       containers:
-        - name: golab
-          image: registry.example.invalid/golab:replace-with-reviewed-digest
+        - name: grayling
+          image: registry.example.invalid/grayling:replace-with-reviewed-digest
           env:
             - name: PG_DSN
-              valueFrom: {secretKeyRef: {name: golab-native-secrets, key: pg-dsn}}
+              valueFrom: {secretKeyRef: {name: grayling-native-secrets, key: pg-dsn}}
             - name: REDIS_ADDR
-              valueFrom: {secretKeyRef: {name: golab-native-secrets, key: redis-addr}}
+              valueFrom: {secretKeyRef: {name: grayling-native-secrets, key: redis-addr}}
           args:
             - -addr=0.0.0.0:8688
             - -pg=$(PG_DSN)
             - -redis=$(REDIS_ADDR)
-            - -auth-secret-file=/run/golab/auth-secret
+            - -auth-secret-file=/run/grayling/auth-secret
             - -gonacos-addr=127.0.0.1:18848
             - -gonacos-grpc-addr=127.0.0.1:19848
             - -nacos-native-auth=true
@@ -57,9 +57,9 @@ spec:
           readinessProbe:
             httpGet: {path: /api/v1/health, port: api}
           volumeMounts:
-            - {name: auth-secret, mountPath: /run/golab, readOnly: true}
+            - {name: auth-secret, mountPath: /run/grayling, readOnly: true}
         - name: native-tls-l4
-          image: registry.example.invalid/golab-native-proxy:replace-with-reviewed-digest
+          image: registry.example.invalid/grayling-native-proxy:replace-with-reviewed-digest
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532
@@ -75,23 +75,23 @@ spec:
             - {name: tls, mountPath: /tls, readOnly: true}
       volumes:
         - name: auth-secret
-          secret: {secretName: golab-native-secrets, defaultMode: 384, items: [{key: auth-secret, path: auth-secret}]}
+          secret: {secretName: grayling-native-secrets, defaultMode: 384, items: [{key: auth-secret, path: auth-secret}]}
         - name: tls
-          secret: {secretName: golab-native-tls}
+          secret: {secretName: grayling-native-tls}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: golab-native-ingress
-  namespace: golab
+  name: grayling-native-ingress
+  namespace: grayling
 spec:
   podSelector:
-    matchLabels: {app: golab-native}
+    matchLabels: {app: grayling-native}
   policyTypes: [Ingress]
   ingress:
     - from:
         - namespaceSelector:
-            matchLabels: {kubernetes.io/metadata.name: golab-native-clients}
+            matchLabels: {kubernetes.io/metadata.name: grayling-native-clients}
           podSelector:
             matchLabels: {native-access: allowed}
       ports:
@@ -99,6 +99,6 @@ spec:
         - {protocol: TCP, port: 9848}
     - from:
         - namespaceSelector:
-            matchLabels: {kubernetes.io/metadata.name: golab-admin}
+            matchLabels: {kubernetes.io/metadata.name: grayling-admin}
       ports:
         - {protocol: TCP, port: 8688}

@@ -45,7 +45,7 @@ def license_type(data):
 
 def runtime_modules():
     go = shutil.which("go") or "/usr/local/go/bin/go"
-    output = subprocess.check_output([go, "list", "-deps", "-f", "{{if .Module}}{{.Module.Path}}{{end}}", "./cmd/golab", "./cmd/golab-proxy"], cwd=ROOT, env={**os.environ, "GOWORK": "off"}).decode()
+    output = subprocess.check_output([go, "list", "-deps", "-f", "{{if .Module}}{{.Module.Path}}{{end}}", "./cmd/grayling", "./cmd/grayling-proxy"], cwd=ROOT, env={**os.environ, "GOWORK": "off"}).decode()
     return set(output.splitlines())
 
 
@@ -81,14 +81,14 @@ def atomic_json(path, value):
 
 
 def notice_text(current):
-    lines = ["# Third-party notices", "", "Generated from `third_party/licenses.json` by `scripts/license_audit.py update`.", "The list covers modules linked by `cmd/golab` or `cmd/golab-proxy`; the JSON also records the complete selected Go module graph and the TypeScript lockfile.", "A release bundle includes the full license and NOTICE texts for every linked module.", "", "| Module | Version | License | Evidence (SHA-256) |", "| --- | --- | --- | --- |"]
+    lines = ["# Third-party notices", "", "Generated from `third_party/licenses.json` by `scripts/license_audit.py update`.", "The list covers modules linked by `cmd/grayling` or `cmd/grayling-proxy`; the JSON also records the complete selected Go module graph and the TypeScript lockfile.", "A release bundle includes the full license and NOTICE texts for every linked module.", "", "| Module | Version | License | Evidence (SHA-256) |", "| --- | --- | --- | --- |"]
     for row in current["go"]:
         if not row["runtime"]:
             continue
         evidence = "<br>".join(f"{entry['file']} `{entry['sha256']}`" for entry in row["evidence"]) or "**No license file; release blocked**"
         resolved = f" → {row['resolved_module']}@{row['resolved_version']}" if "resolved_module" in row else ""
         lines.append(f"| {row['module']}{resolved} | {row['version']} | {row['license']} | {evidence} |")
-    lines += ["", "GoLab itself is Apache-2.0 under `LICENSE`. The pinned gonacos commit includes Apache-2.0 `LICENSE` and `NOTICE`; its [upstream declaration](https://github.com/godeps/gonacos/commit/5ac0bf0b6806) explicitly covers project-authored contributions in the earlier pinned commit.", ""]
+    lines += ["", "Grayling itself is Apache-2.0 under `LICENSE`. The pinned gonacos commit includes Apache-2.0 `LICENSE` and `NOTICE`; its [upstream declaration](https://github.com/godeps/gonacos/commit/5ac0bf0b6806) explicitly covers project-authored contributions in the earlier pinned commit.", ""]
     return "\n".join(lines)
 
 
@@ -126,7 +126,7 @@ def bundle(current, target):
             src = Path(mod["Dir"]) / evidence["file"]
             dst = notices / f"{index:03d}-{evidence['file']}"
             shutil.copy2(src, dst)
-    for name in ("golab", "golab-proxy"):
+    for name in ("grayling", "grayling-proxy"):
         shutil.copy2(ROOT / "bin" / name, target / name)
 
 

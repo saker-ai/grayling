@@ -190,7 +190,7 @@ func (c *Client) EnsureNamespaceContext(ctx context.Context, namespace string) e
 	}
 	if !exists {
 		created, createErr := c.request(ctx, http.MethodPost, "/nacos/v3/admin/core/namespace", url.Values{
-			"namespaceId": {namespace}, "namespaceName": {namespace}, "namespaceDesc": {"GoLab managed"},
+			"namespaceId": {namespace}, "namespaceName": {namespace}, "namespaceDesc": {"Grayling managed"},
 		})
 		var apiErr *apiError
 		if createErr != nil && (!errors.As(createErr, &apiErr) || apiErr.Code != 22002) {
@@ -242,7 +242,7 @@ func (c *Client) PublishContext(ctx context.Context, namespace, group, dataID, c
 	}
 	values := url.Values{
 		"namespaceId": {namespace}, "groupName": {group}, "dataId": {dataID},
-		"content": {content}, "type": {"text"}, "appName": {"golab"},
+		"content": {content}, "type": {"text"}, "appName": {"grayling"},
 	}
 	data, err := c.request(ctx, http.MethodPost, "/nacos/v3/admin/cs/config", values)
 	if errors.Is(err, ErrNotFound) {

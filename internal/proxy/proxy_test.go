@@ -60,7 +60,7 @@ func TestRelayEvalPassthrough(t *testing.T) {
 
 	req, _ := http.NewRequest("POST", px.URL+"/api/v1/sdk/eval?debug=1",
 		strings.NewReader(`{"flagKey":"f1"}`))
-	req.Header.Set("Authorization", "Bearer glab_sdk_x")
+	req.Header.Set("Authorization", "Bearer grayling_sdk_x")
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestRelayEvalPassthrough(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || string(body) != `{"result":{"flagKey":"f1"}}` {
 		t.Fatalf("relay: %d %s", resp.StatusCode, body)
 	}
-	if gotAuth != "Bearer glab_sdk_x" {
+	if gotAuth != "Bearer grayling_sdk_x" {
 		t.Fatalf("authorization must pass through untouched: %q", gotAuth)
 	}
 	// The eval body relays untouched EXCEPT for the reserved client_ip
@@ -170,7 +170,7 @@ func TestHealthEndpoints(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_, _ = w.Write([]byte(`{"status":"ok","service":"golab"}`))
+		_, _ = w.Write([]byte(`{"status":"ok","service":"grayling"}`))
 	}))
 	defer upstream.Close()
 	px := newTestProxy(t, upstream.URL, nil)
@@ -202,7 +202,7 @@ func TestHealthEndpoints(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"service":"golab"`) {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"service":"grayling"`) {
 		t.Fatalf("readiness: %d %s", resp.StatusCode, body)
 	}
 }
@@ -227,7 +227,7 @@ func TestSSERelayFlushesIncrementally(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", px.URL+"/api/v1/sdk/stream", nil)
-	req.Header.Set("Authorization", "Bearer glab_sdk_y")
+	req.Header.Set("Authorization", "Bearer grayling_sdk_y")
 	req.Header.Set("Last-Event-ID", "7")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -237,7 +237,7 @@ func TestSSERelayFlushesIncrementally(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "text/event-stream" {
 		t.Fatalf("stream headers: %d %q", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
-	if gotAuth != "Bearer glab_sdk_y" || gotLastID != "7" {
+	if gotAuth != "Bearer grayling_sdk_y" || gotLastID != "7" {
 		t.Fatalf("stream header passthrough: auth=%q last-id=%q", gotAuth, gotLastID)
 	}
 
@@ -266,25 +266,25 @@ func TestSSERelayFlushesIncrementally(t *testing.T) {
 
 func TestConfigETagPassthrough(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("If-None-Match") == `"golab-r5"` {
-			w.Header().Set("ETag", `"golab-r5"`)
+		if r.Header.Get("If-None-Match") == `"grayling-r5"` {
+			w.Header().Set("ETag", `"grayling-r5"`)
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		w.Header().Set("ETag", `"golab-r5"`)
+		w.Header().Set("ETag", `"grayling-r5"`)
 		_, _ = w.Write([]byte(`{"flags":{}}`))
 	}))
 	defer upstream.Close()
 	px := newTestProxy(t, upstream.URL, nil)
 
 	req, _ := http.NewRequest("GET", px.URL+"/api/v1/sdk/config", nil)
-	req.Header.Set("If-None-Match", `"golab-r5"`)
+	req.Header.Set("If-None-Match", `"grayling-r5"`)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("config via proxy: %v", err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotModified || resp.Header.Get("ETag") != `"golab-r5"` {
+	if resp.StatusCode != http.StatusNotModified || resp.Header.Get("ETag") != `"grayling-r5"` {
 		t.Fatalf("304 passthrough: %d etag=%q", resp.StatusCode, resp.Header.Get("ETag"))
 	}
 }
@@ -316,17 +316,17 @@ func TestRevisionRelay(t *testing.T) {
 		if r.URL.Path != "/api/v1/sdk/revision" {
 			t.Errorf("unexpected upstream path: %s", r.URL.Path)
 		}
-		if got := r.Header.Get("Authorization"); got != "Bearer glab_sdk_test" {
+		if got := r.Header.Get("Authorization"); got != "Bearer grayling_sdk_test" {
 			t.Errorf("credential not passed through: %q", got)
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write([]byte(`{"revision":7,"etag":"\"golab-r7\""}`))
+		_, _ = w.Write([]byte(`{"revision":7,"etag":"\"grayling-r7\""}`))
 	}))
 	defer upstream.Close()
 	px := newTestProxy(t, upstream.URL, nil)
 
 	req, _ := http.NewRequest("GET", px.URL+"/api/v1/sdk/revision", nil)
-	req.Header.Set("Authorization", "Bearer glab_sdk_test")
+	req.Header.Set("Authorization", "Bearer grayling_sdk_test")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("revision via proxy: %v", err)

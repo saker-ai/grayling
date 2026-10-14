@@ -1,6 +1,6 @@
-// OpenFeature contract validation for the golab provider. These tests drive
+// OpenFeature contract validation for the grayling provider. These tests drive
 // the OFFICIAL OpenFeature Go SDK surface (isolated API → client → provider)
-// against a REAL golab server (HTTP, gonacos config substrate, admin
+// against a REAL grayling server (HTTP, gonacos config substrate, admin
 // pipeline), asserting the spec-visible contract: values, variants, reasons,
 // error codes, provider state transitions and exposure attribution
 // (docs/技术方案.md §8).
@@ -30,7 +30,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Harness: a real golab server + admin provisioning
+// Harness: a real grayling server + admin provisioning
 // ---------------------------------------------------------------------------
 
 type harness struct {
@@ -148,7 +148,7 @@ func boolFlag(key string, disabled bool) *model.Flag {
 	}
 }
 
-// newOFAPI registers a golab provider on a fresh isolated OpenFeature API
+// newOFAPI registers a grayling provider on a fresh isolated OpenFeature API
 // and waits for readiness. Returns the OF client and the provider.
 func newOFAPI(t *testing.T, h *harness, mutate func(*sdk.Options)) (*of.Client, *Provider) {
 	t.Helper()
@@ -222,8 +222,8 @@ func TestOFReasonAndVariantMapping(t *testing.T) {
 	if bd.Value != false || bd.Variant != "off" || bd.Reason != of.DefaultReason {
 		t.Fatalf("bool: %+v", bd)
 	}
-	if bd.FlagMetadata["golabReason"] != string(model.ReasonDefault) {
-		t.Fatalf("golab reason metadata: %v", bd.FlagMetadata)
+	if bd.FlagMetadata["graylingReason"] != string(model.ReasonDefault) {
+		t.Fatalf("grayling reason metadata: %v", bd.FlagMetadata)
 	}
 
 	// DISABLED kill switch.
@@ -445,7 +445,7 @@ func TestOFContextTransformation(t *testing.T) {
 }
 
 // TestOFExperimentExposureAttribution proves the full chain: OpenFeature
-// evaluation → golab local split → enrollment in a RUNNING experiment →
+// evaluation → grayling local split → enrollment in a RUNNING experiment →
 // exposure batched to /api/v1/collect → server-side aggregate under the
 // tenant-scoped unit hash derived from the OpenFeature targetingKey.
 func TestOFExperimentExposureAttribution(t *testing.T) {
@@ -530,7 +530,7 @@ func TestOFExperimentExposureAttribution(t *testing.T) {
 	evalCtx := of.NewEvaluationContext("user-77", nil)
 	for time.Now().Before(deadline) {
 		sd, err = client.StringValueDetails(ctx, "of-exp", "?", evalCtx)
-		if err == nil && sd.Reason == of.SplitReason && sd.FlagMetadata["golabExperimentId"] == exp.ID {
+		if err == nil && sd.Reason == of.SplitReason && sd.FlagMetadata["graylingExperimentId"] == exp.ID {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -538,7 +538,7 @@ func TestOFExperimentExposureAttribution(t *testing.T) {
 	if sd.Reason != of.SplitReason {
 		t.Fatalf("experiment split never observed: %+v (%v)", sd, err)
 	}
-	if sd.FlagMetadata["golabExperimentId"] != exp.ID || sd.FlagMetadata["golabExposureSource"] != "split" {
+	if sd.FlagMetadata["graylingExperimentId"] != exp.ID || sd.FlagMetadata["graylingExposureSource"] != "split" {
 		t.Fatalf("experiment metadata: %v", sd.FlagMetadata)
 	}
 
@@ -558,7 +558,7 @@ func TestOFExperimentExposureAttribution(t *testing.T) {
 	if !exposed {
 		t.Fatalf("exposure from OpenFeature evaluation never reached the store (variant %s)", sd.Variant)
 	}
-	decisionID, ok := sd.FlagMetadata["golabDecisionId"].(string)
+	decisionID, ok := sd.FlagMetadata["graylingDecisionId"].(string)
 	if !ok || decisionID == "" {
 		t.Fatalf("decision metadata: %+v", sd.FlagMetadata)
 	}

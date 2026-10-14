@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// AI resource types GoLab brokers. gonacos versions prompt/skill/agentspec
-// natively; mcp/pipeline lack immutable-version semantics there, so GoLab
+// AI resource types Grayling brokers. gonacos versions prompt/skill/agentspec
+// natively; mcp/pipeline lack immutable-version semantics there, so Grayling
 // only allows *referencing* them by their own recorded digest and refuses
 // version pinning until an adapter provides immutable reads (§7: MCP、
 // pipeline 等资源只有在对应适配器支持不可变版本读取和授权校验后才可发布).
@@ -53,7 +53,7 @@ func (s *Store) RegisterAIResource(workspaceID, environmentID, typ, logicalID, o
 		Type: typ, LogicalID: logicalID, Owner: owner,
 		// Physical ID embeds the surrogate IDs — never user text beyond the
 		// validated slug — and a counter for global uniqueness.
-		PhysicalID: fmt.Sprintf("golab-%s-%s-%s-%d", workspaceID, environmentID, logicalID, s.data.NextCounter),
+		PhysicalID: fmt.Sprintf("grayling-%s-%s-%s-%d", workspaceID, environmentID, logicalID, s.data.NextCounter),
 		CreatedAt:  s.now(),
 	}
 	s.data.NextCounter++
@@ -78,7 +78,7 @@ func (s *Store) GetAIResource(workspaceID, environmentID, typ, logicalID string)
 // GetAIResourceByPhysical resolves via physical ID and returns the owning
 // scope — used by the authorization gate to check that the CALLER's scope
 // matches the owner scope before any gonacos read (§5.1: 所有 AI 读写走
-// GoLab 授权入口).
+// Grayling 授权入口).
 func (s *Store) GetAIResourceByPhysical(physicalID string) (*AIResourceRef, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -111,7 +111,7 @@ func (s *Store) ListAIResources(workspaceID, environmentID string) []*AIResource
 
 // DeleteAIResource removes the index entry (the gonacos-side object is
 // handled by the adapter; revoking the index entry immediately makes the
-// resource unresolvable through GoLab authorization).
+// resource unresolvable through Grayling authorization).
 func (s *Store) DeleteAIResource(workspaceID, environmentID, typ, logicalID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -182,7 +182,7 @@ func (s *Store) ListPinnedVersions(workspaceID, environmentID, typ, logicalID st
 }
 
 // SetModelAllowlist replaces the provider/model allowlist of one workspace
-// (§7: modelRef 是 GoLab 适配器维护的白名单).
+// (§7: modelRef 是 Grayling 适配器维护的白名单).
 func (s *Store) SetModelAllowlist(workspaceID string, entries []ModelAllowEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

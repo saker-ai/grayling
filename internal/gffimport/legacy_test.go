@@ -11,7 +11,7 @@ import (
 
 // split5050Doc is a valid gff flag with a 50/50 percentage default rule —
 // the shape used for the normative contrast test (docs/技术方案.md §2, §5.2:
-// legacy gff evaluation and the GoLab fixed-bucket algorithm must NOT be
+// legacy gff evaluation and the Grayling fixed-bucket algorithm must NOT be
 // claimed to assign the same users).
 const split5050Doc = `
 variations:
@@ -153,10 +153,10 @@ defaultRule:
 
 // TestContrastLegacyVsNativeAssignment is NORMATIVE (docs/技术方案.md §2,
 // §5.2): for the same 50/50 gff document, the legacy gff algorithm and the
-// imported GoLab fixed-bucket evaluator must both honor the split ratio
+// imported Grayling fixed-bucket evaluator must both honor the split ratio
 // (±5pp over 2000 users) while disagreeing on a substantial fraction of
 // per-user assignments (>20%) — the two hash algorithms are independent and
-// GoLab can never claim gff-identical assignments.
+// Grayling can never claim gff-identical assignments.
 func TestContrastLegacyVsNativeAssignment(t *testing.T) {
 	const (
 		flagKey = "contrast-split"
@@ -230,7 +230,7 @@ func TestContrastLegacyVsNativeAssignment(t *testing.T) {
 	// (Expectation ≈ 50% for independent algorithms; assert > 20% to stay
 	// robust while still proving the assignments are NOT interchangeable.)
 	if disagreeShare <= 0.20 {
-		t.Errorf("disagreement %.3f ≤ 0.20: legacy gff and GoLab assignments are suspiciously aligned; "+
+		t.Errorf("disagreement %.3f ≤ 0.20: legacy gff and Grayling assignments are suspiciously aligned; "+
 			"the two algorithms must be independent (docs §5.2: 不能承诺原用户分配保持不变)", disagreeShare)
 	}
 }

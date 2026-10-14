@@ -9,7 +9,7 @@ Flag 详情 API 的 `experimentImpact` 读取同工作空间、同环境中 `Fla
 ## 已执行检查
 
 ```sh
-GOLAB_TEST_PG_SKIP=1 GOWORK=off go test ./internal/admin ./internal/api ./web -count=1
+GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test ./internal/admin ./internal/api ./web -count=1
 git diff --check
 ```
 
@@ -17,7 +17,7 @@ git diff --check
 
 ## 真实浏览器补充验收
 
-使用原验收存储的隔离副本，在本机 GoLab 进程打开 `Acceptance/prod` 的 `browser-release` 详情。页面显示同环境关联实验 `exp-11`（reviewed、epoch 2、r3）与 `exp-9`（draft、epoch 1、r1），完整计数为 2；点击 `exp-11` 后进入该实验深链。桌面与 390px 手机截图分别见[桌面](desktop.png)和[手机](mobile.png)。浏览器错误列表为空。该浏览器样本验证关系读取、链接与响应式显示；发布确认的草稿/关系变化由上述契约测试覆盖，本次没有在浏览器实际发布。
+使用原验收存储的隔离副本，在本机 Grayling 进程打开 `Acceptance/prod` 的 `browser-release` 详情。页面显示同环境关联实验 `exp-11`（reviewed、epoch 2、r3）与 `exp-9`（draft、epoch 1、r1），完整计数为 2；点击 `exp-11` 后进入该实验深链。桌面与 390px 手机截图分别见[桌面](desktop.png)和[手机](mobile.png)。浏览器错误列表为空。该浏览器样本验证关系读取、链接与响应式显示；发布确认的草稿/关系变化由上述契约测试覆盖，本次没有在浏览器实际发布。
 
 ## 未覆盖边界
 

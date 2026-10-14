@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Load i18n.js + app.js in ONE vm context (same script-scope order as the
 // browser's <script> tags) so app.js resolves t()/I18N from the catalogs.
-// The sandbox has no golab_lang and no navigator.language → en (default).
+// The sandbox has no grayling_lang and no navigator.language → en (default).
 const code = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'flag_editor.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'segment_editor.js'), 'utf8') + '\n' +

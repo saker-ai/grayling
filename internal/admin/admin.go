@@ -604,7 +604,7 @@ func (s *Service) RepublishManifestContext(ctx context.Context, actor Actor, wor
 // RollbackFlag publishes a NEW manifest revision pointing at an existing,
 // verified, retained flag revision (§5.3). It never fabricates content and
 // never treats gonacos history as an atomic rollback API: the target
-// revision must exist in the GoLab platform store AND read back from the
+// revision must exist in the Grayling platform store AND read back from the
 // config substrate with the recorded hash.
 func (s *Service) RollbackFlag(actor Actor, workspaceID, environmentID, key string,
 	targetRevision int64, reason string, approvalID ...string) (*PublishResult, error) {

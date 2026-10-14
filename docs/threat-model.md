@@ -1,4 +1,4 @@
-# GoLab 威胁模型
+# Grayling 威胁模型
 
 > 状态：首版（对应 [技术方案](技术方案.md) §13 P0 退出条件"威胁模型"）。取证范围为当前工作树代码（main 分支，含本阶段新增的 `internal/rollout` 自动推进引擎、`sdk/python`/`sdk/typescript` 多语言 SDK、`test/perf` 压测与 `openapi.yaml`；状态口径与 `docs/实施状态.md` 同步）。所有"已缓解"结论均指向仓库内可核对的文件、函数或测试名；未实现项按 [实施状态](实施状态.md) 的口径如实记录，不夸大、不缩小。
 
@@ -6,11 +6,11 @@
 
 ### 1.1 范围与假设
 
-**在范围内**：单节点 GoLab server（`cmd/golab`：HTTP API + 内嵌控制台 + 同进程 gonacos 底座 + 平台存储）、独立无状态 proxy（`cmd/golab-proxy`）、以及二者与 PostgreSQL / 文件存储之间的信任关系。
+**在范围内**：单节点 Grayling server（`cmd/grayling`：HTTP API + 内嵌控制台 + 同进程 gonacos 底座 + 平台存储）、独立无状态 proxy（`cmd/grayling-proxy`）、以及二者与 PostgreSQL / 文件存储之间的信任关系。
 
 **对手模型**：
 
-1. 能访问 GoLab HTTP 端口的未认证网络攻击者；
+1. 能访问 Grayling HTTP 端口的未认证网络攻击者；
 2. 持有某一类合法凭证（admin/sdk/collect token）的租户或租户内人员，试图越权、越租户或污染数据；
 3. 持有效凭证的自动化客户端（误用或被盗用），试图耗尽资源或伪造实验数据。
 
@@ -20,7 +20,7 @@
 
 | 资产 | 内容与位置 | 首要保护需求 |
 |---|---|---|
-| 租户配置 | flag/segment 草稿与不可变 revision、manifest（gonacos Config，dataId `golab.flag.<key>.r<rev>`；平台库存元数据） | 完整性（发布即不可变、hash 校验）、租户间机密性 |
+| 租户配置 | flag/segment 草稿与不可变 revision、manifest（gonacos Config，dataId `grayling.flag.<key>.r<rev>`；平台库存元数据） | 完整性（发布即不可变、hash 校验）、租户间机密性 |
 | 实验数据 | 实验定义/epoch/预注册要素、原始事件、单元级聚合、SRM/报告（`internal/platform`，文件 JSON 或 PostgreSQL） | 完整性（统计结论可信）、按保留期删除 |
 | 凭证 | 三受众 token（明文仅铸造时返回一次，库中只存 SHA-256）、平台 HMAC 密钥环（文件 0600 / PG `hmac_keys` 表）、gonacos `-auth-secret` | 机密性、可吊销、可轮换 |
 | AI 内容 | prompt/skill/agentspec 的已发布版本 + MD5 摘要、所有权索引、modelRef 白名单、撤销记录（gonacos AI 底座 + 平台索引） | 机密性（原始内容仅 owner 可读）、完整性（版本 pin + 摘要复核）、可即时撤销 |
@@ -33,9 +33,9 @@
 ─────────────────────────── 租户侧（非可信区） ───────────────────────────
   管理员/CI ──admin token──┐
   应用后端 ──sdk token─────┤        ┌──────────────────────────────┐
-  采集器 ──collect token───┼─HTTPS*▶│ GoLab HTTP API（cmd/golab）    │
+  采集器 ──collect token───┼─HTTPS*▶│ Grayling HTTP API（cmd/grayling）    │
   浏览器/瘦客户端 ─────────┼───────▶│ 唯一鉴权/授权/限流/配额点       │
-        （经 golab-proxy）  │        └──────┬─────────┬─────────┬───┘
+        （经 grayling-proxy）  │        └──────┬─────────┬─────────┬───┘
                            │               │进程内调用 │         │
 ───────────────────────────┼───────────────┼─────────┼─────────┼──────
                            │               ▼         ▼         ▼
@@ -47,14 +47,14 @@
 
 边界要点（逐项在后文取证）：
 
-- **B1 租户 → GoLab API**：唯一认证入口。Bearer token 先鉴权，受众（admin/sdk/collect）互斥，workspace/environment 一律由凭证导出（`internal/api/server.go` 包注释与 `authenticate`）。*TLS 未在仓库内终止，见 §2.10。
-- **B2 GoLab → gonacos**：同进程服务接口（`configstore.NewGonacosStore(bundle.Config)`），不走网络；gonacos 监听默认 loopback，非 loopback 需显式环境变量并告警（`cmd/golab/main.go`）。gonacos 自身无租户授权（技术方案 §2：常规配置读路径允许匿名），故 B2 之外禁止任何租户可达路径。
-- **B3 GoLab → 存储**：文件后端（开发默认，密钥文件 0600）或 PostgreSQL（`-pg`，pgx/v5 连接池）。DSN 属运维机密。
-- **B4 proxy → 上游 GoLab**：无状态中继，凭证透传，鉴权/限流仍在上游（`internal/proxy/proxy.go` 包注释）。proxy 只注册数据面路由，管理 API 不转发。
+- **B1 租户 → Grayling API**：唯一认证入口。Bearer token 先鉴权，受众（admin/sdk/collect）互斥，workspace/environment 一律由凭证导出（`internal/api/server.go` 包注释与 `authenticate`）。*TLS 未在仓库内终止，见 §2.10。
+- **B2 Grayling → gonacos**：同进程服务接口（`configstore.NewGonacosStore(bundle.Config)`），不走网络；gonacos 监听默认 loopback，非 loopback 需显式环境变量并告警（`cmd/grayling/main.go`）。gonacos 自身无租户授权（技术方案 §2：常规配置读路径允许匿名），故 B2 之外禁止任何租户可达路径。
+- **B3 Grayling → 存储**：文件后端（开发默认，密钥文件 0600）或 PostgreSQL（`-pg`，pgx/v5 连接池）。DSN 属运维机密。
+- **B4 proxy → 上游 Grayling**：无状态中继，凭证透传，鉴权/限流仍在上游（`internal/proxy/proxy.go` 包注释）。proxy 只注册数据面路由，管理 API 不转发。
 
 ### 1.4 证据约定
 
-`路径:符号` 指代码取证点；`Test…` 指仓库内可重复运行的测试（`make test`；PG 相关需 docker 或 `GOLAB_TEST_PG_DSN`，见 `test/pgtest`）。技术方案/实施状态章节号沿用原文。
+`路径:符号` 指代码取证点；`Test…` 指仓库内可重复运行的测试（`make test`；PG 相关需 docker 或 `GRAYLING_TEST_PG_DSN`，见 `test/pgtest`）。技术方案/实施状态章节号沿用原文。
 
 ## 2. 威胁面分析
 
@@ -63,10 +63,10 @@
 | 威胁场景 | 现状缓解（证据） | 残余风险与建议 |
 |---|---|---|
 | token 明文泄露（库/接口/日志） | 明文只在铸造响应中出现一次（`internal/platform/store.go:CreateToken` 返回 `CreatedToken`；`internal/api/admin_handlers.go` "secret shown exactly once"）；库中只存 SHA-256 hex（`hashSecret`），`ListTokens` 复制并剥除 `SecretHash`；token 铸造审计只记 token ID 不记 secret | 明文一经泄露不可从库中反查，但**无 token 有效期/TTL 字段**，泄露后只能靠吊销。建议：部署侧定期轮换凭证，仓库后续加过期时间 |
-| 暴力猜解 | secret 为 32 字节 `crypto/rand`（256-bit 熵），格式 `glab_<kind>_<43 字符 base64url>`，猜解不可行；admin 端点在鉴权**前**即计入限流（`internal/api/server.go:adminOnly` → `adminLimiterKey` 取 token 尾 16 字符，无 token 归入 `admin:anon`），超限 429 | 限流按 key 分桶，随机伪造 token 会不断产生新 key；窗口表以 4096 条上限+机会式清理防内存增长（`rateLimiter.allow`），但无按源 IP 的失败计数/封禁。建议：边界（LB/WAF）做 IP 级失败限速 |
+| 暴力猜解 | secret 为 32 字节 `crypto/rand`（256-bit 熵），格式 `grayling_<kind>_<43 字符 base64url>`，猜解不可行；admin 端点在鉴权**前**即计入限流（`internal/api/server.go:adminOnly` → `adminLimiterKey` 取 token 尾 16 字符，无 token 归入 `admin:anon`），超限 429 | 限流按 key 分桶，随机伪造 token 会不断产生新 key；窗口表以 4096 条上限+机会式清理防内存增长（`rateLimiter.allow`），但无按源 IP 的失败计数/封禁。建议：边界（LB/WAF）做 IP 级失败限速 |
 | 受众混用（sdk token 调管理 API 等） | 三受众严格互斥：`adminOnly`/`sdkOnly`/`collectOnly` 各自只接受对应 `TokenKind`，不匹配返回 403 `wrong_audience`（`server.go:authenticate`）；即使 admin token 也不能调 collect（`TestE2EAudienceSeparation` 覆盖全部三种混用 + 匿名 401）；`admin.Authorize` 再次拒绝非 admin kind（`internal/admin/rbac.go`） | 无已知残余。注意 sdk/collect token 是**服务端凭证**，不得下发浏览器（实施状态 §8 行；浏览器走 `/sdk/eval`） |
 | 吊销时效 | `RevokeToken` 置 `Revoked` 并立即提交（文件/PG 同一事务语义）；`ResolveToken` 每请求检查 `Revoked`，无凭证缓存，吊销后下一请求即 401（`store.go`）；作用域 owner 不能吊销全局 token（403，`TestE2ETokenRevokeScoping`） | SDK 已下载的快照在吊销后仍可用到本地过期/陈旧兜底生效——吊销切断的是 API 面，不是已分发数据。kill switch 最大陈旧窗口见技术方案 §5.2 |
-| bootstrap owner token | 仅当库中无任何 token 时自动铸造全局 owner，明文**打印一次**到启动日志（`cmd/golab/main.go:bootstrapOwner` 及打印框），同时写审计 `bootstrap.owner` | 启动日志（stderr/容器日志）成为一次性机密载体。建议：首次启动后立即在控制台铸造命名凭证并吊销 bootstrap token；日志收集侧注意该窗口 |
+| bootstrap owner token | 仅当库中无任何 token 时自动铸造全局 owner，明文**打印一次**到启动日志（`cmd/grayling/main.go:bootstrapOwner` 及打印框），同时写审计 `bootstrap.owner` | 启动日志（stderr/容器日志）成为一次性机密载体。建议：首次启动后立即在控制台铸造命名凭证并吊销 bootstrap token；日志收集侧注意该窗口 |
 | 日志脱敏 | 全仓库无 secret 打印路径（除上述一次性 bootstrap 展示）；审计与错误消息不携带凭证材料 | 未实现统一脱敏过滤器，防泄露靠"不记录"纪律；见 §2.3 日志注入残余 |
 
 ### 2.2 租户隔离面
@@ -75,9 +75,9 @@
 |---|---|---|
 | 跨工作空间读写（管理面） | 对象级 RBAC：token 的 `WorkspaceID` 与路径工作空间不符即 `ErrAccessDenied`（`internal/admin/rbac.go:Authorize`）；所有 admin handler 先 `resolveScope`/`Authorize` 再触库；`TestRBACCrossWorkspaceDenied`、`TestE2ETokenRevokeScoping` | 全局 owner token 通过一切检查（`IsGlobalOwner`）——它是平台运营凭证，泄露即全租户失守，应视同 root secret 管理 |
 | query/body 参数选租户 | 数据面 ws/env **只**取自 token：`/sdk/config` 无任何作用域参数（`internal/api/sdk_handlers.go` 头注释），`/sdk/eval`、`/collect`、AI SDK 端点同样以 `tokenFrom(r)` 定界；`TestE2EAudienceSeparation` 显式断言 `?workspace=other&environment=x` 不改变返回快照的归属 | 无已知残余 |
-| gonacos 匿名读路径 | gonacos 常规配置读不执行 `Auth.Authorize`（技术方案 §2 依赖事实表），因此底座监听默认 loopback（`-gonacos-addr 127.0.0.1:18848`、`-gonacos-grpc-addr 127.0.0.1:19848`）；非 loopback 绑定在无 `GOLAB_ALLOW_NON_LOOPBACK_GONACOS=1` 时 `Fatalf` 拒启，设置时打 WARNING（`cmd/golab/main.go:isLoopback` 分支）；GoLab 自身只经进程内 `Services()` 接口使用底座（`configstore.NewGonacosStore`），技术方案 §9 禁止把 gonacos 原始 HTTP/gRPC 暴露给租户 | 显式 opt-in 后的网络策略正确性属运维职责，且技术方案 §12.5 的"生产验证未授权直连被拒"**未完成**（实施状态 §12 行）。多租户生产前必办（§3.2） |
-| AI 全局资源 ID 无 namespace | gonacos AI 资源以全局 ID 索引、无 namespace 字段（技术方案 §2），GoLab 自建所有权索引 `(ws, env, type, logical) → physical_id`，physical ID 由服务端生成、调用方不可指定（`internal/ai/service.go:RegisterResource`）；一切 AI 读写走 GoLab 授权入口；跨租户解析统一 404（`ErrUnauthorized` → `mapAIError` → `platform.ErrNotFound`，"never reveal whether it exists elsewhere"）；`TestAICrossTenantUnresolvable`、`TestResolveAuthorization` | 若绕过 GoLab 直连 gonacos AI API 则无隔离——回到上一行的 loopback/网络策略前提 |
-| namespace ID 注入/碰撞 | namespace ID 完全由服务端代理 ID 拼成：`"golab-" + ws.ID + "-" + env.ID`（`store.go:CreateEnvironment`），用户提供的 slug 永不进入底座 ID（技术方案 §5.1）；slug 另有 `[a-z0-9-]`、≤64、首字符字母校验（`ValidSlug`）；`TestNamespaceMappingGenerated` | 无已知残余 |
+| gonacos 匿名读路径 | gonacos 常规配置读不执行 `Auth.Authorize`（技术方案 §2 依赖事实表），因此底座监听默认 loopback（`-gonacos-addr 127.0.0.1:18848`、`-gonacos-grpc-addr 127.0.0.1:19848`）；非 loopback 绑定在无 `GRAYLING_ALLOW_NON_LOOPBACK_GONACOS=1` 时 `Fatalf` 拒启，设置时打 WARNING（`cmd/grayling/main.go:isLoopback` 分支）；Grayling 自身只经进程内 `Services()` 接口使用底座（`configstore.NewGonacosStore`），技术方案 §9 禁止把 gonacos 原始 HTTP/gRPC 暴露给租户 | 显式 opt-in 后的网络策略正确性属运维职责，且技术方案 §12.5 的"生产验证未授权直连被拒"**未完成**（实施状态 §12 行）。多租户生产前必办（§3.2） |
+| AI 全局资源 ID 无 namespace | gonacos AI 资源以全局 ID 索引、无 namespace 字段（技术方案 §2），Grayling 自建所有权索引 `(ws, env, type, logical) → physical_id`，physical ID 由服务端生成、调用方不可指定（`internal/ai/service.go:RegisterResource`）；一切 AI 读写走 Grayling 授权入口；跨租户解析统一 404（`ErrUnauthorized` → `mapAIError` → `platform.ErrNotFound`，"never reveal whether it exists elsewhere"）；`TestAICrossTenantUnresolvable`、`TestResolveAuthorization` | 若绕过 Grayling 直连 gonacos AI API 则无隔离——回到上一行的 loopback/网络策略前提 |
+| namespace ID 注入/碰撞 | namespace ID 完全由服务端代理 ID 拼成：`"grayling-" + ws.ID + "-" + env.ID`（`store.go:CreateEnvironment`），用户提供的 slug 永不进入底座 ID（技术方案 §5.1）；slug 另有 `[a-z0-9-]`、≤64、首字符字母校验（`ValidSlug`）；`TestNamespaceMappingGenerated` | 无已知残余 |
 
 角色-权限矩阵（`rbac.go:Authorize`，供隔离审计对照）：
 
@@ -106,9 +106,9 @@
 
 | 威胁场景 | 现状缓解（证据） | 残余风险与建议 |
 |---|---|---|
-| 请求侧控制出站 URL | **GoLab 主服务无任何用户可控 URL 拉取路径**：全仓库（除 proxy）无 `http.Get`/外呼客户端；AI 内容取自同进程 gonacos 底座，modelRef 只做白名单查表（`ResolveModelRef`），不代租户调用模型供应商 | 无已知残余 |
-| proxy 被用作跳板 | 上游地址仅来自启动参数 `-upstream`（`cmd/golab-proxy/main.go`），构造时校验 scheme ∈ {http, https} 且有 host（`proxy.New`）；转发时只拼接固定 upstream + 请求路径（`newUpstreamRequest`），Host 不可被请求改写；管理 API 路由未注册，不转发（`Handler` 仅 eval/config/collect/stream/健康检查；`TestUnknownRouteNotRelayed`）；hop-by-hop 头双向剥离（RFC 9110 §7.6.1） | transport 使用 `http.ProxyFromEnvironment`（`proxy.go:New`）——环境级 `HTTP(S)_PROXY` 可改变实际出口，属部署环境信任假设，建议在部署基线中固定/清空代理环境变量 |
-| gonacos 出站 | 底座绑定默认 loopback（§2.2）；GoLab 对 gonacos 的调用是进程内接口而非网络出站 | 集群模式（外部 Redis）时 Redis 地址为启动参数，同属环境信任 |
+| 请求侧控制出站 URL | **Grayling 主服务无任何用户可控 URL 拉取路径**：全仓库（除 proxy）无 `http.Get`/外呼客户端；AI 内容取自同进程 gonacos 底座，modelRef 只做白名单查表（`ResolveModelRef`），不代租户调用模型供应商 | 无已知残余 |
+| proxy 被用作跳板 | 上游地址仅来自启动参数 `-upstream`（`cmd/grayling-proxy/main.go`），构造时校验 scheme ∈ {http, https} 且有 host（`proxy.New`）；转发时只拼接固定 upstream + 请求路径（`newUpstreamRequest`），Host 不可被请求改写；管理 API 路由未注册，不转发（`Handler` 仅 eval/config/collect/stream/健康检查；`TestUnknownRouteNotRelayed`）；hop-by-hop 头双向剥离（RFC 9110 §7.6.1） | transport 使用 `http.ProxyFromEnvironment`（`proxy.go:New`）——环境级 `HTTP(S)_PROXY` 可改变实际出口，属部署环境信任假设，建议在部署基线中固定/清空代理环境变量 |
+| gonacos 出站 | 底座绑定默认 loopback（§2.2）；Grayling 对 gonacos 的调用是进程内接口而非网络出站 | 集群模式（外部 Redis）时 Redis 地址为启动参数，同属环境信任 |
 
 ### 2.5 统计滥用 / 数据完整性面
 
@@ -140,7 +140,7 @@
 | 威胁场景 | 现状缓解（证据） | 残余风险与建议 |
 |---|---|---|
 | 原始单元身份落盘 | 原始 unit 明文只存在于请求 DTO 与求值内存中，入库前经 `HashUnit` 伪名化（`sdk_handlers.go` collect DTO 注释"plaintext; HMAC'd server-side, never stored"）；伪名 = 逐层 `hex(HMAC-SHA256(key, ws‖0x00‖v))`，密钥环链式（`store.go:HashUnit/hashUnitLayer`），租户（workspace）参与 HMAC 输入，跨租户不可链接 | HMAC 密钥泄露 + 原始事件库泄露 → 可字典枚举重识别（unit 值域小时尤其）。密钥保护见下行 |
-| 伪名化密钥保护与轮换 | 文件后端：store 文件写入 tmp 后 `Chmod 0600`（"contains HMAC key material"，`internal/platform/persistence.go`）；PG 后端：版本化 `hmac_keys` 密钥环表，重启稳定；`RotateHMACKey` 追加新层并在**单事务**内把全部存量伪名（原始事件/曝光集/split 曝光集/聚合键）链式重哈希（内存 `store.go:RotateHMACKey` + PG `rehashStored` 临时表重映射），链式性质保证同一单元跨轮换身份可链接；`TestPGHMACKeyRotation`、`TestFileBackwardCompatSingleKey`（单密钥环与历史方案字节一致） | 轮换目前只有存储层入口，**未暴露管理 API**（实施状态已知限制 1："需要审计流程后再开"）；轮换是同步全量迁移，大库上会长时间持锁。gonacos 侧 `-auth-secret` 为空时每次启动随机，集群模式必须显式设置（`cmd/golab/main.go` flag 说明） |
+| 伪名化密钥保护与轮换 | 文件后端：store 文件写入 tmp 后 `Chmod 0600`（"contains HMAC key material"，`internal/platform/persistence.go`）；PG 后端：版本化 `hmac_keys` 密钥环表，重启稳定；`RotateHMACKey` 追加新层并在**单事务**内把全部存量伪名（原始事件/曝光集/split 曝光集/聚合键）链式重哈希（内存 `store.go:RotateHMACKey` + PG `rehashStored` 临时表重映射），链式性质保证同一单元跨轮换身份可链接；`TestPGHMACKeyRotation`、`TestFileBackwardCompatSingleKey`（单密钥环与历史方案字节一致） | 轮换目前只有存储层入口，**未暴露管理 API**（实施状态已知限制 1："需要审计流程后再开"）；轮换是同步全量迁移，大库上会长时间持锁。gonacos 侧 `-auth-secret` 为空时每次启动随机，集群模式必须显式设置（`cmd/grayling/main.go` flag 说明） |
 | 审计被篡改/删除 | 审计只追加：顺序 ID、无更新/删除代码路径（`store.go:Audit`）；PG 侧 `INSERT … ON CONFLICT (id) DO NOTHING`（`pgstore.go:commitAudit`），schema 无审计 UPDATE/DELETE 语句；`TestAuditTrailRecorded` | 无密码学防篡改（hash chain / WORM）——持有 DB 或文件权限者可改。建议：部署基线定期导出审计至只增存储 |
 | 报告泄露个体数据 | 报告仅输出汇总统计（单元级充分统计 N/Σx/Σx²，实施状态 §10.2）；对外只展示聚合；原始 prompt/response 不进普通事件（事件 DTO 无自由内容字段，仅 ID/数值/时间） | **低样本切片抑制未实现**（实施状态 §10.2 行"未做：低样本切片抑制（v1 报告不切片）"）——当前报告不提供任意维度切片，故暴露面小，但若引入切片必须先实现抑制；原始事件中保留 `sessionId/taskId` 原样值，属准标识符，受保留期（默认 30 天）约束 |
 | 数据保留 | 事件保留期配额（默认 30 天）；PG 按保留期整分区 DROP + 边界删除 + 账本收缩（`pruneEvents`）；内存 `PruneEvents` 同步收缩 | 聚合行不随保留期删除（是充分统计，by design）；"被遗忘权"式单单元删除无 API |
@@ -149,11 +149,11 @@
 
 | 威胁场景 | 现状缓解（证据） | 残余风险与建议 |
 |---|---|---|
-| 已发布内容漂移（底座被改） | 发布即 pin：`PublishVersion` 取得 gonacos 版本号与 MD5 摘要，并**下载回读比对**（内容不一致即 `ErrDigestDrift` 拒发，`internal/ai/service.go:PublishVersion`）；此后每次 `Resolve` 重新计算摘要比对 pin 值，漂移 fail-closed（`Resolve` 中 `md5Hex(content) != pin.Digest` → 409）；label 不作为版本指针（技术方案 §7；实施状态 §7 行）；P3 验收"已发布版本内容不可漂移 ✅" | 摘要算法是 MD5——这是**镜像 gonacos 内部摘要**的选择（`service.go:md5Hex` 注释），防意外漂移足够，对抗蓄意碰撞攻击偏弱；威胁前提是攻击者已能写 gonacos 底座（需突破 loopback/进程边界）。建议：GoLab 侧索引可加 SHA-256 双摘要 |
+| 已发布内容漂移（底座被改） | 发布即 pin：`PublishVersion` 取得 gonacos 版本号与 MD5 摘要，并**下载回读比对**（内容不一致即 `ErrDigestDrift` 拒发，`internal/ai/service.go:PublishVersion`）；此后每次 `Resolve` 重新计算摘要比对 pin 值，漂移 fail-closed（`Resolve` 中 `md5Hex(content) != pin.Digest` → 409）；label 不作为版本指针（技术方案 §7；实施状态 §7 行）；P3 验收"已发布版本内容不可漂移 ✅" | 摘要算法是 MD5——这是**镜像 gonacos 内部摘要**的选择（`service.go:md5Hex` 注释），防意外漂移足够，对抗蓄意碰撞攻击偏弱；威胁前提是攻击者已能写 gonacos 底座（需突破 loopback/进程边界）。建议：Grayling 侧索引可加 SHA-256 双摘要 |
 | 撤销不生效（快照滞后） | 紧急撤销走实时门禁，不依赖快照同步：`Revoke` 写撤销表 + 审计；`Resolve` 每次先查撤销（`ErrRevoked`）；长任务执行前调用 `/sdk/ai/check`，命中撤销返回 **423 Locked** + `anyBlocked`（`ai_handlers.go:handleSDKAICheck`，§7"执行前校验"）；重启后仍生效（`TestRevocationBlocksImmediately`、`TestAISessionFreezeAndRevocation`；实施状态 §7 行） | 门禁是**契约式**的：冻结快照可在离线/不调 check 的客户端上被执行，服务端无法强制。建议：SDK/Agent 框架把 check 做成执行前必经步骤并监控调用率 |
 | 跨租户读取 AI 内容 | 见 §2.2 所有权索引行；管理面读**原始内容**需独立授权 `ai.content.read`，仅 owner 角色（`rbac.go`；`handleResolveAIResource` 注释"§9: 读取原始 AI 内容单独授权"）；SDK 面 resolve 严格以 token 的 ws/env 定界（`handleSDKAIResolve` 注释）；跨 scope 一律 404 不泄露存在性（`mapAIError` 注释"never 403 — existence must not leak"）；会话冻结任一资源解析失败则**整体失败**，不产出部分绑定（`handleSDKAISession` 注释"must never start on partially resolved config"） | SDK token 持有者可读本 scope 全部已 pin 内容——SDK token 属服务端凭证，浏览器场景禁止下发原始内容（技术方案 §7；实施状态 §8 行） |
 | 不可托管资源被伪造版本语义 | mcp/pipeline 在 gonacos 中无不可变版本语义，`RegisterResource` 显式拒绝托管（`ErrTypeUnsupported`，"managed hosting is disabled until an adapter provides it (§7)"），不伪造 `name@v1` 验证；`TestUnsupportedTypesRefused` | 需求方会转向外部适配器——适配器接入时需重做本节的 pin/摘要/撤销等价物 |
-| 未白名单模型混入变体 | modelRef 白名单在 **flag 发布钩子**强制：`SetAI` 挂 `Admin.FlagPublishHook` → `ValidateFlagModelRefs`，未入白名单的 provider/model 无法发布（`ai_handlers.go:SetAI`；`service.go:ValidateFlagModelRefs`）；会话冻结时 `ResolveModelRef` 再次校验（`ErrModelNotAllowed` → 400）；白名单管理需 owner（`PermAIContentRead`）；`TestModelAllowlist`、`TestValidateFlagModelRefs`、`TestAIPublishRequiresAllowlist` | 白名单是配置治理而非运行时网络管控——GoLab 不代调模型，实际调用方仍可能绕过白名单直连供应商（在 GoLab 边界外） |
+| 未白名单模型混入变体 | modelRef 白名单在 **flag 发布钩子**强制：`SetAI` 挂 `Admin.FlagPublishHook` → `ValidateFlagModelRefs`，未入白名单的 provider/model 无法发布（`ai_handlers.go:SetAI`；`service.go:ValidateFlagModelRefs`）；会话冻结时 `ResolveModelRef` 再次校验（`ErrModelNotAllowed` → 400）；白名单管理需 owner（`PermAIContentRead`）；`TestModelAllowlist`、`TestValidateFlagModelRefs`、`TestAIPublishRequiresAllowlist` | 白名单是配置治理而非运行时网络管控——Grayling 不代调模型，实际调用方仍可能绕过白名单直连供应商（在 Grayling 边界外） |
 | AI 端点未接线被探测 | AI 服务未装配时所有 AI 端点 501 `ai_unavailable`（"never pretends to broker resources it cannot verify"，`requireAI`） | 无已知残余 |
 
 ### 2.9 供应链 / 依赖面
@@ -161,7 +161,7 @@
 | 威胁场景 | 现状缓解（证据） | 残余风险与建议 |
 |---|---|---|
 | gonacos 依赖漂移/不可复现构建 | 已从 sibling `replace` 固定为确定 commit 伪版本 `v0.0.0-20261006194453-ea39c83bf6f0`（= main@ea39c83bf6f0，`go.mod` 注释），构建仅依赖模块缓存；契约行为由 `test/smoke:TestEmbeddedGonacosRoundtrip` 在每次测试运行中复核（Publish/Get、AI prompt 版本读写） | gonacos 当前 pin 含 Apache-2.0 LICENSE/NOTICE；旧固定提交的项目原创贡献适用范围由上游声明明确，许可清单记录哈希；Issue #6 已获用户认可，后续依赖或分发内容变化仍须重新核验 |
-| gff core 依赖 | 固定 `thomaspoignant/go-feature-flag/modules/core v0.7.2`；其所需 `nikunjy/rules` fork replace 已在本仓库 `go.mod` 重述（`=> hairyhenderson/rules v0.0.0-20250704181428-…`）；legacy 求值路径有对照测试 `TestGffCoreLegacyEvaluate`；GoLab 原生算法与 gff 分离，黄金向量 20 条经独立 Python 实现交叉验证（`pkg/bucketing/testdata/golden_vectors.json`，`TestGoldenVectors`） | 传递依赖许可证据已列入 `third_party/licenses.json`，仍需人工复核原文 |
+| gff core 依赖 | 固定 `thomaspoignant/go-feature-flag/modules/core v0.7.2`；其所需 `nikunjy/rules` fork replace 已在本仓库 `go.mod` 重述（`=> hairyhenderson/rules v0.0.0-20250704181428-…`）；legacy 求值路径有对照测试 `TestGffCoreLegacyEvaluate`；Grayling 原生算法与 gff 分离，黄金向量 20 条经独立 Python 实现交叉验证（`pkg/bucketing/testdata/golden_vectors.json`，`TestGoldenVectors`） | 传递依赖许可证据已列入 `third_party/licenses.json`，仍需人工复核原文 |
 | 依赖升级引入回归/漏洞 | 升级流程要求重跑契约/兼容测试（实施状态已知限制 3；技术方案 §12.1）；`Makefile` 提供 `vet`/`test`/`smoke`、许可复核和发布阻断目标；`.github/workflows/license-audit.yml` 检测依赖或证据漂移 | 尚未配置 govulncheck/SBOM；许可证自动初筛不替代法律复核 |
 
 ### 2.10 部署基线（运维职责，仓库未实现）
@@ -170,7 +170,7 @@
 
 | 项 | 现状 | 责任与建议 |
 |---|---|---|
-| TLS 终止 | `cmd/golab` 与 `cmd/golab-proxy` 均监听明文 HTTP（默认且建议 loopback：`127.0.0.1:8688`/`8689`）；仓库无 TLS 配置代码 | 运维：前置 TLS 终止（LB/Ingress）；租户流量绝不走明文网络 |
+| TLS 终止 | `cmd/grayling` 与 `cmd/grayling-proxy` 均监听明文 HTTP（默认且建议 loopback：`127.0.0.1:8688`/`8689`）；仓库无 TLS 配置代码 | 运维：前置 TLS 终止（LB/Ingress）；租户流量绝不走明文网络 |
 | HMAC 密钥轮换 API | `Store.RotateHMACKey` 只有存储层入口，未暴露管理 API（实施状态已知限制 1） | 运维：按迁移流程执行；仓库：待审计流程设计后再开 API |
 | 备份 / 恢复联合演练 | gonacos Snapshot、PostgreSQL、密钥须按同一恢复点联合备份与演练（技术方案 §11）；内嵌与外部 Redis 的隔离恢复演练、门禁和注入证据见[联合备份恢复](联合备份恢复.md) | 运维：多租户生产前还须在实际 HA/云 Redis 快照接口、真实数据量与生产密钥托管流程上演练并核对 revision/RPO/RTO |
 | 多节点 / 集群 | 双真实进程与共享 PostgreSQL/Redis 的发布对账已验证；普通管理写入由 `meta.control_version` 条件事务保护，冲突返回 409；令牌认证直接查库。其余管理读路径仍依赖对账 tick 收敛（实施状态已知限制 2） | 运维：保留对账任务并监控冲突重试；参见[多副本管理写入](多副本管理写入.md) |
@@ -205,7 +205,7 @@
 4. **密钥轮换流程**：以 `Store.RotateHMACKey` 为存储层入口制定运维迁移与审计流程；是否暴露管理 API 待审计设计后决定（实施状态已知限制 1）。
 5. **多节点决策**：共享 PostgreSQL/Redis 双副本已验证；管理读路径除令牌认证外仍由周期重载收敛，扩容时配置并监控对账间隔（实施状态已知限制 2）。
 6. **正式压测与生产配额**：以压测确定 P99/SLO、限流参数与 `Quotas` 生产值（`DefaultQuotas` 为开发保守值；实施状态 P0 行）。
-7. **浏览器/瘦客户端接入方式**：只经 `/api/v1/sdk/eval`（可经 `cmd/golab-proxy`），不下发全量快照（实施状态已知限制 6）。
+7. **浏览器/瘦客户端接入方式**：只经 `/api/v1/sdk/eval`（可经 `cmd/grayling-proxy`），不下发全量快照（实施状态已知限制 6）。
 8. **依赖升级纪律**：gonacos/gff 升级必须重跑 `test/smoke` 契约测试与全量测试，并建议补充 govulncheck 类漏洞扫描（当前仓库未配置）。
 
 ---

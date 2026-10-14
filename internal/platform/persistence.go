@@ -181,7 +181,7 @@ func (nopPersistence) Close() error                   { return nil }
 
 // ---------------------------------------------------------------------------
 // File persistence (dev/single-node default): atomic full-state JSON dump —
-// the historical golab-store.json format, unchanged.
+// the historical grayling-store.json format, unchanged.
 // ---------------------------------------------------------------------------
 
 type filePersistence struct {
@@ -217,7 +217,7 @@ func (f *filePersistence) Commit(data *Data, _ *ChangeSet) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".golab-store-*.json")
+	tmp, err := os.CreateTemp(dir, ".grayling-store-*.json")
 	if err != nil {
 		return err
 	}

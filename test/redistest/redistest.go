@@ -2,11 +2,11 @@
 // in-process substitutes — gonacos cluster mode requires the real RESP
 // protocol, pub/sub and persistence semantics). Resolution order:
 //
-//  1. GOLAB_TEST_REDIS_ADDR — an existing reachable Redis; lifecycle
+//  1. GRAYLING_TEST_REDIS_ADDR — an existing reachable Redis; lifecycle
 //     operations (Pause/Resume/Stop/StartAgain) are unavailable for it and
 //     tests needing them skip with an explicit reason.
 //  2. Docker — a throwaway redis:7.4-alpine container bound to loopback
-//     (image override: GOLAB_TEST_REDIS_IMAGE).
+//     (image override: GRAYLING_TEST_REDIS_IMAGE).
 //  3. Neither available — tests skip with an explicit reason.
 package redistest
 
@@ -35,7 +35,7 @@ type Redis struct {
 // Start returns a ready Redis and registers teardown.
 func Start(t *testing.T) *Redis {
 	t.Helper()
-	if addr := os.Getenv("GOLAB_TEST_REDIS_ADDR"); addr != "" {
+	if addr := os.Getenv("GRAYLING_TEST_REDIS_ADDR"); addr != "" {
 		waitPing(t, addr)
 		return &Redis{Addr: addr}
 	}
@@ -46,7 +46,7 @@ func Start(t *testing.T) *Redis {
 func (r *Redis) managed(t *testing.T) bool {
 	t.Helper()
 	if r.container == "" {
-		t.Skip("redistest: GOLAB_TEST_REDIS_ADDR is externally managed — lifecycle operation unavailable")
+		t.Skip("redistest: GRAYLING_TEST_REDIS_ADDR is externally managed — lifecycle operation unavailable")
 		return false
 	}
 	return true
@@ -146,19 +146,19 @@ func (r *Redis) KeysCount(t *testing.T) string {
 func dockerRedis(t *testing.T) *Redis {
 	t.Helper()
 	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skipf("redistest: no docker and no GOLAB_TEST_REDIS_ADDR — real-Redis tests skipped: %v", err)
+		t.Skipf("redistest: no docker and no GRAYLING_TEST_REDIS_ADDR — real-Redis tests skipped: %v", err)
 	}
 	probe := exec.Command("docker", "info")
 	probe.Stdout, probe.Stderr = nil, nil
 	if err := probe.Run(); err != nil {
-		t.Skipf("redistest: docker daemon unavailable and no GOLAB_TEST_REDIS_ADDR — real-Redis tests skipped: %v", err)
+		t.Skipf("redistest: docker daemon unavailable and no GRAYLING_TEST_REDIS_ADDR — real-Redis tests skipped: %v", err)
 	}
-	image := os.Getenv("GOLAB_TEST_REDIS_IMAGE")
+	image := os.Getenv("GRAYLING_TEST_REDIS_IMAGE")
 	if image == "" {
 		image = "redis:7.4-alpine"
 	}
 	port := freePort(t)
-	name := fmt.Sprintf("golab-redis-%d-%d", os.Getpid(), redisCounter.Add(1))
+	name := fmt.Sprintf("grayling-redis-%d-%d", os.Getpid(), redisCounter.Add(1))
 	// Give each test its own writable persistence directory. Docker's overlay
 	// store may be on a different (or full) filesystem from the test workspace.
 	dataDir := t.TempDir()
@@ -169,7 +169,7 @@ func dockerRedis(t *testing.T) *Redis {
 		"-p", fmt.Sprintf("127.0.0.1:%d:6379", port),
 		image)
 	if out, err := run.CombinedOutput(); err != nil {
-		t.Skipf("redistest: cannot run %s (docker pull/start failed) and no GOLAB_TEST_REDIS_ADDR — real-Redis tests skipped: %v\n%s", image, err, out)
+		t.Skipf("redistest: cannot run %s (docker pull/start failed) and no GRAYLING_TEST_REDIS_ADDR — real-Redis tests skipped: %v\n%s", image, err, out)
 	}
 	t.Cleanup(func() {
 		c := exec.Command("docker", "rm", "-f", name)

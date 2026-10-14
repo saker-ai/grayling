@@ -39,14 +39,14 @@ func TestPublishGetRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	dataID, err := s.PublishDoc("golab-ws-1-env-1", FlagDataID("flag-a", 1), content)
+	dataID, err := s.PublishDoc("grayling-ws-1-env-1", FlagDataID("flag-a", 1), content)
 	if err != nil {
 		t.Fatalf("PublishDoc: %v", err)
 	}
-	if dataID != "golab.flag.flag-a.r1" {
+	if dataID != "grayling.flag.flag-a.r1" {
 		t.Fatalf("dataID = %s", dataID)
 	}
-	got, hash, err := s.GetDoc("golab-ws-1-env-1", dataID)
+	got, hash, err := s.GetDoc("grayling-ws-1-env-1", dataID)
 	if err != nil {
 		t.Fatalf("GetDoc: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestPublishGetRoundtrip(t *testing.T) {
 	if hash != model.HashBytes(content) {
 		t.Fatalf("hash mismatch")
 	}
-	_, _, err = s.GetDoc("golab-ws-1-env-1", "golab.flag.missing.r1")
+	_, _, err = s.GetDoc("grayling-ws-1-env-1", "grayling.flag.missing.r1")
 	if err == nil {
 		t.Fatal("missing doc must error")
 	}
@@ -65,17 +65,17 @@ func TestPublishGetRoundtrip(t *testing.T) {
 func TestNamespaceIsolation(t *testing.T) {
 	s := newTestStore(t)
 	content := []byte(`{"schemaVersion":1}`)
-	if _, err := s.PublishDoc("ns-a", "golab.flag.x.r1", content); err != nil {
+	if _, err := s.PublishDoc("ns-a", "grayling.flag.x.r1", content); err != nil {
 		t.Fatalf("publish ns-a: %v", err)
 	}
-	if _, _, err := s.GetDoc("ns-b", "golab.flag.x.r1"); err == nil {
+	if _, _, err := s.GetDoc("ns-b", "grayling.flag.x.r1"); err == nil {
 		t.Fatal("cross-namespace read must fail")
 	}
 }
 
 func TestManifestAndSnapshot(t *testing.T) {
 	s := newTestStore(t)
-	ns := "golab-ws-2-env-1"
+	ns := "grayling-ws-2-env-1"
 
 	f := testFlag("checkout")
 	fContent, _ := model.CanonicalJSON(f)
@@ -128,7 +128,7 @@ func TestManifestAndSnapshot(t *testing.T) {
 
 func TestSnapshotRejectsTamperedHash(t *testing.T) {
 	s := newTestStore(t)
-	ns := "golab-ws-3-env-1"
+	ns := "grayling-ws-3-env-1"
 	f := testFlag("t")
 	fContent, _ := model.CanonicalJSON(f)
 	if _, err := s.PublishDoc(ns, FlagDataID("t", 1), fContent); err != nil {
@@ -150,7 +150,7 @@ func TestSnapshotRejectsTamperedHash(t *testing.T) {
 
 func TestSnapshotRejectsMissingDocument(t *testing.T) {
 	s := newTestStore(t)
-	ns := "golab-ws-4-env-1"
+	ns := "grayling-ws-4-env-1"
 	m := &model.Manifest{
 		SchemaVersion: model.SchemaVersion, Workspace: "w", Environment: "e", Revision: 1,
 		Flags: []model.ManifestEntry{
@@ -167,24 +167,24 @@ func TestSnapshotRejectsMissingDocument(t *testing.T) {
 
 func TestDeleteDocIdempotent(t *testing.T) {
 	s := newTestStore(t)
-	ns := "golab-ws-5-env-1"
+	ns := "grayling-ws-5-env-1"
 	if err := s.DeleteDoc(ns, "never-existed"); err != nil {
 		t.Fatalf("delete missing must be idempotent: %v", err)
 	}
-	if _, err := s.PublishDoc(ns, "golab.flag.d.r1", []byte(`{}`)); err != nil {
+	if _, err := s.PublishDoc(ns, "grayling.flag.d.r1", []byte(`{}`)); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	if err := s.DeleteDoc(ns, "golab.flag.d.r1"); err != nil {
+	if err := s.DeleteDoc(ns, "grayling.flag.d.r1"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if _, _, err := s.GetDoc(ns, "golab.flag.d.r1"); err == nil {
+	if _, _, err := s.GetDoc(ns, "grayling.flag.d.r1"); err == nil {
 		t.Fatal("deleted doc must be gone")
 	}
 }
 
 func TestPublishEmptyRejected(t *testing.T) {
 	s := newTestStore(t)
-	if _, err := s.PublishDoc("ns", "golab.flag.e.r1", nil); err == nil {
+	if _, err := s.PublishDoc("ns", "grayling.flag.e.r1", nil); err == nil {
 		t.Fatal("empty publish must be rejected")
 	}
 }

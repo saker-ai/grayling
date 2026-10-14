@@ -1,5 +1,5 @@
 {
-  "algorithm": "golab-fnv1a-10000-v1",
+  "algorithm": "grayling-fnv1a-10000-v1",
   "encoding": "bucketInput = concat(netstring(workspace), netstring(environment), netstring(key), netstring(epochDecimalAscii), netstring(salt), netstring(unitValue), netstring(purpose)); netstring(s) = asciiDecimal(len(utf8(s))) + \":\" + utf8(s)",
   "hash": "FNV-1a 64-bit: h=0xcbf29ce484222325; for each byte b: h ^= b; h *= 0x100000001b3",
   "modulus": 10000,

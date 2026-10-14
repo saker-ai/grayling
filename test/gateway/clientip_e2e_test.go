@@ -1,5 +1,5 @@
-// Client-IP gray routing end-to-end acceptance (docs/traefik-golab-architecture.md
-// "按 client IP 灰度"): REAL cmd/golab + REAL cmd/golab-proxy processes, real
+// Client-IP gray routing end-to-end acceptance (docs/traefik-grayling-architecture.md
+// "按 client IP 灰度"): REAL cmd/grayling + REAL cmd/grayling-proxy processes, real
 // in_cidr-targeted flag, requests through the proxy's forwardAuth evaluation
 // endpoint and through the /sdk/eval relay.
 //
@@ -68,16 +68,16 @@ func ipGrayFlag() *model.Flag {
 
 func TestGatewayClientIPE2E(t *testing.T) {
 	if testing.Short() {
-		t.Skip("client-IP e2e runs real golab/golab-proxy processes; skipped in -short")
+		t.Skip("client-IP e2e runs real grayling/grayling-proxy processes; skipped in -short")
 	}
 	root := repoRoot(t)
 
-	// ---- golab control plane + data plane (real binary, real gonacos) ----
-	golabBin := buildBinary(t, root, "./cmd/golab", "golab")
-	golabPort := freePort(t)
+	// ---- grayling control plane + data plane (real binary, real gonacos) ----
+	graylingBin := buildBinary(t, root, "./cmd/grayling", "grayling")
+	graylingPort := freePort(t)
 	dataDir := t.TempDir()
-	golab := startProc(t, "golab", golabBin,
-		"-addr", fmt.Sprintf("127.0.0.1:%d", golabPort),
+	grayling := startProc(t, "grayling", graylingBin,
+		"-addr", fmt.Sprintf("127.0.0.1:%d", graylingPort),
 		"-data", filepath.Join(dataDir, "store.json"),
 		"-gonacos-data", filepath.Join(dataDir, "gonacos"),
 		"-gonacos-addr", fmt.Sprintf("127.0.0.1:%d", freePort(t)),
@@ -86,10 +86,10 @@ func TestGatewayClientIPE2E(t *testing.T) {
 		"-reconcile-interval", "0",
 		"-requests-per-second", "100000",
 	)
-	golabBase := fmt.Sprintf("http://127.0.0.1:%d", golabPort)
-	waitHealth(t, golabBase, "/api/v1/health", 30*time.Second)
-	ownerToken := scrapeOwnerToken(t, golab, 15*time.Second)
-	admin := &adminClient{t: t, base: golabBase, token: ownerToken}
+	graylingBase := fmt.Sprintf("http://127.0.0.1:%d", graylingPort)
+	waitHealth(t, graylingBase, "/api/v1/health", 30*time.Second)
+	ownerToken := scrapeOwnerToken(t, grayling, 15*time.Second)
+	admin := &adminClient{t: t, base: graylingBase, token: ownerToken}
 
 	if code := admin.do("POST", "/api/v1/admin/workspaces",
 		map[string]any{"slug": "acme", "name": "Acme"}, nil); code != http.StatusCreated {
@@ -115,13 +115,13 @@ func TestGatewayClientIPE2E(t *testing.T) {
 	admin.publishFlag(ipGrayFlag())
 
 	// ---- two real proxy processes: trusted-edge vs default posture ----
-	proxyBin := buildBinary(t, root, "./cmd/golab-proxy", "golab-proxy")
+	proxyBin := buildBinary(t, root, "./cmd/grayling-proxy", "grayling-proxy")
 
 	startProxy := func(name string, extraArgs ...string) string {
 		port := freePort(t)
 		args := []string{
 			"-addr", fmt.Sprintf("127.0.0.1:%d", port),
-			"-upstream", golabBase,
+			"-upstream", graylingBase,
 			"-timeout", "5s",
 			"-gateway-token", sdkCT.Secret,
 			"-gateway-secret", ipRouteSecret,
@@ -134,9 +134,9 @@ func TestGatewayClientIPE2E(t *testing.T) {
 	}
 	// Exactly one trusted hop: the loopback "edge" that records the real
 	// client in the rightmost XFF entry.
-	trustedProxy := startProxy("golab-proxy-trusted", "-trusted-proxy-cidrs", "127.0.0.1/32")
+	trustedProxy := startProxy("grayling-proxy-trusted", "-trusted-proxy-cidrs", "127.0.0.1/32")
 	// Default posture: no trusted proxies ⇒ XFF never consulted.
-	defaultProxy := startProxy("golab-proxy-default")
+	defaultProxy := startProxy("grayling-proxy-default")
 
 	// ---- forwardAuth evaluation through the trusted-edge proxy ----
 	forwardAuthVariant := func(proxyURL, xff string) (variant, failOpen string) {
@@ -157,7 +157,7 @@ func TestGatewayClientIPE2E(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("forwardauth status = %d (fail-open contract violated)", resp.StatusCode)
 		}
-		return resp.Header.Get("X-Golab-Variant"), resp.Header.Get("X-Golab-Fail-Open")
+		return resp.Header.Get("X-Grayling-Variant"), resp.Header.Get("X-Grayling-Fail-Open")
 	}
 
 	for _, tc := range []struct {
@@ -181,7 +181,7 @@ func TestGatewayClientIPE2E(t *testing.T) {
 				t.Fatalf("xff=%q → variant = %q, want %q", tc.xff, variant, tc.wantVariant)
 			}
 			if failOpen != tc.wantFailOpen {
-				t.Fatalf("xff=%q → X-Golab-Fail-Open = %q, want %q", tc.xff, failOpen, tc.wantFailOpen)
+				t.Fatalf("xff=%q → X-Grayling-Fail-Open = %q, want %q", tc.xff, failOpen, tc.wantFailOpen)
 			}
 		})
 	}

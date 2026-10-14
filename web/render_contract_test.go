@@ -81,7 +81,7 @@ func TestRenderRolloutDOMContract(t *testing.T) {
 
 // TestI18NDOMContract runs the Node-based DOM/contract test for the console
 // i18n layer (web/i18n.js + web/app.js). It loads the REAL sources in a vm and
-// asserts: the language resolution order (localStorage golab_lang >
+// asserts: the language resolution order (localStorage grayling_lang >
 // navigator.language zh*→zh > en), every key view (flags list/detail, segments
 // list/detail, experiments list/create/detail, report, rollout block, tokens,
 // audit, ai, debug) rendered in BOTH en and zh with sampled strings hitting
