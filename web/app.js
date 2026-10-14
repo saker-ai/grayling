@@ -467,6 +467,11 @@ function actionDialog({ title, summary, preview = '', reasonLabel = '', reasonRe
 // ---------------------------------------------------------------------------
 const VIEWS = {}; // populated at the bottom of each view section
 let routeEpoch = 0;
+// Experiment-detail zones (§4.4 四区域). 'summary' is the default and carries
+// no hash segment; the legacy 'diagnostics' deep link is an alias of 'health'
+// and is normalized on restore so old bookmarks keep working.
+const EXP_TABS = ['summary', 'health', 'evidence', 'rollout', 'settings'];
+const EXP_TAB_ALIASES = { diagnostics: 'health' };
 
 function consoleHash() {
   const parts = ['console', S.ws || '~', S.env || '~', S.view];
@@ -474,7 +479,7 @@ function consoleHash() {
   if (S.view === 'segments' && S.segKey) parts.push(S.segKey);
   if (S.view === 'experiments' && S.expId) {
     parts.push(S.expId);
-    if (S.expTab === 'diagnostics') parts.push('diagnostics');
+    if (S.expTab && S.expTab !== 'summary') parts.push(S.expTab);
   }
   if (S.view === 'experiments' && S.expCreate) parts.push('~new');
   if (S.view === 'metrics' && S.metricRef) parts.push(S.metricRef.key, String(S.metricRef.version));
@@ -491,7 +496,8 @@ function restoreConsoleHash(hash) {
   catch { return false; }
   if (parts.length < 4 || parts[0] !== 'console' || !Object.hasOwn(VIEWS, parts[3])) return false;
   if (parts[3] === 'experiments' && (parts.length > 6 ||
-    (parts[5] && (parts[4] === '~new' || parts[5] !== 'diagnostics')))) return false;
+    (parts[5] && (parts[4] === '~new' ||
+      !(EXP_TABS.includes(parts[5]) || Object.hasOwn(EXP_TAB_ALIASES, parts[5])))))) return false;
   if (parts[3] === 'ai' && parts.length !== 4 && parts.length !== 6) return false;
   if (parts[3] === 'audit' && parts.length > 5) return false;
   S.ws = parts[1] === '~' ? '' : parts[1];
@@ -508,7 +514,7 @@ function restoreConsoleHash(hash) {
     if (parts[4] === '~new') S.expCreate = true;
     else {
       S.expId = parts[4];
-      if (parts[5] === 'diagnostics') S.expTab = 'diagnostics';
+      if (parts[5]) S.expTab = EXP_TAB_ALIASES[parts[5]] || parts[5];
     }
   }
   if (S.view === 'metrics' && parts[4] && /^[1-9]\d*$/.test(parts[5] || '')) {

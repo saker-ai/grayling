@@ -2,18 +2,22 @@
 
 // ---------------------------------------------------------------------------
 // GoLab admin console — experiment workbench (detail view). Embedded static
-// file, no build step; extracted verbatim from app.js (pure move, zero
-// behavior change). Loaded BEFORE app.js (plain <script> order) and
-// concatenated with the other console scripts by the Node-VM contract
+// file, no build step; originally extracted from app.js and reorganized into
+// the four-zone layout (§4.4). Loaded BEFORE app.js (plain <script> order)
+// and concatenated with the other console scripts by the Node-VM contract
 // harnesses, so all files share one script scope: the functions below
 // resolve the shared app.js/i18n.js helpers (esc/t/chip/api/S/can/route/
 // $/$$/toast/run/errBanner/reportError/actionDialog/fmtTime/fmtDurNs/
-// NS_HOUR/EXP_CHIP/VERDICT_CHIP/ApiError/requestChange/downloadReport/
-// confirmLeaveEditor/shortHash) at call time, and app.js resolves
-// viewExpDetail from here.
+// NS_HOUR/EXP_CHIP/EXP_TABS/VERDICT_CHIP/ApiError/requestChange/
+// downloadReport/confirmLeaveEditor/shortHash) at call time, and app.js
+// resolves viewExpDetail from here.
 //
-// Contents: experiment detail (decision hero, report, diagnostics, and
-// bind-readiness renderers) plus the staged-rollout section (PLAN_*
+// Contents: experiment detail — the always-visible status band
+// (renderExpStatusBand), the deep-linkable zone navigation
+// (renderExpZoneNav; S.expTab ∈ EXP_TABS, router lives in app.js) and the
+// five zone loaders (decision summary / data health / effect evidence /
+// rollout timeline / settings & audit) — plus report, health and
+// bind-readiness renderers and the staged-rollout section (PLAN_*
 // constants, renderRollout family, bindRollout). The experiments list and
 // the creation wizard stay in app.js.
 // ---------------------------------------------------------------------------
@@ -22,12 +26,158 @@ async function viewExpDetail(m) {
   const id = S.expId;
   const p = '/api/v1/admin/experiments/' + encodeURIComponent(id);
   const e = await api(p);
-  if (S.expTab === 'diagnostics') return viewExpDiagnostics(m, e, p);
+  if (!EXP_TABS.includes(S.expTab)) S.expTab = 'summary';
+  const tab = S.expTab;
   const heading =
     '<div class="view-head"><button class="btn sm" id="exp-back">' + esc(t('exp.back')) + '</button>' +
     '<h2 class="mono">' + esc(e.id) + '</h2>' + chip(e.state, EXP_CHIP[e.state] || 'gray') +
-    '<span class="muted">' + esc(t('exp.meta', { flag: e.flagKey, rev: e.flagRevision || 0, epoch: e.epoch || 0, by: e.createdBy || '—' })) + '</span>' +
-    '<button class="btn" id="exp-diagnostics">' + esc(t('exp.openDiagnostics')) + '</button></div>';
+    '<span class="muted">' + esc(t('exp.meta', { flag: e.flagKey, rev: e.flagRevision || 0, epoch: e.epoch || 0, by: e.createdBy || '—' })) + '</span></div>';
+  // Persistent chrome (§4.4): the status band stays visible above every zone,
+  // the auto-refresh switch is global, and each zone renders into #exp-zone.
+  m.innerHTML = heading +
+    renderExpStatusBand(e, null) +
+    '<div class="row" id="exp-report-controls"><label class="inline"><input type="checkbox" id="exp-auto"> ' +
+      esc(t('exp.autoRefresh')) + '</label></div>' +
+    renderExpZoneNav(tab) +
+    '<div id="exp-zone"></div>';
+  $('#exp-back', m).onclick = () => { S.expId = null; S.expTab = 'summary'; route(); };
+  for (const button of $$('[data-exp-tab]', m)) {
+    button.onclick = () => {
+      if (S.expTab !== button.dataset.expTab) { S.expTab = button.dataset.expTab; route(); }
+    };
+  }
+  const zone = $('#exp-zone', m);
+  const gotoZone = next => { S.expTab = next; route(); };
+  let lastReport = null;
+  let reportDetailOpen = false;
+  let reportRequest = 0;
+  const preLaunch = ['draft', 'reviewed', 'scheduled'].includes(e.state);
+  // The rollout gate status lives on m.dataset so the rollout zone replays the
+  // latest known report status whenever it renders (pre-zoning pattern).
+  setRolloutReportStatus(m, preLaunch ? 'not_required' : can('report.read') ? 'pending' : 'restricted');
+  const loadReport = async (showDetail = false) => {
+    if (showDetail) reportDetailOpen = true;
+    const request = ++reportRequest;
+    try {
+      const report = await api(p + '/report');
+      if (S.expId !== id || S.view !== 'experiments' || request !== reportRequest) return false;
+      lastReport = report;
+      const hero = $('#exp-decision', m);
+      if (hero) hero.innerHTML = renderExpDecisionHero(report, e.state);
+      const reportTime = $('#exp-band-report-time', m);
+      if (reportTime) reportTime.textContent = fmtTime(report.generatedAt);
+      const healthCard = $('#diag-report-card', m);
+      if (healthCard) healthCard.innerHTML = renderHealthReportCard(report);
+      setRolloutReportStatus(m, 'ready');
+      const box = $('#report-box', m);
+      if (reportDetailOpen && box) renderReport(box, report);
+      return true;
+    } catch (err) {
+      if (request !== reportRequest) return false;
+      const hero = $('#exp-decision', m);
+      if (hero) hero.innerHTML = renderExpDecisionHero(lastReport, e.state, err);
+      setRolloutReportStatus(m, 'unavailable');
+      const box = $('#report-box', m);
+      if (reportDetailOpen && box) {
+        if (lastReport) {
+          renderReport(box, lastReport);
+          box.innerHTML = '<div class="banner warn" role="status">' + esc(t('report.stale')) + '</div>' + errBanner(err) + box.innerHTML;
+        } else box.innerHTML = errBanner(err);
+      }
+      return false;
+    }
+  };
+  let autoRefresh = false;
+  let failures = 0;
+  let polling = false;
+  const stopTimer = () => { if (S.timer) { clearTimeout(S.timer); S.timer = null; } };
+  const poll = async () => {
+    if (!autoRefresh || polling || document.visibilityState === 'hidden') return;
+    polling = true;
+    const ok = await loadReport();
+    polling = false;
+    failures = ok ? 0 : Math.min(failures + 1, 3);
+    if (autoRefresh && document.visibilityState !== 'hidden' && S.expId === id && S.view === 'experiments') {
+      S.timer = setTimeout(poll, Math.min(60000, 10000 * 2 ** failures));
+    }
+  };
+  const onVisibility = () => {
+    stopTimer();
+    if (autoRefresh && document.visibilityState !== 'hidden') poll();
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+  S.pollCleanup = () => { autoRefresh = false; stopTimer(); document.removeEventListener?.('visibilitychange', onVisibility); };
+  $('#exp-auto', m).onchange = ev => {
+    autoRefresh = ev.target.checked;
+    stopTimer();
+    failures = 0;
+    if (autoRefresh) poll();
+  };
+  // --- zone: decision summary (hero + primary actions + prereg link) -------
+  const loadZoneSummary = () => {
+    zone.innerHTML =
+      '<div class="exp-decision" id="exp-decision" role="status" aria-live="polite">' +
+      renderExpDecisionHero(lastReport, e.state) + '</div>' +
+      '<div class="row actions" id="exp-zone-actions">' +
+      '<button class="btn" id="exp-goto-health" type="button">' + esc(t('exp.zone.health')) + '</button>' +
+      '<button class="btn" id="exp-goto-evidence" type="button">' + esc(t('exp.zone.evidence')) + '</button>' +
+      '<button class="btn" id="exp-goto-rollout" type="button">' + esc(t('exp.zone.rollout')) + '</button>' +
+      '<button class="btn" id="exp-goto-settings" type="button">' + esc(t('exp.tab.settings')) + '</button>' +
+      '</div>' +
+      '<p><button class="row-link" id="exp-view-prereg" type="button">' + esc(t('exp.viewPrereg')) + '</button></p>';
+    for (const next of ['health', 'evidence', 'rollout', 'settings']) {
+      const button = $('#exp-goto-' + next, zone);
+      if (button) button.onclick = () => gotoZone(next);
+    }
+    const preregLink = $('#exp-view-prereg', zone);
+    if (preregLink) preregLink.onclick = () => gotoZone('settings');
+  };
+  // --- zone: data health (merged diagnostics view) --------------------------
+  const loadZoneHealth = async () => {
+    zone.innerHTML = '<p class="muted">' + esc(t('misc.loading')) + '</p>';
+    let d;
+    try {
+      d = await api(p + '/diagnostics');
+    } catch (err) {
+      if (S.expId !== id || S.view !== 'experiments') return;
+      zone.innerHTML = errBanner(err) +
+        '<div class="row"><button class="btn" id="diag-refresh">' + esc(t('btn.refresh')) + '</button></div>';
+      const retry = $('#diag-refresh', zone);
+      if (retry) retry.onclick = () => route();
+      return;
+    }
+    if (S.expId !== id || S.view !== 'experiments') return;
+    zone.innerHTML = renderHealthZone(e, d, lastReport);
+    const refresh = $('#diag-refresh', zone);
+    if (refresh) refresh.onclick = () => route();
+  };
+  // --- zone: effect evidence (full report + exports) -------------------------
+  const loadZoneEvidence = () => {
+    zone.innerHTML = '<section class="card"><h3>' + esc(t('exp.report')) + '</h3>' +
+      '<div class="row"><button class="btn" id="exp-report">' + esc(t('btn.loadReport')) + '</button>' +
+      (can('report.read') ? '<button class="btn" id="exp-export-csv">' + esc(t('report.exportCsv')) + '</button>' +
+        '<button class="btn" id="exp-export-json">' + esc(t('report.exportJson')) + '</button>' : '') +
+      '</div>' +
+      '<div id="report-box"><p class="muted">' + esc(t('exp.notLoaded')) + '</p></div></section>';
+    $('#exp-report', zone).onclick = () => loadReport(true);
+    if (can('report.read')) {
+      for (const format of ['csv', 'json']) {
+        $('#exp-export-' + format, zone).onclick = async () => {
+          try { await downloadReport(p + '/report/export', format); }
+          catch (err) { reportError(err); }
+        };
+      }
+    }
+  };
+  // --- zone: rollout timeline (IDs/gating unchanged — rollout_contract) -----
+  const loadZoneRollout = () => {
+    zone.innerHTML = '<section class="card"><h3>' + esc(t('ro.title')) + ' <span class="muted">' + esc(t('ro.subtitle')) + '</span></h3>' +
+      '<div id="rollout-box">' + renderRollout(e) + '</div></section>';
+    bindRollout(m, id, e);
+    setRolloutReportStatus(m, m.dataset.rolloutReportStatus);
+  };
+  // --- zone: settings & audit (lifecycle + pre-registration, moved whole) ---
+  const loadZoneSettings = () => {
   const prereg = '<section class="card"><h3>' + esc(t('exp.prereg')) + '</h3><table class="kv">' +
       '<tr><th>' + esc(t('th.unit')) + '</th><td class="mono">' + esc(e.unit) + '</td></tr>' +
       '<tr><th>' + esc(t('exp.layerShort')) + '</th><td>' + esc(e.layer || '—') + (e.layerSlot ? ' <span class="muted">' + esc(t('exp.slot', { json: JSON.stringify(e.layerSlot) })) + '</span>' : '') + '</td></tr>' +
@@ -57,10 +207,7 @@ async function viewExpDetail(m) {
       (e.holmFamily.hypotheses || []).map(h => '<li>' + esc(h.id) + ': ' + esc(h.metric.key) +
         ' (' + esc(h.control) + ' → ' + esc(h.treatment) + ')</li>').join('') + '</ul>' : '') +
     '</section>';
-  m.innerHTML = heading +
-    '<div class="exp-decision" id="exp-decision" role="status" aria-live="polite">' +
-    renderExpDecisionHero(null, e.state) + '</div>' +
-    '<div class="cols exp-detail-cols"><section class="card"><h3>' + esc(t('exp.lifecycle')) + '</h3>' +
+    zone.innerHTML = '<div class="cols exp-detail-cols"><section class="card"><h3>' + esc(t('exp.lifecycle')) + '</h3>' +
       '<div class="bind-readiness" id="exp-bind-check" role="status">' + esc(t('exp.bindCheckLoading')) + '</div>' +
       '<div class="row actions" style="border:0;padding:0;margin:0">' +
       '<button class="btn" id="exp-review">' + esc(t('btn.review')) + '</button>' +
@@ -74,143 +221,115 @@ async function viewExpDetail(m) {
       '<option value="archived">archived</option></select>' +
       '<input id="exp-reason" class="grow" placeholder="' + esc(t('ph.reasonRequired')) + '">' +
       '<button class="btn primary" id="exp-transition">' + esc(t('btn.transition')) + '</button></div>' +
-      '<h3>' + esc(t('exp.report')) + '</h3>' +
-      '<div class="row"><button class="btn" id="exp-report">' + esc(t('btn.loadReport')) + '</button>' +
-      (can('report.read') ? '<button class="btn" id="exp-export-csv">' + esc(t('report.exportCsv')) + '</button>' +
-        '<button class="btn" id="exp-export-json">' + esc(t('report.exportJson')) + '</button>' : '') +
-      '<label class="inline"><input type="checkbox" id="exp-auto"> ' + esc(t('exp.autoRefresh')) + '</label></div>' +
-      '<div id="report-box"><p class="muted">' + esc(t('exp.notLoaded')) + '</p></div>' +
     '</section>' + prereg + '</div>' +
-    '<section class="card"><h3>' + esc(t('ro.title')) + ' <span class="muted">' + esc(t('ro.subtitle')) + '</span></h3>' +
-    '<div id="rollout-box">' + renderRollout(e) + '</div></section>';
-  $('#exp-back', m).onclick = () => { S.expId = null; S.expTab = 'summary'; route(); };
-  $('#exp-diagnostics', m).onclick = () => { S.expTab = 'diagnostics'; route(); };
-  const act = (path, body, msg) => run(() => api(p + path, { method: 'POST', body }), msg);
-  $('#exp-review', m).onclick = () => {
-    const note = prompt(t('prompt.reviewNote'), '') || '';
-    act('/review', { note }, t('toast.reviewRecorded'));
-  };
-  let bindReadiness = null;
-  const loadBindCheck = async () => {
-    const box = $('#exp-bind-check', m);
-    $('#exp-bind', m).disabled = true;
-    box.textContent = t('exp.bindCheckLoading');
-    try {
-      const readiness = await api(p + '/bind-check');
-      if (S.expId !== id || S.view !== 'experiments') return false;
-      bindReadiness = readiness;
-      box.innerHTML = renderBindReadiness(readiness);
-      $('#exp-bind', m).disabled = !readiness.ready || !can('flag.write');
-      return readiness.ready;
-    } catch (err) {
-      bindReadiness = null;
-      box.innerHTML = errBanner(err);
-      return false;
+    '<section class="card"><div class="row"><button class="btn" id="exp-open-audit" type="button">' +
+      esc(t('exp.openAuditObject')) + '</button></div></section>';
+    const act = (path, body, msg) => run(() => api(p + path, { method: 'POST', body }), msg);
+    $('#exp-review', zone).onclick = () => {
+      const note = prompt(t('prompt.reviewNote'), '') || '';
+      act('/review', { note }, t('toast.reviewRecorded'));
+    };
+    let bindReadiness = null;
+    const loadBindCheck = async () => {
+      const box = $('#exp-bind-check', zone);
+      const bindButton = $('#exp-bind', zone);
+      if (!box || !bindButton) return false;
+      bindButton.disabled = true;
+      box.textContent = t('exp.bindCheckLoading');
+      try {
+        const readiness = await api(p + '/bind-check');
+        if (S.expId !== id || S.view !== 'experiments') return false;
+        bindReadiness = readiness;
+        box.innerHTML = renderBindReadiness(readiness);
+        bindButton.disabled = !readiness.ready || !can('flag.write');
+        return readiness.ready;
+      } catch (err) {
+        bindReadiness = null;
+        box.innerHTML = errBanner(err);
+        return false;
+      }
+    };
+    $('#exp-recheck', zone).onclick = loadBindCheck;
+    $('#exp-open-flag', zone).onclick = () => {
+      S.view = 'flags'; S.flagKey = e.flagKey; route();
+    };
+    $('#exp-bind', zone).onclick = async () => {
+      if (!await loadBindCheck() || !bindReadiness?.ready) {
+        toast(t('exp.bindNotReady'), false);
+        return;
+      }
+      const checkedReadiness = bindReadiness;
+      try {
+        await api(p + '/bind', { method: 'POST', body: {} });
+        toast(t('toast.expBound'));
+        route();
+      } catch (err) {
+        reportError(err);
+        await loadBindCheck();
+        const conflictBox = $('#exp-bind-check', zone);
+        if (err.status === 409 && conflictBox) {
+          conflictBox.insertAdjacentHTML('afterbegin', renderBindConflict(checkedReadiness, bindReadiness));
+        }
+      }
+    };
+    if (can('flag.read')) loadBindCheck();
+    else {
+      $('#exp-bind-check', zone).textContent = t('exp.bindCheckPermission');
+      $('#exp-recheck', zone).disabled = true;
     }
-  };
-  $('#exp-recheck', m).onclick = loadBindCheck;
-  $('#exp-open-flag', m).onclick = () => {
-    S.view = 'flags'; S.flagKey = e.flagKey; route();
-  };
-  $('#exp-bind', m).onclick = async () => {
-    if (!await loadBindCheck() || !bindReadiness?.ready) {
-      toast(t('exp.bindNotReady'), false);
-      return;
-    }
-    const checkedReadiness = bindReadiness;
-    try {
-      await api(p + '/bind', { method: 'POST', body: {} });
-      toast(t('toast.expBound'));
+    $('#exp-transition', zone).onclick = () => {
+      const to = $('#exp-to', zone).value;
+      const reason = $('#exp-reason', zone).value.trim();
+      if (!reason) { toast(t('toast.transitionReason'), false); return; }
+      if (!confirm(t('confirm.transition', { to }))) return;
+      act('/transition', { to, reason }, t('toast.transitioned', { to }));
+    };
+    $('#exp-open-audit', zone).onclick = () => {
+      S.view = 'audit'; S.auditObject = id; S.auditQuery = '';
+      S.auditCursors = [0]; S.auditPage = 0;
       route();
-    } catch (err) {
-      reportError(err);
-      await loadBindCheck();
-      if (err.status === 409) {
-        $('#exp-bind-check', m).insertAdjacentHTML('afterbegin', renderBindConflict(checkedReadiness, bindReadiness));
-      }
-    }
+    };
   };
-  if (can('flag.read')) loadBindCheck();
-  else {
-    $('#exp-bind-check', m).textContent = t('exp.bindCheckPermission');
-    $('#exp-recheck', m).disabled = true;
+  if (tab === 'health') await loadZoneHealth();
+  else if (tab === 'evidence') loadZoneEvidence();
+  else if (tab === 'rollout') loadZoneRollout();
+  else if (tab === 'settings') loadZoneSettings();
+  else loadZoneSummary();
+  if (can('report.read') && !preLaunch) {
+    if (tab === 'evidence') await loadReport(true);
+    else loadReport();
   }
-  $('#exp-transition', m).onclick = () => {
-    const to = $('#exp-to', m).value;
-    const reason = $('#exp-reason', m).value.trim();
-    if (!reason) { toast(t('toast.transitionReason'), false); return; }
-    if (!confirm(t('confirm.transition', { to }))) return;
-    act('/transition', { to, reason }, t('toast.transitioned', { to }));
-  };
-  let lastReport = null;
-  let reportDetailOpen = false;
-  let reportRequest = 0;
-  const preLaunch = ['draft', 'reviewed', 'scheduled'].includes(e.state);
-  setRolloutReportStatus(m, preLaunch ? 'not_required' : can('report.read') ? 'pending' : 'restricted');
-  const loadReport = async (showDetail = false) => {
-    const box = $('#report-box', m);
-    if (!box) return false;
-    if (showDetail) reportDetailOpen = true;
-    const request = ++reportRequest;
-    try {
-      const report = await api(p + '/report');
-      if (S.expId !== id || S.view !== 'experiments' || request !== reportRequest) return false;
-      lastReport = report;
-      $('#exp-decision', m).innerHTML = renderExpDecisionHero(report, e.state);
-      setRolloutReportStatus(m, 'ready');
-      if (reportDetailOpen) renderReport(box, report);
-      return true;
-    } catch (err) {
-      if (request !== reportRequest) return false;
-      $('#exp-decision', m).innerHTML = renderExpDecisionHero(lastReport, e.state, err);
-      setRolloutReportStatus(m, 'unavailable');
-      if (reportDetailOpen) {
-        if (lastReport) {
-          renderReport(box, lastReport);
-          box.innerHTML = '<div class="banner warn" role="status">' + esc(t('report.stale')) + '</div>' + errBanner(err) + box.innerHTML;
-        } else box.innerHTML = errBanner(err);
-      }
-      return false;
-    }
-  };
-  $('#exp-report', m).onclick = () => loadReport(true);
-  if (can('report.read')) {
-    for (const format of ['csv', 'json']) {
-      $('#exp-export-' + format, m).onclick = async () => {
-        try { await downloadReport(p + '/report/export', format); }
-        catch (err) { reportError(err); }
-      };
-    }
-  }
-  let autoRefresh = false;
-  let failures = 0;
-  let polling = false;
-  const stopTimer = () => { if (S.timer) { clearTimeout(S.timer); S.timer = null; } };
-  const poll = async () => {
-    if (!autoRefresh || polling || document.visibilityState === 'hidden') return;
-    polling = true;
-    const ok = await loadReport();
-    polling = false;
-    failures = ok ? 0 : Math.min(failures + 1, 3);
-    if (autoRefresh && document.visibilityState !== 'hidden' && S.expId === id && S.view === 'experiments') {
-      S.timer = setTimeout(poll, Math.min(60000, 10000 * 2 ** failures));
-    }
-  };
-  const onVisibility = () => {
-    stopTimer();
-    if (autoRefresh && document.visibilityState !== 'hidden') poll();
-  };
-  document.addEventListener('visibilitychange', onVisibility);
-  S.pollCleanup = () => { autoRefresh = false; stopTimer(); document.removeEventListener?.('visibilitychange', onVisibility); };
-  $('#exp-auto', m).onchange = ev => {
-    autoRefresh = ev.target.checked;
-    stopTimer();
-    failures = 0;
-    if (autoRefresh) poll();
-  };
-  if (can('report.read') && !preLaunch) loadReport();
-  bindRollout(m, id, e);
-  setRolloutReportStatus(m, m.dataset.rolloutReportStatus);
+}
+
+// renderExpStatusBand is the always-visible band above every zone (§4.4):
+// state chip, epoch, Flag revision, registration version, report time and
+// environment. The report time renders '—' until a report actually loaded;
+// loadReport refreshes #exp-band-report-time in place. Never invents values.
+function renderExpStatusBand(e, report) {
+  const field = (label, valueHtml) =>
+    '<span class="exp-status-field"><span class="muted">' + esc(label) + '</span> ' + valueHtml + '</span>';
+  return '<div class="exp-statusband" id="exp-statusband" role="status" aria-label="' + esc(t('exp.statusBand')) + '">' +
+    chip(e.state, EXP_CHIP[e.state] || 'gray') +
+    field('epoch', '<b class="mono">' + esc(e.epoch || 0) + '</b>') +
+    field(t('exp.flagRevisionShort'), '<b class="mono">r' + esc(e.flagRevision || 0) + '</b>') +
+    field(t('exp.registrationVersion'), '<b class="mono">' + esc(e.registrationVersion || '—') + '</b>') +
+    field(t('exp.reportTime'), '<b class="mono" id="exp-band-report-time">' + esc(report ? fmtTime(report.generatedAt) : '—') + '</b>') +
+    field(t('exp.environment'), '<b class="mono">' + esc(e.environmentId || '—') + '</b>') +
+  '</div>';
+}
+
+// renderExpZoneNav renders the five deep-linkable zone buttons (four zones +
+// the settings & audit tab). Each button routes via S.expTab so every zone
+// keeps its own hash deep link; the active one carries aria-current.
+function renderExpZoneNav(activeTab) {
+  return '<nav class="exp-zone-nav" id="exp-zone-nav" role="tablist" aria-label="' + esc(t('exp.zones.nav')) + '">' +
+    EXP_TABS.map(name => {
+      const active = name === activeTab;
+      return '<button type="button" role="tab" id="exp-tab-' + name + '" class="btn exp-zone-tab' +
+        (active ? ' active' : '') + '" data-exp-tab="' + name + '"' +
+        (active ? ' aria-current="true"' : '') + '>' +
+        esc(t(name === 'settings' ? 'exp.tab.settings' : 'exp.zone.' + name)) + '</button>';
+    }).join('') + '</nav>';
 }
 
 function renderExpDecisionHero(report, state, error = null) {
@@ -233,15 +352,19 @@ function metricReferenceSummary(r) {
     '</div>';
 }
 
-async function viewExpDiagnostics(m, experiment, path) {
-  const d = await api(path + '/diagnostics');
+// renderHealthZone renders the data-health zone — the former standalone
+// diagnostics view merged into the experiment detail (§4.4). Pure renderer
+// over the GET {id}/diagnostics payload plus the shared report (may be null:
+// the report card then degrades to exp.zoneEmpty.report, never an empty
+// table). Contents preserved: watermark/backend/complete, blocking issues,
+// sample flow, the two SRM layers, contamination and rejected events.
+function renderHealthZone(e, d, report) {
   const window = d.window || {};
   const blockers = [...new Set([...(window.issues || []), ...(d.issues || [])])];
   const totalAssignments = (d.perVariant || []).reduce((sum, v) => sum + (v.assignments || 0), 0);
   const totalExposures = (d.perVariant || []).reduce((sum, v) => sum + (v.exposures || 0), 0);
-  m.innerHTML = '<div class="view-head"><button class="btn sm" id="diag-back">' + esc(t('exp.back')) + '</button>' +
-    '<h2>' + esc(t('exp.diagnosticsTitle')) + '</h2>' +
-    '<span class="mono">' + esc(experiment.id) + '</span>' + chip(experiment.state, EXP_CHIP[experiment.state] || 'gray') +
+  return '<div class="view-head"><h2>' + esc(t('exp.diagnosticsTitle')) + '</h2>' +
+    '<span class="mono">' + esc(e.id) + '</span>' + chip(e.state, EXP_CHIP[e.state] || 'gray') +
     '<button class="btn" id="diag-refresh">' + esc(t('btn.refresh')) + '</button></div>' +
     '<section class="card"><h3>' + esc(t('exp.diagnosticsStatus')) + '</h3>' +
       '<p>' + esc(t('exp.exposureMode')) + ': ' + esc(t(d.exposureMode === 'onRender' ? 'exp.onRender' : 'exp.onDecision')) +
@@ -257,9 +380,29 @@ async function viewExpDiagnostics(m, experiment, path) {
       (blockers.length ? '<ul>' + blockers.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>' :
         '<p class="muted">' + esc(t('exp.noDiagnosticIssues')) + '</p>') +
     '</section>' +
+    '<section class="card" id="diag-report-card">' + renderHealthReportCard(report) + '</section>' +
     '<section class="card">' + renderDiagnostics(d) + '</section>';
-  $('#diag-back', m).onclick = () => { S.expTab = 'summary'; route(); };
-  $('#diag-refresh', m).onclick = () => route();
+}
+
+// renderHealthReportCard summarizes report.healthIssues and the guardrail
+// states inside the health zone. Without a loaded report it shows the
+// exp.zoneEmpty.report copy — no invented verdict, no fabricated numbers.
+function renderHealthReportCard(report) {
+  if (!report) return '<h3>' + esc(t('exp.report')) + '</h3>' +
+    '<p class="muted">' + esc(t('exp.zoneEmpty.report')) + '</p>';
+  const issues = (report.healthIssues || []).length
+    ? '<ul>' + report.healthIssues.map(issue => '<li>' + esc(issue) + '</li>').join('') + '</ul>'
+    : '';
+  return '<h3>' + esc(t('exp.report')) + '</h3>' +
+    (report.healthy
+      ? '<p class="muted">' + esc(t('report.healthy', { epoch: report.epoch, state: report.state })) + '</p>' + issues
+      : '<div class="banner warn"><strong>' + esc(t('report.unhealthy')) + '</strong>' + issues + '</div>') +
+    '<h4>' + esc(t('exp.guardrails')) + '</h4>' +
+    ((report.guardrails || []).length
+      ? '<ul class="plain">' + report.guardrails.map(g =>
+        '<li>' + chip(g.breached ? t('chip.breached') : t('chip.ok'), g.breached ? 'red' : 'green') +
+        ' <span class="mono">' + esc(g.Metric ?? g.metric ?? '—') + '</span> <span class="muted">' + esc(g.Detail ?? g.detail ?? '') + '</span></li>').join('') + '</ul>'
+      : '<div class="muted">' + esc(t('misc.none')) + '</div>');
 }
 
 function renderDiagnostics(d) {

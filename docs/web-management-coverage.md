@@ -54,7 +54,7 @@
 | `POST` | `/api/v1/admin/experiments/{id}/transition` | 已覆盖 | 实验列表/详情：创建、评审、绑定、状态、报告 | i18n DOM；报告 DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/experiments/{id}/report` | 已覆盖 | 运行中实验首屏自动显示报告结论、阻断、生成时间和水位；完整报告按需展开 | i18n DOM；报告 DOM；真实浏览器验收；API 路由契约 |
 | `GET` | `/api/v1/admin/experiments/{id}/report/export` | 已覆盖 | 实验详情：只读 JSON/CSV 报告导出 | 报告 DOM；API 路由契约 |
-| `GET` | `/api/v1/admin/experiments/{id}/diagnostics` | 已覆盖 | 实验详情独立诊断页：水位、分配/曝光/已采集转化摘要、SRM、污染与阻断项 | i18n 与渲染 DOM；API 路由契约；[零样本 onDecision 浏览器验收](acceptance/web-2026-10-13-sample-flow/report.md)，非零 onRender 浏览器样本待验收 |
+| `GET` | `/api/v1/admin/experiments/{id}/diagnostics` | 已覆盖 | 实验详情·数据健康区域（旧独立诊断深链兼容，归一化到该区域）：水位、分配/曝光/已采集转化摘要、SRM、污染与阻断项 | i18n 与渲染 DOM；API 路由契约；[零样本 onDecision 浏览器验收](acceptance/web-2026-10-13-sample-flow/report.md)，非零 onRender 浏览器样本待验收 |
 | `POST` | `/api/v1/admin/experiments/{id}/release-plan` | 已覆盖 | 实验详情：放量计划、暂停/恢复/推进/接管 | rollout DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/experiments/{id}/release-plan` | 仅 API | 实验详情已从实验读模型展示计划；独立读取供自动化客户端 | OpenAPI ↔ 路由契约；rollout DOM |
 | `POST` | `/api/v1/admin/experiments/{id}/release-plan/pause` | 已覆盖 | 实验详情：放量计划、暂停/恢复/推进/接管 | rollout DOM；API 路由契约 |

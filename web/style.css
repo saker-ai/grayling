@@ -323,6 +323,19 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
 .report-summary p { margin: 10px 0 4px; }
 .report-summary ul { margin: 6px 0 0; padding-left: 20px; }
 
+/* ---------- experiment zones (§4.4 状态带 + 四区域导航) ---------- */
+.exp-statusband {
+  display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center;
+  border: 1px solid var(--border); border-left: 4px solid var(--accent);
+  border-radius: 8px; background: var(--card); padding: 10px 14px; margin: 0 0 10px;
+}
+.exp-status-field { display: inline-flex; gap: 6px; align-items: baseline; font-size: 12.5px; min-width: 0; }
+.exp-status-field b { font-weight: 600; overflow-wrap: anywhere; }
+.exp-zone-nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.exp-zone-tab { white-space: nowrap; }
+.exp-zone-nav .exp-zone-tab.active { border-color: var(--accent); color: var(--active-text); background: var(--active); font-weight: 600; }
+#exp-zone { min-width: 0; }
+
 /* ---------- toasts ---------- */
 #toasts { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 8px; z-index: 50; max-width: 440px; }
 .toast {
@@ -380,6 +393,8 @@ ul.plain { margin: 6px 0; padding-left: 18px; }
   .diagnostic-card dd { display: flex; justify-content: space-between; gap: 12px; margin: 0; padding: 4px 0; border-top: 1px solid var(--row-line); }
   .diagnostic-card strong { font-variant-numeric: tabular-nums; }
   .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .exp-zone-nav .exp-zone-tab { flex: 1 1 auto; }
+  .exp-statusband { border-left-width: 3px; }
   .app { flex-direction: column; min-height: 100dvh; height: auto; }
   .sidebar { width: 100%; border-right: 0; border-bottom: 1px solid var(--border); }
   .brand { padding: 10px 12px; }

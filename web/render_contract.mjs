@@ -39,7 +39,7 @@ const sandbox = {
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderDiagnostics = renderDiagnostics; globalThis.__renderExpDecisionHero = renderExpDecisionHero; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagExperimentImpact = renderFlagExperimentImpact; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail; globalThis.__renderOverviewRiskBand = renderOverviewRiskBand; globalThis.__renderOverviewStats = renderOverviewStats; globalThis.__renderOverviewApprovals = renderOverviewApprovals; globalThis.__renderOverviewReleases = renderOverviewReleases; globalThis.__renderOverviewModuleFailure = renderOverviewModuleFailure;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderDiagnostics = renderDiagnostics; globalThis.__renderExpDecisionHero = renderExpDecisionHero; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__renderExpStatusBand = renderExpStatusBand; globalThis.__renderExpZoneNav = renderExpZoneNav; globalThis.__renderHealthZone = renderHealthZone; globalThis.__renderHealthReportCard = renderHealthReportCard; globalThis.__fmtTime = fmtTime; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagExperimentImpact = renderFlagExperimentImpact; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail; globalThis.__renderOverviewRiskBand = renderOverviewRiskBand; globalThis.__renderOverviewStats = renderOverviewStats; globalThis.__renderOverviewApprovals = renderOverviewApprovals; globalThis.__renderOverviewReleases = renderOverviewReleases; globalThis.__renderOverviewModuleFailure = renderOverviewModuleFailure;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
 
 const delivered = sandbox.__renderDiagnostics({ exposureMode: 'onRender', perVariant: [
@@ -192,6 +192,71 @@ assert(sandbox.__renderExpDecisionHero(null, 'reviewed').includes('No experiment
 const unavailableHero = sandbox.__renderExpDecisionHero({ healthy: true, generatedAt: 'old-time' }, 'running', new Error('offline'));
 assert(unavailableHero.includes('Current analysis is unavailable') && !unavailableHero.includes('Report healthy'),
   'failed refresh must not present an older report as a current healthy decision');
+
+// ---------------------------------------------------------------------------
+// Experiment zones (§4.4): status band, zone navigation, data-health zone.
+// The band shows the real registered contract fields and an em dash for the
+// report time until a report actually loaded — never a fabricated value.
+// ---------------------------------------------------------------------------
+const bandExp = { id: 'exp-1', state: 'running', epoch: 3, flagRevision: 4,
+  registrationVersion: 'sha256:reg-1', environmentId: 'prod' };
+const bandNoReport = sandbox.__renderExpStatusBand(bandExp, null);
+assert(bandNoReport.includes('id="exp-statusband"') && bandNoReport.includes('Status band'),
+  'status band must be a labelled status region');
+assert(bandNoReport.includes('Registration version') && bandNoReport.includes('sha256:reg-1') &&
+  bandNoReport.includes('epoch') && bandNoReport.includes('>3<') &&
+  bandNoReport.includes('Flag revision') && bandNoReport.includes('r4') &&
+  bandNoReport.includes('Environment') && bandNoReport.includes('prod'),
+  'status band must carry epoch, flag revision, registration version and environment');
+assert(bandNoReport.includes('id="exp-band-report-time">—</b>'),
+  'report time must render an em dash while no report is loaded');
+assert(sandbox.__renderExpStatusBand({ ...bandExp, registrationVersion: '', environmentId: '' }, null)
+  .split('id="exp-statusband"')[1].includes('—'),
+  'missing registration data degrades to em dashes, never invented values');
+const bandWithReport = sandbox.__renderExpStatusBand(bandExp, { generatedAt: '2026-10-14T08:00:00Z' });
+assert(bandWithReport.includes('id="exp-band-report-time">' + sandbox.__fmtTime('2026-10-14T08:00:00Z') + '</b>'),
+  'loaded report must show its real generation time in the band');
+
+for (const activeTab of ['summary', 'health', 'evidence', 'rollout', 'settings']) {
+  const nav = sandbox.__renderExpZoneNav(activeTab);
+  assert(nav.includes('id="exp-zone-nav"') && nav.includes('role="tablist"'),
+    'zone nav must be a labelled tablist');
+  for (const tab of ['summary', 'health', 'evidence', 'rollout', 'settings']) {
+    assert(nav.includes('data-exp-tab="' + tab + '"'), 'zone nav missing tab ' + tab);
+  }
+  assert((nav.match(/aria-current="true"/g) || []).length === 1 &&
+    nav.includes('data-exp-tab="' + activeTab + '" aria-current="true"'),
+    'exactly the active zone tab carries aria-current: ' + activeTab);
+}
+assert(sandbox.__renderExpZoneNav('summary').includes('Decision summary') &&
+  sandbox.__renderExpZoneNav('summary').includes('Settings &amp; audit'),
+  'zone nav renders all zone labels');
+
+const healthDiag = { exposureMode: 'onRender', epoch: 3, lastCollectedAt: '2026-10-14T07:00:00Z',
+  window: { version: 'utc-exposure-v1', watermark: '2026-10-14T06:00:00Z', backend: 'sqlite-raw',
+    complete: false, recomputable: true, issues: ['watermark pending'] },
+  perVariant: [{ variant: 'control', assignments: 100, exposures: 90, unexposed: 10, conversions: 8 }],
+  crossVariantUnits: 0, assignmentMismatch: 0, duplicateEvents: 0,
+  issues: ['10 assigned units have no recorded exposure'] };
+const healthNoReport = sandbox.__renderHealthZone(bandExp, healthDiag, null);
+assert(healthNoReport.includes('id="diag-refresh"') && healthNoReport.includes('watermark pending') &&
+  healthNoReport.includes('sqlite-raw') && healthNoReport.includes('Incomplete') &&
+  healthNoReport.includes('10 assigned units have no recorded exposure') &&
+  healthNoReport.includes('Assignment, exposure, and conversion'),
+  'health zone must keep watermark/backend/complete, blocking issues and the sample flow');
+assert(healthNoReport.includes('Load the report to see this section.') &&
+  !healthNoReport.includes('Unhealthy report') && !healthNoReport.includes('Report healthy'),
+  'without a loaded report the health summary degrades instead of inventing a verdict');
+const healthWithReport = sandbox.__renderHealthZone(bandExp, healthDiag,
+  { healthy: false, epoch: 3, state: 'running', healthIssues: ['no randomized exposures recorded yet'],
+    guardrails: [{ metric: 'latency_p95', detail: '+12% over cap', breached: true }] });
+assert(healthWithReport.includes('no randomized exposures recorded yet') &&
+  healthWithReport.includes('latency_p95') && healthWithReport.includes('+12% over cap') &&
+  healthWithReport.includes('Unhealthy report'),
+  'health zone must quote server healthIssues and guardrail breaches verbatim');
+assert(sandbox.__renderHealthReportCard({ healthy: true, epoch: 3, state: 'running', guardrails: [] })
+  .includes('Report healthy · epoch 3 · state running'),
+  'healthy report summary shows the server-generated health line');
 
 function render(report) {
   const box = {};

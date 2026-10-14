@@ -154,6 +154,7 @@ const plan = {
 };
 const expDetail = {
   ...expSummary, flagRevision: 2, createdBy: 'alice', layer: null, layerSlot: null, eligibility: 50,
+  registrationVersion: 'sha256:reg-fixture', environmentId: 'prod',
   proportions: { control: 50, treatment: 50 },
   primaryMetric: { key: 'checkout_success', type: 'welch', direction: 'increase' },
   alpha: 0.05, power: 0.8, mde: 0.01, minSamplePerArm: 1000,
@@ -269,9 +270,20 @@ assert(themed.x.restoreConsoleHash('#/console/acme/prod/metrics/activation.compl
 assert.strictEqual(themed.x.S.metricRef.key, 'activation.complete');
 assert.strictEqual(themed.x.consoleHash(), '#/console/acme/prod/metrics/activation.complete/1');
 assert(!themed.x.restoreConsoleHash('#/console/acme/prod/unknown'), 'unknown deep link view rejected');
+// experiment zone deep links: every tab restores and round-trips through
+// consoleHash; the legacy 'diagnostics' link normalizes to the health zone
+// (old bookmarks keep working); unknown tabs stay rejected.
+for (const tab of ['health', 'evidence', 'rollout', 'settings']) {
+  assert(themed.x.restoreConsoleHash('#/console/acme/prod/experiments/exp-1/' + tab), tab + ' deep link rejected');
+  assert.strictEqual(themed.x.S.expTab, tab);
+  assert.strictEqual(themed.x.consoleHash(), '#/console/acme/prod/experiments/exp-1/' + tab);
+}
+assert(themed.x.restoreConsoleHash('#/console/acme/prod/experiments/exp-1'));
+assert.strictEqual(themed.x.S.expTab, 'summary', 'no tab segment means summary');
+assert.strictEqual(themed.x.consoleHash(), '#/console/acme/prod/experiments/exp-1');
 assert(themed.x.restoreConsoleHash('#/console/acme/prod/experiments/exp-1/diagnostics'));
-assert.strictEqual(themed.x.S.expTab, 'diagnostics');
-assert.strictEqual(themed.x.consoleHash(), '#/console/acme/prod/experiments/exp-1/diagnostics');
+assert.strictEqual(themed.x.S.expTab, 'health', 'legacy diagnostics alias must normalize to health');
+assert.strictEqual(themed.x.consoleHash(), '#/console/acme/prod/experiments/exp-1/health');
 assert(!themed.x.restoreConsoleHash('#/console/acme/prod/experiments/exp-1/unknown'),
   'unknown experiment tab rejected');
 assert(themed.x.restoreConsoleHash('#/console/acme/prod/audit/exp-8'));
@@ -357,18 +369,43 @@ const SWEEPS = [
     ids: ['x-create', 'x-vars', 'x-guards', 'x-mkey'] },
   { name: 'experiments-detail', view: 'experiments',
     setup: S => { S.expCreate = false; S.expId = 'exp-1'; S.expTab = 'summary'; },
-    en: ['Pre-registration', 'Lifecycle', 'Load / refresh report', 'Staged rollout',
-      'Plan steps', 'Next gate evaluation:', 'Action history'],
-    zh: ['预注册', '生命周期', '加载 / 刷新报告', '分阶段放量',
-      '计划步骤', '下次决策门评估：', '执行历史'],
-    ids: ['exp-report', 'exp-transition', 'rollout-box', 'ro-steps-tbl',
-      'ro-history-tbl', 'ro-refresh', 'ro-pause', 'ro-advance'] },
-  { name: 'experiments-diagnostics', view: 'experiments',
-    setup: S => { S.expCreate = false; S.expId = 'exp-1'; S.expTab = 'diagnostics'; },
-    en: ['Experiment diagnostics', 'Data status', 'Blocking issues', 'Assignment to delivery', 'Not exposed'],
-    zh: ['实验诊断', '数据状态', '阻断问题', '分配到实际触达', '未曝光单元'],
+    en: ['Status band', 'Registration version', 'Environment', 'Report time',
+      'Experiment sections', 'Decision summary', 'Data health', 'Effect evidence', 'Rollout timeline',
+      'Settings &amp; audit', 'View the pre-registration contract',
+      'Loading the current analysis and data health…'],
+    zh: ['状态带', '注册版本', '环境', '报告时间',
+      '实验区域导航', '决策摘要', '数据健康', '效果证据', '放量时间轴',
+      '设置与审计', '查看预注册契约',
+      '正在读取当前分析与数据健康状态…'],
+    shared: ['exp-1', 'my-flag', 'sha256:reg-fixture'],
+    ids: ['exp-statusband', 'exp-zone-nav', 'exp-decision', 'exp-band-report-time',
+      'exp-view-prereg', 'exp-auto'] },
+  { name: 'experiments-health', view: 'experiments',
+    setup: S => { S.expCreate = false; S.expId = 'exp-1'; S.expTab = 'health'; },
+    en: ['Experiment diagnostics', 'Data status', 'Blocking issues', 'Assignment to delivery', 'Not exposed',
+      'Load the report to see this section.'],
+    zh: ['实验诊断', '数据状态', '阻断问题', '分配到实际触达', '未曝光单元',
+      '读取报告后展示本区域。'],
     shared: ['watermark pending'],
-    ids: ['diag-back', 'diag-refresh'] },
+    ids: ['diag-refresh', 'diag-report-card'] },
+  { name: 'experiments-evidence', view: 'experiments',
+    setup: S => { S.expCreate = false; S.expId = 'exp-1'; S.expTab = 'evidence'; },
+    en: ['Load / refresh report', 'Download CSV', 'Download JSON'],
+    zh: ['加载 / 刷新报告', '下载 CSV', '下载 JSON'],
+    ids: ['exp-report', 'exp-export-csv', 'exp-export-json', 'report-box'] },
+  { name: 'experiments-rollout', view: 'experiments',
+    setup: S => { S.expCreate = false; S.expId = 'exp-1'; S.expTab = 'rollout'; },
+    en: ['Staged rollout', 'Plan steps', 'Next gate evaluation:', 'Action history'],
+    zh: ['分阶段放量', '计划步骤', '下次决策门评估：', '执行历史'],
+    ids: ['rollout-box', 'ro-steps-tbl', 'ro-history-tbl', 'ro-refresh', 'ro-pause', 'ro-advance'] },
+  { name: 'experiments-settings', view: 'experiments',
+    setup: S => { S.expCreate = false; S.expId = 'exp-1'; S.expTab = 'settings'; },
+    en: ['Pre-registration', 'Lifecycle', 'Transition', 'View audit records for this experiment',
+      'Hypothesis: faster checkout converts better'],
+    zh: ['预注册', '生命周期', '状态迁移', '查看该实验的审计记录',
+      '假设：faster checkout converts better'],
+    ids: ['exp-transition', 'exp-bind', 'exp-review', 'exp-bind-check', 'exp-open-audit',
+      'exp-to', 'exp-reason'] },
   { name: 'tokens', view: 'tokens',
     en: ['<h2>Tokens</h2>', 'Create token', '2 token(s)', 'Revoke', 'Status'],
     zh: ['<h2>令牌</h2>', '创建令牌', '2 个令牌', '撤销', '状态'],
@@ -399,11 +436,14 @@ async function runSweeps(x) {
   const out = {};
   for (const s of SWEEPS) {
     if (s.setup) s.setup(x.S);
+    x.S.view = s.view; // route() always renders the view stored in S.view
     const root = viewRoot();
     await x.VIEWS[s.view](root);
     let html = root.innerHTML;
     const box = root.querySelector('#a-box'); // audit loads its table into #a-box
     if (box && box.innerHTML) html += box.innerHTML;
+    const zone = root.querySelector('#exp-zone'); // experiment zones render into #exp-zone
+    if (zone && zone.innerHTML) html += zone.innerHTML;
     out[s.name] = html;
   }
   return out;
