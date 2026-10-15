@@ -127,7 +127,7 @@ func (s *Store) ReloadFromBackend() error {
 	if d == nil {
 		return nil // empty backend — keep the current working set
 	}
-	s.data = d
+	s.adoptLocked(d)
 	if err := s.normalizeKeyRing(); err != nil {
 		return err
 	}

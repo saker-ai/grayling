@@ -236,7 +236,7 @@ func (s *Store) fullReloadLocked() error {
 		return err
 	}
 	if d != nil {
-		s.data = d
+		s.adoptLocked(d)
 	}
 	s.syncStats.fullReloads.Add(1)
 	s.syncStats.lastReloadNS.Store(time.Since(start).Nanoseconds())

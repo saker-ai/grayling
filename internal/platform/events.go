@@ -444,7 +444,7 @@ func (s *Store) ingestEventsOnce(events []*Event) (IngestResult, error) {
 				if err != nil {
 					return res, fmt.Errorf("platform: reload after concurrent ingest: %w", err)
 				}
-				s.data = fresh
+				s.adoptLocked(fresh)
 			}
 		}
 	}

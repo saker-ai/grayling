@@ -162,14 +162,8 @@ func newStore(p Persistence) (*Store, error) {
 	if d == nil {
 		d = newData()
 	}
-	if d.Approvals == nil {
-		d.Approvals = map[string]*Approval{}
-	}
-	if d.MetricDefinitions == nil {
-		d.MetricDefinitions = map[string]*MetricDefinition{}
-	}
 	needsBootstrap := len(d.HMACKeyRing) == 0
-	s.data = d
+	s.adoptLocked(d)
 	if err := s.normalizeKeyRing(); err != nil {
 		return nil, err
 	}
@@ -262,6 +256,81 @@ func newData() *Data {
 	}
 }
 
+// normalize makes a decoded document safe to mutate. A persistence layer
+// returns whatever the document said — and an empty store serialises its maps as
+// absent keys (metricDefinitions also carries omitempty), which decodes back to
+// nil. Writing through a nil map panics, so every map the working set indexes
+// must exist before the store adopts the document.
+//
+// Only newStore used to initialise these, and only two of them. Everything that
+// adopts a reloaded document afterwards — cluster sync, full reload, and the
+// post-commit recovery paths — called it not at all, so a reload could quietly
+// reintroduce nil maps into a running server.
+func (d *Data) normalize() {
+	initMap(&d.Workspaces)
+	initMap(&d.EnvBySlugKey)
+	initMap(&d.Environments)
+	initMap(&d.Tokens)
+	initMap(&d.TokensByHash)
+	initMap(&d.FlagDrafts)
+	initMap(&d.FlagRevisions)
+	initMap(&d.CurrentFlagRev)
+	initMap(&d.NextFlagRev)
+	initMap(&d.FlagTombstones)
+	initMap(&d.SegmentDrafts)
+	initMap(&d.Approvals)
+	initMap(&d.SegmentRevisions)
+	initMap(&d.CurrentSegmentRev)
+	initMap(&d.NextSegmentRev)
+	initMap(&d.ManifestRevisions)
+	initMap(&d.Experiments)
+	initMap(&d.MetricDefinitions)
+	initMap(&d.EventIndex)
+	initMap(&d.UnitAggs)
+	initMap(&d.ExposedUnits)
+	initMap(&d.SplitExposedUnits)
+	initMap(&d.EventCounts)
+	initMap(&d.CollectionCounts)
+	initMap(&d.AIResources)
+	initMap(&d.PinnedVersions)
+	initMap(&d.ModelAllowlist)
+	initMap(&d.AIRevocations)
+	initMap(&d.Quotas)
+	// The two nested sets are indexed one level deeper, so the inner map needs
+	// to exist too or the same panic returns on a different line.
+	for key, units := range d.ExposedUnits {
+		if units == nil {
+			d.ExposedUnits[key] = map[string]bool{}
+		}
+	}
+	for key, units := range d.SplitExposedUnits {
+		if units == nil {
+			d.SplitExposedUnits[key] = map[string]bool{}
+		}
+	}
+	// Events and Audit are slices: appending to a nil slice is defined, so they
+	// need no repair. NextAudit and NextCounter are reset by the caller when a
+	// document predates them.
+}
+
+func initMap[K comparable, V any](m *map[K]V) {
+	if *m == nil {
+		*m = map[K]V{}
+	}
+}
+
+// adoptLocked replaces the working set with a freshly loaded document. Caller
+// holds mu; every site that assigns s.data from a Load must go through here.
+// The pending ChangeSet is left alone: each caller knows whether the changes it
+// accumulated are still replayable against the document it just loaded.
+func (s *Store) adoptLocked(d *Data) {
+	if d == nil {
+		d = newData()
+	}
+	d.normalize()
+	s.data = d
+}
+
 // commitLocked persists the accumulated ChangeSet as one transactional unit.
 // Caller holds mu. On failure the ChangeSet is RETAINED and replayed with the
 // next commit, so backends only ever see idempotent operations.
@@ -274,7 +343,7 @@ func (s *Store) commitLocked() error {
 			// The attempted mutation did not commit. Discard its working-set
 			// changes before another request can see or replay them.
 			if d, loadErr := s.persist.Load(); loadErr == nil && d != nil {
-				s.data = d
+				s.adoptLocked(d)
 				s.changes = newChangeSet()
 			} else if loadErr != nil {
 				return fmt.Errorf("platform: reload after conflict: %w (original: %v)", loadErr, err)
@@ -476,7 +545,7 @@ func (s *Store) ProvisionRotationApprover(operatorID, checkpointSHA256 string) (
 	s.changes.Meta = true
 	if err := s.commitLocked(); err != nil {
 		if d, loadErr := s.persist.Load(); loadErr == nil && d != nil {
-			s.data = d
+			s.adoptLocked(d)
 			s.changes = newChangeSet()
 		} else if loadErr != nil {
 			return nil, fmt.Errorf("provision failed: %w; reload failed: %v", err, loadErr)
@@ -852,7 +921,7 @@ func (s *Store) rotateHMACKey(newKeyHex, operatorID, approverID, checkpointSHA25
 		// A failed migration must never be replayed by a later commit or
 		// observed from the in-memory working set.
 		if d, loadErr := s.persist.Load(); loadErr == nil && d != nil {
-			s.data = d
+			s.adoptLocked(d)
 			s.changes = newChangeSet()
 		} else if loadErr != nil {
 			return fmt.Errorf("rotation failed: %w; reload failed: %v", err, loadErr)
