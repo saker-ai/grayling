@@ -34,6 +34,22 @@ import (
 	"github.com/saker-ai/grayling/internal/recovery"
 )
 
+// devAdminPassword is the administrator credential developer mode configures
+// when the operator set none. The console signs itself in, so the value is
+// never meant to be typed or memorized; it exists so automatic sign-in has a
+// configured administrator to mint sessions for.
+const devAdminPassword = "grayling-development-admin"
+
+// envFlag reads a boolean environment switch, treating an unset or empty
+// value as false so the corresponding flag keeps its own default.
+func envFlag(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
 func main() {
 	var (
 		listenAddr            = flag.String("addr", "127.0.0.1:8688", "Grayling HTTP listen address")
@@ -59,6 +75,7 @@ func main() {
 		requestsPerSec        = flag.Float64("requests-per-second", 0, "per-token request rate limit on sdk/collect endpoints (0 = default 200)")
 		evaluationSampleRate  = flag.Float64("evaluation-sample-rate", 0, "fraction [0,1] of safe feature-flag evaluation events to write as structured logs")
 		bootstrapName         = flag.String("bootstrap-owner-name", "bootstrap-owner", "display name of the auto-created global owner token")
+		devAutoLogin          = flag.Bool("dev-autologin", envFlag("GRAYLING_DEV_AUTOLOGIN"), "local development mode: sign every console visitor in as the global owner without a password (NEVER enable this where the console is reachable by others)")
 		printVersion          = flag.Bool("version", false, "print version and exit")
 		recoveryPoint         = flag.String("recovery-point", "", "checkpoint to verify before opening the API after a restore")
 		writePoint            = flag.String("write-recovery-point", "", "write a checkpoint from quiesced PostgreSQL and gonacos state, then exit")
@@ -123,8 +140,17 @@ func main() {
 			logger.Fatal("admin password file is empty")
 		}
 	}
+	if *devAutoLogin && adminPassword == "" {
+		// Developer mode always has an administrator to sign in as; it needs a
+		// password so the sessions it mints pass the console check. An explicit
+		// GRAYLING_ADMIN_PASSWORD or password file still takes precedence.
+		adminPassword = devAdminPassword
+	}
 	if adminPassword != "" && (len(adminPassword) < 12 || strings.TrimSpace(adminPassword) == "") {
 		logger.Fatal("admin password must contain at least 12 bytes and non-whitespace characters")
+	}
+	if *devAutoLogin {
+		logger.Printf("WARNING: developer mode (-dev-autologin) signs every console visitor in as the global owner — local use only, never expose this listener to other people")
 	}
 	if *nacosURL == "" && (!isLoopback(*gonacosAddr) || !isLoopback(*gonacosGRPC)) {
 		if !*nativeConfigAuth {
@@ -152,6 +178,7 @@ func main() {
 			NativeConfigAuth:        *nativeConfigAuth,
 			AllowNonLoopbackGonacos: os.Getenv("GRAYLING_ALLOW_NON_LOOPBACK_GONACOS") == "1",
 			AuthSecret:              *authSecret, AdminPassword: adminPassword, RecoveryPoint: *recoveryPoint,
+			DevAutoLogin:       *devAutoLogin,
 			BootstrapOwnerName: *bootstrapName, RolloutInterval: *rolloutIv,
 			RolloutLeaseDuration: *rolloutLease, ReconcileInterval: *reconcileIv,
 			RequestsPerSecond: *requestsPerSec, EvaluationSampleRate: *evaluationSampleRate,

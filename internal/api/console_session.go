@@ -19,7 +19,21 @@ import (
 const (
 	consoleCookieName = "grayling_admin_session"
 	consoleSessionTTL = 8 * time.Hour
+	// consoleDevSignedOutCookie records an explicit console sign-out while the
+	// server runs in developer mode. It carries no value and lives for the
+	// browser session only, so automatic sign-in resumes in a new session.
+	consoleDevSignedOutCookie = "grayling_dev_signed_out"
+	// devConsoleCredential is the sealed payload of a developer-mode session.
+	// It is deliberately not the configured admin password: the server then
+	// never needs the plaintext password in memory, and the value is
+	// unreachable from outside — it only travels as a cookie this server
+	// sealed with the console session key, so callers cannot present it
+	// directly as a bearer credential.
+	devConsoleCredential = "\x00grayling-dev-autologin\x00"
 )
+
+// devConsoleCredentialHash is the digest authenticate compares against.
+var devConsoleCredentialHash = sha256.Sum256([]byte(devConsoleCredential))
 
 func (s *Server) initConsoleSessionKey(secret string) error {
 	if secret == "" {
@@ -138,6 +152,12 @@ func (s *Server) handleConsoleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "session_error", "could not create session")
 		return
 	}
+	// A manual sign-in ends an earlier console sign-out, so developer-mode
+	// automatic sign-in resumes.
+	if s.devAutoLogin {
+		http.SetCookie(w, &http.Cookie{Name: consoleDevSignedOutCookie, Path: "/", HttpOnly: true,
+			Secure: consoleSecureRequest(r), SameSite: http.SameSiteStrictMode, MaxAge: -1})
+	}
 	http.SetCookie(w, &http.Cookie{Name: consoleCookieName, Value: sealed, Path: "/api/v1/admin", HttpOnly: true,
 		Secure: consoleSecureRequest(r), SameSite: http.SameSiteStrictMode, MaxAge: int(consoleSessionTTL.Seconds())})
 	w.Header().Set("Cache-Control", "no-store")
@@ -157,6 +177,80 @@ func (s *Server) handleConsoleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: consoleCookieName, Path: "/api/v1/admin", HttpOnly: true,
 		Secure: consoleSecureRequest(r), SameSite: http.SameSiteStrictMode, MaxAge: -1})
+	if s.devAutoLogin {
+		// An explicit sign-out must not be undone by the automatic sign-in on
+		// the next console request; the marker lasts for the browser session.
+		http.SetCookie(w, &http.Cookie{Name: consoleDevSignedOutCookie, Value: "1", Path: "/", HttpOnly: true,
+			Secure: consoleSecureRequest(r), SameSite: http.SameSiteStrictMode})
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "signed_out"})
+}
+
+// devAutoLoginHandler signs console requests in as the configured
+// administrator while the server runs in developer mode (-dev-autologin). It
+// is a no-op at every other time: the option defaults to false and only
+// cmd/grayling, driven by GRAYLING_DEV_AUTOLOGIN, can enable it.
+//
+// The session is minted for the request being served as well as for the
+// browser: the console's first probe (web/app.js asks for
+// /api/v1/admin/session as it loads) must already see the owner, or the
+// sign-in form would flash before a refresh fixed it.
+//
+// The credential is never disclosed to the browser, and the minted cookie is
+// an ordinary console session: an explicit sign-out (consoleDevSignedOutCookie)
+// and revoked or absent admin configuration still take effect.
+func (s *Server) devAutoLoginHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.devAutoLoginEnabled() || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if s.consoleSessionToken(r) != "" {
+			// The browser already holds a usable session.
+			next.ServeHTTP(w, r)
+			return
+		}
+		if _, err := r.Cookie(consoleDevSignedOutCookie); err == nil {
+			// An explicit sign-out stands until the browser session ends.
+			next.ServeHTTP(w, r)
+			return
+		}
+		cookie, err := s.autoLoginCookie(r)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		http.SetCookie(w, cookie)
+		// Hand the same session to the handler that is about to run, so the
+		// request that discovers the console is also the one that signs it in.
+		// A stale cookie of the same name is dropped first: the authentication
+		// path reads the first match, and a leftover value from an earlier run
+		// must not shadow the session just minted.
+		forward := r.Clone(r.Context())
+		carried := make([]string, 0, len(r.Cookies())+1)
+		for _, existing := range r.Cookies() {
+			if existing.Name != consoleCookieName {
+				carried = append(carried, existing.Name+"="+existing.Value)
+			}
+		}
+		forward.Header.Set("Cookie", strings.Join(append(carried, cookie.Name+"="+cookie.Value), "; "))
+		next.ServeHTTP(w, forward)
+	})
+}
+
+// devAutoLoginEnabled reports whether automatic developer sign-in can mint a
+// session: it needs both the opt-in and a configured administrator password,
+// because the session it mints is that credential.
+func (s *Server) devAutoLoginEnabled() bool { return s.devAutoLogin && s.adminPasswordEnabled }
+
+// autoLoginCookie seals the developer-mode marker into a console session.
+func (s *Server) autoLoginCookie(r *http.Request) (*http.Cookie, error) {
+	sealed, err := s.sealConsoleSession(devConsoleCredential)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Cookie{Name: consoleCookieName, Value: sealed, Path: "/api/v1/admin", HttpOnly: true,
+		Secure: consoleSecureRequest(r), SameSite: http.SameSiteStrictMode,
+		MaxAge: int(consoleSessionTTL.Seconds())}, nil
 }

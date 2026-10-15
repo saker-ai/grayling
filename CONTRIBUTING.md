@@ -7,7 +7,7 @@ Thanks for helping improve Grayling. Bug reports, documentation fixes, tests, an
 1. Install Go 1.27 or newer, `make`, Python 3.9+ for the Python SDK, and Node.js 22.6+ for the TypeScript SDK.
 2. Clone the repository and run `make build`.
 3. Run `GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test -short ./ ./cmd/... ./internal/... ./pkg/... ./web` before changing code. `GOWORK=off` keeps the pinned gonacos version independent of a parent workspace.
-4. For the local console, run `make run`; use `make show-admin-password` in another terminal to read the generated password.
+4. For the local console, run `make run`: it starts in developer mode, where the console signs itself in as the global owner, so nothing needs to be typed. Use `make run DEV=0` for the password flow instead (`make show-admin-password` reads the generated `data/admin-password`). Developer mode hands a global owner session to anyone who can reach the port, so keep it local.
 
 The fast tests do not require Docker. PostgreSQL, Redis, Traefik, and cluster acceptance tests may need Docker or explicit test endpoints. Use `GRAYLING_TEST_PG_DSN` for an existing PostgreSQL server; the test harness creates isolated databases. Do not point tests at production data. The repository's [Go quality workflow](.github/workflows/go-quality.yml) shows the CI commands.
 

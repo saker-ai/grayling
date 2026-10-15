@@ -57,13 +57,18 @@ type Options struct {
 	AllowNonLoopbackGonacos bool
 	AuthSecret              string
 	AdminPassword           string
-	BootstrapOwnerName      string
-	RolloutInterval         time.Duration
-	RolloutLeaseDuration    time.Duration
-	ReconcileInterval       time.Duration
-	RequestsPerSecond       float64
-	EvaluationSampleRate    float64
-	Logger                  *log.Logger
+	// DevAutoLogin signs console visitors in as the configured administrator.
+	// cmd/grayling sets it from -dev-autologin / GRAYLING_DEV_AUTOLOGIN for
+	// local development; it must stay false wherever the console is reachable
+	// by anyone else.
+	DevAutoLogin         bool
+	BootstrapOwnerName   string
+	RolloutInterval      time.Duration
+	RolloutLeaseDuration time.Duration
+	ReconcileInterval    time.Duration
+	RequestsPerSecond    float64
+	EvaluationSampleRate float64
+	Logger               *log.Logger
 }
 
 // App is one running Grayling instance. Close is safe to call more than once.
@@ -224,7 +229,7 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 	}
 
 	apiServer := api.NewServer(store, cfg, api.Options{
-		Logger: opts.Logger, AdminPassword: opts.AdminPassword,
+		Logger: opts.Logger, AdminPassword: opts.AdminPassword, DevAutoLogin: opts.DevAutoLogin,
 		ChatCompletions:      chatHandler,
 		OpenAIWorkspace:      opts.OpenAIWorkspace,
 		OpenAIEnvironment:    opts.OpenAIEnvironment,

@@ -25,7 +25,7 @@ cd grayling
 make run
 ```
 
-打开 <http://127.0.0.1:27002/>。首次运行会在 `data/admin-password` 创建管理员密码；另开终端运行 `make show-admin-password` 查看。密码文件和运行数据已被 Git 忽略。首次创建 owner 时，服务还会在日志中输出一次性全局 owner 令牌；需要使用时请妥善保存。
+打开 <http://127.0.0.1:27002/>。`make run` 默认进入开发者模式：控制台会自动以全局 owner 身份登录，无需输入密码，也不会生成密码文件。该便利对所有访问该端口的请求生效，因此仅限本地开发使用；不要把监听地址暴露到不可信网络，或改用 `make run DEV=0` 关闭（此时会生成 `data/admin-password`，用 `make show-admin-password` 查看后手动登录）。密码文件和运行数据已被 Git 忽略。首次创建 owner 时，服务还会在日志中输出一次性全局 owner 令牌；需要使用时请妥善保存。
 
 `make run` 默认在所有网卡上监听 `:27002`，控制台与 API 可从任意网络以明文 HTTP 访问，暴露到可信网络之外前请先加 TLS 终止（可用 `make run RUN_PORT=...` 改端口）。内置 gonacos 仍使用本机随机端口。平台数据默认保存在 `data/` 下的 JSON 文件。单节点持久化可改用 SQLite：
 

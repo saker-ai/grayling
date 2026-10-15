@@ -6,6 +6,11 @@ GOWORK := off
 GO     := GOWORK=$(GOWORK) go
 RUN_ARGS ?=
 ADMIN_PASSWORD_FILE ?= data/admin-password
+# Developer mode for 'make run': the console signs itself in as the global
+# owner, so no password file is generated and nothing has to be typed. It is
+# on by default for a local checkout; run 'make run DEV=0' to get the password
+# prompt back. NEVER leave it on where the console is reachable by others.
+DEV ?= 1
 # Port for 'make run'. Bound on all interfaces (:PORT), so the console and API
 # are reachable from the network; embedded gonacos stays on ephemeral loopback.
 RUN_PORT ?= 27002
@@ -59,6 +64,7 @@ tidy:
 	$(GO) mod tidy
 
 ensure-admin-password:
+ifeq ($(DEV),0)
 	@mkdir -p "$(dir $(ADMIN_PASSWORD_FILE))"
 	@if [ -z "$$GRAYLING_ADMIN_PASSWORD" ] && [ ! -e "$(ADMIN_PASSWORD_FILE)" ]; then \
 	  umask 077; \
@@ -67,6 +73,9 @@ ensure-admin-password:
 	  echo "Saved to $(ADMIN_PASSWORD_FILE) (use 'make show-admin-password' to view it again)"; \
 	fi
 	@echo "Admin password configured (use 'make show-admin-password' to display the password file)."
+else
+	@echo "Dev mode: console sign-in is automatic; no admin password file is used."
+endif
 
 show-admin-password:
 	@cat "$(ADMIN_PASSWORD_FILE)"
@@ -77,7 +86,9 @@ check-run-port:
 	fi
 
 run: build ensure-admin-password check-run-port
-	GRAYLING_ADMIN_PASSWORD_FILE="$(ADMIN_PASSWORD_FILE)" ./bin/grayling -addr :$(RUN_PORT) \
+	GRAYLING_DEV_AUTOLOGIN=$(DEV) \
+	$(if $(filter 0,$(DEV)),GRAYLING_ADMIN_PASSWORD_FILE="$(ADMIN_PASSWORD_FILE)") \
+	./bin/grayling -addr :$(RUN_PORT) \
 	  -gonacos-addr 127.0.0.1:0 -gonacos-grpc-addr 127.0.0.1:0 \
 	  -gonacos-root "$$($(GO) list -m -f '{{.Dir}}' github.com/godeps/gonacos)" $(RUN_ARGS)
 

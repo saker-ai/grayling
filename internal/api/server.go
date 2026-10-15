@@ -50,6 +50,7 @@ type Server struct {
 	limiter              *rateLimiter
 	adminPasswordHash    [sha256.Size]byte
 	adminPasswordEnabled bool
+	devAutoLogin         bool
 	consoleSessionKey    [sha256.Size]byte
 
 	// Rollout is the staged-release auto-advance engine (§5.3 P4). Created
@@ -94,6 +95,11 @@ type Options struct {
 	// AdminPassword permits a configured password on admin endpoints only.
 	// The server retains its digest, not the plaintext value.
 	AdminPassword string
+	// DevAutoLogin signs console requests in as the configured administrator.
+	// It is a local-development convenience for cmd/grayling's -dev-autologin
+	// switch and must stay off wherever the console is reachable by anyone
+	// else: it hands every console visitor a global owner session.
+	DevAutoLogin bool
 	// ConsoleSessionSecret is shared by replicas so browser sessions survive
 	// routing between nodes. An empty value creates a per-process key.
 	ConsoleSessionSecret string
@@ -133,6 +139,7 @@ func NewServer(store *platform.Store, cfg configstore.Store, opts Options) *Serv
 		s.adminPasswordHash = sha256.Sum256([]byte(opts.AdminPassword))
 		s.adminPasswordEnabled = true
 	}
+	s.devAutoLogin = opts.DevAutoLogin
 	s.Admin = admin.NewService(store, cfg, func(wsID, envID string, rev int64) {
 		s.Hub.Notify(wsID, envID, rev)
 	})
@@ -254,6 +261,11 @@ func (s *Server) Handler() http.Handler {
 	// Collection (collect tokens).
 	mux.HandleFunc("POST /api/v1/collect", s.collectOnly(s.handleCollect))
 
+	if s.devAutoLoginEnabled() {
+		// Only a configured administrator can be signed in automatically, so
+		// the switch alone never opens the console.
+		return s.devAutoLoginHandler(mux)
+	}
 	return mux
 }
 
@@ -299,9 +311,15 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, kinds ...p
 		writeError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
 		return nil, false
 	}
-	if s.adminPasswordEnabled && slices.Contains(kinds, platform.TokenAdmin) {
+	if slices.Contains(kinds, platform.TokenAdmin) {
 		hash := sha256.Sum256([]byte(secret))
-		if subtle.ConstantTimeCompare(hash[:], s.adminPasswordHash[:]) == 1 {
+		// Both comparisons always run: their count must not depend on which
+		// digest matched. The developer-mode marker only ever arrives sealed
+		// inside a console cookie (console_session.go), so it is a credential
+		// this server issues rather than one a caller can simply send.
+		passwordMatch := s.adminPasswordEnabled && subtle.ConstantTimeCompare(hash[:], s.adminPasswordHash[:]) == 1
+		devMatch := s.devAutoLogin && subtle.ConstantTimeCompare(hash[:], devConsoleCredentialHash[:]) == 1
+		if passwordMatch || devMatch {
 			return &platform.Token{
 				ID: "configured-admin-password", Name: "configured-admin-password",
 				Kind: platform.TokenAdmin, Role: platform.RoleOwner,

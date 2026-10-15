@@ -25,7 +25,7 @@ cd grayling
 make run
 ```
 
-Open <http://127.0.0.1:27002/>. On the first run, `make run` creates a local administrator password in `data/admin-password`; in another terminal, run `make show-admin-password` to view it. The password file and runtime data are ignored by Git. The server also prints a one-time global owner token when it creates the first owner. Store that token securely if you plan to use it.
+Open <http://127.0.0.1:27002/>. `make run` starts in developer mode: the console signs itself in as the global owner, so there is no password to type and no password file is created. That convenience covers every visitor to the port, so it is for local work only — keep the listener off untrusted networks, or start without it (`make run DEV=0`, which generates `data/admin-password` and asks you to sign in with `make show-admin-password`). The password file and runtime data are ignored by Git. The server also prints a one-time global owner token when it creates the first owner. Store that token securely if you plan to use it.
 
 `make run` binds `:27002` on every interface — the console and API are reachable from any network over plaintext HTTP, so put TLS termination in front before exposing them beyond a trusted network (override with `make run RUN_PORT=...`). Embedded gonacos still starts on ephemeral loopback ports. Its default platform store is a JSON file under `data/`. To use SQLite for a persistent single-node installation:
 
