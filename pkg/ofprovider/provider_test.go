@@ -464,7 +464,7 @@ func TestOFExperimentExposureAttribution(t *testing.T) {
 	h.publishFlag(flag)
 
 	// Register + run the experiment through the admin API (binding is
-	// high-risk → two-person approval with a second publisher token).
+	// high-risk; a second publisher token approves the draft).
 	var exp platform.Experiment
 	expReq := map[string]any{
 		"flagKey": "of-exp", "unit": "user_id",

@@ -97,7 +97,7 @@ func (s *Server) handleRevokeAIResource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	review, err := s.Store.RequestApproval(platform.Approval{
-		WorkspaceID: ws.ID, EnvironmentID: env.ID, Action: "breakglass.review",
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, Action: platform.BreakglassReviewAction,
 		Object: typ + "/" + logical, PayloadHash: hash,
 		BaseRevision: int64(len(s.Store.ListPinnedVersions(ws.ID, env.ID, typ, logical))),
 		Reason:       req.Reason, Impact: "immediate denial of AI resource resolution and execution",
@@ -142,7 +142,7 @@ func (s *Server) handleReinstateAIResource(w http.ResponseWriter, r *http.Reques
 	}
 	typ, logical := r.PathValue("type"), r.PathValue("logical")
 	for _, review := range s.Store.ListApprovals(ws.ID) {
-		if review.EnvironmentID == env.ID && review.Action == "breakglass.review" &&
+		if review.EnvironmentID == env.ID && review.Action == platform.BreakglassReviewAction &&
 			review.Object == typ+"/"+logical && review.State == platform.DraftSubmitted {
 			writeStoreError(w, fmt.Errorf("%w: emergency revocation requires independent review", platform.ErrInvalidState))
 			return

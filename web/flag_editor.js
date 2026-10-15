@@ -267,10 +267,16 @@ function bindFlagStructured(root) {
     $('#flag-mode-json', root).setAttribute('aria-pressed', 'true');
   };
   redraw();
-  return { valid: () => {
-    if (!advanced.classList.contains('hidden')) return true;
-    if (sync()) return true;
-    toast(errors[0], false);
-    return false;
-  } };
+  // redraw is handed out with valid() because callers can replace the JSON
+  // source behind the structured form (the preset picker does exactly that):
+  // they must re-render from the new value instead of leaving stale controls.
+  return {
+    valid: () => {
+      if (!advanced.classList.contains('hidden')) return true;
+      if (sync()) return true;
+      toast(errors[0], false);
+      return false;
+    },
+    redraw,
+  };
 }

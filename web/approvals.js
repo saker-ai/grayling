@@ -6,8 +6,14 @@ function approvalExpired(approval) {
 }
 
 function approvalAction(approval) {
-  if (approval.state === 'submitted' && can('flag.approve') &&
-      S.actorName && approval.submittedBy !== S.actorName) return 'review';
+  const self = !!S.actorName && approval.submittedBy === S.actorName;
+  // The applicant may approve their own request: a deployment with a single
+  // administrator must still be able to publish, and applicant and approver are
+  // recorded separately, so the audit trail shows the self-approval.
+  // Break-glass post-reviews are the one exception — independence is the whole
+  // point of that review (the server enforces the same rule).
+  if (approval.state === 'submitted' && can('flag.approve') && S.actorName &&
+      !(self && approval.action === 'breakglass.review')) return 'review';
   if (approval.state === 'approved' && !approvalExpired(approval) &&
       approval.action !== 'breakglass.review' && can('flag.publish')) return 'execute';
   return '';
@@ -111,7 +117,9 @@ function renderApprovalDetail(approval, comparison) {
     renderApprovalComparison(approval, comparison) +
     (payload ? '<h4>' + esc(t('approval.proposedPayload')) + '</h4><pre class="pre">' + esc(payload) + '</pre>' : '') +
     (approval.submittedBy === S.actorName && approval.state === 'submitted'
-      ? '<div class="banner info">' + esc(t('approval.selfReview')) + '</div>' : '') +
+      ? '<div class="banner ' + (approval.action === 'breakglass.review' ? 'warn' : 'info') + '">' +
+        esc(t(approval.action === 'breakglass.review'
+          ? 'approval.selfReviewBreakglass' : 'approval.selfReview')) + '</div>' : '') +
     (approvalExpired(approval) ? '<div class="banner warn">' + esc(t('approval.expiredHelp')) + '</div>' : '') +
     (action === 'review' ? '<label class="field">' + esc(t('approval.reviewNote')) +
       '<textarea id="approval-note" rows="3"></textarea></label>' : '') +

@@ -7,7 +7,7 @@ import (
 	"github.com/saker-ai/grayling/internal/platform"
 )
 
-func TestApprovalAPIRejectsScopeSelfEditAndRevocation(t *testing.T) {
+func TestApprovalAPIScopeSelfApprovalAndRevocation(t *testing.T) {
 	h := newHarness(t)
 	h.setupWorkspace()
 	h.publishFlag(t, testFlag("approval-api"), platform.RiskNormal, h.reviewer)
@@ -22,8 +22,32 @@ func TestApprovalAPIRejectsScopeSelfEditAndRevocation(t *testing.T) {
 		t.Fatalf("incomplete preview: %+v", request)
 	}
 	approvePath := "/api/v1/admin/workspaces/acme/approvals/" + request.ID + "/approve"
-	if code := h.do("POST", approvePath, h.owner, map[string]any{"note": "self"}, nil); code != http.StatusForbidden {
+	// The requester may approve their own request: the grant succeeds and
+	// records the self-approving identity instead of refusing it.
+	selfRequest, err := h.store.RequestApproval(platform.Approval{WorkspaceID: h.ws.ID,
+		EnvironmentID: h.env.ID, Action: "flag.rollback", Object: "approval-api",
+		PayloadHash: request.PayloadHash, BaseRevision: request.BaseRevision,
+		Reason: "self-approved", SubmittedBy: "bootstrap-owner", SubmittedTokenID: "tok-self"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerToken, err := h.store.ResolveToken(h.owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selfPath := "/api/v1/admin/workspaces/acme/approvals/" + selfRequest.ID + "/approve"
+	var selfApproved platform.Approval
+	if code := h.do("POST", selfPath, h.owner, map[string]any{"note": "self"}, &selfApproved); code != http.StatusOK {
 		t.Fatalf("self approval status: %d", code)
+	}
+	if selfApproved.State != platform.DraftApproved ||
+		selfApproved.ApprovedBy != ownerToken.Name ||
+		selfApproved.ApprovedTokenID != ownerToken.ID {
+		t.Fatalf("self-approved change: %+v", selfApproved)
+	}
+	// Approving the same request twice is an invalid state.
+	if code := h.do("POST", selfPath, h.owner, map[string]any{"note": "again"}, nil); code != http.StatusConflict {
+		t.Fatalf("double approval status: %d", code)
 	}
 	other, err := h.store.CreateWorkspace("other-approval", "Other")
 	if err != nil {
@@ -79,6 +103,12 @@ func TestEmergencyAPILeavesReviewAndAuditChain(t *testing.T) {
 	}
 	if len(inbox) != 1 || inbox[0].ID != result.ReviewID || inbox[0].State != platform.DraftSubmitted {
 		t.Fatalf("pending review: %+v", inbox)
+	}
+	// The actor who opened the emergency action cannot verify it: the
+	// post-review must stay independent, which the API reports as 403.
+	if code := h.do("POST", "/api/v1/admin/workspaces/acme/approvals/"+result.ReviewID+"/approve",
+		h.owner, map[string]any{"note": "self"}, nil); code != http.StatusForbidden {
+		t.Fatalf("self post-review: %d", code)
 	}
 	if code := h.do("POST", "/api/v1/admin/workspaces/acme/approvals/"+result.ReviewID+"/approve",
 		h.reviewer, map[string]any{"note": "incident verified"}, nil); code != http.StatusOK {

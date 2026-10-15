@@ -3,6 +3,7 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 
 const code = fs.readFileSync(new URL('./i18n.js', import.meta.url), 'utf8') + '\n' +
+  fs.readFileSync(new URL('./presets.js', import.meta.url), 'utf8') + '\n' +
   fs.readFileSync(new URL('./flag_editor.js', import.meta.url), 'utf8') + '\n' +
   fs.readFileSync(new URL('./segment_editor.js', import.meta.url), 'utf8') + '\n' +
   fs.readFileSync(new URL('./approvals.js', import.meta.url), 'utf8') + '\n' +
@@ -54,6 +55,7 @@ for (const [role, permissions] of Object.entries(byRole)) {
   assert.equal(chrome.get('#nav-quotas').classList.contains('hidden'), role !== 'owner', `${role} quota nav`);
   assert(chrome.get('#btn-new-ws').classList.contains('hidden'), `${role} workspace creation`);
   const actions = { '#flag-save': 'flag.write', '#flag-approve': 'flag.approve', '#flag-publish': 'flag.publish',
+    '#flag-preset': 'flag.write', '#seg-preset': 'flag.write',
     '#x-create': 'experiment.write', '#metric-new': 'experiment.write', '#metric-submit': 'experiment.write',
     '#metric-publish': 'flag.publish', '#metric-deprecate': 'flag.publish',
     '#ai-reg': 'ai.write', '[data-pin]': 'flag.publish', '#ai-resolve': 'ai.content.read' };
@@ -114,8 +116,20 @@ for (const [role, wantApprove, wantExecute] of [['viewer', false, false], ['anal
 }
 S.capabilities = { permissions: { 'flag.approve': true, 'flag.publish': true } };
 S.actorName = 'alice';
-assert.equal(sandbox.x.approvalAction(approvals[0]), '', 'requester must not approve own request');
-assert(sandbox.x.renderApprovalDetail(approvals[0]).includes('different person'), 'self review explanation');
+assert.equal(sandbox.x.approvalAction(approvals[0]), 'review', 'requester may review their own request');
+assert(sandbox.x.renderApprovalDetail(approvals[0]).includes('recorded as a self-approval'),
+  'a self-approval is explained, not blocked');
+const selfBreakglass = { ...approvals[0], id: 'a3', action: 'breakglass.review' };
+assert.equal(sandbox.x.approvalAction(selfBreakglass), '',
+  'a break-glass post-review still needs an independent reviewer');
+assert(sandbox.x.renderApprovalDetail(selfBreakglass).includes('independent reviewer'),
+  'break-glass self review explanation');
+assert.equal(sandbox.x.approvalAction({ ...approvals[0], submittedBy: 'carol' }), 'review',
+  "another person's request stays reviewable");
+S.actorName = '';
+assert.equal(sandbox.x.approvalAction(approvals[0]), '',
+  'an unresolved identity claims no review action');
+S.actorName = 'bob';
 S.actorName = 'bob';
 assert(sandbox.x.renderApprovalDetail(approvals[0]).includes('id="approval-reject"'),
   'eligible reviewer can reject with a reason');

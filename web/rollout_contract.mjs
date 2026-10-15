@@ -20,6 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // browser's <script> tags) so app.js resolves t()/I18N from the catalogs.
 // The sandbox has no grayling_lang and no navigator.language → en (default).
 const code = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8') + '\n' +
+  fs.readFileSync(path.join(__dirname, 'presets.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'flag_editor.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'segment_editor.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'approvals.js'), 'utf8') + '\n' +

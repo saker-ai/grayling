@@ -264,7 +264,10 @@ func (s *Store) SubmitFlagDraft(workspaceID, environmentID, key, actor string, t
 	return s.commitLocked()
 }
 
-// ApproveFlagDraft moves submitted → approved, enforcing the two-person rule.
+// ApproveFlagDraft moves submitted → approved. The applicant may approve their
+// own submission: a deployment with a single administrator must still be able
+// to publish. Applicant and approver are recorded separately, so a
+// self-approval stays visible in the audit trail rather than being blocked.
 func (s *Store) ApproveFlagDraft(workspaceID, environmentID, key, actor string, note string, tokenID ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -274,9 +277,6 @@ func (s *Store) ApproveFlagDraft(workspaceID, environmentID, key, actor string, 
 	}
 	if d.State != DraftSubmitted {
 		return fmt.Errorf("%w: draft %q is %s, want submitted", ErrInvalidState, key, d.State)
-	}
-	if d.SubmittedBy == actor || len(tokenID) > 0 && tokenID[0] != "" && tokenID[0] == d.SubmittedTokenID {
-		return ErrSelfApproval
 	}
 	hash, err := draftHash(d.Content, d.Risk, d.Deleted, d.BaseRevision)
 	if err != nil {
@@ -646,6 +646,8 @@ func (s *Store) SubmitSegmentDraft(workspaceID, environmentID, key, actor string
 	return s.commitLocked()
 }
 
+// ApproveSegmentDraft moves submitted → approved, on the same terms as
+// ApproveFlagDraft: the applicant may approve their own submission.
 func (s *Store) ApproveSegmentDraft(workspaceID, environmentID, key, actor string, tokenID ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -655,9 +657,6 @@ func (s *Store) ApproveSegmentDraft(workspaceID, environmentID, key, actor strin
 	}
 	if d.State != DraftSubmitted {
 		return fmt.Errorf("%w: segment %q is %s", ErrInvalidState, key, d.State)
-	}
-	if d.SubmittedBy == actor || len(tokenID) > 0 && tokenID[0] != "" && tokenID[0] == d.SubmittedTokenID {
-		return ErrSelfApproval
 	}
 	hash, err := draftHash(d.Content, d.Risk, false, d.BaseRevision)
 	if err != nil {

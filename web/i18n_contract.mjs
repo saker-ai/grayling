@@ -13,9 +13,10 @@
 //      and report shapes in both languages, en/zh catalog key-set parity, and
 //      every statically-extracted t('key') / data-i18n="key" exists in both
 //      catalogs;
-//   5. static scan: app.js and index.html contain no CJK characters outside
-//      comments (comments are the whitelisted exception; the scan strips them
-//      and then requires zero CJK code points in code/strings/markup).
+//   5. static scan: app.js, presets.js and index.html contain no CJK
+//      characters outside comments (comments are the whitelisted exception; the
+//      scan strips them and then requires zero CJK code points in
+//      code/strings/markup).
 // Run via `go test ./web/` (which shells to node) or `node web/i18n_contract.mjs`.
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -25,13 +26,14 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const i18nCode = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8');
+const presetCode = fs.readFileSync(path.join(__dirname, 'presets.js'), 'utf8');
 const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 const flagEditorCode = fs.readFileSync(path.join(__dirname, 'flag_editor.js'), 'utf8');
 const segmentEditorCode = fs.readFileSync(path.join(__dirname, 'segment_editor.js'), 'utf8');
 const approvalsCode = fs.readFileSync(path.join(__dirname, 'approvals.js'), 'utf8');
 const expWorkbenchCode = fs.readFileSync(path.join(__dirname, 'exp_workbench.js'), 'utf8');
 const indexHTML = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-const code = i18nCode + '\n' + flagEditorCode + '\n' + segmentEditorCode + '\n' + approvalsCode + '\n' + expWorkbenchCode + '\n' + appCode;
+const code = i18nCode + '\n' + presetCode + '\n' + flagEditorCode + '\n' + segmentEditorCode + '\n' + approvalsCode + '\n' + expWorkbenchCode + '\n' + appCode;
 
 const BRIDGE = '\n;globalThis.__x = { I18N, t, setLang, detectLang, localeFor, fmtTime, fmtDurNs,' +
   ' S, VIEWS, route, renderReport, renderRollout, lintFlag, applyStaticI18n, bindLangSwitch, registerI18nHooks, applyTheme, themePreference, consoleHash, restoreConsoleHash, classifyExpStatus, renderExpHero };';
@@ -352,11 +354,13 @@ const SWEEPS = [
   { name: 'flags-detail', view: 'flags',
     setup: S => { S.flagKey = 'my-flag'; S.flagNew = false; },
     en: ['Draft editor', 'Save draft', 'Mark deleted', 'History &amp; rollback', 'Registered experiments',
-      'Import (creates HIGH-risk draft)', 'Rollback to r2', 'Current published (r2)', 'Validate JSON'],
+      'Import (creates HIGH-risk draft)', 'Rollback to r2', 'Current published (r2)', 'Validate JSON',
+      'Built-in preset', 'Gradual percentage rollout', 'None (blank draft)'],
     zh: ['草稿编辑器', '保存草稿', '标记删除', '历史与回滚', '已登记的关联实验',
-      '导入（创建 HIGH 风险草稿）', '回滚到 r2', '当前已发布（r2）', '校验 JSON'],
+      '导入（创建 HIGH 风险草稿）', '回滚到 r2', '当前已发布（r2）', '校验 JSON',
+      '内置模板', '按比例渐进放量', '不使用（空白草稿）'],
     ids: ['flag-json', 'flag-save', 'flag-submit', 'flag-approve', 'flag-reject',
-      'flag-publish', 'flag-delete', 'flag-revs', 'gff-run'] },
+      'flag-publish', 'flag-delete', 'flag-revs', 'gff-run', 'flag-preset'] },
   { name: 'segments-list', view: 'segments',
     setup: S => { S.segKey = null; },
     en: ['<h2>Segments</h2>', '+ New segment', 'Updated by', '1 draft(s)'],
@@ -364,9 +368,9 @@ const SWEEPS = [
     ids: ['seg-new'] },
   { name: 'segments-detail', view: 'segments',
     setup: S => { S.segKey = 'seg-1'; },
-    en: ['Segment draft', 'Validate JSON', 'Save draft', 'Publish'],
-    zh: ['分段草稿', '校验 JSON', '保存草稿', '发布'],
-    ids: ['seg-json', 'seg-save', 'seg-submit', 'seg-approve', 'seg-publish'] },
+    en: ['Segment draft', 'Validate JSON', 'Save draft', 'Publish', 'Built-in preset', 'Named user list'],
+    zh: ['分段草稿', '校验 JSON', '保存草稿', '发布', '内置模板', '指定用户名单'],
+    ids: ['seg-json', 'seg-save', 'seg-submit', 'seg-approve', 'seg-publish', 'seg-preset'] },
   { name: 'experiments-list', view: 'experiments',
     setup: S => { S.expId = null; S.expCreate = false; },
     en: ['<h2>Experiments</h2>', '+ New experiment', 'Data health / decision', 'Needs diagnosis'],
@@ -804,6 +808,7 @@ assert(!main.warns.some(w => w.includes('[i18n] missing')), 'console.warn record
     }
   };
   scan('app.js (code + string literals)', stripJsComments(appCode));
+  scan('presets.js (code + string literals)', stripJsComments(presetCode));
   scan('flag_editor.js (code + string literals)', stripJsComments(flagEditorCode));
   scan('segment_editor.js (code + string literals)', stripJsComments(segmentEditorCode));
   scan('approvals.js (code + string literals)', stripJsComments(approvalsCode));

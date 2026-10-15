@@ -47,7 +47,7 @@ type harness struct {
 	ws        platform.Workspace
 	env       platform.Environment
 	owner     string
-	publisher string // second actor for high-risk approvals (二人规则)
+	publisher string // second publisher, for cross-actor approval flows
 	sdkTok    string
 	colTok    string
 
@@ -643,7 +643,8 @@ func (h *harness) runningExperiment(t *testing.T, flagKey string, mutateExp func
 		h.owner, nil, nil); code != http.StatusOK {
 		t.Fatalf("bind: %d", code)
 	}
-	// High-risk binding draft: approval by the second actor (二人规则).
+	// High-risk binding draft: a second actor approves it (the owner that
+	// bound it could equally approve its own draft).
 	if code := h.do("POST", "/api/v1/admin/workspaces/acme/environments/prod/flags/"+flagKey+"/approve",
 		h.publisher, map[string]any{"note": "second pair of eyes"}, nil); code != http.StatusOK {
 		t.Fatalf("approve binding: %d", code)
@@ -669,9 +670,8 @@ func (h *harness) publishFlag(flag *model.Flag, risk platform.Risk, approver str
 	if code := h.do("POST", base+"/submit", h.owner, map[string]any{"reason": "rollout test"}, nil); code != http.StatusOK {
 		h.t.Fatalf("submit: %d", code)
 	}
-	if approver == h.owner {
-		approver = h.publisher
-	}
+	// The named actor approves; passing h.owner exercises the submitter
+	// approving their own draft, which is allowed.
 	if code := h.do("POST", base+"/approve", approver, map[string]any{"note": "ok"}, nil); code != http.StatusOK {
 		h.t.Fatalf("approve: %d", code)
 	}

@@ -169,7 +169,8 @@ func TestE2EPostgresExperimentLoop(t *testing.T) {
 		h.owner, nil, nil); code != 200 {
 		t.Fatalf("bind: %d", code)
 	}
-	// Binding is high-risk: approve with a second actor (two-person rule).
+	// Binding is high-risk; a second publisher approves it, which exercises
+	// a cross-actor grant against the Postgres backend.
 	var pubCT platform.CreatedToken
 	if c := h.do("POST", "/api/v1/admin/workspaces/acme/tokens", h.owner,
 		map[string]any{"name": "publisher-b", "kind": "admin", "role": "publisher"},

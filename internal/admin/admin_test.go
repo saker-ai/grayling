@@ -170,7 +170,7 @@ func TestPublishRequiresApproval(t *testing.T) {
 	}
 }
 
-func TestHighRiskSelfApprovalBlocked(t *testing.T) {
+func TestHighRiskSelfApprovalAllowed(t *testing.T) {
 	f := newFixture(t)
 	if _, err := f.svc.SaveFlagDraft(f.publisher, f.ws.ID, f.env.ID, testFlag("hr"), platform.RiskHigh, 0); err != nil {
 		t.Fatalf("save: %v", err)
@@ -178,13 +178,33 @@ func TestHighRiskSelfApprovalBlocked(t *testing.T) {
 	if err := f.svc.SubmitFlagDraft(f.publisher, f.ws.ID, f.env.ID, "hr"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	// Same actor as submitter → blocked (§9).
-	if err := f.svc.ApproveFlagDraft(f.publisher, f.ws.ID, f.env.ID, "hr", ""); !errors.Is(err, platform.ErrSelfApproval) {
-		t.Fatalf("self-approval must be blocked: %v", err)
+	// Risk level does not change who may approve: the submitter can.
+	if err := f.svc.ApproveFlagDraft(f.publisher, f.ws.ID, f.env.ID, "hr", "self"); err != nil {
+		t.Fatalf("high-risk self-approval must be allowed: %v", err)
 	}
-	// Different publisher → allowed.
-	if err := f.svc.ApproveFlagDraft(f.publisher2, f.ws.ID, f.env.ID, "hr", ""); err != nil {
+	selfDraft, err := f.store.GetFlagDraft(f.ws.ID, f.env.ID, "hr")
+	if err != nil {
+		t.Fatalf("get draft: %v", err)
+	}
+	if selfDraft.State != platform.DraftApproved || selfDraft.ApprovedBy != f.publisher.Name {
+		t.Fatalf("self-approved high-risk draft: %+v", selfDraft)
+	}
+	// Different publisher → allowed as well.
+	if _, err := f.svc.SaveFlagDraft(f.publisher, f.ws.ID, f.env.ID, testFlag("hr2"), platform.RiskHigh, 0); err != nil {
+		t.Fatalf("save hr2: %v", err)
+	}
+	if err := f.svc.SubmitFlagDraft(f.publisher, f.ws.ID, f.env.ID, "hr2"); err != nil {
+		t.Fatalf("submit hr2: %v", err)
+	}
+	if err := f.svc.ApproveFlagDraft(f.publisher2, f.ws.ID, f.env.ID, "hr2", ""); err != nil {
 		t.Fatalf("cross-approval: %v", err)
+	}
+	crossDraft, err := f.store.GetFlagDraft(f.ws.ID, f.env.ID, "hr2")
+	if err != nil {
+		t.Fatalf("get hr2 draft: %v", err)
+	}
+	if crossDraft.State != platform.DraftApproved || crossDraft.ApprovedBy != f.publisher2.Name {
+		t.Fatalf("cross-approved high-risk draft: %+v", crossDraft)
 	}
 }
 
@@ -452,6 +472,44 @@ func TestSegmentsPublishAndValidate(t *testing.T) {
 	}
 }
 
+func TestSegmentDraftAllowsSelfApproval(t *testing.T) {
+	f := newFixture(t)
+	for _, tc := range []struct {
+		key  string
+		risk platform.Risk
+	}{
+		{"self-seg-normal", platform.RiskNormal},
+		{"self-seg-high", platform.RiskHigh},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			seg := &model.Segment{
+				SchemaVersion: model.SchemaVersion, Key: tc.key, Version: "",
+				Constraints: []model.Constraint{{Field: "user_id", Op: model.OpRegex, Value: `^beta-`}},
+			}
+			if _, err := f.svc.SaveSegmentDraft(f.publisher, f.ws.ID, f.env.ID, seg, tc.risk); err != nil {
+				t.Fatalf("SaveSegmentDraft: %v", err)
+			}
+			if err := f.svc.SubmitSegmentDraft(f.publisher, f.ws.ID, f.env.ID, tc.key); err != nil {
+				t.Fatalf("SubmitSegmentDraft: %v", err)
+			}
+			// The submitter may approve their own segment draft.
+			if err := f.svc.ApproveSegmentDraft(f.publisher, f.ws.ID, f.env.ID, tc.key); err != nil {
+				t.Fatalf("segment self-approval must be allowed: %v", err)
+			}
+			draft, err := f.store.GetSegmentDraft(f.ws.ID, f.env.ID, tc.key)
+			if err != nil {
+				t.Fatalf("GetSegmentDraft: %v", err)
+			}
+			if draft.State != platform.DraftApproved || draft.ApprovedBy != f.publisher.Name {
+				t.Fatalf("self-approved segment draft: %+v", draft)
+			}
+			if _, err := f.svc.PublishSegment(f.publisher, f.ws.ID, f.env.ID, tc.key, "self"); err != nil {
+				t.Fatalf("PublishSegment: %v", err)
+			}
+		})
+	}
+}
+
 func TestExperimentLifecycleRepublishesFlag(t *testing.T) {
 	f := newFixture(t)
 	fullPublishFlow(t, f, f.publisher, f.owner, testFlag("exp-flag"))
@@ -567,13 +625,20 @@ func TestExperimentLifecycleRepublishesFlag(t *testing.T) {
 	if err != nil || readiness.Ready {
 		t.Fatalf("binding should not be repeated over a submitted draft: %+v, %v", readiness, err)
 	}
-	// Binding created a HIGH-risk draft in submitted state; a different
-	// actor must approve.
-	if err := f.svc.ApproveFlagDraft(f.publisher, f.ws.ID, f.env.ID, "exp-flag", ""); !errors.Is(err, platform.ErrSelfApproval) {
-		t.Fatalf("binder self-approval must be blocked (high risk): %v", err)
+	// Binding created a HIGH-risk draft in submitted state; the binder may
+	// approve it, and only that one grant is recorded.
+	if err := f.svc.ApproveFlagDraft(f.publisher, f.ws.ID, f.env.ID, "exp-flag", "self"); err != nil {
+		t.Fatalf("binder self-approval must be allowed (high risk): %v", err)
 	}
-	if err := f.svc.ApproveFlagDraft(f.owner, f.ws.ID, f.env.ID, "exp-flag", "ok"); err != nil {
-		t.Fatalf("approve binding: %v", err)
+	bindingDraft, err := f.store.GetFlagDraft(f.ws.ID, f.env.ID, "exp-flag")
+	if err != nil {
+		t.Fatalf("get binding draft: %v", err)
+	}
+	if bindingDraft.State != platform.DraftApproved || bindingDraft.ApprovedBy != f.publisher.Name {
+		t.Fatalf("self-approved binding draft: %+v", bindingDraft)
+	}
+	if err := f.svc.ApproveFlagDraft(f.owner, f.ws.ID, f.env.ID, "exp-flag", "ok"); !errors.Is(err, platform.ErrInvalidState) {
+		t.Fatalf("approve binding twice: %v", err)
 	}
 	if _, err := f.svc.PublishFlag(f.publisher, f.ws.ID, f.env.ID, "exp-flag", ""); err != nil {
 		t.Fatalf("publish binding: %v", err)

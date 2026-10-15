@@ -26,7 +26,7 @@
 | `GET` | `/api/v1/admin/workspaces/{ws}/metrics` | 已覆盖 | 指标目录列表、搜索和状态筛选 | i18n DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/metrics` | 已覆盖 | 新建指标表单 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}` | 已覆盖 | 指标版本详情与定义哈希 | i18n DOM；API 路由契约 |
-| `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/submit` | 已覆盖 | 详情页提交独立审批 | i18n DOM；API 路由契约 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/submit` | 已覆盖 | 详情页提交审批 | i18n DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/publish` | 已覆盖 | 详情页或审批队列执行已批准发布 | i18n DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}/deprecate` | 已覆盖 | 详情页确认并弃用版本 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/flags` | 已覆盖 | 开关列表/详情：草稿、审批、发布、回滚、删除、导入、紧急禁用 | i18n DOM；API 路由契约 |
@@ -73,7 +73,7 @@
 | `GET` | `/api/v1/admin/workspaces/{ws}/model-allowlist` | 已覆盖 | AI 资源页：注册、解析、版本、撤销、恢复、模型白名单 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/approvals` | 已覆盖 | 审批队列/详情：申请、批准、执行 | i18n DOM；API 路由契约 |
 | `POST` | `/api/v1/admin/workspaces/{ws}/approvals/{id}/approve` | 已覆盖 | 审批队列/详情：申请、批准、执行 | i18n DOM；API 路由契约 |
-| `POST` | `/api/v1/admin/workspaces/{ws}/approvals/{id}/reject` | 已覆盖 | 审批详情：异人拒绝并保留原因 | 审批状态与 API 测试；i18n DOM |
+| `POST` | `/api/v1/admin/workspaces/{ws}/approvals/{id}/reject` | 已覆盖 | 审批详情：拒绝并保留原因，提交人自拒即撤回 | 审批状态与 API 测试；i18n DOM |
 | `GET` | `/api/v1/admin/workspaces/{ws}/approvals/{id}/comparison` | 已覆盖 | 审批详情：回滚前后版本及新放量计划差异、过期基线提示；AI 内容不回传 | 权限与 API 测试；i18n DOM |
 | `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/approvals` | 已覆盖 | 审批队列/详情：申请、批准、执行 | i18n DOM；API 路由契约 |
 | `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/segments/{key}/preview` | 已覆盖 | 分段列表/详情：草稿、预览、审批、发布 | i18n DOM；API 路由契约 |
@@ -87,7 +87,7 @@
 - **权限**：全局能力 GET 支持空工作空间冷启动；工作空间能力 GET 解析目标工作空间并用已认证 admin actor 逐项调用 `Authorize`；作用域外返回 403。Web 在连接和切换工作空间时加载能力，按 `workspace.admin`、`token.manage`、`quota.manage`、`flag.write/approve/publish`、`experiment.write`、`ai.write/content.read` 门控入口与动作。服务端保留每个写请求的 RBAC 和对象状态校验。
 - **错误**：403、409、429 共用中英反馈。403 重新加载能力；409 指示重新读取当前状态并应用修改；429 指示限流后重试。能力请求失败时动作默认不可用。
 - **登录**：同源 HTTPS（或本机回环地址）可用服务器设置的 HttpOnly、SameSite=Strict 会话 Cookie；跨源连接仅在当前页面内存保存管理员凭据，刷新即失效。旧版保存在 localStorage 的凭据会在启动时删除。Cookie 写请求校验 Origin；撤销原始管理员令牌会立即使会话失效。
-- **危险动作**：令牌撤销、flag 删除/回滚/紧急禁用、AI 撤销和审批操作使用可读目标与影响的页面内确认框；审批自批仍由服务端拒绝。放量控制保留原有的确认与理由步骤。
+- **危险动作**：令牌撤销、flag 删除/回滚/紧急禁用、AI 撤销和审批操作使用可读目标与影响的页面内确认框；审批不限制提交人：自批与自拒（撤回）都是正常操作，只有紧急操作的事后复核由服务端排除原操作者。放量控制保留原有的确认与理由步骤。
 - **编辑与检索**：flag、segment 草稿在切换视图、作用域或离开页面时提醒未保存修改。flag、segment、experiment 列表支持键盘操作和页内筛选；审计查询在服务端筛选并通过游标翻页。
 - **中英文本**：`web/i18n_contract.mjs` 和能力 DOM 契约覆盖双语文本、权限动作与语言切换。
 - **测试列含义**：DOM 契约验证页面入口和行为，API 契约验证服务端工作空间权限；不代表外部部署的现场验收。

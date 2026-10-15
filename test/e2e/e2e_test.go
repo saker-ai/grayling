@@ -34,7 +34,7 @@ type harness struct {
 	ws       platform.Workspace
 	env      platform.Environment
 	owner    string // admin secret (global owner)
-	reviewer string // independent publisher for every approval
+	reviewer string // second publisher, for cross-actor approval flows
 	sdkTok   string
 	colTok   string
 }
@@ -172,9 +172,8 @@ func (h *harness) publishFlag(t *testing.T, flag *model.Flag, risk platform.Risk
 	if code := h.do("POST", base+"/submit", h.owner, map[string]any{"reason": "e2e publish"}, nil); code != http.StatusOK {
 		t.Fatalf("submit: %d", code)
 	}
-	if approver == h.owner {
-		approver = h.reviewer
-	}
+	// The named actor approves; passing h.owner exercises the submitter
+	// approving their own draft, which is allowed.
 	if code := h.do("POST", base+"/approve", approver, map[string]any{"note": "ok"}, nil); code != http.StatusOK {
 		t.Fatalf("approve: %d", code)
 	}
@@ -512,16 +511,15 @@ func TestE2EExperimentExposureAndReport(t *testing.T) {
 		h.owner, nil, nil); code != http.StatusOK {
 		t.Fatalf("bind: %d", code)
 	}
-	// Bind created a high-risk submitted draft; owner (not submitter when
-	// done by a different actor — here owner both binds and approves, which
-	// is allowed only because bind used the OWNER actor name and approval
-	// compares token names… bind actor == owner == approver → must FAIL).
+	// Bind created a high-risk submitted draft. The owner both binds and
+	// approves it, which is allowed: risk level does not restrict who may
+	// approve, and the approver identity is recorded either way.
 	code := h.do("POST", "/api/v1/admin/workspaces/acme/environments/prod/flags/exp-checkout/approve",
 		h.owner, map[string]any{"note": "self"}, nil)
-	if code != http.StatusForbidden {
-		t.Fatalf("owner self-approval of high-risk binding must be denied, got %d", code)
+	if code != http.StatusOK {
+		t.Fatalf("owner self-approval of high-risk binding: %d", code)
 	}
-	// Create a second publisher token and approve with it.
+	// A second grant on the same draft is an invalid state.
 	var pubCT platform.CreatedToken
 	if c := h.do("POST", "/api/v1/admin/workspaces/acme/tokens", h.owner,
 		map[string]any{"name": "publisher-b", "kind": "admin", "role": "publisher", "environment": ""},
@@ -529,8 +527,8 @@ func TestE2EExperimentExposureAndReport(t *testing.T) {
 		t.Fatalf("create publisher token: %d", c)
 	}
 	if c := h.do("POST", "/api/v1/admin/workspaces/acme/environments/prod/flags/exp-checkout/approve",
-		pubCT.Secret, map[string]any{"note": "second pair of eyes"}, nil); c != http.StatusOK {
-		t.Fatalf("approve by second actor: %d", c)
+		pubCT.Secret, map[string]any{"note": "second pair of eyes"}, nil); c != http.StatusConflict {
+		t.Fatalf("second approval of an approved draft: %d", c)
 	}
 	if c := h.do("POST", "/api/v1/admin/workspaces/acme/environments/prod/flags/exp-checkout/publish",
 		h.owner, map[string]any{"note": "bind experiment"}, nil); c != http.StatusOK {

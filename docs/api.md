@@ -12,9 +12,9 @@
 | sdk | `grayling_sdk_` | `/api/v1/sdk/**` |
 | collect | `grayling_collect_` | `/api/v1/collect` |
 
-错误响应统一为 `{"error":{"code":"...","message":"..."}}`。常见 code：`unauthorized`(401)、`wrong_audience`/`access_denied`/`self_approval_denied`(403)、`not_found`(404)、`validation_failed`/`import_failed`/`batch_too_large`(400)、`conflict`/`invalid_state`(409)、`rate_limited`/`quota_exceeded`(429)、revoked 资源(423)、`ai_unavailable`(501)。
+错误响应统一为 `{"error":{"code":"...","message":"..."}}`。常见 code：`unauthorized`(401)、`wrong_audience`/`access_denied`(403)、`self_approval_denied`(403，仅紧急操作的事后复核由原操作者发起时)、`not_found`(404)、`validation_failed`/`import_failed`/`batch_too_large`(400)、`conflict`/`invalid_state`(409)、`rate_limited`/`quota_exceeded`(429)、revoked 资源(423)、`ai_unavailable`(501)。
 
-管理角色：`owner`（全部+token/配额/AI 原始内容）、`publisher`（flag 全流程+发布+实验操作）、`analyst`（读+实验定义/评审）、`viewer`（只读）。所有草稿与高影响操作均禁止提交人自批（403 `self_approval_denied`）；审批有效期 24 小时，凭证被吊销或降权、内容或基线 revision 改变后须重新申请。详见 [审批与紧急操作](approval-policy.md)。
+管理角色：`owner`（全部+token/配额/AI 原始内容）、`publisher`（flag 全流程+发布+实验操作）、`analyst`（读+实验定义/评审）、`viewer`（只读）。`normal` 与 `high` 风险的审批均不排除提交人：提交人可批准自己的提交，自审会记入审计。唯一例外是紧急操作（`emergency-disable`、紧急回滚、AI `revoke`）的事后复核，必须由他人完成（403 `self_approval_denied`）。审批有效期 24 小时，凭证被吊销或降权、内容或基线 revision 改变后须重新申请。详见 [审批与紧急操作](approval-policy.md)。
 
 ## Admin
 
@@ -53,7 +53,7 @@
 |---|---|
 | `POST {env前缀}/approvals` | `{action, object, payload, reason}` 申请；支持 `flag.rollback`、`release_plan.create`、`ai.pin`，返回不可变 payload hash、基线 revision、影响与回滚信息 |
 | `GET /api/v1/admin/workspaces/{ws}/approvals` | 本工作空间申请与事后复核列表 |
-| `POST /api/v1/admin/workspaces/{ws}/approvals/{id}/approve` | 不同的 owner/publisher `{note}` 批准；`breakglass.review` 用同一端点事后复核 |
+| `POST /api/v1/admin/workspaces/{ws}/approvals/{id}/approve` | owner/publisher `{note}` 批准，提交人也可批准自己的申请；`breakglass.review` 用同一端点事后复核，必须由紧急操作者以外的人完成 |
 
 申请 `release_plan.create` 的 `object` 为实验 ID、`payload` 为 `{steps:[...]}`；申请 `ai.pin` 的 `object` 为 `{type}/{logical}`、`payload` 为 `{content}`；申请 `flag.rollback` 的 `object` 为 flag key、`payload` 为 `{revision}`。批准后在原执行端点传 `approvalId` 和同一 payload。AI 原始内容只用来计算 hash，不存入审批记录。
 
@@ -65,7 +65,7 @@
 | `GET {env前缀}/experiments`、`GET /api/v1/admin/experiments/{id}` | 列表/详情 |
 | `POST /experiments/{id}/review` | Draft→Reviewed |
 | `GET /experiments/{id}/bind-check` | 只读绑定准备检查（`flag.read`）；返回逐项通过状态、注册时与当前 Flag revision。结果是快照，绑定时重新检查 |
-| `POST /experiments/{id}/bind` | 校验 flag 结构与比例一致后注入绑定，生成高风险草稿并转 Scheduled（需二人审批后发布） |
+| `POST /experiments/{id}/bind` | 校验 flag 结构与比例一致后注入绑定，生成高风险草稿并转 Scheduled（审批后发布） |
 | `POST /experiments/{id}/transition` | `{to, reason}`；状态变更自动重发布绑定 flag（重试收敛） |
 | `GET /experiments/{id}/report` | 分析报告：健康位/SRM/per-variant/主指标（welch\|two-proportion-z\|ratio-delta\|quantile\|cuped）/护栏/决策门（ship/rollback/continue/hold）；显式注册多重比较时另有 `holm`，并保留分离呈现的序贯（`sequential`）与贝叶斯（`bayesian`）视图 |
 

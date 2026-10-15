@@ -86,7 +86,8 @@ const (
 	DraftApproved  DraftState = "approved"
 )
 
-// Risk classifies a draft. Every change requires a distinct approver.
+// Risk classifies a draft. Both levels can be self-approved; the audit trail
+// records applicant and approver separately, so a self-approval stays visible.
 type Risk string
 
 const (

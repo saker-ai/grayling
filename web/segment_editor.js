@@ -208,8 +208,13 @@ function bindSegmentStructured(root) {
     $('#seg-mode-json', root).setAttribute('aria-pressed', 'true');
   };
   redraw();
-  return { valid: () => {
-    if (advanced.classList.contains('hidden') && !sync()) { toast(issues[0], false); return false; }
-    return true;
-  } };
+  // Same contract as bindFlagStructured: a caller that replaces #seg-json
+  // (the preset picker) re-renders the structured form through this handle.
+  return {
+    valid: () => {
+      if (advanced.classList.contains('hidden') && !sync()) { toast(issues[0], false); return false; }
+      return true;
+    },
+    redraw,
+  };
 }

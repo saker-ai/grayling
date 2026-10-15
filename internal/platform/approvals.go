@@ -42,6 +42,12 @@ type Approval struct {
 const (
 	ApprovalRejected DraftState = "rejected"
 	ApprovalUsed     DraftState = "used"
+	// BreakglassReviewAction is the post-hoc review opened after an emergency
+	// action (emergency-disable, emergency rollback, AI revoke). It is the one
+	// approval the operator may not resolve themselves: an emergency action
+	// already skipped the ordinary review, so its aftermath is the only place
+	// where an independent reviewer is still required.
+	BreakglassReviewAction = "breakglass.review"
 )
 
 func copyApproval(a *Approval) *Approval {
@@ -116,6 +122,11 @@ func (s *Store) ListApprovals(workspaceID string) []*Approval {
 	return out
 }
 
+// ApproveChange grants one approval. The applicant may approve their own
+// request: a deployment with a single administrator must still be able to act.
+// Applicant and approver are stored separately, so a self-approval stays
+// visible in the audit trail. Emergency post-reviews are the exception —
+// independence is the entire point of that review.
 func (s *Store) ApproveChange(id, actor, tokenID, note string) (*Approval, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -126,7 +137,7 @@ func (s *Store) ApproveChange(id, actor, tokenID, note string) (*Approval, error
 	if a.State != DraftSubmitted {
 		return nil, fmt.Errorf("%w: approval is %s", ErrInvalidState, a.State)
 	}
-	if actor == a.SubmittedBy || tokenID == a.SubmittedTokenID {
+	if a.Action == BreakglassReviewAction && (actor == a.SubmittedBy || tokenID == a.SubmittedTokenID) {
 		return nil, ErrSelfApproval
 	}
 	a.State = DraftApproved
@@ -142,7 +153,8 @@ func (s *Store) ApproveChange(id, actor, tokenID, note string) (*Approval, error
 	return copyApproval(a), nil
 }
 
-// RejectChange records a distinct reviewer's reason and prevents any later use.
+// RejectChange records a reviewer's reason and prevents any later use. The
+// applicant may also reject their own request, which withdraws it.
 func (s *Store) RejectChange(id, actor, tokenID, reason string) (*Approval, error) {
 	if reason == "" {
 		return nil, fmt.Errorf("%w: rejection reason required", ErrValidation)
@@ -155,9 +167,6 @@ func (s *Store) RejectChange(id, actor, tokenID, reason string) (*Approval, erro
 	}
 	if a.State != DraftSubmitted {
 		return nil, fmt.Errorf("%w: approval is %s", ErrInvalidState, a.State)
-	}
-	if actor == a.SubmittedBy || tokenID == a.SubmittedTokenID {
-		return nil, ErrSelfApproval
 	}
 	a.State = ApprovalRejected
 	a.RejectedBy, a.RejectedTokenID, a.RejectionReason = actor, tokenID, reason

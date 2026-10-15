@@ -116,7 +116,7 @@ func (s *Service) flagPreview(env *platform.Environment, d *platform.FlagDraft, 
 	p := &ReviewPreview{TargetEnvironment: env.WorkspaceID + "/" + env.ID + " (" + env.Slug + ")",
 		Risk: d.Risk, BaseRevision: d.BaseRevision,
 		EstimatedAffected: "up to 100% of evaluations of this flag; exact user count unavailable",
-		Guardrails:        "distinct approver, 24-hour grant, content hash and revision check",
+		Guardrails:        "24-hour grant, content hash and revision check, self-approval recorded in the audit trail",
 		ApprovalExpiresAt: d.ApprovalExpiresAt}
 	if d.Deleted {
 		p.EstimatedAffected = "all current users of this flag"
@@ -153,7 +153,7 @@ func (s *Service) GetSegmentPreview(actor Actor, workspaceID, environmentID, key
 	p := &ReviewPreview{TargetEnvironment: env.WorkspaceID + "/" + env.ID + " (" + env.Slug + ")",
 		Risk: d.Risk, BaseRevision: d.BaseRevision,
 		EstimatedAffected: "up to 100% of evaluations of flags referencing this segment; exact user count unavailable",
-		Guardrails:        "distinct approver, 24-hour grant, content hash and revision check",
+		Guardrails:        "24-hour grant, content hash and revision check, self-approval recorded in the audit trail",
 		ApprovalExpiresAt: d.ApprovalExpiresAt}
 	if current := s.Store.CurrentSegmentContents(env.WorkspaceID, env.ID)[key]; current != nil {
 		p.CurrentHash = current.Hash

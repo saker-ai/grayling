@@ -175,7 +175,7 @@ func (s *Server) handleSubmitMetricDefinition(w http.ResponseWriter, r *http.Req
 		PayloadHash: def.Hash, BaseRevision: ref.Version, Reason: req.Reason,
 		Impact:         "new experiments may reference this metric definition",
 		RollbackTarget: "deprecate this version; existing experiments keep their frozen definition",
-		Guardrails:     "independent reviewer must approve the exact definition hash",
+		Guardrails:     "24-hour grant bound to the exact definition hash; approver recorded separately from the applicant",
 		SubmittedBy:    actor.Name, SubmittedTokenID: actor.TokenID,
 	})
 	if err != nil {

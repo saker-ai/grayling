@@ -181,8 +181,9 @@ func (s *Service) SubmitFlagDraft(actor Actor, workspaceID, environmentID, key s
 	return nil
 }
 
-// ApproveFlagDraft approves a submitted draft (two-person rule for
-// high-risk is enforced by the store).
+// ApproveFlagDraft approves a submitted draft. The applicant may approve
+// their own submission; the audit entry records the approver's token
+// separately from the applicant's, so a self-approval stays visible.
 func (s *Service) ApproveFlagDraft(actor Actor, workspaceID, environmentID, key, note string) error {
 	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagApprove)
 	if err != nil {
@@ -462,7 +463,7 @@ func (s *Service) EmergencyDisableFlagContext(ctx context.Context, actor Actor, 
 			"hash": fr.Hash, "manifestRevision": m.Revision, "reason": reason})
 	review, err := s.Store.RequestApproval(platform.Approval{
 		WorkspaceID: env.WorkspaceID, EnvironmentID: env.ID,
-		Action: "breakglass.review", Object: key, PayloadHash: fr.Hash,
+		Action: platform.BreakglassReviewAction, Object: key, PayloadHash: fr.Hash,
 		BaseRevision: m.Revision, Reason: reason,
 		Impact:         "all users evaluated by this flag",
 		RollbackTarget: fmt.Sprintf("r%d (%s)", current.Revision, current.Hash),
@@ -685,7 +686,7 @@ func (s *Service) RollbackFlagContext(ctx context.Context, actor Actor, workspac
 	if !planned {
 		review, err := s.Store.RequestApproval(platform.Approval{
 			WorkspaceID: env.WorkspaceID, EnvironmentID: env.ID,
-			Action: "breakglass.review", Object: key,
+			Action: platform.BreakglassReviewAction, Object: key,
 			PayloadHash: target.Hash, BaseRevision: m.Revision, Reason: reason,
 			Impact: "all users evaluated by this flag", RollbackTarget: fmt.Sprintf("r%d", targetRevision),
 			Guardrails:  "verified retained target hash; post-action independent review",
@@ -747,6 +748,9 @@ func (s *Service) SubmitSegmentDraft(actor Actor, workspaceID, environmentID, ke
 	return nil
 }
 
+// ApproveSegmentDraft approves a submitted segment draft on the same terms as
+// ApproveFlagDraft: the applicant may approve their own submission, and the
+// audit entry keeps approver and applicant distinct.
 func (s *Service) ApproveSegmentDraft(actor Actor, workspaceID, environmentID, key string) error {
 	_, env, err := s.resolveEnv(workspaceID, environmentID, actor, PermFlagApprove)
 	if err != nil {

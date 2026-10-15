@@ -292,8 +292,8 @@ func (s *Server) handleApproveChange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action := "approval.approve"
-	if a.Action == "breakglass.review" {
-		action = "breakglass.review"
+	if a.Action == platform.BreakglassReviewAction {
+		action = platform.BreakglassReviewAction
 	}
 	_ = s.Store.Audit(actor.Name+" ("+actor.TokenID+")", actor.Role, action, a.WorkspaceID, a.EnvironmentID, a.ID,
 		fmt.Sprintf(`{"hash":%q,"baseRevision":%d,"expiresAt":%q,"note":%q}`, a.PayloadHash, a.BaseRevision, a.ExpiresAt.Format(time.RFC3339), req.Note))

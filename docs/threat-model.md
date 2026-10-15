@@ -89,7 +89,7 @@
 | experiment.write / ai.write | ✓ | ✓ | ✓ | — |
 | flag.read / report.read | ✓ | ✓ | ✓ | ✓ |
 
-补充：高风险变更禁止自批（`platform.ErrSelfApproval` → 403 `self_approval_denied`，`TestHighRiskSelfApprovalBlocked`）；非 owner 角色的 admin token 不能是全局的（`CreateToken` 校验"only owner tokens may be global"）。
+补充：**事前职责分离已移除**。高风险变更此前禁止自批（`platform.ErrSelfApproval` → 403 `self_approval_denied`）；该控制现已移除，`normal` 与 `high` 风险的 flag/segment 草稿和通用审批申请都可由提交人本人批准，提交人也可自拒（撤回）。`platform.ErrSelfApproval` 本身保留，但只守紧急事后复核（`internal/platform/approvals.go:ApproveChange` 的 `platform.BreakglassReviewAction` 分支）；常规草稿与审批不再做自批判定。产品层面因此**不再提供事前职责分离**：自审只靠审计中申请人与审批人分别入账（`submittedBy`/`approvedBy`）事后可见，不构成阻断。非 owner 角色的 admin token 不能是全局的（`CreateToken` 校验"only owner tokens may be global"）。
 
 ### 2.3 注入面
 

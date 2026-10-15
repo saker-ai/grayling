@@ -15,9 +15,9 @@ import (
 	"github.com/saker-ai/grayling/pkg/model"
 )
 
-// overviewFixture wires an in-memory store with two owners (so self-approval
-// exclusion is observable), a viewer (role trimming), an outsider workspace
-// (403) and two environments (env filtering).
+// overviewFixture wires an in-memory store with two owners (so one can see
+// the other's grants as reviewable work), a viewer (role trimming), an
+// outsider workspace (403) and two environments (env filtering).
 type overviewFixture struct {
 	store    *platform.Store
 	server   *Server
@@ -204,8 +204,9 @@ func TestWorkspaceOverviewAggregatesRealModules(t *testing.T) {
 	}
 }
 
-// Matrix 2: self-approval exclusion mirrors the server rule for both owners.
-func TestWorkspaceOverviewExcludesSelfApproval(t *testing.T) {
+// Matrix 2: a submitter sees their own request as reviewable work — the
+// server no longer withholds it as a self-approval — and so does a peer.
+func TestWorkspaceOverviewShowsSelfSubmittedApprovalAsReviewable(t *testing.T) {
 	f := newOverviewFixture(t)
 	a := f.requestApproval(t, f.owner1, f.env.ID, "flag.rollback", "flag-a")
 
@@ -217,10 +218,10 @@ func TestWorkspaceOverviewExcludesSelfApproval(t *testing.T) {
 		t.Fatalf("items = %+v", resp.PendingApprovals.Items)
 	}
 	item := resp.PendingApprovals.Items[0]
-	if item.ID != a.ID || item.MyAction != "" || item.BlockedReason != "self_approval" {
+	if item.ID != a.ID || item.MyAction != "review" || item.BlockedReason != "" {
 		t.Fatalf("submitter view = %+v", item)
 	}
-	if resp.PendingApprovals.ActionableTotal != 0 {
+	if resp.PendingApprovals.ActionableTotal != 1 {
 		t.Fatalf("submitter actionableTotal = %d", resp.PendingApprovals.ActionableTotal)
 	}
 
@@ -519,8 +520,8 @@ func TestBuildOverviewRisksDegradation(t *testing.T) {
 	}
 }
 
-// Matrix 9: pending rules — self-approval dual test, expiry, break-glass,
-// role gates and the untruncated actionable total.
+// Matrix 9: pending rules — self-submitted grants stay reviewable, plus
+// expiry, break-glass, role gates and the untruncated actionable total.
 func TestBuildOverviewPendingRules(t *testing.T) {
 	now := time.Now()
 	future := now.Add(time.Hour)
@@ -547,8 +548,8 @@ func TestBuildOverviewPendingRules(t *testing.T) {
 		wantAction, wantBlockedReason string
 	}{
 		{"submitted other can approve", submitted("a1", "tok-submit", "submitter"), true, false, "review", ""},
-		{"submitted self by token id", submitted("a2", "tok-reviewer", "renamed"), true, false, "", "self_approval"},
-		{"submitted self by name", submitted("a3", "tok-other", "reviewer"), true, false, "", "self_approval"},
+		{"submitted self by token id is reviewable", submitted("a2", "tok-reviewer", "renamed"), true, false, "review", ""},
+		{"submitted self by name is reviewable", submitted("a3", "tok-other", "reviewer"), true, false, "review", ""},
 		{"submitted no approve right", submitted("a4", "tok-submit", "submitter"), false, false, "", "role"},
 		{"approved executable", approved("a5", "flag.rollback", &future), false, true, "execute", ""},
 		{"approved expired", approved("a6", "flag.rollback", &past), false, true, "", "expired"},

@@ -31,14 +31,16 @@ info:
     Chat Completions 的作用域由服务端入口配置固定。任何端点都不接受
     通过 query 参数或 body 字段选择租户。`{ws}`/`{env}` 路径参数接受 slug 或
     服务端生成的内部 ID。管理角色（admin 凭证）：owner、publisher、analyst、
-    viewer；高风险草稿禁止提交人自批（403 `self_approval_denied`）。
+    viewer；所有风险等级的草稿与审批均可自批，自审记入审计（紧急操作的
+    事后复核除外）。
 
     ## 错误约定
 
     错误响应统一为 `{"error":{"code":"...","message":"..."}}`（见
     `ErrorResponse`）。存储层错误到 HTTP 状态的映射（`writeStoreError`）：
     `not_found`→404，`exists`/`conflict`/`invalid_state`→409，
-    `access_denied`/`self_approval_denied`→403，`quota_exceeded`→429，
+    `access_denied`→403，`self_approval_denied`→403（仅紧急操作的事后复核由
+    原操作者发起时；常规草稿与审批已允许自批），`quota_exceeded`→429，
     `validation_failed`→400，其余→500 `internal`。认证层：`unauthorized`→401，
     `wrong_audience`→403，`rate_limited`→429。AI 端点：`ai_unavailable`→501；
     跨租户 AI 读取一律 404（不泄露存在性）。采集：`batch_too_large`→400。
@@ -95,7 +97,7 @@ tags:
   - name: experiments
     description: 实验预注册、评审、绑定、状态迁移与分析报告
   - name: metrics
-    description: 工作空间指标目录、版本、双人审批和弃用
+    description: 工作空间指标目录、版本、审批和弃用
   - name: release-plans
     description: 分阶段放量计划（自动推进引擎的操作面）
   - name: ai
@@ -540,7 +542,7 @@ paths:
         降级为 restricted，只保留 state/plan 条目；报告构建失败成为显式
         experiment_report_unavailable 风险项而非沉默。pendingApprovals
         恒为工作空间级（每条带 environmentId），myAction 由服务端判定，
-        自批排除以 TokenID 为主、Name 兜底（镜像服务端自批规则），
+        提交人对自己提交的项同样可获得 review/execute（服务端不再排除自审），
         actionableTotal 为全量真实计数、不受 limit 截断。recentReleases
         对最近 500 条审计按动作白名单（flag.publish/flag.rollback/
         flag.emergency_disable/segment.publish/release_plan.apply_ratio/
@@ -637,6 +639,11 @@ paths:
                             blockedReason:
                               type: string
                               enum: [self_approval, role, expired, breakglass_review, ""]
+                              description: >-
+                                服务端判定的阻断原因。self_approval 为历史枚举值：
+                                自批限制已移除，服务端不再产生该值，保留仅为兼容既有
+                                客户端分支；当前实际出现的值为 role、expired、
+                                breakglass_review 与空串。
                   recentReleases:
                     type: object
                     required: [status, coverage, items]
@@ -816,7 +823,8 @@ paths:
         `content.key` 必须等于路径 `{key}`（改名在 v1 是删除+新建，不是草稿
         操作）。`baseRevision` 必填且必须等于当前已发布 revision（无发布版时为 0）；
         `expectedDraftHash` 必填，来自 GET 详情的 `draftHash`，无草稿时传空字符串。
-        同一 revision 下草稿被别人修改也返回 409 conflict。高风险（risk=high）草稿的提交人不能自批。
+        同一 revision 下草稿被别人修改也返回 409 conflict。`normal` 与 `high`
+        草稿的提交人都可以批准自己的提交（自审进入审计）。
       operationId: saveFlagDraft
       parameters:
         - $ref: "#/components/parameters/WsPath"
@@ -886,7 +894,7 @@ paths:
   "/api/v1/admin/workspaces/{ws}/environments/{env}/flags/{key}/approve":
     post:
       tags: [flags]
-      summary: 批准草稿（submitted→approved；所有风险等级禁止自批）
+      summary: 批准草稿（submitted→approved；所有风险等级均可自批，自审进入审计）
       operationId: approveFlagDraft
       parameters:
         - $ref: "#/components/parameters/WsPath"
@@ -1283,7 +1291,7 @@ paths:
       - {name: version, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
     post:
       tags: [metrics]
-      summary: 提交草稿指标定义供独立审批
+      summary: 提交草稿指标定义供审批
       operationId: submitMetricDefinition
       requestBody:
         required: true
@@ -1552,7 +1560,7 @@ paths:
       summary: 绑定 flag（注入实验绑定，生成高风险草稿并转 scheduled）
       description: >-
         校验 flag 结构与预注册比例一致后向 flag 内容注入 experiment 绑定，
-        产生 HIGH 风险草稿（需二人评审后发布），实验状态转 scheduled。
+        产生 HIGH 风险草稿（审批后发布，提交人可自批），实验状态转 scheduled。
         无请求体。
       operationId: bindExperiment
       parameters:
@@ -2644,7 +2652,7 @@ paths:
   "/api/v1/admin/workspaces/{ws}/approvals/{id}/approve":
     post:
       tags: [workspaces]
-      summary: 异人审批或事后复核，授权限于当前工作空间
+      summary: 审批或事后复核，授权限于当前工作空间；提交人可批准自己的申请，紧急事后复核须由原操作者以外的人完成
       operationId: approveChange
       parameters:
         - $ref: "#/components/parameters/WsPath"
@@ -2673,7 +2681,7 @@ paths:
   "/api/v1/admin/workspaces/{ws}/approvals/{id}/reject":
     post:
       tags: [workspaces]
-      summary: 异人拒绝待审批申请并记录原因
+      summary: 拒绝待审批申请并记录原因；提交人拒绝自己的申请即撤回
       operationId: rejectChange
       parameters:
         - $ref: "#/components/parameters/WsPath"
@@ -2992,7 +3000,7 @@ components:
     Forbidden:
       description: >-
         403：wrong_audience（受众不符）、access_denied（RBAC/对象级拒绝）、
-        self_approval_denied（高风险草稿自批）。
+        self_approval_denied（紧急事后复核由原操作者发起——常规审批已允许自批）。
       content:
         application/json:
           schema:
@@ -3189,7 +3197,9 @@ components:
             self_approval_denied、not_found、exists、conflict、invalid_state、
             quota_exceeded、rate_limited、validation_failed、import_failed、
             batch_too_large、ai_unavailable、snapshot_invalid、encode、
-            sse_cap、streaming_unsupported、internal。
+            sse_cap、streaming_unsupported、internal。其中
+            self_approval_denied 现仅由紧急操作的事后复核自复核产生
+            （普通草稿与审批已允许自批）。
         message:
           type: string
           description: 人类可读详情。
@@ -3821,7 +3831,7 @@ components:
         risk:
           type: string
           enum: [normal, high]
-          description: high 草稿禁止提交人自批。
+          description: high 草稿同样允许提交人自批（自审进入审计）。
         updatedBy:
           type: string
         updatedAt:

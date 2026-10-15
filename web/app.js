@@ -162,6 +162,10 @@ function errMsg(e) {
   if (e.code === 'flag_review_changed') return t('flags.reviewChanged');
   if (e.code === 'report_changed') return t('ro.reportChanged');
   if (e.code === 'report_unavailable') return t('ro.reportUnavailable');
+  // Break-glass post-reviews still require an independent reviewer, so this
+  // code outlives the general self-approval removal and outranks the plain 403
+  // text (the server returns 403 for it, like any other permission denial).
+  if (e.code === 'self_approval_denied') return t('toast.selfApproval');
   if (e.status === 403) return t('err.denied403');
   if (e.status === 409) return t('err.conflict409');
   if (e.status === 429) return t('err.limited429');
@@ -192,7 +196,7 @@ async function run(fn, okMsg, savedEditor = false) {
     route();
     return r;
   } catch (e) {
-    toast(e.code === 'self_approval_denied' ? t('toast.selfApproval') : errMsg(e), false);
+    toast(errMsg(e), false);
     if (e.status === 403) { await refreshCapabilities(); await route(); }
     return undefined;
   }
@@ -208,8 +212,8 @@ const S = {
   workspaces: [], envs: [],
   capabilities: null,
   globalCapabilities: null,
-  flagKey: null, flagNew: false,
-  segKey: null, segDrafts: [],
+  flagKey: null, flagNew: false, flagPreset: '',
+  segKey: null, segDrafts: [], segPreset: '',
   approvalID: null, approvalFilter: 'pending', actorName: '',
   principalID: '', reauthDraft: null,
   expId: null, expCreate: false, expTab: 'summary',
@@ -331,7 +335,7 @@ function updateCapabilities() {
 // Hide controls after each render. The server still checks every request.
 function gateActions(root) {
   const groups = {
-    'flag.write': ['#flag-new', '#flag-save', '#flag-submit', '#flag-delete', '#gff-run', '#seg-new', '#seg-save', '#seg-submit', '#exp-bind'],
+    'flag.write': ['#flag-new', '#flag-preset', '#flag-save', '#flag-submit', '#flag-delete', '#gff-run', '#seg-new', '#seg-preset', '#seg-save', '#seg-submit', '#exp-bind'],
     'flag.approve': ['#flag-approve', '#flag-reject', '#seg-approve', '[data-appr]'],
     'flag.publish': ['#flag-publish', '#flag-emergency-disable', '[data-rb]', '[data-er]', '#seg-publish', '#exp-transition', '#ro-create', '#ro-pause', '#ro-resume', '#ro-advance', '#ro-takeover-on', '#ro-takeover-off', '[data-pin]', '[data-exec]', '#metric-publish', '#metric-deprecate'],
     'experiment.write': ['#exp-new', '#x-create', '#exp-review', '#metric-new', '#metric-submit'],
@@ -463,6 +467,57 @@ function actionDialog({ title, summary, preview = '', reasonLabel = '', reasonRe
 }
 
 // ---------------------------------------------------------------------------
+// Built-in targeting presets (web/presets.js). The picker is the only way to
+// reach FLAG_PRESETS/SEGMENT_PRESETS: a fresh document is written into the JSON
+// source that backs the structured editor, and the editor is redrawn from it.
+// Applying a preset is a draft edit — nothing is saved until the operator saves.
+// ---------------------------------------------------------------------------
+// presetOptions is the shared shape for both entry points: the create-flag
+// promptForm select and the editor-toolbar select. The empty value means "no
+// preset", which keeps the blank flagTemplate/segmentTemplate behaviour.
+function presetOptions(presets) {
+  return [{ value: '', label: t('preset.none') }].concat(presets.map(preset =>
+    ({ value: preset.id, label: t(preset.nameKey) })));
+}
+
+function presetSelect(id, presets) {
+  return '<label class="inline">' + esc(t('preset.label')) + ' <select id="' + esc(id) + '">' +
+    presetOptions(presets).map(option => '<option value="' + esc(option.value) + '">' +
+      esc(option.label) + '</option>').join('') +
+    '</select></label>';
+}
+
+// renderPresetPreview shows what the preset contains before it is applied: the
+// localized summary, the operator hint and the exact document.
+function renderPresetPreview(preset, content) {
+  return '<p>' + esc(t(preset.descKey)) + '</p>' +
+    (preset.hintKey ? '<p class="muted">' + esc(t(preset.hintKey)) + '</p>' : '') +
+    '<pre class="pre small">' + esc(JSON.stringify(content, null, 2)) + '</pre>';
+}
+
+// bindPresetPicker wires one select: confirm, replace, redraw, reset. content
+// builds a fresh document per call (presetFlagContent/presetSegmentContent).
+function bindPresetPicker(select, presets, content, json, structured) {
+  select.onchange = async () => {
+    const preset = presets.find(item => item.id === select.value);
+    select.value = ''; // never look like a preset is still "applied"
+    if (!preset) return;
+    const next = content(preset.id);
+    if (!next) return;
+    const accepted = await actionDialog({
+      title: t('preset.applyTitle'),
+      summary: t('preset.applySummary', { name: t(preset.nameKey) }),
+      preview: renderPresetPreview(preset, next),
+      confirmLabel: t('preset.applyConfirm'),
+    });
+    if (!accepted) return;
+    json.value = JSON.stringify(next, null, 2);
+    structured.redraw();
+    toast(t('preset.applied', { name: t(preset.nameKey) }));
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 const VIEWS = {}; // populated at the bottom of each view section
@@ -504,6 +559,8 @@ function restoreConsoleHash(hash) {
   S.env = parts[2] === '~' ? '' : parts[2];
   S.view = parts[3];
   S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;
+  // A deep link points at saved objects: a create-dialog preset never applies.
+  S.flagPreset = ''; S.segPreset = '';
   S.auditObject = S.view === 'audit' ? (parts[4] || '') : '';
   S.auditCursors = [0]; S.auditPage = 0;
   S.expCreate = false;
@@ -751,7 +808,6 @@ function overviewMyActionLabel(myAction) {
 // caller; unknown reasons pass through verbatim.
 function overviewBlockedNote(reason) {
   switch (reason) {
-    case 'self_approval': return t('overview.blocked.self_approval');
     case 'role': return t('overview.blocked.role');
     case 'expired': return t('overview.blocked.expired');
     case 'breakglass_review': return t('overview.blocked.breakglass_review');
@@ -1071,12 +1127,13 @@ async function viewFlags(m) {
   $('#flag-status-filter', m).onchange = applyFilter;
   $('#flag-new', m).onclick = () => promptForm(t('flags.new'), [
     { name: 'key', label: t('prompt.newFlagKey'), required: true },
-  ], t('btn.create'), ({ key }) => {
-    S.flagKey = key.trim(); S.flagNew = true; route();
+    { name: 'preset', label: t('preset.label'), type: 'select', options: presetOptions(FLAG_PRESETS) },
+  ], t('btn.create'), ({ key, preset }) => {
+    S.flagKey = key.trim(); S.flagNew = true; S.flagPreset = preset || ''; route();
   });
   m.addEventListener('click', ev => {
     const tr = ev.target.closest('[data-flag]');
-    if (tr) { S.flagKey = tr.dataset.flag; S.flagNew = false; route(); }
+    if (tr) { S.flagKey = tr.dataset.flag; S.flagNew = false; S.flagPreset = ''; route(); }
   });
 }
 
@@ -1205,7 +1262,10 @@ async function viewFlagDetail(m) {
     if (!(e.status === 404 && S.flagNew)) throw e;
   }
   const draft = f && f.draft;
-  const content = (draft && draft.content) || (f && f.current && f.current.content) || flagTemplate(key);
+  // The preset chosen in the create dialog seeds a brand-new draft only: as
+  // soon as the flag has a draft or a published document, the server wins.
+  const content = (draft && draft.content) || (f && f.current && f.current.content) ||
+    presetFlagContent(S.flagPreset, key) || flagTemplate(key);
   const st = draft
     ? chip(draft.state, DRAFT_CHIP[draft.state] || 'gray') + (draft.deleted ? ' ' + chip(t('chip.deletionPending'), 'red') : '')
     : (f && f.current ? chip(t('chip.published'), 'green') : chip(t('chip.new'), 'gray'));
@@ -1224,6 +1284,8 @@ async function viewFlagDetail(m) {
           esc(t('flags.editorStructured')) + '</button>' +
         '<button type="button" class="btn sm" id="flag-mode-json" aria-pressed="false">' +
           esc(t('flags.editorAdvanced')) + '</button></div>' +
+        '<div class="row">' + presetSelect('flag-preset', FLAG_PRESETS) +
+          '<span class="muted">' + esc(t('preset.applyHint')) + '</span></div>' +
         '<div id="flag-structured"></div>' +
         '<div id="flag-advanced" class="hidden"><p class="muted">' + esc(t('flags.editorAdvancedHint')) + '</p>' +
           '<textarea id="flag-json" class="json" rows="24" spellcheck="false"></textarea></div>' +
@@ -1267,13 +1329,20 @@ async function viewFlagDetail(m) {
 function bindFlagDetail(m, key, kp, f) {
   let savedDraftHash = f?.draftHash || '';
   const structured = bindFlagStructured(m);
+  // A toolbar preset rewrites the JSON source behind the structured form and
+  // repaints it; nothing is saved until the operator saves the draft.
+  bindPresetPicker($('#flag-preset', m), FLAG_PRESETS, id => presetFlagContent(id, key),
+    $('#flag-json', m), structured);
   m.addEventListener('click', ev => {
     const link = ev.target.closest('[data-exp-from-flag]');
     if (!link || !confirmLeaveEditor()) return;
     S.view = 'experiments'; S.expId = link.dataset.expFromFlag; S.expTab = 'summary';
-    S.flagKey = null; route();
+    S.flagKey = null; S.flagPreset = ''; route();
   });
-  $('#flag-back', m).onclick = () => { if (!confirmLeaveEditor()) return; S.flagKey = null; S.flagNew = false; route(); };
+  $('#flag-back', m).onclick = () => {
+    if (!confirmLeaveEditor()) return;
+    S.flagKey = null; S.flagNew = false; S.flagPreset = ''; route();
+  };
   // Returns parsed content, or null (with toast) when invalid.
   const readJSON = () => {
     let c;
@@ -1437,12 +1506,13 @@ async function viewSegments(m) {
   bindListSearch(m);
   $('#seg-new', m).onclick = () => promptForm(t('seg.new'), [
     { name: 'key', label: t('prompt.newSegKey'), required: true },
-  ], t('btn.create'), ({ key }) => {
-    S.segKey = key.trim(); route();
+    { name: 'preset', label: t('preset.label'), type: 'select', options: presetOptions(SEGMENT_PRESETS) },
+  ], t('btn.create'), ({ key, preset }) => {
+    S.segKey = key.trim(); S.segPreset = preset || ''; route();
   });
   m.addEventListener('click', ev => {
     const tr = ev.target.closest('[data-seg]');
-    if (tr) { S.segKey = tr.dataset.seg; route(); }
+    if (tr) { S.segKey = tr.dataset.seg; S.segPreset = ''; route(); }
   });
 }
 
@@ -1450,7 +1520,9 @@ async function viewSegmentDetail(m) {
   const key = S.segKey;
   const kp = scopePath() + '/segments/' + encodeURIComponent(key);
   const d = S.segDrafts.find(x => x.key === key);
-  const content = (d && d.content) || segmentTemplate(key);
+  // Same rule as the flag editor: the create-dialog preset only seeds a
+  // segment that has no saved draft yet.
+  const content = (d && d.content) || presetSegmentContent(S.segPreset, key) || segmentTemplate(key);
   let preview = null;
   let previewUnavailable = false;
   let dependencies = { segmentRevision: 0, flags: [] };
@@ -1476,6 +1548,8 @@ async function viewSegmentDetail(m) {
     '<div class="row flag-editor-modes" role="group" aria-label="' + esc(t('seg.editorMode')) + '">' +
       '<button type="button" class="btn sm" id="seg-mode-structured" aria-pressed="true">' + esc(t('flags.editorStructured')) + '</button>' +
       '<button type="button" class="btn sm" id="seg-mode-json" aria-pressed="false">' + esc(t('flags.editorAdvanced')) + '</button></div>' +
+    '<div class="row">' + presetSelect('seg-preset', SEGMENT_PRESETS) +
+      '<span class="muted">' + esc(t('preset.applyHint')) + '</span></div>' +
     '<div id="seg-structured"></div>' +
     '<div id="seg-advanced" class="hidden"><textarea id="seg-json" class="json" rows="18" spellcheck="false"></textarea></div>' +
     '<div class="row"><button class="btn sm" id="seg-validate">' + esc(t('btn.validateJson')) + '</button><span id="seg-valid" class="muted grow"></span>' +
@@ -1492,12 +1566,19 @@ async function viewSegmentDetail(m) {
   $('#seg-json', m).value = JSON.stringify(content, null, 2);
   if (d && d.risk) $('#seg-risk', m).value = d.risk;
   const structured = bindSegmentStructured(m);
+  // Toolbar presets replace the JSON source behind the structured form and
+  // repaint it (same contract as the flag editor).
+  bindPresetPicker($('#seg-preset', m), SEGMENT_PRESETS, id => presetSegmentContent(id, key),
+    $('#seg-json', m), structured);
   if (!can('flag.write')) {
     $$('input, select, button', $('#seg-structured', m)).forEach(control => { control.disabled = true; });
     $('#seg-json', m).readOnly = true;
     $('#seg-risk', m).disabled = true;
   }
-  $('#seg-back', m).onclick = () => { if (!confirmLeaveEditor()) return; S.segKey = null; route(); };
+  $('#seg-back', m).onclick = () => {
+    if (!confirmLeaveEditor()) return;
+    S.segKey = null; S.segPreset = ''; route();
+  };
   $('#seg-history', m).addEventListener('change', event => {
     if (event.target.id === 'seg-history-select') {
       $('#seg-history', m).innerHTML = renderSegmentHistory(history, Number(event.target.value));
@@ -1506,7 +1587,7 @@ async function viewSegmentDetail(m) {
   m.addEventListener('click', event => {
     const flag = event.target.closest('[data-dependent-flag]');
     if (!flag || !confirmLeaveEditor()) return;
-    S.view = 'flags'; S.flagKey = flag.dataset.dependentFlag; S.segKey = null; route();
+    S.view = 'flags'; S.flagKey = flag.dataset.dependentFlag; S.segKey = null; S.segPreset = ''; route();
   });
   m.addEventListener('input', event => {
     if (event.target.closest('#seg-structured') ||
@@ -1867,7 +1948,7 @@ async function viewExpCreate(m) {
   m.addEventListener('click', event => {
     if (event.target.id !== 'x-open-flag' || !confirmLeaveEditor()) return;
     S.expCreate = false; S.wizardDirty = false; S.view = 'flags';
-    S.flagKey = $('#x-flag', m).value.trim(); S.flagNew = false; route();
+    S.flagKey = $('#x-flag', m).value.trim(); S.flagNew = false; S.flagPreset = ''; route();
   });
   m.addEventListener('input', () => { S.wizardDirty = true; });
   m.addEventListener('change', () => { S.wizardDirty = true; });
@@ -2744,6 +2825,7 @@ function init() {
       S.deepLinkDenied = false;
       S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;
       S.flagNew = S.expCreate = S.wizardDirty = false;
+      S.flagPreset = S.segPreset = '';
       $('#nav').classList.remove('mobile-open');
       $('#btn-menu').setAttribute('aria-expanded', 'false');
       route();
@@ -2761,6 +2843,7 @@ function init() {
     S.auditObject = ''; S.auditQuery = ''; S.auditCursors = [0]; S.auditPage = 0;
     S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;
     S.expCreate = S.wizardDirty = false;
+    S.flagPreset = S.segPreset = '';
     localStorage.setItem('grayling_ws', S.ws);
     try { await loadEnvs(); await refreshCapabilities(); } catch (e) { reportError(e); }
     route();
@@ -2774,6 +2857,7 @@ function init() {
     S.deepLinkRequested = false;
     S.flagKey = S.segKey = S.expId = S.metricRef = S.approvalID = S.aiRef = null;
     S.expCreate = S.wizardDirty = false;
+    S.flagPreset = S.segPreset = '';
     localStorage.setItem('grayling_env', S.env);
     route();
     probeAI();

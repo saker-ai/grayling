@@ -46,32 +46,40 @@ func TestRejectApprovalAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The submitter withdraws their own request; the reviewer rejects the
+	// other one. Both end in the same terminal state.
+	withdrawal, err := store.RequestApproval(platform.Approval{WorkspaceID: ws.ID, EnvironmentID: env.ID,
+		Action: "ai.pin", Object: "prompt/withdrawn", PayloadHash: "hash2", Reason: "second thoughts",
+		SubmittedBy: requester.Token.Name, SubmittedTokenID: requester.Token.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
 	server := NewServer(store, nil, Options{})
-	path := "/api/v1/admin/workspaces/review/approvals/" + approval.ID + "/reject"
-	call := func(secret, reason string) *httptest.ResponseRecorder {
+	call := func(id, secret, reason string) *httptest.ResponseRecorder {
 		t.Helper()
 		body, err := json.Marshal(map[string]string{"reason": reason})
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost,
+			"/api/v1/admin/workspaces/review/approvals/"+id+"/reject", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+secret)
 		response := httptest.NewRecorder()
 		server.Handler().ServeHTTP(response, req)
 		return response
 	}
 	for _, check := range []struct {
-		name, secret, reason string
-		want                 int
+		name, id, secret, reason string
+		want                     int
 	}{
-		{"self", requester.Secret, "reject", http.StatusForbidden},
-		{"cross workspace", outsider.Secret, "reject", http.StatusForbidden},
-		{"missing reason", reviewer.Secret, " ", http.StatusBadRequest},
-		{"reviewer", reviewer.Secret, "risk too high", http.StatusOK},
-		{"repeat", reviewer.Secret, "again", http.StatusConflict},
+		{"self withdrawal", withdrawal.ID, requester.Secret, "withdrawn", http.StatusOK},
+		{"cross workspace", approval.ID, outsider.Secret, "reject", http.StatusForbidden},
+		{"missing reason", approval.ID, reviewer.Secret, " ", http.StatusBadRequest},
+		{"reviewer", approval.ID, reviewer.Secret, "risk too high", http.StatusOK},
+		{"repeat", approval.ID, reviewer.Secret, "again", http.StatusConflict},
 	} {
 		t.Run(check.name, func(t *testing.T) {
-			response := call(check.secret, check.reason)
+			response := call(check.id, check.secret, check.reason)
 			if response.Code != check.want {
 				t.Fatalf("status %d, want %d: %s", response.Code, check.want, response.Body.String())
 			}
@@ -81,6 +89,13 @@ func TestRejectApprovalAPI(t *testing.T) {
 	if err != nil || got.State != platform.ApprovalRejected || got.RejectionReason != "risk too high" {
 		t.Fatalf("stored rejection: %+v %v", got, err)
 	}
+	withdrawn, err := store.GetApproval(withdrawal.ID)
+	if err != nil || withdrawn.State != platform.ApprovalRejected ||
+		withdrawn.RejectedBy != requester.Token.Name ||
+		withdrawn.RejectedTokenID != requester.Token.ID ||
+		withdrawn.RejectionReason != "withdrawn" {
+		t.Fatalf("stored withdrawal: %+v %v", withdrawn, err)
+	}
 	foundAudit := false
 	for _, record := range store.AuditList(ws.ID, 0) {
 		if record.Action == "approval.reject" && record.Object == approval.ID {
@@ -89,6 +104,15 @@ func TestRejectApprovalAPI(t *testing.T) {
 	}
 	if !foundAudit {
 		t.Fatal("rejection audit missing")
+	}
+	foundWithdrawalAudit := false
+	for _, record := range store.AuditList(ws.ID, 0) {
+		if record.Action == "approval.reject" && record.Object == withdrawal.ID {
+			foundWithdrawalAudit = true
+		}
+	}
+	if !foundWithdrawalAudit {
+		t.Fatal("withdrawal audit missing")
 	}
 }
 

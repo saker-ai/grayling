@@ -24,7 +24,13 @@ var (
 	ErrAccessDenied  = errors.New("platform: access denied")
 	ErrQuotaExceeded = errors.New("platform: quota exceeded")
 	ErrValidation    = errors.New("platform: validation failed")
-	ErrSelfApproval  = errors.New("platform: applicant cannot approve own change")
+	// ErrSelfApproval guards emergency post-reviews alone. Ordinary drafts and
+	// approvals may be self-approved so a single-administrator deployment can
+	// publish; see ApproveFlagDraft and ApproveChange. The message names the
+	// emergency case because that is the only rule it can still enforce —
+	// "applicant cannot approve own change" would now read as a blanket ban
+	// this store no longer applies.
+	ErrSelfApproval = errors.New("platform: an emergency post-review requires a reviewer other than the operator who triggered it")
 )
 
 // Data is the serializable store state.

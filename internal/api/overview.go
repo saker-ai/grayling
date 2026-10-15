@@ -82,8 +82,8 @@ type pendingApprovalItem struct {
 	SubmittedAt   time.Time  `json:"submittedAt"`
 	Risk          string     `json:"risk"`
 	ExpiresAt     *time.Time `json:"expiresAt,omitempty"`
-	MyAction      string     `json:"myAction"`      // review|execute|"" — TokenID+Name dual self-approval exclusion
-	BlockedReason string     `json:"blockedReason"` // self_approval|role|expired|breakglass_review|""
+	MyAction      string     `json:"myAction"`      // review|execute|""
+	BlockedReason string     `json:"blockedReason"` // role|expired|breakglass_review|""
 }
 
 type pendingModule struct {
@@ -302,10 +302,11 @@ func experimentPreLaunch(state model.ExperimentState) bool {
 }
 
 // buildOverviewPending scans every workspace approval and mirrors the
-// server-side action rules. Self-approval exclusion uses the same dual test
-// as ApproveChange/RejectChange (TokenID primary, name fallback); role gates
-// mirror the approve/publish RBAC. ActionableTotal counts the full scan and
-// is never truncated by limit — Items is.
+// server-side action rules. Self-approval no longer blocks anything: the
+// caller may review their own submission, so every submitted grant is
+// actionable when the role gate passes. Role gates mirror the approve/publish
+// RBAC. ActionableTotal counts the full scan and is never truncated by
+// limit — Items is.
 func buildOverviewPending(actor admin.Actor, approvals []*platform.Approval,
 	canApprove, canPublish bool, now time.Time, limit int) pendingModule {
 	mod := pendingModule{Status: "ok", Items: []pendingApprovalItem{}}
@@ -318,12 +319,9 @@ func buildOverviewPending(actor admin.Actor, approvals []*platform.Approval,
 			SubmittedBy: a.SubmittedBy, SubmittedAt: a.SubmittedAt, Risk: string(a.Risk),
 			ExpiresAt: a.ExpiresAt,
 		}
-		selfApproval := actor.TokenID == a.SubmittedTokenID || actor.Name == a.SubmittedBy
 		switch a.State {
 		case platform.DraftSubmitted:
 			switch {
-			case selfApproval:
-				item.BlockedReason = "self_approval"
 			case canApprove:
 				item.MyAction = "review"
 			default:
@@ -335,7 +333,7 @@ func buildOverviewPending(actor admin.Actor, approvals []*platform.Approval,
 			switch {
 			case expired:
 				item.BlockedReason = "expired"
-			case a.Action == "breakglass.review":
+			case a.Action == platform.BreakglassReviewAction:
 				// Emergency post-reviews are resolved in the approvals
 				// inbox, never executed from the overview.
 				item.BlockedReason = "breakglass_review"

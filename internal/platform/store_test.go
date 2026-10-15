@@ -218,7 +218,7 @@ func TestSlugValidation(t *testing.T) {
 	}
 }
 
-func TestSelfApprovalAndStateMachines(t *testing.T) {
+func TestSelfApprovalAllowedAndStateMachines(t *testing.T) {
 	s, _ := NewStore("")
 	ws, _ := s.CreateWorkspace("w", "")
 	env, _ := s.CreateEnvironment(ws.ID, "e", "")
@@ -233,15 +233,45 @@ func TestSelfApprovalAndStateMachines(t *testing.T) {
 	if err := s.SubmitFlagDraft(ws.ID, env.ID, "f", "alice"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if err := s.ApproveFlagDraft(ws.ID, env.ID, "f", "alice", ""); !errors.Is(err, ErrSelfApproval) {
-		t.Fatalf("high-risk self-approval: %v", err)
+	// The submitter may approve their own high-risk draft: applicant and
+	// approver are recorded separately, so the audit trail still shows it.
+	if err := s.ApproveFlagDraft(ws.ID, env.ID, "f", "alice", ""); err != nil {
+		t.Fatalf("high-risk self-approval must be allowed: %v", err)
 	}
-	if err := s.ApproveFlagDraft(ws.ID, env.ID, "f", "bob", ""); err != nil {
-		t.Fatalf("cross approval: %v", err)
+	selfDraft, err := s.GetFlagDraft(ws.ID, env.ID, "f")
+	if err != nil {
+		t.Fatalf("get draft: %v", err)
+	}
+	if selfDraft.State != DraftApproved || selfDraft.ApprovedBy != "alice" {
+		t.Fatalf("self-approved draft: %+v", selfDraft)
 	}
 	// Double submit from approved state is rejected.
 	if err := s.SubmitFlagDraft(ws.ID, env.ID, "f", "alice"); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("resubmit approved: %v", err)
+	}
+
+	// A second draft takes the same submitted → approved transition with a
+	// different approver, which must stay available too.
+	crossFlag := &model.Flag{
+		SchemaVersion: model.SchemaVersion, Key: "g", Type: model.FlagBool,
+		Variations:  map[string]any{"on": true, "off": false},
+		DefaultRule: &model.Rule{Variation: "off"},
+	}
+	if _, err := s.SaveFlagDraft(ws.ID, env.ID, crossFlag, RiskHigh, "alice", 0); err != nil {
+		t.Fatalf("save cross: %v", err)
+	}
+	if err := s.SubmitFlagDraft(ws.ID, env.ID, "g", "alice"); err != nil {
+		t.Fatalf("submit cross: %v", err)
+	}
+	if err := s.ApproveFlagDraft(ws.ID, env.ID, "g", "bob", ""); err != nil {
+		t.Fatalf("cross approval: %v", err)
+	}
+	crossDraft, err := s.GetFlagDraft(ws.ID, env.ID, "g")
+	if err != nil {
+		t.Fatalf("get cross draft: %v", err)
+	}
+	if crossDraft.State != DraftApproved || crossDraft.ApprovedBy != "bob" {
+		t.Fatalf("cross-approved draft: %+v", crossDraft)
 	}
 
 	// Experiment state machine.

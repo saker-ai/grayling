@@ -34,11 +34,19 @@ func TestApprovalStateMachineAndConcurrentUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ApproveChange(a.ID, "alice", "tok-a", "self"); !errors.Is(err, ErrSelfApproval) {
-		t.Fatalf("self approval: %v", err)
+	// The applicant may grant their own request; the approver fields record
+	// who actually pressed approve.
+	self, err := s.ApproveChange(a.ID, "alice", "tok-a", "self")
+	if err != nil {
+		t.Fatalf("self approval must be allowed: %v", err)
 	}
-	if _, err := s.ApproveChange(a.ID, "bob", "tok-b", "reviewed"); err != nil {
-		t.Fatal(err)
+	if self.State != DraftApproved || self.ApprovedBy != "alice" || self.ApprovedTokenID != "tok-a" {
+		t.Fatalf("self-approved change: %+v", self)
+	}
+	// A second grant on the same request is an invalid state, whether it
+	// comes from the applicant or anyone else.
+	if _, err := s.ApproveChange(a.ID, "bob", "tok-b", "reviewed"); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("double approval: %v", err)
 	}
 	if _, err := s.UseApproval(a.ID, a.WorkspaceID, a.EnvironmentID, a.Action, a.Object, "different", 3); !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed payload: %v", err)
@@ -144,8 +152,25 @@ func TestRejectApprovalPreventsUseAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RejectChange(a.ID, "alice", "tok-a", "self"); !errors.Is(err, ErrSelfApproval) {
-		t.Fatalf("self rejection: %v", err)
+	// The applicant may reject their own request, which withdraws it.
+	withdrawn, err := s.RequestApproval(Approval{WorkspaceID: a.WorkspaceID,
+		EnvironmentID: a.EnvironmentID, Action: a.Action, Object: "prompt/withdrawn",
+		PayloadHash: "hash-w", Reason: "changed my mind",
+		SubmittedBy: "alice", SubmittedTokenID: "tok-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selfRejected, err := s.RejectChange(withdrawn.ID, "alice", "tok-a", "withdrawn")
+	if err != nil {
+		t.Fatalf("self rejection must be allowed: %v", err)
+	}
+	if selfRejected.State != ApprovalRejected || selfRejected.RejectedBy != "alice" ||
+		selfRejected.RejectedTokenID != "tok-a" || selfRejected.RejectionReason != "withdrawn" {
+		t.Fatalf("self-withdrawn approval: %+v", selfRejected)
+	}
+	if _, err := s.UseApproval(withdrawn.ID, withdrawn.WorkspaceID, withdrawn.EnvironmentID,
+		withdrawn.Action, withdrawn.Object, withdrawn.PayloadHash, withdrawn.BaseRevision); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("use self-withdrawn request: %v", err)
 	}
 	if _, err := s.RejectChange(a.ID, "bob", "tok-b", ""); !errors.Is(err, ErrValidation) {
 		t.Fatalf("empty reason: %v", err)

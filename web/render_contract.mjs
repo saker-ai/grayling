@@ -14,6 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // browser's <script> tags) so app.js resolves t()/I18N from the catalogs.
 // The sandbox has no grayling_lang and no navigator.language → en (default).
 const code = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8') + '\n' +
+  fs.readFileSync(path.join(__dirname, 'presets.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'flag_editor.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'segment_editor.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, 'approvals.js'), 'utf8') + '\n' +
@@ -637,7 +638,10 @@ const pending = sandbox.__renderOverviewApprovals({ status: 'ok', actionableTota
     submittedBy: 'alice', submittedAt: OVS, risk: 'high', expiresAt: OVS,
     myAction: 'execute', blockedReason: '' },
   { id: 'ap-3', action: 'flag.publish', object: 'flag-c', environmentId: 'prod',
-    submittedBy: 'bob', submittedAt: OVS, risk: 'normal', myAction: '', blockedReason: 'self_approval' },
+    // The three codes the server actually emits (role|expired|breakglass_review)
+    // are pinned by ap-4/5/6 below; ap-3 keeps the unknown-code passthrough
+    // covered, since a future server enum value must never render as blank.
+    submittedBy: 'bob', submittedAt: OVS, risk: 'normal', myAction: '', blockedReason: 'future_reason' },
   { id: 'ap-4', action: 'flag.publish', object: 'flag-d', environmentId: 'prod',
     submittedBy: 'carol', submittedAt: OVS, risk: 'normal', myAction: '', blockedReason: 'role' },
   { id: 'ap-5', action: 'flag.publish', object: 'flag-e', environmentId: 'prod',
@@ -647,9 +651,9 @@ const pending = sandbox.__renderOverviewApprovals({ status: 'ok', actionableTota
 assert(pending.includes('Waiting for my review') && pending.includes('Waiting for my execution') &&
   pending.includes('2 waiting for you') && pending.includes('data-overview-approval="ap-1"'),
   'server myAction verdicts must render as chips with the true actionable total');
-assert(pending.includes('Submitted by you') && pending.includes('cannot approve or execute') &&
+assert(pending.includes('future_reason') && pending.includes('cannot approve or execute') &&
   pending.includes('Grant expired') && pending.includes('approvals inbox'),
-  'all four blocked reasons must render their localized explanations');
+  'mapped blocked reasons localize, an unknown code passes through verbatim');
 assert(pending.includes('&lt;img src=x&gt;') && !pending.includes('<img'),
   'approval objects must be escaped');
 const pendingDown = sandbox.__renderOverviewApprovals({ status: 'unavailable', reason: 'approvals_unavailable' });
