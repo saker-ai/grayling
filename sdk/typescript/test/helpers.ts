@@ -80,8 +80,12 @@ export class GraylingServer {
   async publishFlag(ws: string, env: string, content: Record<string, unknown>,
     opts: { approver?: string; risk?: string } = {}): Promise<any> {
     const base = `/api/v1/admin/workspaces/${ws}/environments/${env}/flags/${content.key}`;
+    // Draft saves are guarded by optimistic locking: the editor must echo the
+    // revision and draft fingerprint it read ("" when no draft exists yet).
+    const current = await this.expect("GET", base, 200, this.ownerToken);
     await this.expect("PUT", `${base}/draft`, 200, this.ownerToken,
-      { content, risk: opts.risk ?? "normal" });
+      { content, risk: opts.risk ?? "normal",
+        baseRevision: current.currentRevision, expectedDraftHash: current.draftHash });
     await this.expect("POST", `${base}/submit`, 200, this.ownerToken, { reason: "TypeScript SDK integration" });
     await this.expect("POST", `${base}/approve`, 200, opts.approver ?? this.reviewerToken, { note: "ok" });
     return await this.expect("POST", `${base}/publish`, 200, this.ownerToken, { note: "ship" });

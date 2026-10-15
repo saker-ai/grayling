@@ -84,10 +84,17 @@ func TestPostgresReportWindowRecomputesAfterReload(t *testing.T) {
 	if _, err := store.TransitionExperiment(exp.ID, model.ExperimentReviewed, "test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.TransitionExperiment(exp.ID, model.ExperimentRunning, "test"); err != nil {
+	// The store stamps StartedAt on its own record and returns a copy, while the
+	// experiment CreateExperiment handed back stays frozen, so the started time
+	// comes from the transition that moved it to running.
+	running, err := store.TransitionExperiment(exp.ID, model.ExperimentRunning, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	start := *exp.StartedAt
+	if running.StartedAt == nil {
+		t.Fatal("running experiment has no StartedAt")
+	}
+	start := *running.StartedAt
 	base := platform.Event{WorkspaceID: ws.ID, EnvironmentID: env.ID, ExperimentID: exp.ID, Epoch: 1, FlagKey: "f"}
 	makeEvent := func(id string, typ platform.EventType, arm, unit string, at time.Time) *platform.Event {
 		ev := base
