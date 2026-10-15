@@ -217,7 +217,7 @@ func (p *gormPersistence) recordCollectionCounts(counts []collectionCount) error
 				(workspace_id, environment_id, experiment_id, epoch, code, cnt)
 				VALUES (?, ?, ?, ?, ?, ?)
 				ON CONFLICT (workspace_id, environment_id, experiment_id, epoch, code)
-				DO UPDATE SET cnt = cnt + excluded.cnt`,
+				DO UPDATE SET cnt = collection_diagnostics.cnt + excluded.cnt`,
 				count.WorkspaceID, count.EnvironmentID, count.ExperimentID,
 				count.Epoch, count.Code, count.Count).Error; err != nil {
 				return err
