@@ -4,6 +4,8 @@ go 1.27.2
 
 require (
 	github.com/blang/semver/v4 v4.0.0
+	github.com/cenkalti/backoff/v5 v5.0.3
+	github.com/coder/websocket v1.8.15
 	github.com/godeps/gonacos v0.0.0-20261006194453-ea39c83bf6f0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/libtnb/sqlite v1.2.2
@@ -13,6 +15,7 @@ require (
 	github.com/redis/go-redis/v9 v9.21.0
 	github.com/thomaspoignant/go-feature-flag/modules/core v0.7.2
 	golang.org/x/net v0.60.0
+	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/postgres v1.6.3
 	gorm.io/gorm v1.31.2
@@ -46,7 +49,6 @@ require (
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clbanning/mxj/v2 v2.5.5 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
 	github.com/deckarep/golang-set v1.7.1 // indirect
 	github.com/diegoholiveira/jsonlogic/v3 v3.10.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -99,7 +101,6 @@ require (
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.83.2 // indirect
-	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
 	modernc.org/libc v1.74.4 // indirect

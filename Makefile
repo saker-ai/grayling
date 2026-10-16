@@ -92,3 +92,14 @@ run: build ensure-admin-password check-run-port
 
 clean:
 	rm -rf bin/
+
+# Agent SDK contract and real WSS transport checks.
+.PHONY: test-agent-sdk generate-agent check-agent-generated
+test-agent-sdk:
+	$(GO) test -race ./api/agent/v1 ./pkg/agent -count=1
+
+generate-agent:
+	sh scripts/generate_agent_proto.sh
+
+check-agent-generated:
+	sh scripts/check_agent_generated.sh
