@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/saker-ai/grayling/pkg/bucketing"
 )
@@ -18,15 +19,17 @@ var KeyPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 
 // Limits bounding document cost (§5.2, §11).
 const (
-	MaxVariations      = 64
-	MaxTargetingRules  = 64
-	MaxConstraints     = 32
-	MaxSegmentsPerRule = 16
-	MaxSegmentDepth    = 8
-	MaxRegexLen        = 512
-	MaxSetValues       = 512
-	MaxSaltLen         = 128
-	MaxFields          = 64
+	MaxVariations       = 64
+	MaxTargetingRules   = 64
+	MaxConstraints      = 32
+	MaxSegmentsPerRule  = 16
+	MaxSegmentDepth     = 8
+	MaxRegexLen         = 512
+	MaxSetValues        = 512
+	MaxSaltLen          = 128
+	MaxFields           = 64
+	MaxDisplayNameRunes = 128
+	MaxDescriptionRunes = 2048
 )
 
 // HashBytes returns the SHA-256 hex digest used for manifest entries and
@@ -75,6 +78,25 @@ func (e *ValidationError) add(format string, args ...any) {
 	e.Problems = append(e.Problems, fmt.Sprintf(format, args...))
 }
 
+// Metadata is bounded in Unicode code points, allowing Chinese names without
+// weakening the ASCII identifiers used in API paths and evaluation references.
+func validateDisplayMetadata(displayName, description string, verr *ValidationError) {
+	for _, field := range []struct {
+		name  string
+		value string
+		limit int
+	}{
+		{"displayName", displayName, MaxDisplayNameRunes},
+		{"description", description, MaxDescriptionRunes},
+	} {
+		if !utf8.ValidString(field.value) {
+			verr.add("%s must be valid UTF-8", field.name)
+		} else if utf8.RuneCountInString(field.value) > field.limit {
+			verr.add("%s exceeds %d Unicode characters", field.name, field.limit)
+		}
+	}
+}
+
 // ValidateFlag checks one flag in the context of the segments it may
 // reference. segments may be nil when the flag references none.
 func ValidateFlag(f *Flag, segments map[string]*Segment) error {
@@ -88,6 +110,7 @@ func ValidateFlag(f *Flag, segments map[string]*Segment) error {
 	if !KeyPattern.MatchString(f.Key) {
 		verr.add("key %q does not match %s", f.Key, KeyPattern)
 	}
+	validateDisplayMetadata(f.DisplayName, f.Description, verr)
 	switch f.Type {
 	case FlagBool, FlagString, FlagNumber, FlagJSON:
 	default:
@@ -408,6 +431,7 @@ func ValidateSegment(s *Segment, segments map[string]*Segment) error {
 	if !KeyPattern.MatchString(s.Key) {
 		verr.add("key %q does not match %s", s.Key, KeyPattern)
 	}
+	validateDisplayMetadata(s.DisplayName, s.Description, verr)
 	// Standalone validation registers all referenced fields; flag-level
 	// validation re-checks them against the flag's allowlist.
 	registered := map[string]bool{TargetingKeyField: true}

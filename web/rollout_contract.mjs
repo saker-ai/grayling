@@ -55,7 +55,8 @@ const sandbox = {
   console,
   // No-op timers keep the harness process from lingering on toast fade-outs.
   setInterval: () => 0, clearInterval() {}, setTimeout: () => 0, clearTimeout() {},
-  fetch(url, opts) {
+  AbortController,
+    fetch(url, opts) {
     if (opts.method === 'GET' && url === '/api/v1/admin/experiments/exp-1') {
       return Promise.resolve({ ok: true, status: 200,
         text: () => Promise.resolve(JSON.stringify(currentExperiment)) });

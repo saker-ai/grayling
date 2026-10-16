@@ -35,12 +35,13 @@ const sandbox = {
   history: { pushState() {}, replaceState() {} },
   navigator: { clipboard: { writeText() { return Promise.resolve(); } } },
   console, setInterval, clearInterval, setTimeout, clearTimeout,
+  AbortController,
   fetch: () => Promise.reject(new Error('no fetch in contract test')),
 };
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 // Expose renderReport without modifying the shipped file (append a bridge).
-vm.runInNewContext(code + '\n;globalThis.__renderReport = renderReport; globalThis.__renderDiagnostics = renderDiagnostics; globalThis.__renderExpDecisionHero = renderExpDecisionHero; globalThis.__classifyExpStatus = classifyExpStatus; globalThis.__renderExpHero = renderExpHero; globalThis.__S = S; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__renderExpStatusBand = renderExpStatusBand; globalThis.__renderExpZoneNav = renderExpZoneNav; globalThis.__renderHealthZone = renderHealthZone; globalThis.__renderHealthReportCard = renderHealthReportCard; globalThis.__fmtTime = fmtTime; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagExperimentImpact = renderFlagExperimentImpact; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail; globalThis.__renderOverviewRiskBand = renderOverviewRiskBand; globalThis.__renderOverviewStats = renderOverviewStats; globalThis.__renderOverviewApprovals = renderOverviewApprovals; globalThis.__renderOverviewReleases = renderOverviewReleases; globalThis.__renderOverviewModuleFailure = renderOverviewModuleFailure;', sandbox);
+vm.runInNewContext(code + '\n;globalThis.__loadEditorSegmentSuggestions = loadEditorSegmentSuggestions; globalThis.__resourceIdentity = resourceIdentity; globalThis.__flagListPage = flagListPage; globalThis.__renderFlagWorkflow = renderFlagWorkflow; globalThis.__renderPublishedSummary = renderPublishedSummary; globalThis.__renderReport = renderReport; globalThis.__renderDiagnostics = renderDiagnostics; globalThis.__renderExpDecisionHero = renderExpDecisionHero; globalThis.__classifyExpStatus = classifyExpStatus; globalThis.__renderExpHero = renderExpHero; globalThis.__S = S; globalThis.__renderBindReadiness = renderBindReadiness; globalThis.__renderBindConflict = renderBindConflict; globalThis.__renderExpStatusBand = renderExpStatusBand; globalThis.__renderExpZoneNav = renderExpZoneNav; globalThis.__renderHealthZone = renderHealthZone; globalThis.__renderHealthReportCard = renderHealthReportCard; globalThis.__fmtTime = fmtTime; globalThis.__sortFlagsForList = sortFlagsForList; globalThis.__flagListCategory = flagListCategory; globalThis.__renderFlagDiff = renderFlagDiff; globalThis.__renderFlagSaveConflict = renderFlagSaveConflict; globalThis.__renderFlagExperimentImpact = renderFlagExperimentImpact; globalThis.__renderFlagStructured = renderFlagStructured; globalThis.__lintFlag = lintFlag; globalThis.__renderSegmentStructured = renderSegmentStructured; globalThis.__lintSegment = lintSegment; globalThis.__renderSegmentDependencies = renderSegmentDependencies; globalThis.__renderSegmentHistory = renderSegmentHistory; globalThis.__renderSegmentMatchForm = renderSegmentMatchForm; globalThis.__renderSegmentMatchResult = renderSegmentMatchResult; globalThis.__parseSegmentPreviewContext = parseSegmentPreviewContext; globalThis.__renderApprovalDetail = renderApprovalDetail; globalThis.__renderApprovalComparison = renderApprovalComparison; globalThis.__renderAIResourceDetail = renderAIResourceDetail; globalThis.__renderOverviewRiskBand = renderOverviewRiskBand; globalThis.__renderOverviewStats = renderOverviewStats; globalThis.__renderOverviewApprovals = renderOverviewApprovals; globalThis.__renderOverviewReleases = renderOverviewReleases; globalThis.__renderOverviewModuleFailure = renderOverviewModuleFailure;', sandbox);
 assert.strictEqual(typeof sandbox.__renderReport, 'function', 'renderReport() not exposed from app.js');
 
 const delivered = sandbox.__renderDiagnostics({ exposureMode: 'onRender', perVariant: [
@@ -72,7 +73,7 @@ const structuredFlag = sandbox.__renderFlagStructured({ type: 'bool',
   targeting: [{ name: '<script>alert(1)</script>', percentage: { control: 50, treatment: 50 },
     constraints: [{ field: 'country', op: 'eq', value: 'CN' }] }] });
 assert(structuredFlag.includes('Percentage split') && structuredFlag.includes('data-split="control"') &&
-  structuredFlag.includes('Constraints (JSON array)') && !structuredFlag.includes('<script>') &&
+  structuredFlag.includes('data-condition-field') && !structuredFlag.includes('<script>') &&
   structuredFlag.includes('&lt;script&gt;'), 'structured Flag editor must render split and escape rule content');
 assert(sandbox.__lintFlag({ type: 'bool', variations: { control: 'false' },
   defaultRule: { variation: 'control' }, targeting: {} }).length >= 2,
@@ -706,3 +707,35 @@ assert(moduleFailure.includes('Recent releases is unavailable: audit_unavailable
   'module failure banner must state name, reason, status, coverage and retry');
 
 console.log('renderReport DOM contract: all assertions passed (9 report shapes + six-state hero matrix)');
+
+const manyFlags = Array.from({ length: 101 }, (_, i) => ({ key: 'flag-' + i, draft: { state: i % 2 ? 'submitted' : 'editing' } }));
+assert.equal(sandbox.__flagListPage(manyFlags).records.length, 25, 'large lists render a bounded page');
+assert.equal(sandbox.__flagListPage(manyFlags, { page: 4 }).records.length, 1, 'last page preserves remaining records');
+assert.equal(sandbox.__flagListPage(manyFlags, { query: 'FLAG-100' }).records[0].key, 'flag-100', 'search covers records outside the visible page');
+assert.equal(sandbox.__flagListPage(manyFlags, { category: 'submitted' }).total, 50, 'status filter count includes all pages');
+assert.equal(sandbox.__flagListPage([], { page: 99 }).page, 0, 'empty search clamps page safely');
+assert(sandbox.__renderFlagWorkflow({ state: 'approved' }).includes('aria-current="step">Approved'), 'approved workflow identifies the next publishing stage');
+assert(sandbox.__renderPublishedSummary({ type: 'string', variations: { a: '<script>' }, defaultRule: { variation: 'a' } }).includes('&lt;script&gt;'), 'published summary escapes variant values');
+
+const namedFlags = [{ key: 'checkout-v2', draft: { content: { displayName: '\u4e2d\u6587\u540d\u79f0', description: 'For regional checkout' } } }];
+assert.equal(sandbox.__flagListPage(namedFlags, { query: '\u4e2d\u6587' }).total, 1, 'list search includes display names');
+assert.equal(sandbox.__flagListPage(namedFlags, { query: 'REGIONAL' }).total, 1, 'list search includes descriptions without changing machine keys');
+assert(sandbox.__resourceIdentity({ displayName: '<name>', description: '<description>' }, 'safe-key', 'data-flag').includes('data-flag="safe-key"'), 'named navigation continues to use the ASCII key');
+assert(sandbox.__resourceIdentity({ displayName: '<name>' }, 'safe-key').includes('&lt;name&gt;'), 'display names are escaped');
+assert(sandbox.__renderFlagDiff({ content: { displayName: 'Before' } }, { content: { displayName: 'After', description: 'New context' } }).includes('New context'), 'metadata changes are included in draft review');
+let resolveSuggestions;
+sandbox.__testApi = () => new Promise(resolve => { resolveSuggestions = resolve; });
+vm.runInNewContext('api = globalThis.__testApi;', sandbox);
+const suggestionList = { innerHTML: '' };
+const suggestionRoot = { dataset: { segmentKeys: '[]' }, isConnected: true,
+  querySelectorAll: () => [suggestionList] };
+assert.equal(sandbox.__loadEditorSegmentSuggestions(suggestionRoot, 'self'), undefined, 'optional suggestions never block editor setup');
+resolveSuggestions([{ key: 'self' }, { key: '<audience>' }]);
+await Promise.resolve();
+assert(suggestionList.innerHTML.includes('&lt;audience&gt;') && !suggestionList.innerHTML.includes('self'), 'lazy suggestions exclude self references and escape keys');
+assert.deepEqual(JSON.parse(suggestionRoot.dataset.segmentKeys), ['<audience>'], 'lazy suggestions update cached keys without repainting controls');
+const staleRoot = { dataset: {}, isConnected: false, querySelectorAll() { throw new Error('stale editor mutated'); } };
+sandbox.__loadEditorSegmentSuggestions(staleRoot);
+resolveSuggestions([{ key: 'ignored' }]);
+await Promise.resolve();
+assert.equal(staleRoot.dataset.segmentKeys, undefined, 'detached editors ignore late suggestions');

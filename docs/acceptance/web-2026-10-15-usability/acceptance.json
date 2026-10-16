@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-15",
+  "scope": "Web usability and resilience",
+  "environment": "Isolated in-memory Grayling on loopback 19107; existing data and services untouched",
+  "browser": "Headless Chromium; desktop 1440x1000, mobile 390x844",
+  "checks": {
+    "unsaved_navigation": "Native confirm shown; dismiss preserved URL and editor. Separate deterministic window.confirm=false check preserved edited allowlist and recorded one confirmation.",
+    "typed_conditions": "Changed allowlist to alice/bob/charlie, saved via real draft API and read back matching values.",
+    "workflow": "Saved draft shows submit; real submit transitions to submitted and shows approve/reject. No publish performed.",
+    "pagination": "28 real draft records: 25 on page one, 3 on page two; search finds checkout-00 from page two; focus moves to enabled previous button at boundary.",
+    "mobile": "390px viewport, document and main scrollWidth 390 after long hash wrapping correction.",
+    "i18n": "No missing catalog keys in browser.",
+    "javascript_errors": "None reported in final session.",
+    "style_scan": "Impeccable detector returned []."
+  },
+  "screenshots": [
+    "desktop.png",
+    "mobile.png"
+  ],
+  "limitations": [
+    "Desktop screenshot is draft editing state. Mobile screenshot uses the identical final p.mono/view-head wrap rule injected into the running page after identifying hash overflow; source CSS contains this rule and final Go build includes source assets.",
+    "Real timeout/abort/navigation failure scenarios covered by deterministic Node contracts, not live network throttling.",
+    "Flag API still fetches the full list; pagination bounds rendered rows rather than server response size.",
+    "No physical mobile device or screen reader testing."
+  ]
+}

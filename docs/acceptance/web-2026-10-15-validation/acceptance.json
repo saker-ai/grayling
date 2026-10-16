@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-15",
+  "cause": "Create-dialog validation did not cover document lint/JSON-mode saves; not all form parameters were statically checked.",
+  "fixes": [
+    "ASCII resource key, schema, identifiers, field registration, rule shapes/limits, percentages and bucketing checked before saving.",
+    "Segment and Flag constraints share typed operand validation; server remains authoritative for referenced object existence and full RE2 syntax.",
+    "Invalid JSON-mode saves report persistent errors and retain input.",
+    "Incomplete model-allowlist and guardrail rows are rejected instead of silently filtered.",
+    "Metric definitions, experiment numbers, slug formats, token scopes and rollout step fields receive local validation."
+  ],
+  "browser": {
+    "environment": "Isolated in-memory loopback server 19111",
+    "newChineseKey": "Native constraint validation blocked submission and kept the dialog open.",
+    "jsonChineseKey": "Actual save handler issued zero PUT requests; error shown and invalid input kept.",
+    "simulatedBackend400": "Actual save handler displayed rejection, retained Chinese displayName, and showed no success notification.",
+    "missingTranslationKeys": []
+  },
+  "contracts": [
+    "document_validation_contract.mjs",
+    "validation_contract.mjs",
+    "form_validation_contract.mjs",
+    "save_validation_contract.mjs"
+  ],
+  "limits": [
+    "Permissions, cross-document references, cycles, live revisions and final server parsing remain server-side validations.",
+    "Browser rejection scenario used a mocked 400 response; it did not mutate server data."
+  ]
+}

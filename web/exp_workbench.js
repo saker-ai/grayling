@@ -589,14 +589,14 @@ function renderExpHero(cls, report, error = null) {
     return '<div class="banner" id="exp-hero-banner"><strong>' + esc(t('exp.hero.immature')) + '</strong>' +
       '<div>' + esc(eta) + '</div>' +
       ((p.reasons || []).length
-        ? '<ul class="muted">' + p.reasons.map(r => '<li>' + esc(r) + '</li>').join('') + '</ul>' : '') +
+        ? '<ul class="muted">' + p.reasons.map(r => '<li>' + (r === 'no randomized exposures recorded yet' ? esc(t('diagnostic.noExposures')) + '<details><summary>' + esc(t('diagnostic.raw')) + '</summary><code>' + esc(r) + '</code></details>' : esc(r)) + '</li>').join('') + '</ul>' : '') +
       '</div>' + actionRow;
   }
   if (kind === 'blocked') {
     const scope = t('exp.hero.blockedScope', { flag: p.scope.flag, env: p.scope.env, epoch: p.scope.epoch });
     return '<div class="banner err" id="exp-hero-banner"><strong>' + esc(t('exp.hero.blocked')) + '</strong>' +
       ((p.reasons || []).length
-        ? '<ul>' + p.reasons.map(r => '<li>' + esc(r) + '</li>').join('') + '</ul>' : '') +
+        ? '<ul>' + p.reasons.map(r => '<li>' + (r === 'no randomized exposures recorded yet' ? esc(t('diagnostic.noExposures')) + '<details><summary>' + esc(t('diagnostic.raw')) + '</summary><code>' + esc(r) + '</code></details>' : esc(r)) + '</li>').join('') + '</ul>' : '') +
       ((p.breaches || []).length
         ? '<div>' + esc(t('report.breaches')) + '<ul>' + p.breaches.map(gb =>
           '<li><span class="mono">' + esc(gb.metric) + '</span> — ' + esc(gb.detail || '') + '</li>').join('') + '</ul></div>' : '') +
@@ -1142,6 +1142,21 @@ function setRolloutReportStatus(m, status) {
 
 // bindRollout wires the rendered rollout card. State-conditional buttons are
 // guarded (they exist only in the states where the action is legal server-side).
+function validateReleaseSteps(steps) {
+  if (!steps.length || steps.length > 32) return t('ro.validationCount');
+  const names = new Set();
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index];
+    if (!step.name || !Number.isFinite(step.ratio) || step.ratio <= 0 || step.ratio > 100) return t('toast.stepFields');
+    if (names.has(step.name)) return t('ro.validationNames');
+    names.add(step.name);
+    if (index && step.ratio <= steps[index - 1].ratio) return t('toast.ratioIncrease', { i: index + 1 });
+    if (!Number.isFinite(step.minRuntime) || step.minRuntime <= 0 || step.minRuntime > 9223372036854775807) return t('toast.minRuntimePositive');
+    if (!Number.isFinite(step.observationWindow) || step.observationWindow < 0 || step.observationWindow > 9223372036854775807) return t('ro.validationObservation');
+  }
+  return '';
+}
+
 function bindRollout(m, expId, exp = null) {
   const base = '/api/v1/admin/experiments/' + encodeURIComponent(expId) + '/release-plan';
   const plan = exp?.releasePlan;
@@ -1266,13 +1281,9 @@ function bindRollout(m, expId, exp = null) {
       minRuntime: Math.round(Number($('.rs-min', r).value || 0) * NS_HOUR),
       observationWindow: Math.round(Number($('.rs-obs', r).value || 0) * NS_HOUR),
       autoAdvance: $('.rs-auto', r).checked,
-    })).filter(s => s.name || s.ratio);
-    if (!steps.length) { toast(t('toast.needStep'), false); return; }
-    if (steps.some(s => !s.name || !(s.ratio > 0 && s.ratio <= 100))) { toast(t('toast.stepFields'), false); return; }
-    for (let i = 1; i < steps.length; i++) {
-      if (steps[i].ratio <= steps[i - 1].ratio) { toast(t('toast.ratioIncrease', { i: i + 1 }), false); return; }
-    }
-    if (steps.some(s => !(s.minRuntime > 0))) { toast(t('toast.minRuntimePositive'), false); return; }
+    }));
+    const issue = validateReleaseSteps(steps);
+    if (issue) { toast(issue, false); return; }
     requestChange('release_plan.create', expId, { steps }).catch(e => reportError(e));
   };
 }

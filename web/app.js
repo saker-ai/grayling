@@ -8,6 +8,29 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
+function resourceKeyError(value) {
+  return typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.exec(value)?.[0] === value
+    ? '' : t('key.formatHint');
+}
+
+function resourceKeyField(label) {
+  return { name: 'key', label, required: true, placeholder: 'office-network',
+    hint: t('key.formatHint'), validate: resourceKeyError };
+}
+
+function reportDocumentIssues(root, prefix, issues) {
+  const output = $('#' + prefix + '-valid', root);
+  if (output) {
+    output.className = 'err-text grow';
+    output.textContent = issues.join(' · ');
+    output.setAttribute('role', 'alert');
+    output.tabIndex = -1;
+    output.scrollIntoView?.({ block: 'nearest' });
+    output.focus?.();
+  }
+  toast(issues.join(' · '), false);
+}
+
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -42,7 +65,7 @@ function reviewPreview(p, id = 'review-preview') {
   if (!p) return '';
   return '<section class="card" id="' + esc(id) + '"><h3>' + esc(t('approval.preview')) + '</h3>' +
     '<p>' + esc(t('approval.environment')) + ': ' + esc(p.targetEnvironment) + ' · ' +
-      esc(t('approval.risk')) + ': ' + esc(p.risk) + ' · ' + esc(t('approval.base')) + ': r' + esc(p.baseRevision) + '</p>' +
+      esc(t('approval.risk')) + ': ' + esc(diagnosticLabel(p.risk)) + ' · ' + esc(t('approval.base')) + ': r' + esc(p.baseRevision) + '</p>' +
     '<p>' + esc(t('approval.changed')) + ': ' + esc((p.changedFields || []).join(', ') || '—') + '</p>' +
     '<p>' + esc(t('approval.impact')) + ': ' + esc(p.estimatedAffected) + '</p>' +
     renderFlagExperimentImpact(p.experimentImpact, false) +
@@ -90,8 +113,19 @@ function toast(msg, ok = true) {
   d.className = 'toast ' + (ok ? 'ok' : 'err');
   d.textContent = msg;
   $('#toasts').appendChild(d);
-  setTimeout(() => d.classList.add('fade'), 3800);
-  setTimeout(() => d.remove(), 4300);
+  if (ok) {
+    setTimeout(() => d.classList.add('fade'), 3800);
+    setTimeout(() => d.remove(), 4300);
+  } else {
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'btn sm toast-close';
+    dismiss.textContent = t('btn.dismissError');
+    dismiss.onclick = () => d.remove();
+    d.appendChild(dismiss);
+    const errors = $$('.toast.err', $('#toasts'));
+    errors.slice(0, Math.max(0, errors.length - 5)).forEach(error => error.remove());
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -105,21 +139,38 @@ let memoryToken = '';
 let cookieSession = false;
 const sameOriginConsole = () => !baseUrl() || baseUrl() === location.origin;
 
+// Keep the deadline active while reading the response body as well as headers.
+async function requestBody(url, options, readBody, timeoutMs = 30000) {
+  const controller = new AbortController();
+  const external = options.signal;
+  const cancel = () => controller.abort();
+  if (external?.aborted) cancel();
+  else external?.addEventListener('abort', cancel, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return { response, body: await readBody(response) };
+  } catch (error) {
+    if (timedOut) throw new ApiError(0, 'timeout', t('err.requestTimeout'));
+    if (controller.signal.aborted) throw new ApiError(0, 'cancelled', t('err.requestCancelled'));
+    throw new ApiError(0, 'network', t('err.cannotReach', { url: baseUrl() || t('err.sameOrigin'), msg: error.message }));
+  } finally {
+    clearTimeout(timer);
+    external?.removeEventListener('abort', cancel);
+  }
+}
+
 async function api(path, opts = {}) {
   const { method = 'GET', body } = opts;
   const headers = {};
   if (!cookieSession && memoryToken) headers.Authorization = 'Bearer ' + memoryToken;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  let res;
-  try {
-    res = await fetch(baseUrl() + path, {
-      method, headers, credentials: cookieSession ? 'same-origin' : 'omit',
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-  } catch (e) {
-    throw new ApiError(0, 'network', t('err.cannotReach', { url: baseUrl() || t('err.sameOrigin'), msg: e.message }));
-  }
-  const text = await res.text();
+  const { response: res, body: text } = await requestBody(baseUrl() + path, {
+    method, headers, credentials: cookieSession ? 'same-origin' : 'omit',
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: opts.signal,
+  }, response => response.text());
   let data = null;
   if (text) { try { data = JSON.parse(text); } catch { /* non-JSON body */ } }
   if (!res.ok) {
@@ -134,21 +185,17 @@ async function api(path, opts = {}) {
 async function downloadReport(path, format) {
   const headers = {};
   if (!cookieSession && memoryToken) headers.Authorization = 'Bearer ' + memoryToken;
-  let res;
-  try {
-    res = await fetch(baseUrl() + path + '?format=' + format, {
-      headers, credentials: cookieSession ? 'same-origin' : 'omit',
-    });
-  } catch (e) {
-    throw new ApiError(0, 'network', t('err.cannotReach', { url: baseUrl() || t('err.sameOrigin'), msg: e.message }));
-  }
+  const { response: res, body: reportBody } = await requestBody(baseUrl() + path + '?format=' + format, {
+    headers, credentials: cookieSession ? 'same-origin' : 'omit',
+  }, response => response.ok ? response.blob() : response.text());
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
+    let body = {};
+    try { body = JSON.parse(reportBody); } catch { /* non-JSON error body */ }
     const err = body.error || {};
     if (res.status === 401) { cookieSession = false; memoryToken = ''; showAuth(t('err.tokenRejected401'), true); }
     throw new ApiError(res.status, err.code || 'http_' + res.status, err.message || res.statusText);
   }
-  const url = URL.createObjectURL(await res.blob());
+  const url = URL.createObjectURL(reportBody);
   const link = document.createElement('a');
   link.href = url;
   link.download = 'grayling-report.' + format;
@@ -169,6 +216,8 @@ function errMsg(e) {
   if (e.status === 403) return t('err.denied403');
   if (e.status === 409) return t('err.conflict409');
   if (e.status === 429) return t('err.limited429');
+  if (e.code === 'timeout') return t('err.requestTimeout');
+  if (e.code === 'cancelled') return t('err.requestCancelled');
   if (e.code === 'network') return t('err.networkRetry');
   if (e.status >= 500 && e.status !== 501) return t('err.server5xx', { status: e.status });
   let m = '[' + (e.code || 'error') + '] ' + (e.message || e);
@@ -212,8 +261,8 @@ const S = {
   workspaces: [], envs: [],
   capabilities: null,
   globalCapabilities: null,
-  flagKey: null, flagNew: false, flagPreset: '',
-  segKey: null, segDrafts: [], segPreset: '',
+  flagKey: null, flagNew: false, flagPreset: '', flagMetadata: null,
+  segKey: null, segDrafts: [], segPreset: '', segMetadata: null,
   approvalID: null, approvalFilter: 'pending', actorName: '',
   principalID: '', reauthDraft: null,
   expId: null, expCreate: false, expTab: 'summary',
@@ -232,13 +281,13 @@ function editorValue() {
   const flag = $('#flag-json');
   if (flag) {
     const form = $('#flag-structured');
-    const fields = form ? $$('input, select, textarea', form).map(control => [control.value, control.checked]) : [];
+    const fields = form ? $$('input, select, textarea', form).filter(control => !control.matches?.('[data-reference-search]')).map(control => [control.value, control.checked]) : [];
     return JSON.stringify(['flag', flag.value, $('#flag-risk')?.value, $('#flag-base')?.value, fields]);
   }
   const segment = $('#seg-json');
   if (segment) {
     const form = $('#seg-structured');
-    const fields = form ? $$('input, select', form).map(control => control.value) : [];
+    const fields = form ? $$('input, select, textarea', form).filter(control => !control.matches?.('[data-reference-search]')).map(control => control.value) : [];
     return JSON.stringify(['segment', segment.value, $('#seg-risk')?.value, fields]);
   }
   return null;
@@ -303,23 +352,28 @@ const can = permission => permission === 'workspace.admin'
   ? !!(S.globalCapabilities && S.globalCapabilities[permission])
   : !!(S.capabilities && S.capabilities.permissions[permission]);
 
-async function refreshCapabilities() {
+async function refreshCapabilities(current = () => true) {
   const ws = S.ws;
   S.capabilities = null;
   S.globalCapabilities = null;
   updateCapabilities();
-  try { S.globalCapabilities = await api('/api/v1/admin/capabilities'); }
-  catch (e) { if (e.status !== 403 && e.status !== 404) reportError(e); }
-  if (ws !== S.ws) return;
+  try {
+    const global = await api('/api/v1/admin/capabilities');
+    if (!current()) return;
+    S.globalCapabilities = global;
+  }
+  catch (e) { if (current() && e.status !== 403 && e.status !== 404) reportError(e); }
+  if (!current() || ws !== S.ws) return;
   if (ws) {
     try {
       const data = await api(wsPath() + '/capabilities');
-      if (ws !== S.ws) return;
+      if (!current() || ws !== S.ws) return;
       S.capabilities = data;
     } catch (e) {
-      if (e.status !== 403 && e.status !== 404) reportError(e);
+      if (current() && e.status !== 403 && e.status !== 404) reportError(e);
     }
   }
+  if (!current()) return;
   updateCapabilities();
   if (!can('token.manage') && S.view === 'tokens') S.view = 'flags';
   if (!can('quota.manage') && S.view === 'quotas') S.view = 'flags';
@@ -385,11 +439,30 @@ function promptForm(title, fields, submitLabel, onSubmit) {
     if (f.required) inp.required = true;
     if (f.placeholder) inp.placeholder = f.placeholder;
     w.appendChild(inp);
+    if (f.hint) {
+      const hint = document.createElement('small');
+      hint.id = 'modal-hint-' + f.name;
+      hint.className = 'muted';
+      hint.textContent = f.hint;
+      inp.setAttribute('aria-describedby', hint.id);
+      w.appendChild(hint);
+    }
+    if (f.validate) {
+      const validate = () => {
+        const message = f.validate(inp.value.trim());
+        inp.setCustomValidity(message);
+        inp.setAttribute('aria-invalid', String(!!message));
+      };
+      inp.addEventListener('input', validate);
+      inp.addEventListener('change', validate);
+      inp.addEventListener('invalid', validate);
+    }
     body.appendChild(w);
   }
   const previousFocus = document.activeElement;
   document.body.appendChild(ov);
-  const close = () => { ov.remove(); previousFocus?.focus?.(); };
+  let busy = false;
+  const close = () => { if (busy) return; ov.remove(); previousFocus?.focus?.(); };
   ov.addEventListener('keydown', ev => {
     if (ev.key === 'Escape') { ev.preventDefault(); close(); return; }
     if (ev.key !== 'Tab') return;
@@ -404,13 +477,23 @@ function promptForm(title, fields, submitLabel, onSubmit) {
   ov.addEventListener('click', ev => { if (ev.target === ov) close(); });
   $('[data-x="ok"]', ov).onclick = async () => {
     const ok = $('[data-x="ok"]', ov);
+    if (busy) return;
     $$('input, textarea', ov).filter(el => el.required).forEach(el => { el.value = el.value.trim(); });
+    for (const f of fields) {
+      if (f.validate) {
+        const input = body.querySelector('[name="' + f.name + '"]');
+        const message = f.validate(input.value);
+        input.setCustomValidity(message);
+        input.setAttribute('aria-invalid', String(!!message));
+      }
+    }
     const invalid = $$('input, select, textarea', ov).find(el => !el.reportValidity());
     if (invalid) { invalid.focus(); return; }
+    busy = true;
     ok.disabled = true;
     const vals = {};
     for (const f of fields) vals[f.name] = body.querySelector('[name="' + f.name + '"]').value;
-    try { await onSubmit(vals); close(); } catch (e) { reportError(e); ok.disabled = false; }
+    try { await onSubmit(vals); busy = false; close(); } catch (e) { busy = false; reportError(e); ok.disabled = false; }
   };
 }
 
@@ -504,6 +587,12 @@ function bindPresetPicker(select, presets, content, json, structured) {
     if (!preset) return;
     const next = content(preset.id);
     if (!next) return;
+    let previous = {};
+    try { previous = JSON.parse(json.value); } catch { /* preset may repair invalid configuration */ }
+    for (const field of ['displayName', 'description']) {
+      if (previous[field] !== undefined) next[field] = previous[field];
+    }
+    if (!next) return;
     const accepted = await actionDialog({
       title: t('preset.applyTitle'),
       summary: t('preset.applySummary', { name: t(preset.nameKey) }),
@@ -584,10 +673,68 @@ function restoreConsoleHash(hash) {
   return true;
 }
 
+let consoleHistoryIndex = Number.isInteger(history.state?.graylingIndex) ? history.state.graylingIndex : 0;
+let consoleHistoryURL = location.href;
+let restoringHistory = false;
+function rememberConsoleHistory() {
+  history.replaceState({ ...history.state, graylingIndex: consoleHistoryIndex }, '', location.href);
+  consoleHistoryURL = location.href;
+}
 function syncConsoleHash() {
   if (!S.booted || S.deepLinkDenied) return;
   const target = consoleHash();
-  if (location.hash !== target) history.pushState(null, '', target);
+  if (location.hash !== target) {
+    consoleHistoryIndex++;
+    history.pushState({ graylingIndex: consoleHistoryIndex }, '', target);
+  }
+  rememberConsoleHistory();
+}
+
+async function handleConsolePopState(event) {
+  if (restoringHistory) {
+    restoringHistory = false;
+    return;
+  }
+  if (!S.booted) return;
+  const targetIndex = event.state?.graylingIndex;
+  if (!confirmLeaveEditor()) {
+    if (Number.isInteger(targetIndex) && targetIndex !== consoleHistoryIndex) {
+      restoringHistory = true;
+      history.go(consoleHistoryIndex - targetIndex);
+    } else {
+      history.replaceState({ ...history.state, graylingIndex: consoleHistoryIndex }, '', consoleHistoryURL);
+    }
+    return;
+  }
+  const previousState = { ...S };
+  const previousIndex = consoleHistoryIndex;
+  const previousURL = consoleHistoryURL;
+  if (!restoreConsoleHash(location.hash || '')) {
+    history.replaceState({ ...history.state, graylingIndex: consoleHistoryIndex }, '', consoleHistoryURL);
+    return;
+  }
+  consoleHistoryIndex = Number.isInteger(targetIndex) ? targetIndex : consoleHistoryIndex + 1;
+  rememberConsoleHistory();
+  const navigationEpoch = ++routeEpoch;
+  const current = () => navigationEpoch === routeEpoch;
+  try {
+    await loadWorkspaces(current);
+    if (!current()) return;
+    S.deepLinkRequested = false;
+    await route();
+  } catch (error) {
+    if (!current()) return;
+    Object.assign(S, previousState);
+    consoleHistoryIndex = previousIndex;
+    consoleHistoryURL = previousURL;
+    if (Number.isInteger(targetIndex) && targetIndex !== previousIndex) {
+      restoringHistory = true;
+      history.go(previousIndex - targetIndex);
+    } else {
+      history.replaceState({ ...history.state, graylingIndex: previousIndex }, '', previousURL);
+    }
+    reportError(error);
+  }
 }
 
 async function route() {
@@ -650,14 +797,14 @@ async function doConnect() {
       throw new ApiError(0, 'tls_required', t('auth.httpsRequired'));
     }
     if (sameOriginConsole()) {
-      const res = await fetch(baseUrl() + '/api/v1/admin/session', {
+      const { response: res, body: loginBody } = await requestBody(baseUrl() + '/api/v1/admin/session', {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'token=' + encodeURIComponent(tok),
-      });
+      }, response => response.text());
       if (!res.ok) {
         let error = {};
-        try { error = (await res.json()).error || {}; } catch { /* server may return plain text */ }
+        try { error = JSON.parse(loginBody).error || {}; } catch { /* server may return plain text */ }
         throw new ApiError(res.status, error.code || 'login_failed', error.message || t('auth.rejected401'));
       }
       cookieSession = true;
@@ -695,8 +842,10 @@ async function signOut() {
   showAuth('');
 }
 
-async function loadWorkspaces() {
-  S.workspaces = (await api('/api/v1/admin/workspaces')) || [];
+async function loadWorkspaces(current = () => true) {
+  const workspaces = (await api('/api/v1/admin/workspaces')) || [];
+  if (!current()) return;
+  S.workspaces = workspaces;
   const sel = $('#sel-ws');
   sel.innerHTML = S.workspaces.map(w =>
     '<option value="' + esc(w.slug) + '">' + esc(w.name || w.slug) + ' (' + esc(w.slug) + ')</option>').join('') ||
@@ -707,12 +856,16 @@ async function loadWorkspaces() {
   }
   localStorage.setItem('grayling_ws', S.ws);
   sel.value = S.ws;
-  await loadEnvs();
-  await refreshCapabilities();
+  await loadEnvs(current);
+  if (!current()) return;
+  await refreshCapabilities(current);
 }
 
-async function loadEnvs() {
-  S.envs = S.ws ? (await api(wsPath() + '/environments')) || [] : [];
+async function loadEnvs(current = () => true) {
+  const ws = S.ws;
+  const envs = ws ? (await api(wsPath() + '/environments')) || [] : [];
+  if (!current() || ws !== S.ws) return;
+  S.envs = envs;
   const sel = $('#sel-env');
   sel.innerHTML = S.envs.map(v =>
     '<option value="' + esc(v.slug) + '">' + esc(v.name || v.slug) + ' (' + esc(v.slug) + ')</option>').join('') ||
@@ -886,12 +1039,12 @@ function renderOverviewApprovals(pending) {
     (items.length ? '<ul class="attention-list">' + items.map(item =>
       '<li><span>' +
       '<button class="row-link mono" type="button" data-overview-approval="' + esc(item.id) + '">' +
-      esc(item.action) + ' · ' + esc(item.object) + '</button> ' +
+      esc(diagnosticLabel(item.action)) + ' · ' + esc(item.object) + '</button> <details class="inline-diagnostic"><summary>' + esc(t('diagnostic.raw')) + '</summary><code>' + esc(item.action) + '</code></details> ' +
       (item.myAction ? chip(overviewMyActionLabel(item.myAction), item.myAction === 'review' ? 'amber' : 'green') : '') +
       (item.blockedReason ? '<span class="muted">' + esc(overviewBlockedNote(item.blockedReason)) + '</span>' : '') +
       '<br><span class="muted">' + esc(item.environmentId || '—') + ' · ' + esc(item.submittedBy || '—') +
       ' · ' + esc(fmtTime(item.submittedAt)) +
-      (item.risk ? ' · ' + esc(t('approval.risk')) + ': ' + esc(item.risk) : '') +
+      (item.risk ? ' · ' + esc(t('approval.risk')) + ': ' + esc(diagnosticLabel(item.risk)) : '') +
       (item.expiresAt ? ' · ' + esc(t('approval.expires')) + ' ' + esc(fmtTime(item.expiresAt)) : '') +
       '</span></span><button class="btn sm" type="button" data-overview-approval="' + esc(item.id) + '">' +
       esc(t('overview.openApproval')) + '</button></li>').join('') + '</ul>' :
@@ -912,7 +1065,7 @@ function renderOverviewReleases(releases) {
   const cov = releases.coverage || {};
   const row = item => '<td class="nowrap">' + esc(fmtTime(item.time)) + '</td>' +
     '<td>' + chip(releaseActionLabel(item.action), RELEASE_ACTION_CHIP[item.action] || 'gray') +
-    ' <span class="mono">' + esc(item.action) + '</span></td>' +
+    ' <span class="mono">' + esc(diagnosticLabel(item.action)) + '</span> <details class="inline-diagnostic"><summary>' + esc(t('diagnostic.raw')) + '</summary><code>' + esc(item.action) + '</code></details>' + '</td>' +
     '<td class="mono">' + esc(item.object || '—') + '</td><td>' + esc(item.actor || '—') + '</td>' +
     '<td class="mono">' + esc(item.environmentId || '—') + '</td>' +
     '<td><button class="btn sm" type="button" data-overview-release="' + esc(item.object || '') + '">' +
@@ -1016,63 +1169,132 @@ function flagTemplate(key) {
 
 // Client-side lint of the flag DSL; returns a list of issue strings.
 function lintFlag(c) {
-  const issues = [];
   if (typeof c !== 'object' || c === null || Array.isArray(c)) return [t('lint.notObject')];
+  const issues = editorMetadataIssues(c);
+  const bad = field => issues.push(t('validation.fieldType', { field }));
+  const limit = (field, count, max) => { if (count > max) issues.push(t('validation.itemLimit', { field, max })); };
+  if (c.schemaVersion !== 1) issues.push(t('editor.schemaVersion'));
+  if (resourceKeyError(c.key)) issues.push(t('key.formatHint'));
   if (!['bool', 'string', 'number', 'json'].includes(c.type)) issues.push(t('lint.badType'));
+  for (const field of ['disable']) if (c[field] != null && typeof c[field] !== 'boolean') bad(field);
+  if (c.version != null && typeof c.version !== 'string') bad('version');
+  const fields = Array.isArray(c.fields) ? c.fields : [];
+  if (c.fields != null && !Array.isArray(c.fields)) bad('fields');
+  if (fields.some(field => typeof field !== 'string' || !field)) bad('fields');
+  limit('fields', fields.length, 64);
+  const registered = new Set(['targetingKey', ...fields]);
   if (!c.variations || typeof c.variations !== 'object' || Array.isArray(c.variations)) {
     return [...issues, t('flags.editorNeedVariation')];
   }
   const vars = c.variations;
   if (!Object.keys(vars).length) issues.push(t('flags.editorNeedVariation'));
+  limit('variations', Object.keys(vars).length, 64);
   for (const [name, value] of Object.entries(vars)) {
+    if (resourceKeyError(name)) issues.push(t('validation.identifier', { field: 'variations.' + name }));
     const valid = c.type === 'json' ||
       (c.type === 'bool' && typeof value === 'boolean') ||
       (c.type === 'string' && typeof value === 'string') ||
       (c.type === 'number' && typeof value === 'number' && Number.isFinite(value));
     if (!valid) issues.push(t('flags.editorValueType', { name }));
   }
+  let needsBucketing = c.experiment != null;
   const checkRule = (r, where) => {
     if (!r || typeof r !== 'object' || Array.isArray(r)) { issues.push(t('lint.ruleMissing', { where })); return; }
-    const hasVar = r.variation !== undefined, hasPct = r.percentage !== undefined;
-    if (hasVar === hasPct) issues.push(t('lint.ruleExclusive', { where }));
-    if (hasVar && !(r.variation in vars)) issues.push(t('lint.unknownVariation', { where, name: r.variation }));
+    if (r.name != null && typeof r.name !== 'string') bad(where + '.name');
+    if (r.disable != null && typeof r.disable !== 'boolean') bad(where + '.disable');
+    if (r.variation != null && typeof r.variation !== 'string') bad(where + '.variation');
+    const hasVar = typeof r.variation === 'string' && !!r.variation;
+    const split = r.percentage && typeof r.percentage === 'object' && !Array.isArray(r.percentage);
+    if (r.percentage != null && !split) bad(where + '.percentage');
+    const hasPct = split && Object.keys(r.percentage).length > 0;
+    if (!!hasVar === !!hasPct) issues.push(t('lint.ruleExclusive', { where }));
+    if (hasVar && !Object.hasOwn(vars, r.variation)) issues.push(t('lint.unknownVariation', { where, name: r.variation }));
     if (hasPct) {
-      if (!r.percentage || typeof r.percentage !== 'object' || Array.isArray(r.percentage)) {
-        issues.push(t('flags.editorPercentRange'));
-      } else {
-        const sum = Object.values(r.percentage).reduce((a, b) => a + Number(b), 0);
-        if (!Number.isFinite(sum) || Math.abs(sum - 100) > 0.01) issues.push(t('lint.pctSum', { where, sum }));
-        for (const [vn, percent] of Object.entries(r.percentage)) {
-          if (!(vn in vars)) issues.push(t('lint.unknownVariation', { where, name: vn }));
-          if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent > 100) {
-            issues.push(t('flags.editorPercentRange'));
-          }
-        }
+      needsBucketing = true;
+      const sum = Object.values(r.percentage).reduce((a, b) => a + Number(b), 0);
+      if (!Number.isFinite(sum) || Math.abs(sum - 100) > 1e-9) issues.push(t('lint.pctSum', { where, sum }));
+      for (const [name, percent] of Object.entries(r.percentage)) {
+        if (!Object.hasOwn(vars, name)) issues.push(t('lint.unknownVariation', { where, name }));
+        if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent > 100) issues.push(t('flags.editorPercentRange'));
       }
     }
-    if (r.constraints && !Array.isArray(r.constraints)) {
-      issues.push(t('flags.editorConstraintsArray'));
-      return;
-    }
-    for (const con of r.constraints || []) {
-      if (!con || typeof con !== 'object' || Array.isArray(con)) {
-        issues.push(t('flags.editorConstraintsArray'));
-        continue;
-      }
-      if (!con.field) issues.push(t('lint.constraintField', { where }));
-      if (!OPS.includes(con.op)) issues.push(t('lint.unknownOp', { where, op: con.op }));
-    }
+    issues.push(...lintConstraints(r.constraints, registered, 32));
+    issues.push(...lintSegmentReferences(r.segments, '', 16));
   };
   checkRule(c.defaultRule, 'defaultRule');
-  if (c.targeting && !Array.isArray(c.targeting)) issues.push(t('flags.editorRulesArray'));
-  else (c.targeting || []).forEach((r, i) => checkRule(r, 'targeting[' + i + ']'));
-  return issues;
+  if (c.targeting != null && !Array.isArray(c.targeting)) issues.push(t('flags.editorRulesArray'));
+  else {
+    const rules = c.targeting || [];
+    limit('targeting', rules.length, 64);
+    const names = new Set();
+    rules.forEach((rule, i) => {
+      if (rule?.name && names.has(rule.name)) issues.push(t('validation.duplicateRule', { name: rule.name }));
+      if (rule?.name) names.add(rule.name);
+      checkRule(rule, 'targeting[' + i + ']');
+    });
+  }
+  const b = c.bucketing;
+  if (b != null && (typeof b !== 'object' || Array.isArray(b))) bad('bucketing');
+  if (needsBucketing) {
+    if (!b || b.algorithm !== 'grayling-fnv1a-10000-v1') bad('bucketing.algorithm');
+    if (!b || typeof b.unit !== 'string' || !registered.has(b.unit)) bad('bucketing.unit');
+    if (b?.salt != null && (typeof b.salt !== 'string' || editorUTF8Length(b.salt) > 128)) bad('bucketing.salt');
+  }
+  if (c.experiment != null) {
+    const exp = c.experiment;
+    if (typeof exp !== 'object' || Array.isArray(exp)) bad('experiment');
+    else {
+      if (resourceKeyError(exp.id)) issues.push(t('validation.identifier', { field: 'experiment.id' }));
+      if (exp.epoch != null && (!Number.isInteger(exp.epoch) || exp.epoch < 0)) bad('experiment.epoch');
+      if (!['draft', 'reviewed', 'scheduled', 'running', 'paused', 'stopped', 'analyzed', 'archived'].includes(exp.state)) bad('experiment.state');
+      if (exp.eligibility != null && (typeof exp.eligibility !== 'number' || !Number.isFinite(exp.eligibility) || exp.eligibility < 0 || exp.eligibility > 100)) bad('experiment.eligibility');
+      if (exp.exposureMode && !['onDecision', 'onRender'].includes(exp.exposureMode)) bad('experiment.exposureMode');
+      if (exp.layer && resourceKeyError(exp.layer)) issues.push(t('validation.identifier', { field: 'experiment.layer' }));
+      if (exp.layer && (!exp.layerSlot || !Number.isInteger(exp.layerSlot.start) || !Number.isInteger(exp.layerSlot.end) || exp.layerSlot.start < 0 || exp.layerSlot.end > 10000 || exp.layerSlot.start >= exp.layerSlot.end)) bad('experiment.layerSlot');
+      if (!c.defaultRule?.variation) bad('defaultRule.variation');
+    }
+  }
+  return [...new Set(issues)];
+}
+
+function resourceContent(resource) {
+  return resource?.draft?.content || resource?.current?.content || resource?.content || {};
+}
+function resourceIdentity(content, key, actionAttribute = '') {
+  const name = content.displayName || key;
+  return (actionAttribute ? '<button class="row-link resource-name" type="button" ' + actionAttribute + '="' + esc(key) + '">' + esc(name) + '</button>' : '<h2 class="resource-name">' + esc(name) + '</h2>') +
+    '<div class="muted mono resource-key">' + esc(key) + '</div>' +
+    (content.description ? '<p class="muted resource-description">' + esc(content.description) + '</p>' : '');
+}
+function resourceSearchText(resource) {
+  const content = resourceContent(resource);
+  return [resource.key, content.displayName, content.description].filter(Boolean).join(' ').toLocaleLowerCase();
+}
+function resourceMetadataFields() {
+  return [{ name: 'displayName', label: t('resource.displayName'), hint: t('resource.displayNameHint'),
+    validate: value => editorMetadataIssues({ displayName: value })[0] || '' },
+  { name: 'description', label: t('resource.description'), type: 'textarea', rows: 3,
+    validate: value => editorMetadataIssues({ description: value })[0] || '' }];
+}
+
+function flagListPage(flags, { query = '', category = 'all', page = 0, pageSize = 25 } = {}) {
+  const filtered = flags.filter(flag => (category === 'all' || flagListCategory(flag) === category) &&
+    (!query || resourceSearchText(flag).includes(query.toLocaleLowerCase())));
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  page = Math.max(0, Math.min(page, pages - 1));
+  return { records: filtered.slice(page * pageSize, (page + 1) * pageSize), page, pages, total: filtered.length };
 }
 
 async function viewFlags(m) {
   if (!needScope(m)) return;
   if (S.flagKey) return viewFlagDetail(m);
   const flags = sortFlagsForList((await api(scopePath() + '/flags')) || []);
+  let page = 0, query = '', category = 'all';
+  const pageSize = 25;
+  const renderPage = () => {
+  const result = flagListPage(flags, { query, category, page, pageSize });
+  page = result.page;
+  const pageFlags = result.records;
   m.innerHTML =
     '<div class="view-head"><h2>' + esc(t('flags.title')) + '</h2><span class="muted">' + esc(t('flags.count', { n: flags.length })) + '</span>' +
     '<input class="list-search" type="search" placeholder="' + esc(t('list.search')) + '" aria-label="' + esc(t('list.search')) + '"><button class="btn primary sm" id="flag-new">' + esc(t('flags.new')) + '</button></div>' +
@@ -1084,7 +1306,7 @@ async function viewFlags(m) {
       '<option value="published">' + esc(t('flags.statusPublished')) + '</option></select></label>' +
       '<span class="muted">' + esc(t('flags.sortNote')) + '</span></div>' +
     '<table class="grid flag-list-table"><thead><tr><th>' + esc(t('th.key')) + '</th><th>' + esc(t('th.type')) + '</th><th>' + esc(t('th.draftState')) + '</th><th>' + esc(t('th.revision')) + '</th><th>' + esc(t('th.updated')) + '</th></tr></thead><tbody>' +
-    (flags.map(f => {
+    (pageFlags.map(f => {
       const d = f.draft, c = f.current;
       const type = (d && d.content && d.content.type) || (c && c.content && c.content.type) || '—';
       const st = d
@@ -1092,48 +1314,55 @@ async function viewFlags(m) {
           (d.deleted ? ' ' + chip(t('chip.del'), 'red') : '')
         : (c ? chip(t('chip.published'), 'green') : chip(t('chip.none'), 'gray'));
       const upd = (d && d.updatedAt) || (c && c.publishedAt) || null;
-      return '<tr data-flag-record data-key="' + esc(f.key) + '" data-category="' + esc(flagListCategory(f)) + '"><td class="mono"><button class="row-link" type="button" data-flag="' + esc(f.key) + '">' + esc(f.key) + '</button>' +
+      return '<tr data-flag-record data-key="' + esc(f.key) + '" data-category="' + esc(flagListCategory(f)) + '"><td>' + resourceIdentity(resourceContent(f), f.key, 'data-flag') +
         '</td><td>' + esc(type) + '</td><td>' + st +
         (flagRunningChange(f) ? ' ' + chip(t('flags.runningChange'), 'red') : '') +
         '</td><td>' + esc(f.currentRevision || 0) +
         '</td><td class="nowrap">' + esc(fmtTime(upd)) + '</td></tr>';
     }).join('') || '<tr><td colspan="5" class="muted">' + esc(t('flags.empty')) + '</td></tr>') +
     '</tbody></table>' +
-    '<div class="flag-record-cards">' + flags.map(f => {
+    '<div class="flag-record-cards">' + pageFlags.map(f => {
       const d = f.draft, c = f.current;
       const status = flagListStatusLabel(f);
       const upd = (d && d.updatedAt) || (c && c.publishedAt) || null;
       return '<article class="flag-record" data-flag-record data-key="' + esc(f.key) + '" data-category="' + esc(flagListCategory(f)) + '">' +
-        '<button class="row-link mono" type="button" data-flag="' + esc(f.key) + '">' + esc(f.key) + '</button>' +
+        resourceIdentity(resourceContent(f), f.key, 'data-flag') +
         '<div>' + esc(status) + ' · r' + esc(f.currentRevision || 0) + '</div>' +
         (flagRunningChange(f) ? '<div>' + chip(t('flags.runningChange'), 'red') + '</div>' : '') +
         '<div class="muted">' + esc(fmtTime(upd)) + '</div></article>';
     }).join('') + '</div>' +
     (flags.length ? '' : '<p class="muted flag-empty-mobile">' + esc(t('flags.empty')) + '</p>') +
     '<p class="muted hidden" id="flag-filter-empty">' + esc(t('flags.noMatch')) + '</p>';
-  const applyFilter = () => {
-    const query = $('.list-search', m).value.trim().toLocaleLowerCase();
-    const category = $('#flag-status-filter', m).value;
-    let visible = 0;
-    $$('[data-flag-record]', m).forEach(record => {
-      const match = (category === 'all' || record.dataset.category === category) &&
-        (!query || record.dataset.key.toLocaleLowerCase().includes(query));
-      record.hidden = !match;
-      if (match && record.tagName === 'TR') visible++;
-    });
-    $('#flag-filter-empty', m).classList.toggle('hidden', visible > 0 || flags.length === 0);
+  m.insertAdjacentHTML('beforeend', '<div class="row list-pagination"><button class="btn sm" id="flag-page-prev">' + esc(t('list.previous')) + '</button><span role="status">' + esc(t('list.page', { page: page + 1, pages: result.pages, n: result.total })) + '</span><button class="btn sm" id="flag-page-next">' + esc(t('list.next')) + '</button></div>');
+  $('.list-search', m).value = query;
+  $('#flag-status-filter', m).value = category;
+  $('#flag-filter-empty', m).classList.toggle('hidden', result.total > 0 || flags.length === 0);
+  $('#flag-page-prev', m).disabled = page === 0;
+  $('#flag-page-next', m).disabled = (page + 1) * pageSize >= result.total;
+  $('#flag-page-prev', m).onclick = () => { page--; renderPage(); ($('#flag-page-prev', m).disabled ? $('#flag-page-next', m) : $('#flag-page-prev', m)).focus(); };
+  $('#flag-page-next', m).onclick = () => { page++; renderPage(); ($('#flag-page-next', m).disabled ? $('#flag-page-prev', m) : $('#flag-page-next', m)).focus(); };
+  $('.list-search', m).oninput = ev => {
+    const input = ev.target, selection = input.selectionStart;
+    query = input.value.toLocaleLowerCase(); page = 0; renderPage();
+    const next = $('.list-search', m); next.focus();
+    if (next.type !== 'search') next.setSelectionRange(selection, selection);
   };
-  $('.list-search', m).oninput = applyFilter;
-  $('#flag-status-filter', m).onchange = applyFilter;
+  $('#flag-status-filter', m).onchange = ev => { category = ev.target.value; page = 0; renderPage(); $('#flag-status-filter', m).focus(); };
   $('#flag-new', m).onclick = () => promptForm(t('flags.new'), [
-    { name: 'key', label: t('prompt.newFlagKey'), required: true },
+    ...resourceMetadataFields(),
+    resourceKeyField(t('prompt.newFlagKey')),
     { name: 'preset', label: t('preset.label'), type: 'select', options: presetOptions(FLAG_PRESETS) },
-  ], t('btn.create'), ({ key, preset }) => {
-    S.flagKey = key.trim(); S.flagNew = true; S.flagPreset = preset || ''; route();
+  ], t('btn.create'), ({ key, preset, displayName, description }) => {
+    const keyIssue = resourceKeyError(key.trim());
+    if (keyIssue) throw new ApiError(0, 'validation_failed', keyIssue);
+    S.flagKey = key.trim(); S.flagNew = true; S.flagPreset = preset || ''; S.flagMetadata = { displayName: (displayName || '').trim(), description: (description || '').trim() }; route();
   });
+  gateActions(m);
+  };
+  renderPage();
   m.addEventListener('click', ev => {
     const tr = ev.target.closest('[data-flag]');
-    if (tr) { S.flagKey = tr.dataset.flag; S.flagNew = false; S.flagPreset = ''; route(); }
+    if (tr) { S.flagKey = tr.dataset.flag; S.flagNew = false; S.flagPreset = ''; S.flagMetadata = null; route(); }
   });
 }
 
@@ -1171,7 +1400,7 @@ function revisionsTable(f) {
   return '<table class="grid"><thead><tr><th>' + esc(t('th.rev')) + '</th><th>' + esc(t('th.hash')) + '</th><th>' + esc(t('th.published')) + '</th><th>' + esc(t('th.by')) + '</th><th>' + esc(t('th.note')) + '</th><th></th></tr></thead><tbody>' +
     revs.map(r => '<tr><td>r' + esc(r.revision) + (r.rollbackOf ? ' <span class="muted">' + esc(t('flags.rollbackOf', { n: r.rollbackOf })) + '</span>' : '') +
       '</td><td class="mono">' + esc(shortHash(r.hash)) + '</td><td class="nowrap">' + esc(fmtTime(r.publishedAt)) +
-      '</td><td>' + esc(r.publishedBy || '—') + '</td><td>' + esc(r.note || '') +
+      '</td><td>' + esc(r.publishedBy || '—') + '</td><td>' + esc(r.note || '') + (r.content?.displayName ? '<div>' + esc(r.content.displayName) + '</div>' : '') + (r.content?.description ? '<div class="muted">' + esc(r.content.description) + '</div>' : '') +
       '</td><td><button class="btn sm" data-rb="' + esc(r.revision) + '">' + esc(t('flags.rollbackTo', { n: r.revision })) + '</button> ' +
       '<button class="btn sm danger" data-er="' + esc(r.revision) + '">' + esc(t('approval.emergency')) + '</button></td></tr>').join('') +
     '</tbody></table>';
@@ -1198,6 +1427,7 @@ function renderFlagDiff(current, draft, options = {}) {
   const before = current?.content || {};
   const after = draft.content || {};
   const labels = {
+    displayName: t('resource.displayName'), description: t('resource.description'),
     type: t('flags.diffType'), disable: t('flags.diffDisable'), bucketing: t('flags.diffBucketing'),
     fields: t('flags.diffFields'), variations: t('flags.diffVariations'),
     defaultRule: t('flags.diffDefaultRule'), targeting: t('flags.diffTargeting'),
@@ -1252,6 +1482,46 @@ async function confirmFlagPublish(key, kp) {
   if (accepted) route();
 }
 
+function loadEditorSegmentSuggestions(root, excludedKey = '') {
+  const path = scopePath() + '/segments';
+  api(path).then(segments => {
+    if (root.isConnected === false || path !== scopePath() + '/segments') return;
+    const keys = (segments || []).map(segment => segment.key).filter(key => key && key !== excludedKey);
+    root.dataset.segmentKeys = JSON.stringify(keys);
+    const options = keys.map(key => '<option value="' + esc(key) + '"></option>').join('');
+    // Only replace suggestion options; typed references and editor controls stay intact.
+    $$('datalist[id*="-segment-options-"]', root).forEach(list => { list.innerHTML = options; });
+  }).catch(() => { /* Optional suggestions: manual entry remains available. */ });
+}
+
+function diagnosticLabel(value) {
+  const keys = { normal: 'normal', high: 'high', 'flag.rollback': 'rollback',
+    'flag.publish': 'publish', 'flag.delete': 'delete', 'flag.emergency_disable': 'disable',
+    'segment.publish': 'segmentPublish', 'segment.delete': 'segmentDelete',
+    default: 'default', targeting: 'targeting', disabled: 'disabled', error: 'error' };
+  const translation = 'diagnostic.' + keys[value];
+  return keys[value] ? t(translation) : (value || '—');
+}
+
+function renderFlagWorkflow(draft, published = false) {
+  const state = draft?.state || (published ? 'published' : 'editing');
+  return '<section class="flag-workflow" aria-label="' + esc(t('flags.workflow')) + '"><ol>' +
+    ['editing', 'submitted', 'approved', 'published'].map(step => '<li' + (step === state ? ' aria-current="step"' : '') + '>' +
+      esc(t(step === 'published' ? 'chip.published' : 'flags.status' + step[0].toUpperCase() + step.slice(1))) + '</li>').join('') +
+    '</ol><p>' + esc(t(({ editing: 'flags.next.editing', submitted: 'flags.next.submitted', approved: 'flags.next.approved', published: 'flags.next.published' })[state])) + '</p></section>';
+}
+
+function renderPublishedSummary(content) {
+  if (!content) return '';
+  const rule = content.defaultRule || {};
+  const fallback = rule.variation !== undefined ? String(rule.variation) :
+    Object.entries(rule.percentage || {}).map(([key, value]) => key + ': ' + value + '%').join(' · ');
+  return '<dl class="published-summary"><dt>' + esc(t('resource.displayName')) + '</dt><dd>' + esc(content.displayName || content.key || '—') + '</dd><dt>' + esc(t('resource.description')) + '</dt><dd>' + esc(content.description || '—') + '</dd><dt>' + esc(t('th.type')) + '</dt><dd>' + esc(content.type) +
+    '</dd><dt>' + esc(t('flags.summaryVariations')) + '</dt><dd>' + esc(Object.entries(content.variations || {}).map(([key, value]) =>
+      key + ': ' + JSON.stringify(value)).join(' · ')) + '</dd><dt>' + esc(t('flags.summaryDefault')) + '</dt><dd>' +
+      esc(fallback || '—') + '</dd><dt>' + esc(t('flags.summaryRules')) + '</dt><dd>' + esc((content.targeting || []).length) + '</dd></dl>';
+}
+
 async function viewFlagDetail(m) {
   const key = S.flagKey;
   const kp = scopePath() + '/flags/' + encodeURIComponent(key);
@@ -1265,17 +1535,18 @@ async function viewFlagDetail(m) {
   // The preset chosen in the create dialog seeds a brand-new draft only: as
   // soon as the flag has a draft or a published document, the server wins.
   const content = (draft && draft.content) || (f && f.current && f.current.content) ||
-    presetFlagContent(S.flagPreset, key) || flagTemplate(key);
+    { ...(presetFlagContent(S.flagPreset, key) || flagTemplate(key)), ...(S.flagMetadata || {}) };
   const st = draft
-    ? chip(draft.state, DRAFT_CHIP[draft.state] || 'gray') + (draft.deleted ? ' ' + chip(t('chip.deletionPending'), 'red') : '')
+    ? chip(flagListStatusLabel(f), DRAFT_CHIP[draft.state] || 'gray') + (draft.deleted ? ' ' + chip(t('chip.deletionPending'), 'red') : '')
     : (f && f.current ? chip(t('chip.published'), 'green') : chip(t('chip.new'), 'gray'));
   m.innerHTML =
     '<div class="view-head"><button class="btn sm" id="flag-back">' + esc(t('flags.back')) + '</button>' +
-    '<h2 class="mono">' + esc(key) + '</h2>' + st +
-    (draft ? '<span class="muted">' + esc(t('flags.riskMeta', { risk: draft.risk || '—', by: draft.updatedBy || '—', time: fmtTime(draft.updatedAt) })) + '</span>' : '') +
+    resourceIdentity(content, key) + st +
+    (draft ? '<span class="muted">' + esc(t('flags.riskMeta', { risk: diagnosticLabel(draft.risk), by: draft.updatedBy || '—', time: fmtTime(draft.updatedAt) })) + '</span>' : '') +
     '</div>' +
-    '<div id="flag-saved-diff">' + renderFlagDiff(f && f.current, draft) + '</div>' +
-    renderFlagExperimentImpact(f?.experimentImpact) +
+    renderFlagWorkflow(draft, !!f?.current) +
+    '<div id="flag-saved-diff">' + (draft ? renderFlagDiff(f && f.current, draft) : '') + '</div>' +
+    (f ? renderFlagExperimentImpact(f.experimentImpact) : '') +
     '<div id="flag-conflict"></div>' +
     '<div class="cols">' +
       '<section class="card"><h3>' + esc(t('flags.draftEditor')) + '</h3>' +
@@ -1290,8 +1561,8 @@ async function viewFlagDetail(m) {
         '<div id="flag-advanced" class="hidden"><p class="muted">' + esc(t('flags.editorAdvancedHint')) + '</p>' +
           '<textarea id="flag-json" class="json" rows="24" spellcheck="false"></textarea></div>' +
         '<div class="row"><button class="btn sm" id="flag-validate">' + esc(t('btn.validateJson')) + '</button><span id="flag-valid" class="muted grow"></span>' +
-        '<label class="inline">' + esc(t('label.risk')) + ' <select id="flag-risk"><option value="normal">normal</option><option value="high">high</option></select></label>' +
-        '<label class="inline">baseRevision <input id="flag-base" type="number" min="0" size="4" value="' + esc((f && f.currentRevision) || 0) + '"></label></div>' +
+        '<label class="inline">' + esc(t('label.risk')) + ' <select id="flag-risk"><option value="normal">' + esc(t('diagnostic.normal')) + '</option><option value="high">' + esc(t('diagnostic.high')) + '</option></select></label>' +
+        '<input id="flag-base" type="hidden" value="' + esc((f && f.currentRevision) || 0) + '"></div>' +
         '<div class="row actions">' +
         '<button class="btn primary" id="flag-save">' + esc(t('btn.saveDraft')) + '</button>' +
         '<button class="btn" id="flag-submit">' + esc(t('btn.submit')) + '</button>' +
@@ -1304,20 +1575,35 @@ async function viewFlagDetail(m) {
         (f && f.current
           ? '<div class="muted">' + esc(t('flags.currentMeta', { hash: shortHash(f.current.hash), time: fmtTime(f.current.publishedAt), by: f.current.publishedBy || '—' })) + '</div>'
           : '<div class="muted">' + esc(t('flags.nothingPublished')) + '</div>') +
-        '<pre id="flag-current" class="pre"></pre></section>' +
+        renderPublishedSummary(f?.current?.content) + '<details' + (f?.current ? '' : ' hidden') + '><summary>' + esc(t('flags.publishedJson')) + '</summary><pre id="flag-current" class="pre"></pre></details></section>' +
     '</div>' +
     reviewPreview(f && f.preview) +
     '<section class="card"><h3>' + t('flags.history') + '</h3><div id="flag-revs">' + revisionsTable(f) + '</div></section>' +
-    '<section class="card"><h3>' + esc(t('flags.importTitle')) + '</h3>' +
+    '<details class="card advanced-tools"><summary>' + esc(t('flags.importTitle')) + '</summary>' +
       '<textarea id="gff-doc" class="json" rows="8" spellcheck="false" placeholder="' + esc(t('flags.importPh')) + '"></textarea>' +
       '<div class="row"><label class="inline">key <input id="gff-key" value="' + esc(key) + '"></label>' +
       '<label class="inline">salt <input id="gff-salt" placeholder="' + esc(t('flags.saltPh')) + '"></label>' +
       '<button class="btn" id="gff-run">' + esc(t('flags.importBtn')) + '</button></div>' +
-      '<div id="gff-warn"></div></section>';
+      '<div id="gff-warn"></div></details>';
   $('#flag-json', m).value = JSON.stringify(content, null, 2);
   $('#flag-current', m).textContent = f && f.current ? JSON.stringify(f.current.content, null, 2) : '';
   if (draft && draft.risk) $('#flag-risk', m).value = draft.risk;
+  m.dataset.segmentKeys = '[]';
   bindFlagDetail(m, key, kp, f);
+  loadEditorSegmentSuggestions(m);
+  const state = draft?.state || 'editing';
+  $('#flag-submit', m).hidden = !draft || state !== 'editing';
+  $('#flag-approve', m).hidden = state !== 'submitted';
+  $('#flag-reject', m).hidden = !['submitted', 'approved'].includes(state);
+  $('#flag-publish', m).hidden = state !== 'approved';
+  const primary = state === 'submitted' ? 'flag-approve' : state === 'approved' ? 'flag-publish' : 'flag-save';
+  $$('.actions .btn', m).forEach(button => button.classList.toggle('primary', button.id === primary));
+  $('#flag-emergency-disable', m).hidden = !f?.current;
+  const dangers = document.createElement('details'); dangers.className = 'flag-danger-tools';
+  dangers.hidden = !f || (!can('flag.write') && !can('flag.publish'));
+  dangers.innerHTML = '<summary>' + esc(t('flags.dangerTools')) + '</summary><div class="row"></div>';
+  $('.actions', m).after(dangers);
+  $('div', dangers).append($('#flag-delete', m), $('#flag-emergency-disable', m));
   if (!can('flag.write')) {
     $$('input, select, textarea, button', $('#flag-structured', m)).forEach(control => { control.disabled = true; });
     $('#flag-json', m).readOnly = true;
@@ -1343,14 +1629,27 @@ function bindFlagDetail(m, key, kp, f) {
     if (!confirmLeaveEditor()) return;
     S.flagKey = null; S.flagNew = false; S.flagPreset = ''; route();
   };
+  const syncLifecycleActions = () => {
+    const dirty = S.editorBaseline !== null && editorValue() !== S.editorBaseline;
+    ['flag-submit', 'flag-approve', 'flag-reject', 'flag-publish'].forEach(id => {
+      const button = $('#' + id, m);
+      button.disabled = dirty;
+      button.title = dirty ? t('flags.saveBeforeAction') : '';
+    });
+  };
+  m.addEventListener('input', syncLifecycleActions);
+  m.addEventListener('change', syncLifecycleActions);
+  m.addEventListener('click', event => {
+    if (event.target.closest('#flag-structured, #flag-preset')) syncLifecycleActions();
+  });
   // Returns parsed content, or null (with toast) when invalid.
   const readJSON = () => {
     let c;
     try { c = JSON.parse($('#flag-json', m).value); }
-    catch (e) { toast(t('toast.invalidJson', { msg: e.message }), false); return null; }
-    if (!c || c.key !== key) { toast(t('toast.keyMismatch', { key }), false); return null; }
+    catch (e) { reportDocumentIssues(m, 'flag', [t('toast.invalidJson', { msg: e.message })]); return null; }
     const issues = lintFlag(c);
-    if (issues.length) { toast(issues.join(' · '), false); return null; }
+    if (c?.key !== key) issues.unshift(t('toast.keyMismatch', { key }));
+    if (issues.length) { reportDocumentIssues(m, 'flag', issues); return null; }
     return c;
   };
   $('#flag-validate', m).onclick = () => {
@@ -1376,6 +1675,7 @@ function bindFlagDetail(m, key, kp, f) {
           expectedDraftHash: savedDraftHash },
       });
       S.editorBaseline = editorValue();
+      S.flagMetadata = null;
       toast(t('toast.draftSaved'));
       route();
     } catch (err) {
@@ -1461,10 +1761,13 @@ function bindFlagDetail(m, key, kp, f) {
   $('#gff-run', m).onclick = async () => {
     const doc = $('#gff-doc', m).value;
     if (!doc.trim()) { toast(t('toast.pasteGff'), false); return; }
+    const importKey = $('#gff-key', m).value.trim() || key;
+    const keyIssue = resourceKeyError(importKey);
+    if (keyIssue) { reportDocumentIssues(m, 'flag', [keyIssue]); return; }
     try {
       const res = await api(kp + '/import-gff', {
         method: 'POST',
-        body: { document: doc, key: $('#gff-key', m).value.trim() || key, salt: $('#gff-salt', m).value.trim() },
+        body: { document: doc, key: importKey, salt: $('#gff-salt', m).value.trim() },
       });
       const warns = (res && res.warnings) || [];
       $('#gff-warn', m).innerHTML = '<div class="banner warn"><b>' + esc(t('flags.importWarnings', { n: warns.length })) + '</b><ul>' +
@@ -1492,27 +1795,29 @@ async function viewSegments(m) {
     '<input class="list-search" type="search" placeholder="' + esc(t('list.search')) + '" aria-label="' + esc(t('list.search')) + '"><button class="btn primary sm" id="seg-new">' + esc(t('seg.new')) + '</button></div>' +
     '<table class="grid mobile-card-table"><thead><tr><th>' + esc(t('th.key')) + '</th><th>' + esc(t('th.state')) + '</th><th>' + esc(t('th.risk')) + '</th><th>' + esc(t('th.updatedBy')) + '</th><th>' + esc(t('th.updated')) + '</th></tr></thead><tbody>' +
     (S.segDrafts.map(d =>
-      '<tr data-list-record><td class="mono"><button class="row-link" type="button" data-seg="' + esc(d.key) + '">' + esc(d.key) + '</button></td><td>' +
+      '<tr data-list-record><td>' + resourceIdentity(resourceContent(d), d.key, 'data-seg') + '</td><td>' +
       chip(d.state, DRAFT_CHIP[d.state] || 'gray') + '</td><td>' + esc(d.risk || '—') + '</td><td>' +
       esc(d.updatedBy || '—') + '</td><td class="nowrap">' + esc(fmtTime(d.updatedAt)) + '</td></tr>').join('') ||
       '<tr><td colspan="5" class="muted">' + esc(t('seg.empty')) + '</td></tr>') +
     '</tbody></table><div class="mobile-record-cards">' + S.segDrafts.map(d =>
-      '<article class="mobile-record" data-list-record><button class="row-link mono" type="button" data-seg="' +
-      esc(d.key) + '">' + esc(d.key) + '</button><div>' + chip(d.state, DRAFT_CHIP[d.state] || 'gray') +
+      '<article class="mobile-record" data-list-record>' + resourceIdentity(resourceContent(d), d.key, 'data-seg') + '<div>' + chip(d.state, DRAFT_CHIP[d.state] || 'gray') +
       ' · ' + esc(d.risk || '—') + '</div><div class="muted">' + esc(d.updatedBy || '—') +
       ' · ' + esc(fmtTime(d.updatedAt)) + '</div></article>').join('') + '</div>' +
     (S.segDrafts.length ? '' : '<p class="muted mobile-empty">' + esc(t('seg.empty')) + '</p>') +
     '<p class="muted hidden" data-list-no-match>' + esc(t('list.noMatch')) + '</p>';
   bindListSearch(m);
   $('#seg-new', m).onclick = () => promptForm(t('seg.new'), [
-    { name: 'key', label: t('prompt.newSegKey'), required: true },
+    ...resourceMetadataFields(),
+    resourceKeyField(t('prompt.newSegKey')),
     { name: 'preset', label: t('preset.label'), type: 'select', options: presetOptions(SEGMENT_PRESETS) },
-  ], t('btn.create'), ({ key, preset }) => {
-    S.segKey = key.trim(); S.segPreset = preset || ''; route();
+  ], t('btn.create'), ({ key, preset, displayName, description }) => {
+    const keyIssue = resourceKeyError(key.trim());
+    if (keyIssue) throw new ApiError(0, 'validation_failed', keyIssue);
+    S.segKey = key.trim(); S.segPreset = preset || ''; S.segMetadata = { displayName: (displayName || '').trim(), description: (description || '').trim() }; route();
   });
   m.addEventListener('click', ev => {
     const tr = ev.target.closest('[data-seg]');
-    if (tr) { S.segKey = tr.dataset.seg; S.segPreset = ''; route(); }
+    if (tr) { S.segKey = tr.dataset.seg; S.segPreset = ''; S.segMetadata = null; route(); }
   });
 }
 
@@ -1522,7 +1827,7 @@ async function viewSegmentDetail(m) {
   const d = S.segDrafts.find(x => x.key === key);
   // Same rule as the flag editor: the create-dialog preset only seeds a
   // segment that has no saved draft yet.
-  const content = (d && d.content) || presetSegmentContent(S.segPreset, key) || segmentTemplate(key);
+  const content = (d && d.content) || { ...(presetSegmentContent(S.segPreset, key) || segmentTemplate(key)), ...(S.segMetadata || {}) };
   let preview = null;
   let previewUnavailable = false;
   let dependencies = { segmentRevision: 0, flags: [] };
@@ -1540,7 +1845,7 @@ async function viewSegmentDetail(m) {
   }
   m.innerHTML =
     '<div class="view-head"><button class="btn sm" id="seg-back">' + esc(t('seg.back')) + '</button>' +
-    '<h2 class="mono">' + esc(key) + '</h2>' +
+    resourceIdentity(content, key) +
     (d ? chip(d.state, DRAFT_CHIP[d.state] || 'gray') +
       ' <span class="muted">' + esc(t('flags.riskMeta', { risk: d.risk || '—', by: d.updatedBy || '—', time: fmtTime(d.updatedAt) })) + '</span>'
       : chip(t('chip.new'), 'gray')) + '</div>' +
@@ -1553,7 +1858,7 @@ async function viewSegmentDetail(m) {
     '<div id="seg-structured"></div>' +
     '<div id="seg-advanced" class="hidden"><textarea id="seg-json" class="json" rows="18" spellcheck="false"></textarea></div>' +
     '<div class="row"><button class="btn sm" id="seg-validate">' + esc(t('btn.validateJson')) + '</button><span id="seg-valid" class="muted grow"></span>' +
-    '<label class="inline">' + esc(t('label.risk')) + ' <select id="seg-risk"><option value="normal">normal</option><option value="high">high</option></select></label></div>' +
+    '<label class="inline">' + esc(t('label.risk')) + ' <select id="seg-risk"><option value="normal">' + esc(t('diagnostic.normal')) + '</option><option value="high">' + esc(t('diagnostic.high')) + '</option></select></label></div>' +
     '<div class="row actions">' +
     '<button class="btn primary" id="seg-save">' + esc(t('btn.saveDraft')) + '</button>' +
     '<button class="btn" id="seg-submit">' + esc(t('btn.submit')) + '</button>' +
@@ -1565,7 +1870,9 @@ async function viewSegmentDetail(m) {
       '<div id="seg-history">' + renderSegmentHistory(history) + '</div>';
   $('#seg-json', m).value = JSON.stringify(content, null, 2);
   if (d && d.risk) $('#seg-risk', m).value = d.risk;
+  m.dataset.segmentKeys = '[]';
   const structured = bindSegmentStructured(m);
+  loadEditorSegmentSuggestions(m, key);
   // Toolbar presets replace the JSON source behind the structured form and
   // repaint it (same contract as the flag editor).
   bindPresetPicker($('#seg-preset', m), SEGMENT_PRESETS, id => presetSegmentContent(id, key),
@@ -1614,10 +1921,10 @@ async function viewSegmentDetail(m) {
   const readJSON = () => {
     let c;
     try { c = JSON.parse($('#seg-json', m).value); }
-    catch (e) { toast(t('toast.invalidJson', { msg: e.message }), false); return null; }
-    if (!c || c.key !== key) { toast(t('toast.keyMismatch', { key }), false); return null; }
+    catch (e) { reportDocumentIssues(m, 'seg', [t('toast.invalidJson', { msg: e.message })]); return null; }
     const issues = lintSegment(c);
-    if (issues.length) { toast(issues.join(' · '), false); return null; }
+    if (c?.key !== key) issues.unshift(t('toast.keyMismatch', { key }));
+    if (issues.length) { reportDocumentIssues(m, 'seg', issues); return null; }
     return c;
   };
   $('#seg-match-run', m).onclick = async () => {
@@ -1672,6 +1979,62 @@ async function viewSegmentDetail(m) {
 // ---------------------------------------------------------------------------
 // View: Experiments
 // ---------------------------------------------------------------------------
+function validateCreationSlug(value) {
+  if (!/^[a-z][a-z0-9-]{0,63}$/.test(value)) throw new ApiError(0, 'validation_failed', t('validation.slugInvalid'));
+}
+function validateTokenScope(body) {
+  if (['sdk', 'collect'].includes(body.kind) && !body.environment) {
+    throw new ApiError(0, 'validation_failed', t('validation.tokenEnvironment'));
+  }
+}
+function collectAllowlistEntries(rows) {
+  return rows.flatMap((row, index) => {
+    const provider = row.provider.trim(), model = row.model.trim();
+    if (!provider && !model && row.enabled !== false) return [];
+    if (!provider || !model) throw new ApiError(0, 'validation_failed', t('validation.allowlistRow', { n: index + 1 }));
+    return [{ provider, model, enabled: row.enabled }];
+  });
+}
+function collectExperimentGuardrails(rows) {
+  return rows.flatMap((row, index) => {
+    const metricKey = row.metricKey.trim(), threshold = row.threshold.trim(), sample = row.sample.trim(), journey = row.journey.trim();
+    if (!metricKey && !threshold && !sample && !journey && row.type === 'proportion' && row.direction === 'increase') return [];
+    const fail = () => { throw new ApiError(0, 'validation_failed', t('validation.guardrailRow', { n: index + 1 })); };
+    const maxRelativeRegression = Number(threshold), minSample = Number(sample);
+    if (!metricKey || !threshold || !Number.isFinite(maxRelativeRegression) || maxRelativeRegression < 0 ||
+        !sample || !Number.isSafeInteger(minSample) || minSample < 0) fail();
+    const entry = { metricKey, type: row.type, direction: row.direction, maxRelativeRegression, minSample };
+    if (['funnel', 'retention'].includes(row.type)) {
+      if (minSample <= 0) fail();
+      try {
+        const spec = JSON.parse(journey);
+        if (!spec || typeof spec !== 'object' || Array.isArray(spec)) fail();
+        entry[row.type] = spec;
+      } catch { fail(); }
+    }
+    return [entry];
+  });
+}
+function experimentNumericIssue(values) {
+  const finite = key => values[key] !== '' && Number.isFinite(Number(values[key]));
+  const checks = [
+    ['alpha', finite('alpha') && Number(values.alpha) > 0 && Number(values.alpha) < 1, '0 < x < 1'],
+    ['power', finite('power') && Number(values.power) > 0 && Number(values.power) < 1, '0 < x < 1'],
+    ['mde', finite('mde') && Number(values.mde) > 0, 'x > 0'],
+    ['minsample', finite('minsample') && Number.isSafeInteger(Number(values.minsample)) && Number(values.minsample) >= 0, 'x ∈ ℤ, x ≥ 0'],
+    ['minruntime', finite('minruntime') && Number(values.minruntime) >= 0 && Number.isSafeInteger(Math.round(Number(values.minruntime) * NS_HOUR)), 'x ≥ 0'],
+    ['window', finite('window') && Number(values.window) > 0 && Number.isSafeInteger(Math.round(Number(values.window) * NS_DAY)), 'x > 0'],
+    ['elig', values.elig === '' || (finite('elig') && Number(values.elig) >= 0 && Number(values.elig) <= 100), '0 ≤ x ≤ 100'],
+  ];
+  const failed = checks.find(([, valid]) => !valid);
+  return failed ? { field: failed[0], range: failed[2] } : null;
+}
+function readExperimentGuardrails(root) {
+  return collectExperimentGuardrails($$('.vrow', root).map(row => ({
+    metricKey: $('.g-key', row).value, type: $('.g-type', row).value, direction: $('.g-dir', row).value,
+    threshold: $('.g-reg', row).value, sample: $('.g-min', row).value, journey: $('.g-journey', row).value,
+  })));
+}
 const NS_HOUR = 3.6e12, NS_DAY = 8.64e13;
 const expList = { scope: '', offset: 0, q: '', state: '' };
 
@@ -1850,6 +2213,9 @@ async function viewExpCreate(m) {
       if (!$('#x-hyp', m).value.trim()) return [t('exp.wizardHypothesisRequired'), 'x-hyp'];
     }
     if (index === 1) {
+      const eligibility = $('#x-elig', m).value.trim();
+      if (eligibility !== '' && (!Number.isFinite(Number(eligibility)) || Number(eligibility) < 0 || Number(eligibility) > 100))
+        return [t('validation.experimentNumber', { field: t('exp.elig'), range: '0 ≤ x ≤ 100' }), 'x-elig'];
       if (!$('#x-unit', m).value.trim()) return [t('exp.wizardUnitRequired'), 'x-unit'];
       const variants = $$('.vrow', vars).map(row => ({
         name: $('.v-name', row).value.trim(), proportion: Number($('.v-prop', row).value),
@@ -1860,7 +2226,7 @@ async function viewExpCreate(m) {
       const unknown = variants.find(v => !Object.hasOwn(published, v.name));
       if (flagView && unknown) return [t('exp.flagVariantMissing', { name: unknown.name }), 'x-vars'];
       const sum = variants.reduce((total, v) => total + v.proportion, 0);
-      if (variants.some(v => !Number.isFinite(v.proportion) || v.proportion <= 0) || Math.abs(sum - 100) > 0.01)
+      if (variants.some(v => !Number.isFinite(v.proportion) || v.proportion <= 0) || Math.abs(sum - 100) > 1e-9)
         return [t('toast.propSum', { sum }), 'x-vars'];
       if ($('#x-mode', m).value === 'bandit' && variants.length !== 2)
         return [t('exp.banditRequiresProportion'), 'x-mode'];
@@ -1884,10 +2250,19 @@ async function viewExpCreate(m) {
           return [t('exp.integrationOwnerRequired'), 'x-integration-owner'];
       }
     }
+    if (index === 2) {
+      try { readExperimentGuardrails(guards); }
+      catch (error) { return [errMsg(error), 'x-add-guard']; }
+    }
     if (index === 4) {
-      if (!(Number($('#x-alpha', m).value) > 0 && Number($('#x-alpha', m).value) < 1) ||
-          !(Number($('#x-minsample', m).value) > 0) || !(Number($('#x-window', m).value) > 0))
-        return [t('exp.wizardStatsInvalid'), 'x-alpha'];
+      const values = Object.fromEntries(['alpha', 'power', 'mde', 'minsample', 'minruntime', 'window', 'elig']
+        .map(key => [key, $('#x-' + key, m).value.trim()]));
+      const issue = experimentNumericIssue(values);
+      if (issue) {
+        const labels = { alpha: 'Alpha', power: 'Power', mde: 'MDE', minsample: t('exp.minSample'),
+          minruntime: t('exp.minRuntimeH'), window: t('exp.window'), elig: t('exp.elig') };
+        return [t('validation.experimentNumber', { field: labels[issue.field], range: issue.range }), 'x-' + issue.field];
+      }
     }
     return null;
   };
@@ -2004,13 +2379,13 @@ async function viewExpCreate(m) {
   $('#x-add-guard', m).onclick = () => {
     const row = document.createElement('div');
     row.className = 'vrow';
-    row.innerHTML = '<input class="g-key" placeholder="metricKey">' +
-      '<select class="g-type"><option>proportion</option><option>mean</option><option>funnel</option><option>retention</option></select>' +
-      '<select class="g-dir"><option value="increase">' + esc(t('exp.increaseGood')) + '</option><option value="decrease">' + esc(t('exp.decreaseGood')) + '</option></select>' +
-      '<input class="g-reg" type="number" step="0.01" placeholder="' + esc(t('ph.maxReg')) + '">' +
-      '<input class="g-min" type="number" placeholder="minSample">' +
-      '<textarea class="g-journey" rows="2" placeholder="' + esc(t('exp.journeySpec')) + ' JSON"></textarea>' +
-      '<button class="btn sm">✕</button>';
+    row.innerHTML = '<label>' + esc(t('exp.metricKey')) + '<input class="g-key" required></label>' +
+      '<label>' + esc(t('th.type')) + '<select class="g-type"><option>proportion</option><option>mean</option><option>funnel</option><option>retention</option></select></label>' +
+      '<label>' + esc(t('exp.guardDirection')) + '<select class="g-dir"><option value="increase">' + esc(t('exp.increaseGood')) + '</option><option value="decrease">' + esc(t('exp.decreaseGood')) + '</option></select></label>' +
+      '<label>' + esc(t('ph.maxReg')) + '<input class="g-reg" type="number" step="0.01" placeholder="' + esc(t('ph.maxReg')) + '"></label>' +
+      '<label>' + esc(t('exp.minSample')) + '<input class="g-min" type="number" min="0" step="1"></label>' +
+      '<label>' + esc(t('exp.journeySpec')) + '<textarea class="g-journey" rows="2" placeholder="' + esc(t('exp.journeySpec')) + ' JSON"></textarea></label>' +
+      '<button type="button" class="btn sm" aria-label="' + esc(t('btn.remove')) + '">' + esc(t('btn.remove')) + '</button>';
     $('button', row).onclick = () => { S.wizardDirty = true; row.remove(); };
     guards.appendChild(row);
     S.wizardDirty = true;
@@ -2036,22 +2411,12 @@ async function viewExpCreate(m) {
         .filter(v => v.name);
       if (variants.length < 2) { toast(t('toast.need2variants'), false); return; }
       const propSum = variants.reduce((a, v) => a + (v.prop || 0), 0);
-      if (Math.abs(propSum - 100) > 0.01) { toast(t('toast.propSum', { sum: propSum }), false); return; }
+      if (Math.abs(propSum - 100) > 1e-9) { toast(t('toast.propSum', { sum: propSum }), false); return; }
       const proportions = {};
       variants.forEach(v => { proportions[v.name] = v.prop; });
-      const guardrails = $$('.vrow', guards).map(r => ({
-        metricKey: $('.g-key', r).value.trim(),
-        type: $('.g-type', r).value,
-        direction: $('.g-dir', r).value,
-        maxRelativeRegression: Number($('.g-reg', r).value || 0),
-        minSample: Number($('.g-min', r).value || 0),
-      })).filter(g => g.metricKey);
-      try {
-        $$('.vrow', guards).filter(r => $('.g-key', r).value.trim()).forEach((r, i) => {
-          const g = guardrails[i];
-          if (g.type === 'funnel' || g.type === 'retention') g[g.type] = JSON.parse($('.g-journey', r).value);
-        });
-      } catch { toast(t('exp.journeyInvalid'), false); return; }
+      let guardrails;
+      try { guardrails = readExperimentGuardrails(guards); }
+      catch (error) { reportError(error); return; }
       const pm = { key: $('#x-mkey', m).value.trim(), type: $('#x-mtype', m).value, direction: $('#x-mdir', m).value };
       if (pm.type === 'ratio') {
         const num = $('#x-numkey', m).value.trim();
@@ -2151,7 +2516,7 @@ async function viewDebug(m) {
       $('#d-summary', m).innerHTML =
         chip(t('debug.valueChip', { v: JSON.stringify(r.value) }), 'blue') + ' ' +
         chip(t('debug.variationChip', { v: r.variationType || '—' }), 'teal') + ' ' +
-        chip(t('debug.reasonChip', { v: r.reason || '—' }), r.failed ? 'red' : 'green') +
+        chip(t('debug.reasonChip', { v: diagnosticLabel(r.reason) }), r.failed ? 'red' : 'green') +
         (r.errorCode ? ' ' + chip(t('debug.errorChip', { v: r.errorCode }), 'red') : '') +
         (r.bucket != null ? ' <span class="muted">' + esc(t('debug.bucket', { n: r.bucket })) + '</span>' : '') +
         ' <span class="muted">' + esc(t('debug.manifest', { n: res.manifestRevision ?? '—' })) +
@@ -2255,6 +2620,8 @@ async function viewTokens(m) {
     '<table class="grid"><thead><tr><th>' + esc(t('label.name')) + '</th><th>' + esc(t('label.kind')) + '</th><th>' + esc(t('label.role')) + '</th><th>' + esc(t('th.prefix')) + '</th><th>' + esc(t('th.env')) + '</th><th>' + esc(t('th.created')) + '</th><th>' + esc(t('th.status')) + '</th><th></th></tr></thead>' +
     '<tbody>' + tokenRows(tokens) + '</tbody></table>';
   $('#t-create', m).onclick = async () => {
+    const button = $('#t-create', m);
+    if (button.disabled) return;
     const body = {
       name: $('#t-name', m).value.trim(),
       kind: $('#t-kind', m).value,
@@ -2262,6 +2629,8 @@ async function viewTokens(m) {
       environment: $('#t-env', m).value,
     };
     if (!body.name) { toast(t('toast.nameRequired'), false); return; }
+    try { validateTokenScope(body); } catch (error) { reportError(error); return; }
+    button.disabled = true;
     try {
       const res = await api(wsPath() + '/tokens', { method: 'POST', body });
       const secret = res.Secret || '';
@@ -2279,6 +2648,7 @@ async function viewTokens(m) {
       toast(t('toast.tokenCreated'));
       $('tbody', m).innerHTML = tokenRows((await api(wsPath() + '/tokens')) || []);
     } catch (e) { reportError(e); }
+    finally { button.disabled = false; }
   };
   $('table.grid', m).addEventListener('click', async ev => {
     const b = ev.target.closest('[data-rev]');
@@ -2321,13 +2691,13 @@ async function viewAudit(m) {
       '<table class="grid mobile-card-table"><thead><tr><th>' + esc(t('th.time')) + '</th><th>' + esc(t('th.actor')) + '</th><th>' + esc(t('th.action')) + '</th><th>' + esc(t('th.object')) + '</th><th>' + esc(t('th.env')) + '</th><th>' + esc(t('th.detail')) + '</th></tr></thead><tbody>' +
       (records.map(({ entry: a, detail }) => {
         return '<tr><td class="nowrap">' + esc(fmtTime(a.time)) + '</td><td>' + esc(a.actor || '—') +
-          '</td><td class="mono">' + esc(a.action) + '</td><td class="mono">' + esc(a.object || '—') +
+          '</td><td class="mono">' + esc(diagnosticLabel(a.action)) + ' <details class="inline-diagnostic"><summary>' + esc(t('diagnostic.raw')) + '</summary><code>' + esc(a.action) + '</code></details>' + '</td><td class="mono">' + esc(a.object || '—') +
           '</td><td class="mono">' + esc(a.environmentId || '—') + '</td>' +
           '<td class="detail" title="' + esc(detail) + '">' + esc(detail) + '</td></tr>';
       }).join('') || '<tr><td colspan="6" class="muted">' + esc(t('audit.empty')) + '</td></tr>') +
       '</tbody></table><div class="mobile-record-cards" aria-label="' + esc(t('audit.title')) + '">' +
       (records.map(({ entry: a, detail }) => '<article class="mobile-record audit-record"><div class="row"><strong class="mono">' +
-        esc(a.action) + '</strong><span class="muted">' + esc(fmtTime(a.time)) + '</span></div><div><b>' +
+        esc(diagnosticLabel(a.action)) + '</strong><details class="inline-diagnostic"><summary>' + esc(t('diagnostic.raw')) + '</summary><code>' + esc(a.action) + '</code></details><span class="muted">' + esc(fmtTime(a.time)) + '</span></div><div><b>' +
         esc(t('th.object')) + ':</b> <span class="mono">' + esc(a.object || '—') + '</span></div><div><b>' +
         esc(t('th.actor')) + ':</b> ' + esc(a.actor || '—') + '</div><div><b>' + esc(t('th.env')) +
         ':</b> ' + esc(a.environmentId || '—') + '</div>' + (detail ? '<details><summary>' +
@@ -2594,7 +2964,7 @@ async function viewAI(m) {
     row.innerHTML = '<input class="al-provider" placeholder="' + esc(t('ph.provider')) + '">' +
       '<input class="al-model" placeholder="' + esc(t('ph.model')) + '">' +
       '<label class="inline"><input type="checkbox" class="al-enabled"> ' + esc(t('ai.enabled')) + '</label>' +
-      '<button class="btn sm">✕</button>';
+      '<button type="button" class="btn sm" aria-label="' + esc(t('btn.remove')) + '">' + esc(t('btn.remove')) + '</button>';
     $('.al-provider', row).value = (ent && ent.provider) || '';
     $('.al-model', row).value = (ent && ent.model) || '';
     $('.al-enabled', row).checked = !ent || ent.enabled !== false;
@@ -2605,12 +2975,15 @@ async function viewAI(m) {
   if (!allow.length) allowBox.innerHTML = '<p class="muted">' + esc(t('ai.allowEmpty')) + '</p>';
   $('#ai-allow-add', m).onclick = () => { if (!allow.length && !$('.vrow', allowBox)) allowBox.innerHTML = ''; addAllowRow(null); };
   $('#ai-allow-save', m).onclick = () => {
-    const entries = $$('.vrow', allowBox).map(row => ({
-      provider: $('.al-provider', row).value.trim(),
-      model: $('.al-model', row).value.trim(),
-      enabled: $('.al-enabled', row).checked,
-    })).filter(e2 => e2.provider && e2.model);
+    let entries;
+    try {
+      entries = collectAllowlistEntries($$('.vrow', allowBox).map(row => ({
+        provider: $('.al-provider', row).value, model: $('.al-model', row).value,
+        enabled: $('.al-enabled', row).checked,
+      })));
+    } catch (error) { reportError(error); return; }
     run(() => api(wsPath() + '/model-allowlist', { method: 'PUT', body: { entries } }), t('toast.allowSaved'));
+
   };
 }
 
@@ -2619,6 +2992,52 @@ async function viewAI(m) {
 // ---------------------------------------------------------------------------
 function metricVersionPath(ref) {
   return wsPath() + '/metrics/' + encodeURIComponent(ref.key) + '/versions/' + encodeURIComponent(ref.version);
+}
+
+function metricDefinitionFromForm(values) {
+  const fail = key => { throw new ApiError(0, 'validation_failed', t(key)); };
+  const keyPattern = /^[a-z][a-z0-9_.-]{0,127}$/;
+  const key = values.key.trim(), displayName = values.displayName.trim(), owner = values.owner.trim();
+  if (!keyPattern.test(key)) fail('metrics.validationKey');
+  if (!displayName || !owner) fail('metrics.validationIdentity');
+  const eventKeys = values.eventKeys.split(',').map(value => value.trim());
+  if (!eventKeys.length || eventKeys.length > 32 || new Set(eventKeys).size !== eventKeys.length || eventKeys.some(value => !keyPattern.test(value))) fail('metrics.validationEvents');
+  const days = Number(values.windowDays);
+  if (!Number.isFinite(days) || days <= 0 || days > 30 || Math.round(days * NS_DAY) <= 0) fail('metrics.validationWindow');
+  let spec;
+  try { spec = JSON.parse(values.spec); } catch { fail('metrics.validationSpec'); }
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec) ||
+    !['proportion', 'mean', 'ratio', 'quantile', 'funnel', 'retention'].includes(spec.type) ||
+    !['increase', 'decrease'].includes(spec.direction)) fail('metrics.validationSpec');
+  for (const field of ['key', 'unit', 'numeratorKey', 'denominatorKey', 'covariateKey']) {
+    if (spec[field] !== undefined && spec[field] !== null && typeof spec[field] !== 'string') fail('metrics.validationSpec');
+  }
+  if (spec.quantileLevel !== undefined && spec.quantileLevel !== null && (typeof spec.quantileLevel !== 'number' || !Number.isFinite(spec.quantileLevel))) fail('metrics.validationSpec');
+  if (spec.key === undefined || spec.key === '') spec.key = eventKeys[0];
+  if (!eventKeys.includes(spec.key)) fail('metrics.validationSpecKey');
+  if (spec.type === 'ratio' && (!eventKeys.includes(spec.denominatorKey) ||
+    (spec.numeratorKey !== undefined && spec.numeratorKey !== '' && !eventKeys.includes(spec.numeratorKey)))) fail('metrics.validationRatio');
+  if (spec.type === 'quantile' && (typeof spec.quantileLevel !== 'number' || !Number.isFinite(spec.quantileLevel) || spec.quantileLevel <= 0 || spec.quantileLevel >= 1)) fail('metrics.validationQuantile');
+  for (const field of ['floor', 'ceil']) {
+    if (spec[field] !== undefined && spec[field] !== null && (typeof spec[field] !== 'number' || !Number.isFinite(spec[field]))) fail('metrics.validationClamp');
+  }
+  if (spec.floor != null && spec.ceil != null && spec.floor > spec.ceil) fail('metrics.validationClamp');
+  if (spec.type === 'funnel') {
+    const journey = spec.funnel;
+    if (!journey || typeof journey !== 'object' || Array.isArray(journey) || spec.retention != null ||
+      !Array.isArray(journey.steps) || journey.steps.length < 2 || journey.steps.length > 32 ||
+      new Set(journey.steps).size !== journey.steps.length || journey.steps.some(step => !eventKeys.includes(step)) ||
+      !['user', 'session'].includes(journey.dedupUnit) || typeof journey.stepTimeout !== 'number' || !Number.isInteger(journey.stepTimeout) || journey.stepTimeout <= 0 || journey.stepTimeout > 9223372036854775807) fail('metrics.validationJourney');
+  } else if (spec.type === 'retention') {
+    const journey = spec.retention;
+    if (!journey || typeof journey !== 'object' || Array.isArray(journey) || spec.funnel != null ||
+      (journey.cohortKey != null && typeof journey.cohortKey !== 'string') || !eventKeys.includes(journey.returnKey) || ![1, 7].includes(journey.day) || typeof journey.timezone !== 'string' || !journey.timezone.trim()) fail('metrics.validationJourney');
+  } else if (spec.funnel != null || spec.retention != null) fail('metrics.validationJourney');
+  const hasNonfinite = value => typeof value === 'number' ? !Number.isFinite(value) :
+    value && typeof value === 'object' ? Object.values(value).some(hasNonfinite) : false;
+  if (hasNonfinite(spec)) fail('metrics.validationSpec');
+  return { key, displayName, description: values.description.trim(), owner, source: 'collect', dedupUnit: 'user',
+    eventKeys, attributionWindow: Math.round(days * NS_DAY), spec };
 }
 
 async function viewMetrics(m) {
@@ -2696,22 +3115,16 @@ async function viewMetrics(m) {
   };
   if (page.nextCursor) $('#metric-next', m).onclick = () => { S.metricCursor = page.nextCursor; route(); };
   $('#metric-new', m).onclick = () => promptForm(t('metrics.new'), [
-    { name: 'key', label: t('metrics.key'), placeholder: 'activation.complete' },
-    { name: 'displayName', label: t('label.displayName') },
+    { name: 'key', label: t('metrics.key'), placeholder: 'activation.complete', required: true },
+    { name: 'displayName', label: t('label.displayName'), required: true },
     { name: 'description', label: t('metrics.description'), type: 'textarea', rows: 2 },
-    { name: 'owner', label: t('metrics.owner') },
-    { name: 'eventKeys', label: t('metrics.eventKeys'), placeholder: 'activation_complete' },
+    { name: 'owner', label: t('metrics.owner'), required: true },
+    { name: 'eventKeys', label: t('metrics.eventKeys'), placeholder: 'activation_complete', required: true },
     { name: 'windowDays', label: t('metrics.windowDays'), type: 'number', value: '7' },
     { name: 'spec', label: t('metrics.spec'), type: 'textarea', rows: 5,
       value: JSON.stringify({ type: 'proportion', direction: 'increase' }, null, 2) },
   ], t('metrics.create'), async v => {
-    let spec;
-    try { spec = JSON.parse(v.spec); }
-    catch { throw new ApiError(0, 'validation_failed', t('exp.journeyInvalid')); }
-    const body = { key: v.key.trim(), displayName: v.displayName.trim(), description: v.description.trim(),
-      owner: v.owner.trim(), source: 'collect', dedupUnit: 'user',
-      eventKeys: v.eventKeys.split(',').map(s => s.trim()).filter(Boolean),
-      attributionWindow: Math.round(Number(v.windowDays) * NS_DAY), spec };
+    const body = metricDefinitionFromForm(v);
     const created = await api(wsPath() + '/metrics', { method: 'POST', body });
     S.metricRef = { key: created.key, version: created.version };
     toast(t('metrics.created')); route();
@@ -2867,7 +3280,7 @@ function init() {
     { name: 'name', label: t('label.displayName'), placeholder: 'Acme Inc' },
   ], t('btn.create'), async v => {
     const slug = v.slug.trim();
-    if (!slug) throw new ApiError(0, 'validation_failed', t('err.slugRequired'));
+    validateCreationSlug(slug);
     await api('/api/v1/admin/workspaces', { method: 'POST', body: { slug, name: v.name.trim() || slug } });
     toast(t('toast.wsCreated'));
     S.ws = slug;
@@ -2883,7 +3296,7 @@ function init() {
       { name: 'name', label: t('label.displayName'), placeholder: 'Production' },
     ], t('btn.create'), async v => {
       const slug = v.slug.trim();
-      if (!slug) throw new ApiError(0, 'validation_failed', t('err.slugRequired'));
+      validateCreationSlug(slug);
       await api(wsPath() + '/environments', { method: 'POST', body: { slug, name: v.name.trim() || slug } });
       toast(t('toast.envCreated'));
       S.env = slug;
@@ -2906,12 +3319,8 @@ function init() {
       ev.returnValue = '';
     }
   });
-  window.addEventListener('popstate', async () => {
-    if (!restoreConsoleHash(location.hash || '') || !S.booted) return;
-    await loadWorkspaces();
-    S.deepLinkRequested = false;
-    await route();
-  });
+  rememberConsoleHistory();
+  window.addEventListener('popstate', handleConsolePopState);
 }
 
 document.addEventListener('DOMContentLoaded', init);

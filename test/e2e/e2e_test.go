@@ -225,6 +225,79 @@ func newSDK(t *testing.T, h *harness, mutate func(*sdk.Options)) *sdk.Client {
 	return c
 }
 
+func TestE2EChineseResourceMetadata(t *testing.T) {
+	h := newHarness(t)
+	h.setupWorkspace()
+	segment := &model.Segment{
+		SchemaVersion: model.SchemaVersion, Key: "internal-office",
+		DisplayName: "办公网人群", Description: "仅匹配内部员工\n接入代码使用 internal-office",
+		Constraints: []model.Constraint{{Field: "user_id", Op: "eq", Value: "staff"}},
+	}
+	segmentPath := "/api/v1/admin/workspaces/acme/environments/prod/segments/internal-office"
+	var saved platform.SegmentDraft
+	if status := h.do("PUT", segmentPath+"/draft", h.owner,
+		map[string]any{"content": segment, "risk": "normal"}, &saved); status != http.StatusOK {
+		t.Fatalf("save segment metadata: %d", status)
+	}
+	if saved.Content.DisplayName != segment.DisplayName || saved.Content.Description != segment.Description {
+		t.Fatalf("segment metadata changed on save: %+v", saved.Content)
+	}
+	for _, action := range []string{"submit", "approve", "publish"} {
+		field := "note"
+		if action == "submit" {
+			field = "reason"
+		}
+		if status := h.do("POST", segmentPath+"/"+action, h.owner,
+			map[string]any{field: "metadata acceptance"}, nil); status != http.StatusOK {
+			t.Fatalf("segment %s: %d", action, status)
+		}
+	}
+	flag := testFlag("office-network")
+	flag.DisplayName = "办公网"
+	flag.Description = "仅向内部员工开放候选版本"
+	flag.Targeting = []model.Rule{{Name: "internal", Segments: []string{segment.Key}, Variation: "candidate"}}
+	h.publishFlag(t, flag, platform.RiskNormal, h.owner)
+	var view struct {
+		Current *platform.FlagRevision `json:"current"`
+	}
+	if status := h.do("GET", "/api/v1/admin/workspaces/acme/environments/prod/flags/office-network",
+		h.owner, nil, &view); status != http.StatusOK || view.Current == nil {
+		t.Fatalf("read published flag: %d", status)
+	}
+	if view.Current.Content.DisplayName != flag.DisplayName || view.Current.Content.Description != flag.Description {
+		t.Fatalf("published metadata lost: %+v", view.Current.Content)
+	}
+	client := newSDK(t, h, nil)
+	if err := client.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := client.Snapshot()
+	if snapshot.Flags[flag.Key].DisplayName != flag.DisplayName ||
+		snapshot.Segments[segment.Key].Description != segment.Description {
+		t.Fatal("metadata lost during config distribution or SDK sync")
+	}
+	value, result := client.StringVariation(flag.Key,
+		model.EvaluationContext{Attributes: map[string]any{"user_id": "staff"}}, "fallback")
+	if value != "candidate-value" || result.FlagKey != flag.Key {
+		t.Fatalf("metadata changed SDK addressing or targeting: %q %+v", value, result)
+	}
+	for _, tc := range []struct {
+		name, key, path, description string
+	}{
+		{name: "Chinese key remains invalid", key: "办公网", path: "%E5%8A%9E%E5%85%AC%E7%BD%91"},
+		{name: "metadata length bounded", key: "oversized", path: "oversized", description: strings.Repeat("中", 2049)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			invalid := *flag
+			invalid.Key, invalid.Description = tc.key, tc.description
+			if status := h.do("PUT", "/api/v1/admin/workspaces/acme/environments/prod/flags/"+tc.path+"/draft", h.owner,
+				map[string]any{"content": &invalid, "risk": "normal", "baseRevision": 0, "expectedDraftHash": ""}, nil); status != http.StatusBadRequest {
+				t.Fatalf("invalid resource accepted: %d", status)
+			}
+		})
+	}
+}
+
 // TestE2EPublishSubscribeEvaluate is the P1 acceptance loop:
 // create→review→publish→subscribe→evaluate, with push-based propagation.
 func TestE2EPublishSubscribeEvaluate(t *testing.T) {

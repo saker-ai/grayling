@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-15",
+  "decision": "Stable ASCII key with optional human-readable displayName and description",
+  "scope": [
+    "Flag",
+    "Segment"
+  ],
+  "limits": {
+    "displayNameUnicodeCodepoints": 128,
+    "descriptionUnicodeCodepoints": 2048
+  },
+  "behavior": [
+    "Create and edit Chinese names and multiline descriptions.",
+    "Search lists by name, description or stable key.",
+    "Rule templates preserve metadata.",
+    "Metadata participates in draft review and publication hashes, not bucketing or targeting.",
+    "Absent metadata preserves legacy schema-1 canonical JSON and hashes."
+  ],
+  "browser": {
+    "environment": "Isolated in-memory loopback server 19109; no production data writes",
+    "desktop": [
+      1440,
+      1000
+    ],
+    "mobile": [
+      390,
+      844
+    ],
+    "flag": "Created office-network named 办公网 with CIDR template, saved and read back Chinese metadata.",
+    "segment": "Created office-users named 办公网人群, saved and read back Chinese metadata.",
+    "search": "Searching 公司内网 matches office-network via description.",
+    "overflow": "document and main scrollWidth both 390 at mobile viewport",
+    "missingTranslationKeys": []
+  },
+  "automatedTests": [
+    "model metadata validation, canonical compatibility and evaluation invariance",
+    "platform JSON reload, approval invalidation and metadata tampering rejection",
+    "real HTTP segment+flag publication, SDK sync and evaluation with unchanged ASCII key",
+    "Web rendering, template preservation, typed editors and bilingual contracts"
+  ],
+  "screenshots": [
+    "create.png",
+    "desktop.png",
+    "mobile.png"
+  ],
+  "limitations": [
+    "No physical mobile device or screen reader testing.",
+    "JSON-backed persistence tested; optional fields use existing JSON payload storage without new SQL columns."
+  ]
+}

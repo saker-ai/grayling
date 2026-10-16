@@ -57,6 +57,29 @@ func TestFlagPublishReviewContract(t *testing.T) {
 	t.Logf("%s", out)
 }
 
+func TestConsoleUsabilityContracts(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not available; console usability contracts require node")
+	}
+	for _, script := range []string{
+		"editor_usability_contract.mjs", "resilience_contract.mjs",
+		"document_validation_contract.mjs", "validation_contract.mjs",
+		"form_validation_contract.mjs", "save_validation_contract.mjs",
+	} {
+		t.Run(script, func(t *testing.T) {
+			t.Parallel()
+			cmd := exec.CommandContext(t.Context(), node, script)
+			cmd.Dir = wd(t)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("console usability contract failed: %v\n%s", err, out)
+			}
+			t.Logf("%s", out)
+		})
+	}
+}
+
 // TestRenderRolloutDOMContract runs the Node-based DOM/contract test for the
 // staged-rollout (release plan) UI of the experiment-detail view (§5.3 P4
 // 自动推进). It loads the same real web/app.js in a vm and drives

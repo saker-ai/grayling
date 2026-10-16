@@ -3431,6 +3431,16 @@ components:
           enum: [1]
         key:
           type: string
+          pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$'
+          description: 稳定的程序调用标识；中文名称请使用 displayName。
+        displayName:
+          type: string
+          maxLength: 128
+          description: 可选的人类可读名称，支持中文；修改不改变 key。
+        description:
+          type: string
+          maxLength: 2048
+          description: 可选说明，支持中文和多行。名称和说明随草稿审核及版本发布。
         type:
           type: string
           enum: [bool, string, number, json]
@@ -3598,6 +3608,16 @@ components:
           enum: [1]
         key:
           type: string
+          pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$'
+          description: 稳定的人群引用标识；中文名称请使用 displayName。
+        displayName:
+          type: string
+          maxLength: 128
+          description: 可选的人类可读名称，支持中文；修改不改变 key。
+        description:
+          type: string
+          maxLength: 2048
+          description: 可选说明，支持中文和多行。名称和说明随草稿审核及版本发布。
         version:
           type: string
         constraints:

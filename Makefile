@@ -81,9 +81,7 @@ show-admin-password:
 	@cat "$(ADMIN_PASSWORD_FILE)"
 
 check-run-port:
-	@if command -v lsof >/dev/null && lsof -nP -tiTCP:$(RUN_PORT) -sTCP:LISTEN >/dev/null; then \
-	  echo "Port $(RUN_PORT) is occupied; stop its listener explicitly before running Grayling" >&2; exit 1; \
-	fi
+	@python3 scripts/free_run_port.py "$(RUN_PORT)"
 
 run: build ensure-admin-password check-run-port
 	GRAYLING_DEV_AUTOLOGIN=$(DEV) \

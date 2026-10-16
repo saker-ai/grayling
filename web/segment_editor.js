@@ -1,41 +1,132 @@
 'use strict';
 
+function editorUTF8Length(value) {
+  return Array.from(value).reduce((length, character) => {
+    const point = character.codePointAt(0);
+    return length + (point < 0x80 ? 1 : point < 0x800 ? 2 : point < 0x10000 ? 3 : 4);
+  }, 0);
+}
+function editorValidCIDR(value) {
+  if (typeof value !== 'string') return false;
+  const parts = value.split('/');
+  if (parts.length !== 2 || !/^(0|[1-9]\d*)$(?![\s\S])/.test(parts[1])) return false;
+  const ipv4 = address => {
+    const octets = address.split('.');
+    return octets.length === 4 && octets.every(n => /^(0|[1-9]\d{0,2})$(?![\s\S])/.test(n) && Number(n) <= 255);
+  };
+  const address = parts[0], prefix = Number(parts[1]);
+  if (!address.includes(':')) return prefix <= 32 && ipv4(address);
+  if (prefix > 128 || /:::|^:[^:]|[^:]:$(?![\s\S])/.test(address) || address.includes('%') || /[^0-9a-fA-F:.]/.test(address)) return false;
+  const halves = address.split('::');
+  if (halves.length > 2) return false;
+  const groups = address.split(':').filter(Boolean);
+  let count = 0;
+  for (let i = 0; i < groups.length; i++) {
+    if (groups[i].includes('.')) {
+      if (i !== groups.length - 1 || !address.endsWith(groups[i]) || !ipv4(groups[i])) return false;
+      count += 2;
+    } else {
+      if (!/^[0-9a-fA-F]{1,4}$(?![\s\S])/.test(groups[i])) return false;
+      count++;
+    }
+  }
+  return halves.length === 2 ? count < 8 : count === 8 && !address.startsWith(':') && !address.endsWith(':');
+}
+function editorValidSemver(value) {
+  if (typeof value !== 'string') return false;
+  const match = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$(?![\s\S])/.exec(value);
+  if (!match) return false;
+  const max = 18446744073709551615n;
+  if (match.slice(1, 4).some(part => BigInt(part) > max)) return false;
+  return !match[4] || match[4].split('.').every(part => !/^\d+$(?![\s\S])/.test(part) ||
+    (!/^0\d/.test(part) && BigInt(part) <= max));
+}
+function editorValidTime(value) {
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:[.,]\d+)?(Z|[+-]\d{2}:\d{2})$(?![\s\S])/.exec(value);
+  if (!match) return false;
+  const [, year, month, day, hour, minute, second, zone] = match;
+  const y = Number(year), m = Number(month), d = Number(day);
+  const days = [31, y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return m >= 1 && m <= 12 && d >= 1 && d <= days[m - 1] && Number(hour) < 24 &&
+    Number(minute) < 60 && Number(second) < 60 &&
+    (zone === 'Z' || (Number(zone.slice(1, 3)) <= 24 && Number(zone.slice(4)) <= 60));
+}
+function editorUnsupportedRE2Pattern(pattern) {
+  let characterClass = false;
+  for (let index = 0; index < pattern.length; index++) {
+    const character = pattern[index];
+    if (character === '\\') {
+      const escape = pattern[++index];
+      if (!characterClass && (/[1-9]/.test(escape || '') || (escape === 'k' && pattern[index + 1] === '<'))) return true;
+      continue;
+    }
+    if (character === '[') characterClass = true;
+    if (character === ']') characterClass = false;
+    if (!characterClass && character === '(' && /^\(\?(?:[=!]|<[=!])/.test(pattern.slice(index))) return true;
+  }
+  return false;
+}
+// Local syntax checks complement server validation; RE2 remains authoritative.
+function lintConstraints(constraints, registered = null, maxCount = null) {
+  if (constraints == null) return [];
+  if (!Array.isArray(constraints)) return [t('flags.editorConstraintsArray')];
+  const issues = [];
+  if (maxCount !== null && constraints.length > maxCount) issues.push(t('editor.constraintLimit', {max: maxCount}));
+  const fields = registered === null ? null : new Set(registered);
+  const scalar = value => ['string', 'boolean'].includes(typeof value) ||
+    (typeof value === 'number' && Number.isFinite(value));
+  constraints.forEach((constraint, index) => {
+    const n = index + 1;
+    if (!constraint || typeof constraint !== 'object' || Array.isArray(constraint) ||
+        typeof constraint.field !== 'string' || !constraint.field || !OPS.includes(constraint.op)) {
+      issues.push(t('seg.editorBadConstraint', {n})); return;
+    }
+    if (fields && !fields.has(constraint.field)) issues.push(t('editor.unregisteredField', {field: constraint.field}));
+    const {op, value, values} = constraint;
+    if (['in', 'not_in'].includes(op)) {
+      if (!Array.isArray(values) || !values.length || values.length > 512 || !values.every(scalar)) issues.push(t('editor.setLimit', {n}));
+    } else if (op === 'regex') {
+      if (typeof value !== 'string' || editorUTF8Length(value) > 512) issues.push(t('editor.regexLimit', {n}));
+      else if (editorUnsupportedRE2Pattern(value)) issues.push(t('seg.editorBadRegex', {n}));
+      else {
+        // Go supports inline/scoped flags and quoted literals unavailable in JS.
+        // Leave those patterns to the backend instead of falsely rejecting them.
+        if (/\(\?[imsU-]+[:)]|\\Q/.test(value)) return;
+        try { new RegExp(value.replace(/\(\?P</g, '(?<')); }
+        catch { issues.push(t('seg.editorBadRegex', {n})); }
+      }
+    } else if (op === 'in_cidr') {
+      if (!editorValidCIDR(value)) issues.push(t('editor.invalidCIDR', {n}));
+    } else if (op.startsWith('semver_')) {
+      if (!editorValidSemver(value)) issues.push(t('editor.invalidSemver', {n}));
+    } else if (['time_before', 'time_after'].includes(op)) {
+      if (!editorValidTime(value)) issues.push(t('editor.invalidTime', {n}));
+    } else if (['gt', 'gte', 'lt', 'lte'].includes(op)) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) issues.push(t('seg.editorNumberValue', {n}));
+    } else if (!scalar(value)) issues.push(t('seg.editorScalarValue', {n}));
+  });
+  return [...new Set(issues)];
+}
+function lintSegmentReferences(references, key = '', maxCount = null) {
+  if (references == null) return [];
+  if (!Array.isArray(references)) return [t('seg.editorBadReference')];
+  const issues = [];
+  if (maxCount !== null && references.length > maxCount) issues.push(t('editor.referenceLimit', {max: maxCount}));
+  if (references.some(ref => resourceKeyError(ref) || ref === key)) issues.push(t('seg.editorBadReference'));
+  return issues;
+}
 function lintSegment(content) {
   if (!content || typeof content !== 'object' || Array.isArray(content)) return [t('lint.notObject')];
-  const issues = [];
-  if (!Array.isArray(content.constraints) || !Array.isArray(content.segments)) {
-    issues.push(t('seg.editorArrayShape'));
-    return issues;
-  }
-  if (!content.constraints.length && !content.segments.length) issues.push(t('validate.segmentNonEmpty'));
-  content.constraints.forEach((constraint, index) => {
-    if (!constraint || typeof constraint !== 'object' || Array.isArray(constraint) || !constraint.field ||
-        !OPS.includes(constraint.op)) {
-      issues.push(t('seg.editorBadConstraint', { n: index + 1 }));
-      return;
-    }
-    if (constraint.op === 'in' || constraint.op === 'not_in') {
-      if (!Array.isArray(constraint.values) || !constraint.values.length ||
-          constraint.values.some(value => value === null || typeof value === 'object')) {
-        issues.push(t('seg.editorSetValues', { n: index + 1 }));
-      }
-    } else if (constraint.value === undefined || constraint.value === null ||
-        typeof constraint.value === 'object') {
-      issues.push(t('seg.editorScalarValue', { n: index + 1 }));
-    } else if (constraint.op === 'regex') {
-      if (typeof constraint.value !== 'string') issues.push(t('seg.editorBadRegex', { n: index + 1 }));
-      else {
-        try { new RegExp(constraint.value); }
-        catch { issues.push(t('seg.editorBadRegex', { n: index + 1 })); }
-      }
-    } else if (['gt', 'gte', 'lt', 'lte'].includes(constraint.op) && typeof constraint.value !== 'number') {
-      issues.push(t('seg.editorNumberValue', { n: index + 1 }));
-    }
-  });
-  if (content.segments.some(name => typeof name !== 'string' || !name.trim() || name === content.key)) {
-    issues.push(t('seg.editorBadReference'));
-  }
-  return issues;
+  const issues = editorMetadataIssues(content);
+  if (content.schemaVersion !== 1) issues.push(t('editor.schemaVersion'));
+  const keyIssue = resourceKeyError(content.key);
+  if (keyIssue) issues.push(keyIssue);
+  issues.push(...lintConstraints(content.constraints), ...lintSegmentReferences(content.segments, content.key));
+  if (!(Array.isArray(content.constraints) && content.constraints.length) &&
+      !(Array.isArray(content.segments) && content.segments.length)) issues.push(t('validate.segmentNonEmpty'));
+  return [...new Set(issues)];
 }
 
 function renderSegmentDependencies(data) {
@@ -114,17 +205,9 @@ function parseSegmentPreviewContext(text) {
 function renderSegmentStructured(content) {
   const constraints = Array.isArray(content.constraints) ? content.constraints : [];
   const segments = Array.isArray(content.segments) ? content.segments : [];
-  return '<div class="segment-structured"><p class="muted">' + esc(t('seg.editorSemantics')) + '</p>' +
+  return '<div class="segment-structured">' + editorMetadataMarkup(content, 'seg') + '<p class="muted">' + esc(t('seg.editorSemantics')) + '</p>' +
     '<h4>' + esc(t('seg.editorConditions')) + '</h4><div id="seg-conditions">' +
-    constraints.map((constraint, index) => '<div class="segment-condition" data-condition="' + index + '">' +
-      '<label class="field">' + esc(t('seg.editorField')) + '<input data-seg-field value="' + esc(constraint.field || '') + '"></label>' +
-      '<label class="field">' + esc(t('seg.editorOperator')) + '<select data-seg-op>' +
-        OPS.map(op => '<option value="' + op + '"' + (constraint.op === op ? ' selected' : '') + '>' + op + '</option>').join('') +
-      '</select></label><label class="field grow">' + esc(t('seg.editorValue')) +
-      '<input class="mono" data-seg-value value="' + esc(JSON.stringify(
-        constraint.op === 'in' || constraint.op === 'not_in' ? constraint.values ?? [] : constraint.value ?? '')) + '"></label>' +
-      '<button type="button" class="btn sm" data-remove-condition="' + index + '">' + esc(t('flags.editorRemove')) + '</button></div>').join('') +
-    '</div><button type="button" class="btn sm" id="seg-add-condition">' + esc(t('seg.editorAddCondition')) + '</button>' +
+    editorConditionsMarkup(constraints) + '</div>' +
     '<label class="field">' + esc(t('seg.editorReferences')) +
     '<input id="seg-references" value="' + esc(segments.join(', ')) + '"></label>' +
     '<div id="seg-structured-status" role="status" aria-live="polite"></div></div>';
@@ -133,14 +216,8 @@ function renderSegmentStructured(content) {
 function readSegmentStructured(root, current) {
   const content = JSON.parse(JSON.stringify(current));
   const issues = [];
-  content.constraints = $$('[data-condition]', root).map(row => {
-    const field = $('[data-seg-field]', row).value.trim();
-    const op = $('[data-seg-op]', row).value;
-    let value;
-    try { value = JSON.parse($('[data-seg-value]', row).value); }
-    catch { issues.push(t('seg.editorInvalidJson')); }
-    return op === 'in' || op === 'not_in' ? { field, op, values: value } : { field, op, value };
-  });
+  editorReadMetadata(root, content, issues);
+  content.constraints = editorReadConditions(root, current.constraints || [], issues);
   content.segments = [...new Set($('#seg-references', root).value.split(',').map(value => value.trim()).filter(Boolean))];
   return { content, issues: [...new Set(issues.length ? issues : lintSegment(content))] };
 }
@@ -151,16 +228,16 @@ function bindSegmentStructured(root) {
   const json = $('#seg-json', root);
   let issues = [];
   let lastControls = '';
-  const snapshot = () => JSON.stringify($$('input, select', form).map(control => control.value));
+  const snapshot = () => JSON.stringify($$('input, select, textarea', form).filter(control => !control.matches('[data-reference-search]')).map(control => control.value));
   const status = () => {
     const box = $('#seg-structured-status', form);
-    box.className = issues.length ? 'warn-text' : 'ok-text';
-    box.textContent = issues.length ? issues.join(' · ') : t('validate.ok');
+    editorShowIssues(box, issues);
     $('#seg-save', root).disabled = issues.length > 0;
   };
   const redraw = () => {
     const content = JSON.parse(json.value);
     form.innerHTML = renderSegmentStructured(content);
+    editorBindReferences(form, root);
     issues = lintSegment(content);
     lastControls = snapshot();
     status();
@@ -177,17 +254,19 @@ function bindSegmentStructured(root) {
     }
     return !issues.length;
   };
-  form.addEventListener('input', sync);
-  form.addEventListener('change', sync);
+  form.addEventListener('input', event => { if (!event.target.matches('[data-condition-type]')) sync(); });
+  form.addEventListener('change', event => { editorChangeConditionType(event); sync(); });
   form.addEventListener('click', event => {
-    const remove = event.target.closest('[data-remove-condition]');
-    if (!remove && event.target.id !== 'seg-add-condition') return;
+    const remove = event.target.closest('[data-editor-remove-condition]');
+    if (!remove && !event.target.closest('[data-editor-add-condition]')) return;
+    if (remove) { remove.closest('[data-editor-condition]').remove(); if (sync()) redraw(); $('[data-editor-add-condition]', form)?.focus(); return; }
     if (snapshot() !== lastControls && !sync()) return;
     const content = JSON.parse(json.value);
-    if (remove) content.constraints.splice(Number(remove.dataset.removeCondition), 1);
+    if (remove) content.constraints.splice(Number(remove.closest('[data-editor-condition]').dataset.editorCondition), 1);
     else content.constraints.push({ field: '', op: 'eq', value: '' });
     json.value = JSON.stringify(content, null, 2);
     redraw();
+    (remove ? $('[data-editor-add-condition]', form) : $$('[data-condition-field]', form).at(-1))?.focus();
   });
   $('#seg-mode-structured', root).onclick = () => {
     if (!form.classList.contains('hidden')) return;
@@ -212,7 +291,7 @@ function bindSegmentStructured(root) {
   // (the preset picker) re-renders the structured form through this handle.
   return {
     valid: () => {
-      if (advanced.classList.contains('hidden') && !sync()) { toast(issues[0], false); return false; }
+      if (advanced.classList.contains('hidden') && !sync()) { ($('[aria-invalid="true"]', form) || $('#seg-structured-status', form)).focus(); return false; }
       return true;
     },
     redraw,

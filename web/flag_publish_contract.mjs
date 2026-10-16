@@ -21,7 +21,7 @@ const view = (state, hash = 'draft-v1') => ({
 });
 const sandbox = {
   document: {
-    addEventListener() {}, createElement() { return { classList: { add() {} }, remove() {} }; },
+    addEventListener() {}, createElement() { return { classList: { add() {} }, appendChild() {}, remove() {} }; },
     querySelector(selector) {
       if (selector === '#flag-publish-review') return reviewBox;
       if (selector === '#toasts') return { appendChild() {} };
@@ -32,6 +32,7 @@ const sandbox = {
   localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
   location: { hash: '', origin: 'http://localhost' }, history: { pushState() {}, replaceState() {} },
   navigator: {}, console, setTimeout() {}, clearTimeout() {},
+  AbortController,
   fetch: async (url, opts) => {
     if (url === base && opts.method === 'GET') {
       return { ok: true, status: 200, text: async () => JSON.stringify(current) };

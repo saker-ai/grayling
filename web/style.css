@@ -180,7 +180,14 @@ body {
 .hidden { display: none !important; }
 .muted { color: var(--text-secondary); }
 .mono, pre, textarea.json, input.mono { font-family: var(--font-mono); }
+p.mono, .view-head h2 { overflow-wrap: anywhere; }
 .nowrap { white-space: nowrap; }
+.resource-name { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.resource-key { display: block; color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.resource-description { margin: var(--sp-1) 0 0; color: var(--text-secondary); font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; max-width: 70ch; }
+.view-head > .resource-description { flex-basis: 100%; }
+.editor-metadata { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.editor-metadata input, .editor-metadata textarea { width: 100%; }
 .grow { flex: 1; width: 100%; }
 .err-text { color: var(--bad); margin: var(--sp-2) 0; min-height: 1em; }
 .warn-text { color: var(--warn); }
@@ -359,6 +366,24 @@ table.grid { min-width: 660px; }
 .modal .flag-diff-values { grid-template-columns: 1fr; }
 .flag-editor-modes { margin-bottom: var(--sp-3); }
 .flag-editor-modes [aria-pressed="true"] { background: var(--action-soft); color: var(--action-soft-on); border-color: var(--action); }
+.flag-workflow { margin-block: var(--sp-3) var(--sp-4); }
+.flag-workflow ol { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.flag-workflow li { padding-block: var(--sp-2); color: var(--text-secondary); border-bottom: 2px solid var(--line); flex: 1 1 100px; }
+.flag-workflow li[aria-current="step"] { border-color: var(--action); color: var(--text-primary); font-weight: 600; }
+.flag-workflow p { max-width: 70ch; }
+.published-summary { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 2fr); gap: var(--sp-2) var(--sp-3); }
+.published-summary dt { color: var(--text-secondary); }
+.published-summary dd { margin: 0; overflow-wrap: anywhere; }
+.flag-danger-tools { margin-top: var(--sp-4); padding-top: var(--sp-2); border-top: 1px solid var(--bad-line); }
+.flag-danger-tools > summary { color: var(--bad); }
+.advanced-tools { margin-top: var(--sp-4); }
+.inline-diagnostic { font-size: var(--fs-xs); color: var(--text-secondary); overflow-wrap: anywhere; }
+.inline-diagnostic > summary { font-weight: 400; }
+.list-pagination { justify-content: flex-end; padding-block: var(--sp-3); }
+.list-pagination [role="status"] { margin-inline: var(--sp-2); color: var(--text-secondary); }
+.vrow > label { display: grid; gap: var(--sp-1); flex: 1 1 120px; min-width: 0; color: var(--text-secondary); font-size: var(--fs-xs); }
+.vrow > label > input, .vrow > label > select { width: 100%; min-width: 0; }
+.vrow:has(> label) { flex-wrap: wrap; align-items: end; }
 .flag-structured h4 { margin: var(--sp-4) 0 var(--sp-2); }
 .flag-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .flag-fields .flag-wide { grid-column: 1 / -1; }
@@ -388,11 +413,24 @@ dl.approval-facts dt { color: var(--text-secondary); }
 dl.approval-facts dd { margin: 0; overflow-wrap: anywhere; }
 .segment-structured h4 { margin: var(--sp-4) 0 var(--sp-2); }
 .segment-condition { display: flex; align-items: end; gap: var(--sp-2); margin: var(--sp-2) 0; }
+.segment-condition { flex-wrap: wrap; }
 .segment-condition > .field { min-width: 0; }
 .segment-condition > .field:first-child { flex: 1 1 28%; }
 .segment-condition > .field:nth-child(2) { flex: 0 1 150px; }
 .segment-condition > .field.grow { flex: 2 1 35%; }
 .segment-condition input, .segment-condition select { width: 100%; }
+.segment-condition textarea { width: 100%; min-width: 0; resize: vertical; }
+.segment-condition > .field { flex: 1 1 130px; }
+.segment-condition > .field.grow { flex: 2 1 240px; }
+[data-rule-condition-group] { border: 0; padding: 0; margin: var(--sp-3) 0 0; min-width: 0; }
+[data-rule-condition-group] > legend { padding: 0; }
+[data-editor-conditions] { display: grid; gap: var(--sp-3); }
+[data-editor-condition] { padding-block: var(--sp-2); border-bottom: 1px solid var(--line-faint); }
+[aria-invalid="true"] { border-color: var(--bad); outline-color: var(--bad); }
+#flag-structured-status, #seg-structured-status { margin-top: var(--sp-3); overflow-wrap: anywhere; }
+#flag-structured-status ul, #seg-structured-status ul { padding-inline-start: var(--sp-5); }
+details > summary { cursor: pointer; padding-block: var(--sp-2); font-weight: 600; }
+details > summary:focus-visible { outline-offset: 2px; }
 .segment-structured > .field { margin-top: var(--sp-3); }
 table.grid tr[hidden] { display: none; }
 .row-link {
@@ -493,6 +531,7 @@ ul.plain { margin: 6px 0; padding-left: var(--sp-5); }
 
 /* ---------- toasts ---------- */
 #toasts { position: fixed; right: var(--sp-4); bottom: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); z-index: 50; max-width: 440px; }
+#toasts { max-width: min(440px, calc(100vw - 2 * var(--sp-4))); max-height: 50dvh; overflow-y: auto; }
 .toast {
   background: var(--surface-float); border: 1px solid var(--ok-line);
   border-radius: var(--radius-md); padding: 10px var(--sp-3);
@@ -500,6 +539,7 @@ ul.plain { margin: 6px 0; padding-left: var(--sp-5); }
   transition: opacity var(--dur-base) var(--ease); word-break: break-word;
 }
 .toast.err { border-color: var(--bad-line); color: var(--bad); }
+.toast-close { display: block; margin-top: var(--sp-2); color: var(--text-primary); }
 .toast.fade { opacity: 0; }
 
 /* ---------- modal ---------- */
@@ -540,6 +580,11 @@ ul.plain { margin: 6px 0; padding-left: var(--sp-5); }
   .flag-empty-mobile { display: block; }
   .flag-diff-values { grid-template-columns: 1fr; }
   .flag-fields { grid-template-columns: 1fr; }
+  .published-summary { grid-template-columns: 1fr; }
+  .published-summary dd { margin-bottom: var(--sp-2); }
+  .vrow > label { flex-basis: 100%; }
+  .list-pagination { justify-content: space-between; }
+  .list-pagination [role="status"] { order: -1; width: 100%; margin-inline: 0; }
   .flag-variation { align-items: stretch; flex-wrap: wrap; }
   .flag-variation > .field:first-child { flex: 1 1 100%; }
   .flag-variation > .field.grow { flex: 1 1 100%; }

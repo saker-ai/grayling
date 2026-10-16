@@ -50,7 +50,8 @@ function el() {
       add() {}, remove() {}, contains() { return false; },
       toggle(cls, on) { s._toggles.push([cls, on]); },
     },
-    appendChild() {}, replaceChildren(child) { s.innerHTML = child.innerHTML; },
+    appendChild() {}, append() {}, after() {}, focus() {},
+    insertAdjacentHTML(position, html) { s.innerHTML += html; }, replaceChildren(child) { s.innerHTML = child.innerHTML; },
     remove() {}, setAttribute() {}, addEventListener() {},
     select() {}, closest() { return null; },
     querySelector() { return el(); }, querySelectorAll() { return []; },
@@ -108,6 +109,7 @@ function makeSandbox({ storedLang, navLang } = {}) {
       : { language: navLang, clipboard: { writeText: () => Promise.resolve() } },
     console: { warn: (...a) => warns.push(a.join(' ')), log() {}, error() {} },
     setInterval: () => 0, clearInterval() {}, setTimeout: () => 0, clearTimeout() {},
+    AbortController,
     fetch(url, opts) {
       fetchCalls.push({ url, opts });
       return mockResponse(url);

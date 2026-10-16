@@ -27,9 +27,12 @@ const (
 
 // Flag is one feature flag / experiment carrier in Grayling DSL form.
 type Flag struct {
-	SchemaVersion int      `yaml:"schemaVersion" json:"schemaVersion"`
-	Key           string   `yaml:"key" json:"key"`
-	Type          FlagType `yaml:"type" json:"type"`
+	SchemaVersion int    `yaml:"schemaVersion" json:"schemaVersion"`
+	Key           string `yaml:"key" json:"key"`
+	// DisplayName and Description are human-readable metadata; Key remains the stable identifier.
+	DisplayName string   `yaml:"displayName,omitempty" json:"displayName,omitempty"`
+	Description string   `yaml:"description,omitempty" json:"description,omitempty"`
+	Type        FlagType `yaml:"type" json:"type"`
 	// Disable is the kill switch. A disabled flag serves its DefaultRule
 	// with reason DISABLED; offline nodes only observe it after the next
 	// successful sync (bounded by the SDK max-staleness window).
@@ -195,6 +198,8 @@ var Operators = map[string]bool{
 type Segment struct {
 	SchemaVersion int          `yaml:"schemaVersion" json:"schemaVersion"`
 	Key           string       `yaml:"key" json:"key"`
+	DisplayName   string       `yaml:"displayName,omitempty" json:"displayName,omitempty"`
+	Description   string       `yaml:"description,omitempty" json:"description,omitempty"`
 	Version       string       `yaml:"version,omitempty" json:"version,omitempty"`
 	Constraints   []Constraint `yaml:"constraints,omitempty" json:"constraints,omitempty"`
 	Segments      []string     `yaml:"segments,omitempty" json:"segments,omitempty"`

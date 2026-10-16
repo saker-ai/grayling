@@ -42,11 +42,13 @@ const element = () => {
       add: c => classes.add(c), remove: c => classes.delete(c),
       contains: c => classes.has(c), toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)),
     },
-    addEventListener() {}, appendChild(child) { node.children.push(child); }, remove() {},
+    append() {}, after() {}, addEventListener() {}, appendChild(child) { node.children.push(child); }, remove() {},
+    parentElement: { insertAdjacentElement() {} },
+    matches() { return false; }, removeAttribute() {},
     setAttribute() {}, focus() {}, select() {}, closest() { return null; }, reportValidity() { return true; },
     replaceChildren(child) { node.innerHTML = child.innerHTML; },
     querySelector(sel) { if (!kids.has(sel)) kids.set(sel, element()); return kids.get(sel); },
-    querySelectorAll(sel) { return [node.querySelector(sel)]; },
+    querySelectorAll(sel) { return sel === '[data-rule-segments], #seg-references' ? [] : [node.querySelector(sel)]; },
   };
   created.push(node);
   return node;
@@ -63,6 +65,7 @@ const sandbox = {
   navigator: { language: 'en-US' }, location: { origin: 'http://localhost', hash: '', href: 'http://localhost/', search: '' },
   history: { pushState() {}, replaceState() {} },
   setTimeout: () => 0, clearInterval() {}, clearTimeout() {}, console,
+  AbortController,
   fetch: async url => mockResponse(url),
 };
 sandbox.window = sandbox;
@@ -85,7 +88,7 @@ function mockResponse(url) {
 function viewRoot() {
   const nodes = new Map();
   return {
-    innerHTML: '',
+    innerHTML: '', dataset: {},
     addEventListener() {},
     querySelector(sel) { if (!nodes.has(sel)) nodes.set(sel, element()); return nodes.get(sel); },
     querySelectorAll(sel) { return [this.querySelector(sel)]; },
@@ -299,6 +302,32 @@ assert.equal(segRoot.querySelector('#seg-json').value, JSON.stringify(segment.bu
   'the segment picker must replace the JSON source with the preset');
 assert.ok(segRoot.querySelector('#seg-structured').innerHTML.includes('alice'),
   'the segment structured form must be repainted from the preset');
+
+// Applying rule templates preserves descriptive metadata in both editors.
+for (const [root, id, presetId, keyName] of [[flagRoot, 'flag', 'kill-switch', 'flagKey'], [segRoot, 'seg', 'email-domain', 'segKey']]) {
+  const source = root.querySelector('#' + id + '-json');
+  const named = JSON.parse(source.value);
+  named.displayName = '\u4e2d\u6587\u540d\u79f0'; named.description = 'Context survives template replacement';
+  source.value = JSON.stringify(named);
+  const picker = root.querySelector('#' + id + '-preset'); picker.value = presetId;
+  const apply = picker.onchange(); await tick();
+  await lastOverlay().querySelector('#action-confirm').onclick(); await apply;
+  const result = JSON.parse(source.value);
+  assert.equal(result.displayName, named.displayName, 'template replacement retains the display name');
+  assert.equal(result.description, named.description, 'template replacement retains the description');
+  assert.equal(result.key, S[keyName], 'template replacement retains the machine key');
+}
+
+const seed = { displayName: '\u65b0\u7b56\u7565', description: 'Only saved when the operator saves the draft' };
+S.flagKey = 'metadata-seed-flag'; S.flagNew = true; S.flagPreset = 'kill-switch'; S.flagMetadata = seed;
+const metadataFlagRoot = viewRoot(); await VIEWS.flags(metadataFlagRoot);
+const seededFlag = JSON.parse(metadataFlagRoot.querySelector('#flag-json').value);
+assert.equal(seededFlag.displayName, seed.displayName, 'create-dialog display name seeds the unsaved flag');
+assert.equal(seededFlag.key, 'metadata-seed-flag', 'display name never replaces the SDK key');
+S.segKey = 'metadata-seed-segment'; S.segPreset = 'user-list'; S.segMetadata = seed;
+const metadataSegmentRoot = viewRoot(); await VIEWS.segments(metadataSegmentRoot);
+assert.equal(JSON.parse(metadataSegmentRoot.querySelector('#seg-json').value).description, seed.description, 'create-dialog description seeds the unsaved segment');
+S.flagMetadata = S.segMetadata = null;
 
 // --- 5. machine-readable hand-off to the Go side ----------------------------
 console.log('preset_contract.presets ' + JSON.stringify({ flags: flagDocuments, segments: segmentDocuments }));

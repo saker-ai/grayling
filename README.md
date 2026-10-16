@@ -27,7 +27,7 @@ make run
 
 Open <http://127.0.0.1:27002/>. `make run` starts in developer mode: the console signs itself in as the global owner, so there is no password to type and no password file is created. That convenience covers every visitor to the port, so it is for local work only — keep the listener off untrusted networks, or start without it (`make run DEV=0`, which generates `data/admin-password` and asks you to sign in with `make show-admin-password`). The password file and runtime data are ignored by Git. The server also prints a one-time global owner token when it creates the first owner. Store that token securely if you plan to use it.
 
-`make run` binds `:27002` on every interface — the console and API are reachable from any network over plaintext HTTP, so put TLS termination in front before exposing them beyond a trusted network (override with `make run RUN_PORT=...`). Embedded gonacos still starts on ephemeral loopback ports. Its default platform store is a JSON file under `data/`. To use SQLite for a persistent single-node installation:
+`make run` binds `:27002` on every interface — the console and API are reachable from any network over plaintext HTTP, so put TLS termination in front before exposing them beyond a trusted network (override with `make run RUN_PORT=...`). Embedded gonacos still starts on ephemeral loopback ports. Its default platform store is a JSON file under `data/`. Before starting, `make run` automatically stops any process listening on `RUN_PORT`: it sends SIGTERM, waits up to 5 seconds, then uses SIGKILL if needed. This requires Python 3 and either `lsof` or `ss`. To use SQLite for a persistent single-node installation:
 
 ```bash
 make run RUN_ARGS='-sqlite data/grayling.db'
@@ -36,6 +36,8 @@ make run RUN_ARGS='-sqlite data/grayling.db'
 For multi-replica PostgreSQL deployments, use `-pg` and a shared auth secret; see [platform storage](docs/storage.md) and [multi-replica writes](docs/多副本管理写入.md). Set `-nacos-url` to use an external Nacos service; see [external Nacos](docs/external-nacos.md) for credentials, permissions, and data layout. The storage flag selects Grayling's platform database; Nacos stores the published configuration separately.
 
 ## Use Grayling in your application
+
+Flags and segments use a stable ASCII `key` for SDK calls and references. Use optional `displayName` (up to 128 Unicode characters) and `description` (up to 2048) for Chinese or other human-readable text. The console supports creating, editing, displaying and searching this metadata; changes follow the existing draft review and publish lifecycle.
 
 The root package is importable as `github.com/saker-ai/grayling`. `grayling.Start` owns the stores and background jobs, while your service owns the HTTP listener and shutdown sequence. Mount `App.Handler()` for the API and console, or `App.APIHandler()` for the API alone. See the [complete embedding example](docs/embedding.md).
 
