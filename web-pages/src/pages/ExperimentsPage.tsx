@@ -96,6 +96,7 @@ export function ExperimentsPage(): ReactElement {
       key: 'id',
       header: t('th.id'),
       className: 'mono',
+      mobilePrimary: true, // card title: the experiment id drill-down
       cell: ({ experiment: e }) => (
         <button
           className="row-link"
@@ -160,7 +161,7 @@ export function ExperimentsPage(): ReactElement {
           {t('exp.listApply')}
         </Button>
       </form>
-      <DataTable columns={columns} rows={rows} rowKey={({ experiment: e }) => e.id} emptyText={t('exp.empty')} />
+      <DataTable columns={columns} rows={rows} rowKey={({ experiment: e }) => e.id} emptyText={t('exp.empty')} mobileCards />
       <div className="exp-list-pager">
         <span className="muted">{t('exp.listRange', { first, last, total: pageData.total })}</span>
         <Button

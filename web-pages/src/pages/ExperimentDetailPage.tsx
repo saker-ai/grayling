@@ -594,11 +594,11 @@ function PreRegistration({ experiment }: { experiment: ExperimentDetail }): Reac
       <table className="kv">
         <tbody>
           <tr>
-            <th>{t('th.unit')}</th>
+            <th scope="row">{t('th.unit')}</th>
             <td className="mono">{e.unit}</td>
           </tr>
           <tr>
-            <th>{t('exp.layerShort')}</th>
+            <th scope="row">{t('exp.layerShort')}</th>
             <td>
               {e.layer || '—'}
               {e.layerSlot ? (
@@ -607,11 +607,11 @@ function PreRegistration({ experiment }: { experiment: ExperimentDetail }): Reac
             </td>
           </tr>
           <tr>
-            <th>{t('exp.eligShort')}</th>
+            <th scope="row">{t('exp.eligShort')}</th>
             <td>{e.eligibility ? e.eligibility + '%' : '100%'}</td>
           </tr>
           <tr>
-            <th>{t('th.variants')}</th>
+            <th scope="row">{t('th.variants')}</th>
             <td>
               {(e.variants || []).map((v, i) => (
                 <span key={v}>
@@ -623,51 +623,51 @@ function PreRegistration({ experiment }: { experiment: ExperimentDetail }): Reac
             </td>
           </tr>
           <tr>
-            <th>{t('exp.primaryShort')}</th>
+            <th scope="row">{t('exp.primaryShort')}</th>
             <td className="mono">{e.primaryMetric?.key}</td>
           </tr>
           <tr>
-            <th></th>
+            <th scope="row"></th>
             <td>{t('exp.betterEq', { type: e.primaryMetric?.type, dir: e.primaryMetric?.direction })}</td>
           </tr>
           <tr>
-            <th>α / power / MDE</th>
+            <th scope="row">α / power / MDE</th>
             <td>{String(e.alpha) + ' / ' + String(e.power) + ' / ' + String(e.mde)}</td>
           </tr>
           <tr>
-            <th>{t('exp.minSampleArm')}</th>
+            <th scope="row">{t('exp.minSampleArm')}</th>
             <td>{e.minSamplePerArm}</td>
           </tr>
           <tr>
-            <th>{t('exp.minRuntime')}</th>
+            <th scope="row">{t('exp.minRuntime')}</th>
             <td>{fmtDurNs(e.minRuntime, t)}</td>
           </tr>
           <tr>
-            <th>{t('exp.window')}</th>
+            <th scope="row">{t('exp.window')}</th>
             <td>{fmtDurNs(e.analysisWindow, t)}</td>
           </tr>
           <tr>
-            <th>{t('exp.exposureMode')}</th>
+            <th scope="row">{t('exp.exposureMode')}</th>
             <td>{t(e.exposureMode === 'onRender' ? 'exp.onRender' : 'exp.onDecision')}</td>
           </tr>
           {e.exposureMode === 'onRender' ? (
             <>
               <tr>
-                <th>{t('exp.exposureTrigger')}</th>
+                <th scope="row">{t('exp.exposureTrigger')}</th>
                 <td>{e.exposureTrigger || '—'}</td>
               </tr>
               <tr>
-                <th>{t('exp.integrationOwner')}</th>
+                <th scope="row">{t('exp.integrationOwner')}</th>
                 <td>{e.integrationOwner || '—'}</td>
               </tr>
             </>
           ) : null}
           <tr>
-            <th>{t('exp.method')}</th>
+            <th scope="row">{t('exp.method')}</th>
             <td>{e.analysisMethod || '—'}</td>
           </tr>
           <tr>
-            <th>{t('exp.allocationMode')}</th>
+            <th scope="row">{t('exp.allocationMode')}</th>
             <td>
               {(e.allocationMode || 'fixed-split') + (e.bandit ? ' · ' + e.bandit.policyVersion + ' · ' + e.bandit.strategy : '')}
             </td>

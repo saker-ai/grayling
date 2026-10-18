@@ -71,7 +71,7 @@ function setup(flags: FlagListItem[] = FLAGS, permissions: string[] = []) {
 }
 
 function recordKeys(): string[] {
-  return Array.from(document.querySelectorAll('[data-flag-record]')).map(row => row.getAttribute('data-key') || '');
+  return Array.from(document.querySelectorAll('tr[data-flag-record]')).map(row => row.getAttribute('data-key') || '');
 }
 
 describe('FlagsPage', () => {
@@ -80,25 +80,25 @@ describe('FlagsPage', () => {
   it('renders the legacy sort: running change first, then submitted/approved/editing/published', async () => {
     const { calls } = setup();
     renderPage(<FlagsPage />, ROUTE);
-    await screen.findByText('Risky change');
+    await screen.findAllByText('Risky change');
     expect(recordKeys()).toEqual(['running-change', 'submitted-flag', 'approved-flag', 'editing-flag', 'published-only']);
     expect(screen.getByText('5 flag(s)')).toBeTruthy();
-    expect(screen.getByText('High-risk draft on a running experiment').className).toContain('chip red');
-    expect(screen.getByText('published').className).toContain('chip green');
+    expect(screen.getAllByText('High-risk draft on a running experiment')[0].className).toContain('chip red');
+    expect(screen.getAllByText('published')[0].className).toContain('chip green');
     expect(calls[0]).toBe('/api/v1/admin/workspaces/ws1/environments/prod/flags');
   });
 
   it('filters by status category and shows the dedicated no-match hint', async () => {
     setup();
     renderPage(<FlagsPage />, ROUTE);
-    await screen.findByText('Risky change');
+    await screen.findAllByText('Risky change');
 
     await userEvent.selectOptions(screen.getByLabelText(/^Status/), 'published');
     expect(recordKeys()).toEqual(['published-only']);
 
     await userEvent.selectOptions(screen.getByLabelText(/^Status/), 'submitted');
     expect(recordKeys()).toEqual(['submitted-flag']);
-    expect(screen.getByText('Submitted flag')).toBeTruthy();
+    expect(screen.getAllByText('Submitted flag')[0]).toBeTruthy();
 
     await userEvent.selectOptions(screen.getByLabelText(/^Status/), 'approved');
     expect(recordKeys()).toEqual(['approved-flag']);
@@ -107,7 +107,7 @@ describe('FlagsPage', () => {
   it('shows #flag-filter-empty when the query leaves zero rows', async () => {
     setup();
     renderPage(<FlagsPage />, ROUTE);
-    await screen.findByText('Risky change');
+    await screen.findAllByText('Risky change');
     const search = screen.getByLabelText('Filter this list');
     await userEvent.type(search, 'zzz-no-match');
     const empty = document.getElementById('flag-filter-empty');
@@ -119,7 +119,7 @@ describe('FlagsPage', () => {
   it('searches key, display name and description', async () => {
     setup();
     renderPage(<FlagsPage />, ROUTE);
-    await screen.findByText('Risky change');
+    await screen.findAllByText('Risky change');
     const search = screen.getByLabelText('Filter this list');
     await userEvent.type(search, 'local experiment copy'); // description only
     expect(recordKeys()).toEqual(['editing-flag']);
@@ -138,7 +138,7 @@ describe('FlagsPage', () => {
     );
     setup(many);
     renderPage(<FlagsPage />, ROUTE);
-    await screen.findByText('Flag 25');
+    await screen.findAllByText('Flag 25');
     expect(recordKeys()).toHaveLength(25);
     expect(screen.getByText('Page 1 of 2 · 26 matches')).toBeTruthy();
 
@@ -153,7 +153,7 @@ describe('FlagsPage', () => {
   it('gates the create button on flag.write', async () => {
     setup(FLAGS, []);
     renderPage(<FlagsPage />, { ...ROUTE, permissions: [] });
-    await screen.findByText('Risky change');
+    await screen.findAllByText('Risky change');
     expect(document.getElementById('flag-new')).toBeNull();
   });
 
@@ -192,7 +192,7 @@ describe('FlagsPage', () => {
   it('renders the empty state without pagination when the scope has no flags', async () => {
     setup([]);
     renderPage(<FlagsPage />, ROUTE);
-    expect(await screen.findByText('No flags yet — create one.')).toBeTruthy();
+    expect((await screen.findAllByText('No flags yet — create one.'))[0]).toBeTruthy();
     expect(screen.getByText('0 flag(s)')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Next' })).toBeNull();
     expect(document.getElementById('flag-filter-empty')?.hasAttribute('hidden')).toBe(true);

@@ -237,7 +237,7 @@ p.mono, .view-head h2 { overflow-wrap: anywhere; }
 /* Data roles get tabular figures so columns and stats stop jittering. */
 table.grid td, table.grid th, table.kv td,
 .overview-stat strong, .sample-flow-stage strong,
-.wizard-progress li span, .diagnostic-card strong, .exp-status-field b {
+.wizard-progress li span, .exp-status-field b {
   font-variant-numeric: tabular-nums;
 }
 
@@ -400,19 +400,18 @@ main { flex: 1; overflow: auto; padding: var(--sp-4); }
 
 table.grid { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 table.grid { min-width: 660px; }
-/* DataTable (React) renders one table for all viewports; on narrow screens
-   this wrapper pans horizontally, replacing the legacy dual desktop/mobile
-   markup (table.mobile-card-table + .mobile-record-cards). */
+/* DataTable renders the desktop table inside this panning wrapper. With
+   mobileCards it additionally renders a .dt-cards tree from the same column
+   declarations, and the 700px media query below swaps which tree is visible —
+   display:none drops the hidden tree from the accessibility tree, so there is
+   no double-read risk. */
 .table-scroll { overflow-x: auto; }
-.diagnostic-cards { display: none; }
+.dt-cards { display: none; }
 .sample-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); margin: var(--sp-4) 0 var(--sp-2); padding: 0; list-style: none; }
 .sample-flow-stage { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 0.625rem var(--sp-3); display: grid; gap: var(--sp-1); background: var(--surface-sunken); }
 .sample-flow-stage span { color: var(--text-secondary); font-size: var(--fs-xs); }
 .sample-flow-stage strong { font-size: 1.375rem; line-height: 1.15; }
-.flag-record-cards { display: none; }
-.flag-empty-mobile { display: none; }
-.mobile-record-cards, .mobile-empty { display: none; }
-.mobile-record[hidden], tr[data-list-record][hidden] { display: none !important; }
+tr[data-list-record][hidden] { display: none !important; }
 [data-flag-record][hidden] { display: none !important; }
 .flag-diff-list { display: grid; gap: var(--sp-2); }
 .flag-experiment-list { display: grid; gap: 0.375rem; padding-left: var(--sp-5); overflow-wrap: anywhere; }
@@ -630,15 +629,20 @@ ul.plain { margin: 0.375rem 0; padding-left: var(--sp-5); }
 .auth-card h1 span { color: var(--text-tertiary); font-weight: 400; font-size: var(--fs-sm); letter-spacing: .02em; }
 .auth-card .field { margin: var(--sp-3) 0; }
 @media (max-width: 700px) {
-  table.grid.mobile-card-table { display: none; }
-  .mobile-record-cards { display: grid; gap: 0.625rem; margin: 0.625rem 0; }
-  .mobile-empty { display: block; }
-  .mobile-record { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 0.625rem var(--sp-3); display: grid; gap: 0.375rem; min-width: 0; overflow-wrap: anywhere; }
-  .audit-record pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--sp-2) 0 0; }
-  .mobile-record .row { flex-wrap: wrap; }
-  table.grid.flag-list-table { display: none; }
-  .flag-record-cards { display: grid; gap: 0.625rem; margin: 0.625rem 0; }
-  .flag-empty-mobile { display: block; }
+  /* DataTable mobileCards: swap the panning table for the card tree (both
+     come from the same column declarations). Cards reuse the .card surface /
+     border / radius tokens; long dd values wrap instead of overflowing. */
+  .dt-responsive .table-scroll { display: none; }
+  .dt-responsive .dt-cards { display: grid; gap: 0.625rem; margin: 0.625rem 0; }
+  .dt-card { background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 0.625rem var(--sp-3); display: grid; gap: 0.375rem; min-width: 0; overflow-wrap: anywhere; }
+  .dt-card-primary { font-weight: 600; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }
+  .dt-card-fields { display: grid; gap: 0.375rem; margin: 0; }
+  .dt-card-field { display: flex; justify-content: space-between; gap: var(--sp-3); }
+  .dt-card-field dt { color: var(--text-secondary); }
+  .dt-card-field dd { margin: 0; min-width: 0; text-align: right; overflow-wrap: anywhere; }
+  /* Low-value in-cell metadata stays on the table (Flags/Segments
+     descriptions live inside the primary name cell). */
+  .dt-card .resource-description { display: none; }
   .flag-diff-values { grid-template-columns: 1fr; }
   .flag-fields { grid-template-columns: 1fr; }
   .published-summary { grid-template-columns: 1fr; }
@@ -658,13 +662,7 @@ ul.plain { margin: 0.375rem 0; padding-left: var(--sp-5); }
   .segment-condition > button { margin-bottom: var(--sp-1); }
   dl.approval-facts { grid-template-columns: 1fr; gap: 0.1875rem; }
   dl.approval-facts dd { margin-bottom: 0.5625rem; }
-  .flag-record { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 0.625rem var(--sp-3); display: grid; gap: var(--sp-1); }
-  table.grid.diagnostic-table { display: none; }
-  .diagnostic-cards { display: grid; gap: 0.625rem; margin: 0.625rem 0; }
   .sample-flow { grid-template-columns: 1fr; }
-  .diagnostic-card { border: 1px solid var(--line); border-radius: var(--radius-md); margin: 0; padding: 0.625rem; }
-  .diagnostic-card dt { font-weight: 700; margin-bottom: 0.375rem; }
-  .diagnostic-card dd { display: flex; justify-content: space-between; gap: var(--sp-3); margin: 0; padding: var(--sp-1) 0; border-top: 1px solid var(--line-faint); }
   .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .exp-zone-nav .exp-zone-tab { flex: 1 1 auto; }
   .app { flex-direction: column; min-height: 100dvh; height: auto; }

@@ -29,12 +29,12 @@ describe('TokensPage', () => {
   it('renders the token list with kind/status chips', async () => {
     setup();
     renderPage(<TokensPage />, { permissions: ['token.manage'] });
-    expect(await screen.findByText('ci-token')).toBeTruthy();
-    expect(screen.getByText('old-admin')).toBeTruthy();
-    expect(screen.getByText('revoked')).toBeTruthy();
-    expect(screen.getByText('active')).toBeTruthy();
+    expect((await screen.findAllByText('ci-token'))[0]).toBeTruthy();
+    expect(screen.getAllByText('old-admin')[0]).toBeTruthy();
+    expect(screen.getAllByText('revoked')[0]).toBeTruthy();
+    expect(screen.getAllByText('active')[0]).toBeTruthy();
     // A revoked token carries no revoke action.
-    expect(screen.getAllByRole('button', { name: 'Revoke' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Revoke' })).toHaveLength(2);
   });
 
   it('rejects an empty name without issuing a POST', async () => {
@@ -103,7 +103,7 @@ describe('TokensPage', () => {
       }),
     );
     renderPage(<TokensPage />, { permissions: ['token.manage'] });
-    await userEvent.click(await screen.findByRole('button', { name: 'Revoke' }));
+    await userEvent.click((await screen.findAllByRole('button', { name: 'Revoke' }))[0]);
 
     // Reason is required: confirming with an empty reason keeps the dialog.
     const dialog = await screen.findByRole('dialog');

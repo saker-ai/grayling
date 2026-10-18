@@ -98,7 +98,7 @@ describe('OverviewPage', () => {
     expect(screen.getByText(/Risk: High risk/)).toBeTruthy();
 
     // Recent releases: action chip, scan-window coverage line.
-    expect(screen.getByText('Flag published').className).toContain('chip green');
+    expect(screen.getAllByText('Flag published')[0].className).toContain('chip green');
     expect(screen.getByText('Scanned the latest 20 audit records.')).toBeTruthy();
 
     // Coverage card: complete variant, no drill-down button.
@@ -136,7 +136,7 @@ describe('OverviewPage', () => {
   it('navigates from a release row to the audit view filtered by object', async () => {
     setup(() => ok(FULL));
     renderPage(<OverviewPage />, ROUTE);
-    await userEvent.click(await screen.findByRole('button', { name: 'View in audit log' }));
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View in audit log' }))[0]);
     const loc = await screen.findByTestId('location');
     expect(loc.getAttribute('data-pathname')).toBe('/console/ws1/prod/audit/new-checkout');
   });

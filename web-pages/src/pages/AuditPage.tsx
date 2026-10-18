@@ -18,7 +18,7 @@ import { consoleViewPath, diagnosticLabel, fmtTime, wsPath } from '../utils';
 // {ws}/audit (the server is asked for limit+1 rows to detect a next page),
 // a q= search, and an exact-match object filter that deep-links as
 // #/console/{ws}/{env}/audit/{object}. The legacy dual desktop/mobile markup
-// is merged into one scrolling DataTable.
+// is one DataTable whose mobileCards tree serves narrow screens.
 interface Pager {
   cursors: Array<string | 0>;
   page: number;
@@ -77,8 +77,9 @@ export function AuditPage(): ReactElement {
   };
 
   const columns: Array<Column<AuditEntry>> = [
-    { key: 'time', header: t('th.time'), className: 'nowrap', cell: a => fmtTime(a.time, locale) },
-    { key: 'actor', header: t('th.actor'), cell: a => a.actor || '—' },
+    // Card title: time + actor together identify the entry at a glance.
+    { key: 'time', header: t('th.time'), className: 'nowrap', mobilePrimary: true, cell: a => fmtTime(a.time, locale) },
+    { key: 'actor', header: t('th.actor'), mobilePrimary: true, cell: a => a.actor || '—' },
     {
       key: 'action',
       header: t('th.action'),
@@ -156,7 +157,14 @@ export function AuditPage(): ReactElement {
         <ErrorBanner error={error} />
       ) : (
         <>
-          <DataTable columns={columns} rows={rows} rowKey={a => a.id} emptyText={t('audit.empty')} ariaLabel={t('audit.title')} />
+          <DataTable
+            columns={columns}
+            rows={rows}
+            rowKey={a => a.id}
+            emptyText={t('audit.empty')}
+            ariaLabel={t('audit.title')}
+            mobileCards
+          />
           <CursorPager
             page={pager.page}
             hasMore={hasMore}

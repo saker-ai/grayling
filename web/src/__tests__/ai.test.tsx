@@ -53,9 +53,10 @@ describe('AiPage list', () => {
   it('renders resources with type chips and revocation state', async () => {
     const { calls } = setup();
     renderPage(<AiPage />, { ...LIST_ROUTE, permissions: PERMS });
-    expect(await screen.findByText('checkout-helper')).toBeTruthy();
-    // old-skill renders in both the resources row and the revocations table.
-    expect(screen.getAllByText('old-skill')).toHaveLength(2);
+    expect((await screen.findAllByText('checkout-helper'))[0]).toBeTruthy();
+    // old-skill renders in the resources row and the revocations table, and
+    // R2 renders each table twice (desktop tree + mobileCards tree).
+    expect(screen.getAllByText('old-skill')).toHaveLength(4);
     expect(screen.getByText('Resources (2)')).toBeTruthy();
     // The type selects also render prompt/skill as options, so pick the chips.
     const prompt = screen.getAllByText('prompt').find(el => el.className.includes('chip'));
@@ -64,19 +65,20 @@ describe('AiPage list', () => {
       .getAllByText('skill')
       .find(el => el.className.includes('chip') && el.className.includes('red'));
     expect(revokedType).toBeTruthy();
-    // The revocation reason shows in the revocations table; the revoked row
-    // offers Reinstate while the active row offers Revoke.
-    expect(screen.getByText('leaked in logs')).toBeTruthy();
-    // R1.0 regression pin: the revocations block stays mounted and unhidden —
-    // the ≤700px grid rule used to display:none the whole wrapper, dropping
-    // the content on mobile (the class now survives only as the R2 anchor).
-    const revBlock = document.querySelector('.ai-revocations-desktop') as HTMLElement | null;
-    expect(revBlock).toBeTruthy();
-    expect(revBlock?.style.display).not.toBe('none');
-    expect(revBlock?.hasAttribute('hidden')).toBe(false);
-    expect(within(revBlock as HTMLElement).getByText('leaked in logs')).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: 'Reinstate' })).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'Revoke' })).toHaveLength(1);
+    // The revocation reason shows in the revocations table (and its cards);
+    // the revoked row offers Reinstate while the active row offers Revoke.
+    expect(screen.getAllByText('leaked in logs')).toHaveLength(2);
+    // R1.0/R2 regression pin: the revocations table stays mounted and unhidden
+    // — the ≤700px grid rule used to display:none the whole wrapper, dropping
+    // the content on mobile. The wrapper class is gone in R2; the table is
+    // addressed by its aria-label, and its card tree carries the reason too.
+    const revTable = screen.getByRole('table', { name: 'Revocations' });
+    expect(revTable).toBeTruthy();
+    expect(within(revTable).getByText('leaked in logs')).toBeTruthy();
+    const revCards = within(revTable.closest('.dt-responsive') as HTMLElement).getAllByText('leaked in logs');
+    expect(revCards).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Reinstate' })).toHaveLength(4);
+    expect(screen.getAllByRole('button', { name: 'Revoke' })).toHaveLength(2);
     expect(calls.some(c => c.url === '/api/v1/admin/workspaces/ws1/environments/prod/ai/resources')).toBe(true);
     expect(calls.some(c => c.url === '/api/v1/admin/workspaces/ws1/model-allowlist')).toBe(true);
   });
@@ -84,7 +86,7 @@ describe('AiPage list', () => {
   it('validates the register fields before posting', async () => {
     const { calls } = setup();
     renderPage(<AiPage />, { ...LIST_ROUTE, permissions: PERMS });
-    await screen.findByText('checkout-helper');
+    await screen.findAllByText('checkout-helper');
     await userEvent.click(screen.getByRole('button', { name: 'Register' }));
     expect(await screen.findByText('logicalId and name are required')).toBeTruthy();
     expect(calls.some(c => c.init.method === 'POST')).toBe(false);
@@ -93,7 +95,7 @@ describe('AiPage list', () => {
   it('registers a resource with the exact body', async () => {
     const { calls } = setup();
     renderPage(<AiPage />, { ...LIST_ROUTE, permissions: PERMS });
-    await screen.findByText('checkout-helper');
+    await screen.findAllByText('checkout-helper');
     await userEvent.type(screen.getByPlaceholderText('checkout-helper'), 'summarizer');
     await userEvent.type(screen.getByLabelText('Name'), 'Summarizer');
     await userEvent.click(screen.getByRole('button', { name: 'Register' }));
@@ -126,7 +128,7 @@ describe('AiPage list', () => {
       return { status: 404, body: {} };
     });
     renderPage(<AiPage />, { ...LIST_ROUTE, permissions: PERMS });
-    await screen.findByText('checkout-helper');
+    await screen.findAllByText('checkout-helper');
     await userEvent.click(screen.getAllByRole('button', { name: 'Pin version' })[0]);
     const dialog = await screen.findByRole('dialog');
     expect(dialog.textContent).toContain('Pin new version — prompt/checkout-helper');
@@ -159,8 +161,8 @@ describe('AiPage list', () => {
       return { status: 404, body: {} };
     });
     renderPage(<AiPage />, { ...LIST_ROUTE, permissions: PERMS });
-    await screen.findByText('checkout-helper');
-    await userEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+    await screen.findAllByText('checkout-helper');
+    await userEvent.click(screen.getAllByRole('button', { name: 'Revoke' })[0]);
     const dialog = await screen.findByRole('dialog');
     expect(dialog.textContent).toContain('Revoke this AI resource? SDK resolves will fail with 423.');
 
@@ -187,7 +189,7 @@ describe('AiPage list', () => {
       return { status: 404, body: {} };
     });
     renderPage(<AiPage />, { ...LIST_ROUTE, permissions: PERMS });
-    await screen.findByText('checkout-helper');
+    await screen.findAllByText('checkout-helper');
     await userEvent.type(screen.getByPlaceholderText('logicalId'), 'checkout-helper');
     await userEvent.click(screen.getByRole('button', { name: 'Resolve' }));
     expect(await screen.findByText('version: v3')).toBeTruthy();
@@ -207,7 +209,7 @@ describe('AiPage list', () => {
       return { status: 404, body: {} };
     });
     renderPage(<AiPage />, { ...LIST_ROUTE, permissions: PERMS });
-    await screen.findByText('checkout-helper');
+    await screen.findAllByText('checkout-helper');
     expect(screen.getByText('Allowlist empty.')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: '+ Add entry' }));
     await userEvent.type(screen.getByPlaceholderText('provider e.g. openai'), 'openai');
@@ -225,7 +227,7 @@ describe('AiPage list', () => {
   it('rejects a half-filled allowlist row without a PUT', async () => {
     const { calls } = setup();
     renderPage(<AiPage />, { ...LIST_ROUTE, permissions: PERMS });
-    await screen.findByText('checkout-helper');
+    await screen.findAllByText('checkout-helper');
     await userEvent.click(screen.getByRole('button', { name: '+ Add entry' }));
     await userEvent.type(screen.getByPlaceholderText('provider e.g. openai'), 'openai');
     await userEvent.click(screen.getByRole('button', { name: 'Save allowlist' }));

@@ -113,7 +113,8 @@ export function TokensPage(): ReactElement {
   };
 
   const columns: Array<Column<TokenInfo>> = [
-    { key: 'name', header: t('label.name'), cell: tk => tk.name },
+    // Card title: name + environment scope identify the token.
+    { key: 'name', header: t('label.name'), mobilePrimary: true, cell: tk => tk.name },
     {
       key: 'kind',
       header: t('label.kind'),
@@ -121,7 +122,7 @@ export function TokensPage(): ReactElement {
     },
     { key: 'role', header: t('label.role'), cell: tk => tk.role || '—' },
     { key: 'prefix', header: t('th.prefix'), className: 'mono', cell: tk => tk.prefix || '—' },
-    { key: 'env', header: t('th.env'), className: 'mono', cell: tk => tk.environmentId || '—' },
+    { key: 'env', header: t('th.env'), className: 'mono', mobilePrimary: true, cell: tk => tk.environmentId || '—' },
     { key: 'created', header: t('th.created'), className: 'nowrap', cell: tk => fmtTime(tk.createdAt, locale) },
     {
       key: 'status',
@@ -202,7 +203,7 @@ export function TokensPage(): ReactElement {
           </Button>
         </div>
       </section>
-      <DataTable columns={columns} rows={tokens} rowKey={tk => tk.id} emptyText={t('tokens.empty')} />
+      <DataTable columns={columns} rows={tokens} rowKey={tk => tk.id} emptyText={t('tokens.empty')} mobileCards />
     </>
   );
 }

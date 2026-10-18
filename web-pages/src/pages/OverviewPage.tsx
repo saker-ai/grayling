@@ -213,7 +213,7 @@ export function OverviewPage(): ReactElement {
         </>
       ),
     },
-    { key: 'object', header: t('th.object'), cell: item => <span className="mono">{item.object || '—'}</span> },
+    { key: 'object', header: t('th.object'), mobilePrimary: true, cell: item => <span className="mono">{item.object || '—'}</span> },
     { key: 'actor', header: t('th.actor'), cell: item => item.actor || '—' },
     { key: 'env', header: t('th.env'), className: 'mono', cell: item => item.environmentId || '—' },
     {
@@ -400,6 +400,7 @@ export function OverviewPage(): ReactElement {
                 rowKey={item => [item.time, item.action, item.object, item.actor].join('|')}
                 emptyText={t('overview.recentReleasesEmpty')}
                 ariaLabel={t('overview.recentReleases')}
+                mobileCards
               />
             ) : (
               <p className="muted">{t('overview.recentReleasesEmpty')}</p>

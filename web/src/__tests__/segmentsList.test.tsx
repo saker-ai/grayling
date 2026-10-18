@@ -47,11 +47,11 @@ describe('SegmentsPage', () => {
   it('renders the draft list with state chips and the draft count', async () => {
     const { calls } = setup();
     renderPage(<SegmentsPage />);
-    expect(await screen.findByText('Beta users')).toBeTruthy();
-    expect(screen.getByText('Internal network')).toBeTruthy();
-    expect(screen.getByText('cohort for beta rollouts')).toBeTruthy();
-    expect(screen.getByText('editing').className).toContain('chip blue');
-    expect(screen.getByText('approved').className).toContain('chip green');
+    expect((await screen.findAllByText('Beta users'))[0]).toBeTruthy();
+    expect(screen.getAllByText('Internal network')[0]).toBeTruthy();
+    expect(screen.getAllByText('cohort for beta rollouts')[0]).toBeTruthy();
+    expect(screen.getAllByText('editing')[0].className).toContain('chip blue');
+    expect(screen.getAllByText('approved')[0].className).toContain('chip green');
     expect(screen.getByText('2 draft(s)')).toBeTruthy();
     expect(calls[0]).toBe('/api/v1/admin/workspaces/ws1/environments/prod/segments');
   });
@@ -59,12 +59,12 @@ describe('SegmentsPage', () => {
   it('filters rows by the rendered text and shows the no-match hint', async () => {
     setup();
     renderPage(<SegmentsPage />);
-    await screen.findByText('Beta users');
+    await screen.findAllByText('Beta users');
 
     const search = screen.getByLabelText('Filter this list');
     await userEvent.type(search, 'internal');
     expect(screen.queryByText('Beta users')).toBeNull();
-    expect(screen.getByText('Internal network')).toBeTruthy();
+    expect(screen.getAllByText('Internal network')[0]).toBeTruthy();
 
     await userEvent.clear(search);
     await userEvent.type(search, 'zzz-no-match');
@@ -73,14 +73,14 @@ describe('SegmentsPage', () => {
     expect(noMatch.getAttribute('data-list-no-match')).toBe('');
 
     await userEvent.clear(search);
-    await screen.findByText('Beta users');
+    await screen.findAllByText('Beta users');
     expect(screen.getByText('No records match this search.').hasAttribute('hidden')).toBe(true);
   });
 
   it('navigates to the detail route when a row is clicked', async () => {
     setup();
     renderPage(<SegmentsPage />, { path: '/console/:ws/:env/segments', route: '/console/ws1/prod/segments' });
-    await userEvent.click(await screen.findByText('Beta users'));
+    await userEvent.click((await screen.findAllByText('Beta users'))[0]);
     const loc = await screen.findByTestId('location');
     expect(loc.getAttribute('data-pathname')).toBe('/console/ws1/prod/segments/beta-users');
     expect(loc.getAttribute('data-state')).toBe('null');
@@ -89,7 +89,7 @@ describe('SegmentsPage', () => {
   it('hides the create button without flag.write', async () => {
     setup();
     renderPage(<SegmentsPage />, { permissions: [] });
-    await screen.findByText('Beta users');
+    await screen.findAllByText('Beta users');
     expect(screen.queryByRole('button', { name: '+ New segment' })).toBeNull();
   });
 
@@ -131,7 +131,7 @@ describe('SegmentsPage', () => {
   it('renders the empty state when the scope has no drafts', async () => {
     setup([]);
     renderPage(<SegmentsPage />);
-    expect(await screen.findByText('No segment drafts.')).toBeTruthy();
+    expect((await screen.findAllByText('No segment drafts.'))[0]).toBeTruthy();
     expect(screen.getByText('0 draft(s)')).toBeTruthy();
   });
 });

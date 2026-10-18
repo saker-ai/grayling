@@ -44,24 +44,24 @@ describe('capability gating', () => {
   it('hides #seg-new without flag.write and shows it with the permission', async () => {
     setup();
     const first = renderPage(<SegmentsPage />, { permissions: [] });
-    await screen.findByText('No segment drafts.');
+    await screen.findAllByText('No segment drafts.');
     expect(document.getElementById('seg-new')).toBeNull();
     first.unmount();
 
     renderPage(<SegmentsPage />, { permissions: ['flag.write'] });
-    await screen.findByText('No segment drafts.');
+    await screen.findAllByText('No segment drafts.');
     expect(document.getElementById('seg-new')).toBeTruthy();
   });
 
   it('hides #exp-new without experiment.write and shows it with the permission', async () => {
     setup();
     const first = renderPage(<ExperimentsPage />, { permissions: [] });
-    await screen.findByText('No experiments.');
+    await screen.findAllByText('No experiments.');
     expect(document.getElementById('exp-new')).toBeNull();
     first.unmount();
 
     renderPage(<ExperimentsPage />, { permissions: ['experiment.write'] });
-    await screen.findByText('No experiments.');
+    await screen.findAllByText('No experiments.');
     expect(document.getElementById('exp-new')).toBeTruthy();
   });
 });

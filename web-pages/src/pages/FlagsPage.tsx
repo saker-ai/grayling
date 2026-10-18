@@ -155,6 +155,9 @@ export function FlagsPage(): ReactElement {
     {
       key: 'key',
       header: t('th.key'),
+      // Card title: name + key (the in-cell description stays table-only via
+      // the .dt-card .resource-description rule).
+      mobilePrimary: true,
       cell: f => {
         const content = resourceContent(f);
         return (
@@ -239,6 +242,7 @@ export function FlagsPage(): ReactElement {
         rows={result.records}
         rowKey={f => f.key}
         emptyText={t('flags.empty')}
+        mobileCards
         rowProps={f => ({
           'data-flag-record': '',
           'data-key': f.key,

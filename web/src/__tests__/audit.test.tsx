@@ -44,7 +44,7 @@ describe('AuditPage', () => {
   it('fetches limit+1 rows and renders the table', async () => {
     const { calls } = auditMock([entries(51)]);
     renderPage(<AuditPage />, ROUTE);
-    expect(await screen.findByText('flag/flag-1')).toBeTruthy();
+    expect((await screen.findAllByText('flag/flag-1'))[0]).toBeTruthy();
     expect(calls[0]).toContain('limit=51');
     expect(calls[0]).toContain('q=');
     expect(calls[0]).not.toContain('before=');
@@ -58,10 +58,10 @@ describe('AuditPage', () => {
   it('walks forward and back through the cursor stack', async () => {
     const { calls } = auditMock([entries(51), entries(10, 51)]);
     renderPage(<AuditPage />, ROUTE);
-    await screen.findByText('flag/flag-1');
+    await screen.findAllByText('flag/flag-1');
 
     await userEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByText('flag/flag-51');
+    await screen.findAllByText('flag/flag-51');
     expect(calls[1]).toContain('before=evt-50');
     expect(screen.getByText('Page 2')).toBeTruthy();
     // Page 2 returned 10 (< 51): no further page.
@@ -69,7 +69,7 @@ describe('AuditPage', () => {
     expect((screen.getByRole('button', { name: 'Previous' }) as HTMLButtonElement).disabled).toBe(false);
 
     await userEvent.click(screen.getByRole('button', { name: 'Previous' }));
-    await screen.findByText('flag/flag-1');
+    await screen.findAllByText('flag/flag-1');
     expect(screen.getByText('Page 1')).toBeTruthy();
     expect(calls[2]).not.toContain('before=');
   });
@@ -77,7 +77,7 @@ describe('AuditPage', () => {
   it('applies the search query and restarts pagination', async () => {
     const { calls } = auditMock([entries(3)]);
     renderPage(<AuditPage />, ROUTE);
-    await screen.findByText('flag/flag-1');
+    await screen.findAllByText('flag/flag-1');
     await userEvent.type(screen.getByLabelText(/Search actor/), 'flag.publish');
     await userEvent.click(screen.getByRole('button', { name: 'Search' }));
     await waitFor(() => expect(calls.at(-1)).toContain('q=flag.publish'));
@@ -102,9 +102,9 @@ describe('AuditPage', () => {
   it('renders the inline raw-action disclosure per row', async () => {
     auditMock([entries(2)]);
     renderPage(<AuditPage />, ROUTE);
-    await screen.findByText('flag/flag-1');
+    await screen.findAllByText('flag/flag-1');
     const summaries = screen.getAllByText('Technical details');
-    expect(summaries.length).toBe(2);
+    expect(summaries.length).toBe(4);
     expect(summaries[0].closest('details')).toBeTruthy();
     expect(summaries[0].closest('details')?.querySelector('code')?.textContent).toBe('custom.action');
     expect(summaries[1].closest('details')?.querySelector('code')?.textContent).toBe('flag.publish');
@@ -113,7 +113,7 @@ describe('AuditPage', () => {
   it('switches the page size and restarts from page 1', async () => {
     const { calls } = auditMock([entries(30)]);
     renderPage(<AuditPage />, ROUTE);
-    await screen.findByText('flag/flag-1');
+    await screen.findAllByText('flag/flag-1');
     await userEvent.selectOptions(screen.getByLabelText(/limit/), '25');
     await waitFor(() => expect(calls.at(-1)).toContain('limit=26'));
   });

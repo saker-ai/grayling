@@ -39,7 +39,7 @@ describe('ExperimentsPage', () => {
   it('fetches the first page and renders rows with the range label', async () => {
     const { calls } = expMock({ 0: { items: items(20), total: 25, offset: 0, limit: 20 } });
     renderPage(<ExperimentsPage />);
-    expect(await screen.findByText('exp-1')).toBeTruthy();
+    expect(await screen.findAllByText('exp-1')).toBeTruthy();
     expect(calls[0]).toContain('limit=20');
     expect(calls[0]).toContain('offset=0');
     expect(screen.getByText('1–20 of 25')).toBeTruthy();
@@ -53,24 +53,24 @@ describe('ExperimentsPage', () => {
       20: { items: items(5, 21), total: 25, offset: 20, limit: 20 },
     });
     renderPage(<ExperimentsPage />);
-    await screen.findByText('exp-1');
+    await screen.findAllByText('exp-1');
 
     await userEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByText('exp-21');
+    await screen.findAllByText('exp-21');
     expect(calls.at(-1)).toContain('offset=20');
     expect(screen.getByText('21–25 of 25')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: 'Previous' }) as HTMLButtonElement).disabled).toBe(false);
 
     await userEvent.click(screen.getByRole('button', { name: 'Previous' }));
-    await screen.findByText('exp-1');
+    await screen.findAllByText('exp-1');
     expect(calls.at(-1)).toContain('offset=0');
   });
 
   it('applies the search and state filters on submit', async () => {
     const { calls } = expMock({ 0: { items: items(2), total: 2, offset: 0, limit: 20 } });
     renderPage(<ExperimentsPage />);
-    await screen.findByText('exp-1');
+    await screen.findAllByText('exp-1');
 
     await userEvent.type(screen.getByLabelText(/Search experiments/), 'checkout');
     await userEvent.selectOptions(screen.getByLabelText(/State/), 'running');
@@ -96,25 +96,25 @@ describe('ExperimentsPage', () => {
       },
     });
     renderPage(<ExperimentsPage />);
-    expect(await screen.findByText('Not started')).toBeTruthy();
-    expect(screen.getByText('Healthy')).toBeTruthy();
-    expect(screen.getByText('ship').className).toContain('chip green');
-    expect(screen.getByText('Needs diagnosis')).toBeTruthy();
-    expect(screen.getByText('rollback').className).toContain('chip red');
-    expect(screen.getByText('guardrail tripped').getAttribute('title')).toBe('guardrail tripped');
+    expect((await screen.findAllByText('Not started'))[0]).toBeTruthy();
+    expect(screen.getAllByText('Healthy')[0]).toBeTruthy();
+    expect(screen.getAllByText('ship')[0].className).toContain('chip green');
+    expect(screen.getAllByText('Needs diagnosis')[0]).toBeTruthy();
+    expect(screen.getAllByText('rollback')[0].className).toContain('chip red');
+    expect(screen.getAllByText('guardrail tripped')[0].getAttribute('title')).toBe('guardrail tripped');
   });
 
   it('renders the empty state for a zero total', async () => {
     expMock({ 0: { items: [], total: 0, offset: 0, limit: 20 } });
     renderPage(<ExperimentsPage />);
-    expect(await screen.findByText('No experiments.')).toBeTruthy();
+    expect((await screen.findAllByText('No experiments.'))[0]).toBeTruthy();
     expect(screen.getByText('0–0 of 0')).toBeTruthy();
   });
 
   it('gates the create button on experiment.write and navigates to the ~new route', async () => {
     expMock({ 0: { items: items(1), total: 1, offset: 0, limit: 20 } });
     const { unmount } = renderPage(<ExperimentsPage />, { permissions: [] });
-    await screen.findByText('exp-1');
+    await screen.findAllByText('exp-1');
     expect(screen.queryByRole('button', { name: '+ New experiment' })).toBeNull();
     unmount();
 
@@ -131,7 +131,7 @@ describe('ExperimentsPage', () => {
   it('navigates to the experiment detail when the id is clicked', async () => {
     expMock({ 0: { items: items(1), total: 1, offset: 0, limit: 20 } });
     renderPage(<ExperimentsPage />, { path: '/console/:ws/:env/experiments', route: '/console/ws1/prod/experiments' });
-    await userEvent.click(await screen.findByText('exp-1'));
+    await userEvent.click((await screen.findAllByText('exp-1'))[0]);
     const loc = await screen.findByTestId('location');
     expect(loc.getAttribute('data-pathname')).toBe('/console/ws1/prod/experiments/exp-1');
   });

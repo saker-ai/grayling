@@ -2,6 +2,8 @@ import type { ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ExperimentDiagnostics, ExperimentReport, SRMResult } from '@saker/grayling-client';
 import { Chip } from '../components/Chip';
+import { DataTable } from '../components/DataTable';
+import type { Column } from '../components/DataTable';
 import { fmtDurNs, shortHash } from '../utils';
 
 // Diagnostics ports renderDiagnostics (exp_workbench.js ~703): the delivery
@@ -10,7 +12,12 @@ import { fmtDurNs, shortHash } from '../utils';
 // SRM layers (bandit-feedback windows show the banditSrmSeparate note), the
 // per-variant flow table, contamination counters and rejected events with the
 // collect.code.* label map. Never invents numbers: onDecision histories show
-// '—' for assignment facts when no assignment events exist.
+// '—' for assignment facts when no assignment events exist. The legacy
+// table.diagnostic-table + .diagnostic-cards pair is one DataTable whose
+// mobileCards tree serves narrow screens.
+
+// FlowRow is one per-variant delivery counter row of the diagnostics payload.
+type FlowRow = NonNullable<ExperimentDiagnostics['perVariant']>[number];
 
 const COLLECT_CODE_KEYS: Record<string, string> = {
   invalid_event: 'collect.code.invalid_event',
@@ -56,6 +63,14 @@ export function Diagnostics({ d }: { d: ExperimentDiagnostics | null | undefined
 
   const rejected = Object.entries(d.rejectedByReason || {}).sort(([a], [b]) => a.localeCompare(b));
 
+  const flowColumns: Array<Column<FlowRow>> = [
+    { key: 'variant', header: t('th.variant'), mobilePrimary: true, cell: v => <span className="mono">{v.variant}</span> },
+    { key: 'assignments', header: t('report.assignments'), cell: v => (hasAssignmentFacts ? v.assignments : '—') },
+    { key: 'exposures', header: t('report.exposures'), cell: v => v.exposures },
+    { key: 'unexposed', header: t('report.unexposed'), cell: v => (hasAssignmentFacts ? v.unexposed : '—') },
+    { key: 'converted', header: t('th.converted'), cell: v => v.conversions },
+  ];
+
   return (
     <section aria-label={t('report.deliveryDiagnostics')}>
       <h4>{t('report.deliveryDiagnostics')}</h4>
@@ -87,51 +102,14 @@ export function Diagnostics({ d }: { d: ExperimentDiagnostics | null | undefined
           {srmLine(t('report.exposureSrm'), d.exposureSrm)}
         </div>
       )}
-      <table className="grid diagnostic-table">
-        <thead>
-          <tr>
-            <th scope="col">{t('th.variant')}</th>
-            <th scope="col">{t('report.assignments')}</th>
-            <th scope="col">{t('report.exposures')}</th>
-            <th scope="col">{t('report.unexposed')}</th>
-            <th scope="col">{t('th.converted')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {flow.map(v => (
-            <tr key={v.variant}>
-              <td className="mono">{v.variant}</td>
-              <td>{hasAssignmentFacts ? v.assignments : '—'}</td>
-              <td>{v.exposures}</td>
-              <td>{hasAssignmentFacts ? v.unexposed : '—'}</td>
-              <td>{v.conversions}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="diagnostic-cards">
-        {flow.map(v => (
-          <dl className="diagnostic-card" key={v.variant}>
-            <dt className="mono">{v.variant}</dt>
-            <dd>
-              <span>{t('report.assignments')}</span>
-              <strong>{hasAssignmentFacts ? v.assignments : '—'}</strong>
-            </dd>
-            <dd>
-              <span>{t('report.exposures')}</span>
-              <strong>{v.exposures}</strong>
-            </dd>
-            <dd>
-              <span>{t('report.unexposed')}</span>
-              <strong>{hasAssignmentFacts ? v.unexposed : '—'}</strong>
-            </dd>
-            <dd>
-              <span>{t('th.converted')}</span>
-              <strong>{v.conversions}</strong>
-            </dd>
-          </dl>
-        ))}
-      </div>
+      <DataTable
+        columns={flowColumns}
+        rows={flow}
+        rowKey={v => v.variant}
+        emptyText={t('report.noData')}
+        ariaLabel={t('report.perVariant')}
+        mobileCards
+      />
       <div>
         {t('report.crossVariantUnits') + ': ' + (d.crossVariantUnits ?? 0) + ' · ' + t('report.assignmentMismatch') + ': ' +
           (d.assignmentMismatch ?? 0)}

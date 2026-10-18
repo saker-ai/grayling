@@ -96,10 +96,10 @@ describe('MetricsPage list', () => {
   it('renders rows with chips and versions, and navigates on row click', async () => {
     const { calls } = setup();
     renderPage(<MetricsPage />, LIST_ROUTE);
-    const link = await screen.findByText('activation.complete');
-    expect(screen.getByText('checkout.complete')).toBeTruthy();
-    expect(screen.getByText('v3')).toBeTruthy();
-    expect(screen.getByText('v1')).toBeTruthy();
+    const link = (await screen.findAllByText('activation.complete'))[0];
+    expect(screen.getAllByText('checkout.complete')[0]).toBeTruthy();
+    expect(screen.getAllByText('v3')[0]).toBeTruthy();
+    expect(screen.getAllByText('v1')[0]).toBeTruthy();
     // The status select also renders draft/published as options, so pick the chip.
     const published = screen.getAllByText('published').find(el => el.className.includes('chip'));
     const draft = screen.getAllByText('draft').find(el => el.className.includes('chip'));
@@ -115,7 +115,7 @@ describe('MetricsPage list', () => {
   it('narrows via q/status params and fetches the cursor page', async () => {
     const { calls } = setup();
     renderPage(<MetricsPage />, LIST_ROUTE);
-    await screen.findByText('activation.complete');
+    await screen.findAllByText('activation.complete');
 
     await userEvent.type(screen.getByLabelText('Filter this list'), 'checkout');
     await userEvent.selectOptions(screen.getByLabelText('Status'), 'draft');

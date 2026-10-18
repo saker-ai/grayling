@@ -75,6 +75,9 @@ export function SegmentsPage(): ReactElement {
     {
       key: 'key',
       header: t('th.key'),
+      // Card title: name + key (the in-cell description stays table-only via
+      // the .dt-card .resource-description rule).
+      mobilePrimary: true,
       cell: d => {
         const content = resourceContent(d);
         return (
@@ -111,6 +114,7 @@ export function SegmentsPage(): ReactElement {
         rows={visible}
         rowKey={d => d.key}
         emptyText={t('seg.empty')}
+        mobileCards
         rowProps={d => ({
           'data-list-record': '',
           className: 'clickable',

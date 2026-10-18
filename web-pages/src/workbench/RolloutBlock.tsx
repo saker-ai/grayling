@@ -404,7 +404,7 @@ function RolloutSteps({ plan }: { plan: ReleasePlan }): ReactElement {
   const rows: Row[] = steps.map((step, index) => ({ step, index }));
   const columns: Array<Column<Row>> = [
     { key: 'idx', header: '#', cell: r => String(r.index) },
-    { key: 'name', header: t('th.step'), cell: r => <span className="mono">{r.step.name}</span> },
+    { key: 'name', header: t('th.step'), mobilePrimary: true, cell: r => <span className="mono">{r.step.name}</span> },
     { key: 'ratio', header: t('exp.eligShort'), cell: r => r.step.ratio + '%' },
     { key: 'min', header: t('exp.minRuntime'), cell: r => fmtDurNs(r.step.minRuntime, t) },
     { key: 'obs', header: t('ro.obsWindow'), cell: r => fmtDurNs(r.step.observationWindow || 0, t) },
@@ -445,6 +445,7 @@ function RolloutSteps({ plan }: { plan: ReleasePlan }): ReactElement {
         emptyText={t('ro.noSteps')}
         rowProps={r => (r.index === plan.currentStep ? { className: 'ro-current' } : {})}
         ariaLabel={t('ro.planSteps')}
+        mobileCards
       />
       <div className="muted">{t('ro.gateNote')}</div>
     </>
@@ -458,8 +459,9 @@ function RolloutHistory({ plan, locale }: { plan: ReleasePlan; locale: string })
   const { t } = useTranslation();
   const history = (plan.history || []).slice().reverse(); // newest first
   const columns: Array<Column<PlanEvent>> = [
-    { key: 'time', header: t('th.time'), className: 'nowrap', cell: ev => fmtTime(ev.at, locale) },
-    { key: 'actor', header: t('th.actor'), cell: ev => ev.actor || '—' },
+    // Card title: time + actor together identify the event.
+    { key: 'time', header: t('th.time'), className: 'nowrap', mobilePrimary: true, cell: ev => fmtTime(ev.at, locale) },
+    { key: 'actor', header: t('th.actor'), mobilePrimary: true, cell: ev => ev.actor || '—' },
     {
       key: 'action',
       header: t('th.action'),
@@ -476,6 +478,7 @@ function RolloutHistory({ plan, locale }: { plan: ReleasePlan; locale: string })
       rowKey={ev => ev.at + '|' + ev.action + '|' + ev.step}
       emptyText={t('ro.noActions')}
       ariaLabel={t('ro.actionHistory')}
+      mobileCards
     />
   );
 }

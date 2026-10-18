@@ -255,6 +255,7 @@ function MetricCatalog(): ReactElement {
     {
       key: 'key',
       header: t('metrics.key'),
+      mobilePrimary: true, // card title: the metric key drill-down
       cell: d => (
         <button
           className="row-link mono"
@@ -312,6 +313,7 @@ function MetricCatalog(): ReactElement {
         rowKey={d => d.key + '@' + d.version}
         emptyText={t('metrics.empty')}
         ariaLabel={t('metrics.title')}
+        mobileCards
       />
       {page.nextCursor ? (
         <Button size="sm" id="metric-next" onClick={() => setCursor(page.nextCursor || '')}>

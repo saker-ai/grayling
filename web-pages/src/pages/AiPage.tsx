@@ -308,11 +308,13 @@ function AIResourceCatalog(): ReactElement {
     setAllowRows(rows => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
 
   const columns: Array<Column<AIResource>> = [
-    { key: 'type', header: t('th.type'), cell: r => <Chip label={r.type} cls="teal" /> },
+    // Card title: type chip + logicalId drill-down identify the resource.
+    { key: 'type', header: t('th.type'), mobilePrimary: true, cell: r => <Chip label={r.type} cls="teal" /> },
     {
       key: 'logicalId',
       header: t('ai.logicalId'),
       className: 'mono',
+      mobilePrimary: true,
       cell: r => (
         <button
           className="row-link"
@@ -360,8 +362,8 @@ function AIResourceCatalog(): ReactElement {
   ];
 
   const revocationColumns: Array<Column<Revocation>> = [
-    { key: 'type', header: t('th.type'), cell: rv => <Chip label={rv.type} cls="red" /> },
-    { key: 'logicalId', header: t('ai.logicalId'), className: 'mono', cell: rv => rv.logicalId },
+    { key: 'type', header: t('th.type'), mobilePrimary: true, cell: rv => <Chip label={rv.type} cls="red" /> },
+    { key: 'logicalId', header: t('ai.logicalId'), className: 'mono', mobilePrimary: true, cell: rv => rv.logicalId },
     { key: 'reason', header: t('th.reason'), cell: rv => rv.reason || '—' },
     {
       key: 'actions',
@@ -418,10 +420,11 @@ function AIResourceCatalog(): ReactElement {
           rowKey={r => r.type + '\u0000' + r.logicalId}
           emptyText={t('ai.noneRegistered')}
           ariaLabel={t('ai.title')}
+          mobileCards
           rowProps={() => ({ 'data-list-record': '' })}
         />
         {revocations.length ? (
-          <div className="ai-revocations-desktop">
+          <>
             <h4>{t('ai.revocations')}</h4>
             <DataTable
               columns={revocationColumns}
@@ -429,8 +432,9 @@ function AIResourceCatalog(): ReactElement {
               rowKey={rv => rv.type + '\u0000' + rv.logicalId}
               emptyText={t('ai.noneRegistered')}
               ariaLabel={t('ai.revocations')}
+              mobileCards
             />
-          </div>
+          </>
         ) : null}
       </section>
       <section className="card">
