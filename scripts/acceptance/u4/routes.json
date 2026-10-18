@@ -1,0 +1,30 @@
+{
+  "comment": "Console routes enumerated from web/src/App.tsx createHashRouter (web/src/routes.tsx). Placeholders ${...} resolve from the seed summary at runtime. key6=true marks the six key pages that get the extra theme/lang/mobile axe passes.",
+  "scope": { "ws": "u4acc", "env": "prod" },
+  "routes": [
+    { "name": "overview", "path": "/console/${WS}/${ENV}/overview", "key6": true },
+    { "name": "flags", "path": "/console/${WS}/${ENV}/flags", "key6": true },
+    { "name": "flag-detail", "path": "/console/${WS}/${ENV}/flags/${FLAG}", "key6": true },
+    { "name": "flag-detail-draft", "path": "/console/${WS}/${ENV}/flags/${FLAG_DRAFT}" },
+    { "name": "segments", "path": "/console/${WS}/${ENV}/segments" },
+    { "name": "segment-detail", "path": "/console/${WS}/${ENV}/segments/${SEG}" },
+    { "name": "experiments", "path": "/console/${WS}/${ENV}/experiments", "key6": true },
+    { "name": "experiment-create", "path": "/console/${WS}/${ENV}/experiments/~new" },
+    { "name": "exp-summary", "path": "/console/${WS}/${ENV}/experiments/${EXP}", "key6": true, "expZone": true },
+    { "name": "exp-health", "path": "/console/${WS}/${ENV}/experiments/${EXP}/health", "expZone": true },
+    { "name": "exp-evidence", "path": "/console/${WS}/${ENV}/experiments/${EXP}/evidence", "expZone": true },
+    { "name": "exp-rollout", "path": "/console/${WS}/${ENV}/experiments/${EXP}/rollout", "expZone": true },
+    { "name": "exp-settings", "path": "/console/${WS}/${ENV}/experiments/${EXP}/settings", "expZone": true },
+    { "name": "metrics", "path": "/console/${WS}/${ENV}/metrics" },
+    { "name": "metric-detail", "path": "/console/${WS}/${ENV}/metrics/${METRIC_KEY}/${METRIC_VER}" },
+    { "name": "approvals", "path": "/console/${WS}/${ENV}/approvals" },
+    { "name": "approval-detail", "path": "/console/${WS}/${ENV}/approvals/${APPROVAL}" },
+    { "name": "ai", "path": "/console/${WS}/${ENV}/ai", "key6": true },
+    { "name": "ai-detail", "path": "/console/${WS}/${ENV}/ai/${AI_TYPE}/${AI_ID}" },
+    { "name": "audit", "path": "/console/${WS}/${ENV}/audit" },
+    { "name": "audit-object", "path": "/console/${WS}/${ENV}/audit/${AUDIT_OBJECT}" },
+    { "name": "debug", "path": "/console/${WS}/${ENV}/debug" },
+    { "name": "tokens", "path": "/console/${WS}/${ENV}/tokens" },
+    { "name": "quotas", "path": "/console/${WS}/${ENV}/quotas" }
+  ]
+}

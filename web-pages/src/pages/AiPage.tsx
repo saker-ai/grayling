@@ -440,7 +440,7 @@ function AIResourceCatalog(): ReactElement {
       <section className="card">
         <h3>{t('ai.resolveViewer')}</h3>
         <div className="row">
-          <select id="ai-r-type">
+          <select id="ai-r-type" aria-label={t('ai.resolveType')}>
             {AI_TYPES.map(type => (
               <option key={type}>{type}</option>
             ))}

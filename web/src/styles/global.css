@@ -382,19 +382,23 @@ main { flex: 1; overflow: auto; padding: var(--sp-4); }
 .view-head h2 { margin: 0; font-size: var(--fs-xl); line-height: var(--lh-tight); letter-spacing: -.012em; }
 .row { display: flex; gap: var(--sp-2); align-items: center; margin: var(--sp-2) 0; flex-wrap: wrap; }
 .row.actions { border-top: 1px solid var(--line); padding-top: var(--sp-3); margin-top: var(--sp-3); }
-/* Editor lifecycle rows stick to the viewport bottom on narrow screens: the
+/* Editor lifecycle rows pin to the viewport bottom on narrow screens: the
    draft card (structured form + 24-row JSON source) is tall enough that the
-   save row otherwise scrolls out of reach. Desktop keeps normal flow. Sits
-   under overlays (--z-overlay) and toasts (--z-toast). The mobile shell scrolls the
-   document (.app is content-height), so main must not stay an overflow
-   container here — a non-scrolling overflow ancestor silently defeats
-   position:sticky by becoming its scroll container. */
+   save row otherwise scrolls out of reach. Desktop keeps normal flow.
+   position:fixed, not sticky: a bottom-sticky bar inside a card taller than
+   the viewport clamps to the card's top edge at scroll 0 and covers the
+   editor mode toggle (found by the axe target-size audit). The matching
+   bottom padding on main keeps end-of-page content tappable, and the scroll
+   padding keeps scroll-into-view targets (keyboard focus, in-page anchors)
+   clear of the bar. Sits under overlays (--z-overlay) and toasts (--z-toast). */
 @media (max-width: 700px) {
-  main { overflow: visible; }
+  main { overflow: visible; padding-bottom: calc(var(--touch-min) + var(--sp-6)); }
   .sticky-actions {
-    position: sticky; bottom: 0; z-index: var(--z-sticky);
-    background: var(--surface-raised); padding-bottom: var(--sp-2);
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: var(--z-sticky);
+    background: var(--surface-raised); padding: var(--sp-2) var(--sp-4);
+    border-top: 1px solid var(--line);
   }
+  html { scroll-padding-bottom: calc(var(--touch-min) + var(--sp-6)); }
 }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sp-3); margin: var(--sp-2) 0; }
 .wizard-progress { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.375rem; list-style: none; padding: 0; margin: 0 0 var(--sp-5); }

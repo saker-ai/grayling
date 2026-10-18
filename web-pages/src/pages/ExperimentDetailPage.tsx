@@ -548,7 +548,12 @@ function SettingsZone({
           </div>
           <p className="muted">{t('exp.bindHint')}</p>
           <div className="row">
-            <select id="exp-to" value={transitionTo} onChange={ev => setTransitionTo(ev.currentTarget.value)}>
+            <select
+              id="exp-to"
+              aria-label={t('exp.transitionTo')}
+              value={transitionTo}
+              onChange={ev => setTransitionTo(ev.currentTarget.value)}
+            >
               <option value="running">running</option>
               <option value="paused">paused</option>
               <option value="stopped">stopped</option>

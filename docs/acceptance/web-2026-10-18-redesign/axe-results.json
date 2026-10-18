@@ -1,0 +1,560 @@
+{
+  "generatedAt": "2026-10-18T07:01:10.427Z",
+  "tags": [
+    "wcag2a",
+    "wcag2aa",
+    "wcag21a",
+    "wcag21aa",
+    "wcag22aa"
+  ],
+  "runs": [
+    {
+      "route": "overview",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/overview",
+      "violations": [],
+      "passes": 28,
+      "incomplete": []
+    },
+    {
+      "route": "flags",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/flags",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "flag-detail",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/flags/u4-bool",
+      "violations": [],
+      "passes": 32,
+      "incomplete": []
+    },
+    {
+      "route": "flag-detail-draft",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/flags/u4-json",
+      "violations": [],
+      "passes": 28,
+      "incomplete": []
+    },
+    {
+      "route": "segments",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/segments",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "segment-detail",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/segments/u4-seg",
+      "violations": [],
+      "passes": 27,
+      "incomplete": []
+    },
+    {
+      "route": "experiments",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/experiments",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "experiment-create",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/experiments/~new",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-summary",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-health",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5/health",
+      "violations": [],
+      "passes": 30,
+      "incomplete": []
+    },
+    {
+      "route": "exp-evidence",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5/evidence",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-rollout",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5/rollout",
+      "violations": [],
+      "passes": 25,
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": 1
+        }
+      ]
+    },
+    {
+      "route": "exp-settings",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5/settings",
+      "violations": [],
+      "passes": 30,
+      "incomplete": []
+    },
+    {
+      "route": "metrics",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/metrics",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "metric-detail",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/metrics/u4.metric/1",
+      "violations": [],
+      "passes": 24,
+      "incomplete": []
+    },
+    {
+      "route": "approvals",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/approvals",
+      "violations": [],
+      "passes": 22,
+      "incomplete": []
+    },
+    {
+      "route": "approval-detail",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/approvals/approval-4",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "ai",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/ai",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "ai-detail",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/ai/prompt/u4-prompt",
+      "violations": [],
+      "passes": 24,
+      "incomplete": []
+    },
+    {
+      "route": "audit",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/audit",
+      "violations": [],
+      "passes": 27,
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": 57
+        }
+      ]
+    },
+    {
+      "route": "audit-object",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/audit/prompt%2Fu4-prompt",
+      "violations": [],
+      "passes": 26,
+      "incomplete": []
+    },
+    {
+      "route": "debug",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/debug",
+      "violations": [],
+      "passes": 23,
+      "incomplete": []
+    },
+    {
+      "route": "tokens",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/tokens",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "quotas",
+      "combo": "desktop-zh-light",
+      "url": "#/console/u4acc/prod/quotas",
+      "violations": [],
+      "passes": 23,
+      "incomplete": []
+    },
+    {
+      "route": "overview",
+      "combo": "desktop-zh-dark",
+      "url": "#/console/u4acc/prod/overview",
+      "violations": [],
+      "passes": 28,
+      "incomplete": []
+    },
+    {
+      "route": "flags",
+      "combo": "desktop-zh-dark",
+      "url": "#/console/u4acc/prod/flags",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "flag-detail",
+      "combo": "desktop-zh-dark",
+      "url": "#/console/u4acc/prod/flags/u4-bool",
+      "violations": [],
+      "passes": 32,
+      "incomplete": []
+    },
+    {
+      "route": "experiments",
+      "combo": "desktop-zh-dark",
+      "url": "#/console/u4acc/prod/experiments",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-summary",
+      "combo": "desktop-zh-dark",
+      "url": "#/console/u4acc/prod/experiments/exp-5",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-health",
+      "combo": "desktop-zh-dark",
+      "url": "#/console/u4acc/prod/experiments/exp-5/health",
+      "violations": [],
+      "passes": 30,
+      "incomplete": []
+    },
+    {
+      "route": "exp-evidence",
+      "combo": "desktop-zh-dark",
+      "url": "#/console/u4acc/prod/experiments/exp-5/evidence",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-rollout",
+      "combo": "desktop-zh-dark",
+      "url": "#/console/u4acc/prod/experiments/exp-5/rollout",
+      "violations": [],
+      "passes": 25,
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": 1
+        }
+      ]
+    },
+    {
+      "route": "exp-settings",
+      "combo": "desktop-zh-dark",
+      "url": "#/console/u4acc/prod/experiments/exp-5/settings",
+      "violations": [],
+      "passes": 30,
+      "incomplete": []
+    },
+    {
+      "route": "ai",
+      "combo": "desktop-zh-dark",
+      "url": "#/console/u4acc/prod/ai",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "overview",
+      "combo": "desktop-en-light",
+      "url": "#/console/u4acc/prod/overview",
+      "violations": [],
+      "passes": 28,
+      "incomplete": []
+    },
+    {
+      "route": "flags",
+      "combo": "desktop-en-light",
+      "url": "#/console/u4acc/prod/flags",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "flag-detail",
+      "combo": "desktop-en-light",
+      "url": "#/console/u4acc/prod/flags/u4-bool",
+      "violations": [],
+      "passes": 32,
+      "incomplete": []
+    },
+    {
+      "route": "experiments",
+      "combo": "desktop-en-light",
+      "url": "#/console/u4acc/prod/experiments",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-summary",
+      "combo": "desktop-en-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-health",
+      "combo": "desktop-en-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5/health",
+      "violations": [],
+      "passes": 30,
+      "incomplete": []
+    },
+    {
+      "route": "exp-evidence",
+      "combo": "desktop-en-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5/evidence",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-rollout",
+      "combo": "desktop-en-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5/rollout",
+      "violations": [],
+      "passes": 25,
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": 1
+        }
+      ]
+    },
+    {
+      "route": "exp-settings",
+      "combo": "desktop-en-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5/settings",
+      "violations": [],
+      "passes": 30,
+      "incomplete": []
+    },
+    {
+      "route": "ai",
+      "combo": "desktop-en-light",
+      "url": "#/console/u4acc/prod/ai",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "overview",
+      "combo": "desktop-en-dark",
+      "url": "#/console/u4acc/prod/overview",
+      "violations": [],
+      "passes": 28,
+      "incomplete": []
+    },
+    {
+      "route": "flags",
+      "combo": "desktop-en-dark",
+      "url": "#/console/u4acc/prod/flags",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "flag-detail",
+      "combo": "desktop-en-dark",
+      "url": "#/console/u4acc/prod/flags/u4-bool",
+      "violations": [],
+      "passes": 32,
+      "incomplete": []
+    },
+    {
+      "route": "experiments",
+      "combo": "desktop-en-dark",
+      "url": "#/console/u4acc/prod/experiments",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-summary",
+      "combo": "desktop-en-dark",
+      "url": "#/console/u4acc/prod/experiments/exp-5",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-health",
+      "combo": "desktop-en-dark",
+      "url": "#/console/u4acc/prod/experiments/exp-5/health",
+      "violations": [],
+      "passes": 30,
+      "incomplete": []
+    },
+    {
+      "route": "exp-evidence",
+      "combo": "desktop-en-dark",
+      "url": "#/console/u4acc/prod/experiments/exp-5/evidence",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-rollout",
+      "combo": "desktop-en-dark",
+      "url": "#/console/u4acc/prod/experiments/exp-5/rollout",
+      "violations": [],
+      "passes": 25,
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": 1
+        }
+      ]
+    },
+    {
+      "route": "exp-settings",
+      "combo": "desktop-en-dark",
+      "url": "#/console/u4acc/prod/experiments/exp-5/settings",
+      "violations": [],
+      "passes": 30,
+      "incomplete": []
+    },
+    {
+      "route": "ai",
+      "combo": "desktop-en-dark",
+      "url": "#/console/u4acc/prod/ai",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "overview",
+      "combo": "mobile-zh-light",
+      "url": "#/console/u4acc/prod/overview",
+      "violations": [],
+      "passes": 27,
+      "incomplete": []
+    },
+    {
+      "route": "flags",
+      "combo": "mobile-zh-light",
+      "url": "#/console/u4acc/prod/flags",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "flag-detail",
+      "combo": "mobile-zh-light",
+      "url": "#/console/u4acc/prod/flags/u4-bool",
+      "violations": [],
+      "passes": 32,
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": 7
+        }
+      ]
+    },
+    {
+      "route": "experiments",
+      "combo": "mobile-zh-light",
+      "url": "#/console/u4acc/prod/experiments",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-summary",
+      "combo": "mobile-zh-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-health",
+      "combo": "mobile-zh-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5/health",
+      "violations": [],
+      "passes": 29,
+      "incomplete": []
+    },
+    {
+      "route": "exp-evidence",
+      "combo": "mobile-zh-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5/evidence",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    },
+    {
+      "route": "exp-rollout",
+      "combo": "mobile-zh-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5/rollout",
+      "violations": [],
+      "passes": 25,
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": 1
+        }
+      ]
+    },
+    {
+      "route": "exp-settings",
+      "combo": "mobile-zh-light",
+      "url": "#/console/u4acc/prod/experiments/exp-5/settings",
+      "violations": [],
+      "passes": 30,
+      "incomplete": []
+    },
+    {
+      "route": "ai",
+      "combo": "mobile-zh-light",
+      "url": "#/console/u4acc/prod/ai",
+      "violations": [],
+      "passes": 25,
+      "incomplete": []
+    }
+  ],
+  "probeFailures": []
+}

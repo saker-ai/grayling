@@ -147,7 +147,21 @@ function ShellBody({ guard }: { guard?: ReactNode }): ReactElement {
 
   return (
     <div className="app">
-      <a className="skip-link" href="#main">
+      <a
+        className="skip-link"
+        href="#main"
+        onClick={ev => {
+          // The console lives behind a hash router: letting the anchor set
+          // location.hash would clobber the route and unmount the app, so the
+          // jump is performed programmatically instead.
+          ev.preventDefault();
+          const main = document.getElementById('main');
+          if (main) {
+            if (!main.hasAttribute('tabindex')) main.setAttribute('tabindex', '-1');
+            main.focus();
+          }
+        }}
+      >
         {t('a11y.skipToMain')}
       </a>
       <aside className="sidebar">
@@ -179,6 +193,7 @@ function ShellBody({ guard }: { guard?: ReactNode }): ReactElement {
                     type="button"
                     id={item.id}
                     className={consoleParams?.view === item.view ? 'active' : ''}
+                    aria-current={consoleParams?.view === item.view ? 'page' : undefined}
                     onClick={() => gotoView(item.view)}
                   >
                     {t(item.labelKey)}
