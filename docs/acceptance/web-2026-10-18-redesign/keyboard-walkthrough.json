@@ -1,0 +1,167 @@
+{
+  "generatedAt": "2026-10-18T07:07:44.362Z",
+  "results": [
+    {
+      "id": "K1a",
+      "name": "first Tab lands on skip-link",
+      "pass": true,
+      "detail": "{\"tag\":\"A\",\"id\":\"\",\"cls\":\"skip-link\",\"role\":\"\",\"text\":\"跳至主要内容\",\"ariaCurrent\":null,\"ariaSelected\":null,\"tabindex\":null}"
+    },
+    {
+      "id": "K1b",
+      "name": "skip-link activation moves focus to main",
+      "pass": true,
+      "detail": "{\"hash\":\"#/console/u4acc/prod/overview\",\"activeId\":\"main\",\"mainHasFocus\":true,\"mainVisible\":true}"
+    },
+    {
+      "id": "K1c",
+      "name": "hash route survives skip-link",
+      "pass": true,
+      "detail": "hash=#/console/u4acc/prod/overview"
+    },
+    {
+      "id": "K1d",
+      "name": "main content still rendered",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "K2a",
+      "name": "every sidebar nav button is tabbable",
+      "pass": true,
+      "detail": "11 buttons"
+    },
+    {
+      "id": "K2b",
+      "name": "exactly one nav button carries aria-current=page",
+      "pass": true,
+      "detail": "[{\"text\":\"功能开关\",\"tabbable\":true,\"ariaCurrent\":\"page\",\"active\":true}]"
+    },
+    {
+      "id": "K2c",
+      "name": "aria-current marks the flags view",
+      "pass": true,
+      "detail": "功能开关"
+    },
+    {
+      "id": "K2d",
+      "name": "nav reachable in Tab sequence",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "K3a",
+      "name": "ArrowRight moves focus to next tab",
+      "pass": true,
+      "detail": "{\"focused\":\"exp-tab-health\",\"summarySelected\":\"true\",\"hash\":\"#/console/u4acc/prod/experiments/exp-5\"}"
+    },
+    {
+      "id": "K3b",
+      "name": "focus move does not select (manual activation)",
+      "pass": true,
+      "detail": "summary aria-selected=true"
+    },
+    {
+      "id": "K3c",
+      "name": "focus move does not navigate",
+      "pass": true,
+      "detail": "hash=#/console/u4acc/prod/experiments/exp-5"
+    },
+    {
+      "id": "K3d",
+      "name": "Enter selects the focused tab",
+      "pass": true,
+      "detail": "{\"healthSelected\":\"true\",\"hash\":\"#/console/u4acc/prod/experiments/exp-5/health\",\"panelVisible\":true}"
+    },
+    {
+      "id": "K3e",
+      "name": "selection deep-links the hash",
+      "pass": true,
+      "detail": "hash=#/console/u4acc/prod/experiments/exp-5/health"
+    },
+    {
+      "id": "K3f",
+      "name": "tabpanel with matching id exists",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "K4a",
+      "name": "dialog opens with focus inside",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "K4b",
+      "name": "Tab cycles inside the dialog (trap)",
+      "pass": true,
+      "detail": "cycle=INPUT. → INPUT. → BUTTON.btn → BUTTON.btn primary → INPUT. → INPUT. → BUTTON.btn → BUTTON.btn primary → INPUT. → INPUT. → BUTTON.btn → BUTTON.btn primary"
+    },
+    {
+      "id": "K4c",
+      "name": "focus never escapes to the page",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "K4d",
+      "name": "Shift+Tab wraps from first to last",
+      "pass": true,
+      "detail": "first=INPUT shiftTab→创建"
+    },
+    {
+      "id": "K4e",
+      "name": "Escape closes the dialog",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "K4f",
+      "name": "focus returns to the trigger",
+      "pass": true,
+      "detail": "active=btn-new-ws"
+    },
+    {
+      "id": "K5a",
+      "name": "rollback confirm opens, reason field focused",
+      "pass": true,
+      "detail": "active=action-reason"
+    },
+    {
+      "id": "K5b",
+      "name": "confirm button reachable by Tab",
+      "pass": true,
+      "detail": "{\"tag\":\"BUTTON\",\"id\":\"\",\"cls\":\"btn danger\",\"role\":\"\",\"text\":\"回滚到 r1\",\"ariaCurrent\":null,\"ariaSelected\":null,\"tabindex\":null}"
+    },
+    {
+      "id": "K5c",
+      "name": "rollback request completes and dialog closes",
+      "pass": true,
+      "detail": "{\"dialogOpen\":false,\"hash\":\"#/console/u4acc/prod/flags/u4-bool\"}"
+    },
+    {
+      "id": "K5d",
+      "name": "pending flag.rollback approval created for r1",
+      "pass": true,
+      "detail": "id=approval-7 state=submitted payload={\"revision\":1}"
+    },
+    {
+      "id": "K6",
+      "name": "decorative SVG charts never enter the Tab order",
+      "pass": true,
+      "detail": "28 stops walked"
+    },
+    {
+      "id": "K7-light",
+      "name": "focus ring screenshots (light)",
+      "pass": true,
+      "detail": "PNG in evidence dir"
+    },
+    {
+      "id": "K7-dark",
+      "name": "focus ring screenshots (dark)",
+      "pass": true,
+      "detail": "PNG in evidence dir"
+    }
+  ]
+}
