@@ -12,7 +12,7 @@ Grayling 是可自托管的功能开关、渐进发布与 A/B 实验平台，也
 - **实验分析**：预注册 A/B 实验、曝光和转化采集、样本比例偏差检查、护栏、报告，以及可人工或自动推进的分阶段发布计划。
 - **AI 资源治理**：Prompt、Skill 和 AgentSpec 独立版本，固定版本、会话级配置冻结、摘要校验与紧急撤销。
 - **客户端**：Go SDK 本地求值、Python/TypeScript SDK 远程求值、OpenFeature Go Provider，以及可独立部署的远程求值代理。
-- **部署选择**：内置 gonacos 或外部 Nacos 3.2.1+ 分发配置；JSON 文件、纯 Go SQLite 或 PostgreSQL 保存 Grayling 平台数据。控制台内嵌，无需构建前端。
+- **部署选择**：内置 gonacos 或外部 Nacos 3.2.1+ 分发配置；JSON 文件、纯 Go SQLite 或 PostgreSQL 保存 Grayling 平台数据。控制台为内嵌 React SPA，构建产物已提交到仓库，`make run` 无需 Node.js。
 - **OpenAI 客户端兼容**：可选地将 Chat Completions（包括 SSE 流）转发到配置好的 OpenAI 兼容上游；客户端只需修改 `baseURL`。
 
 ## 快速开始
@@ -84,6 +84,10 @@ make license-check
 ```
 
 `GOWORK=off` 避免父级 Go workspace 覆盖固定的 gonacos 版本。快速测试会跳过依赖外部环境的验收套件；完整集成测试可使用 Docker 或显式指定 PostgreSQL/Redis 测试端点。参见[贡献指南](CONTRIBUTING.md)和[实施记录](docs/实施状态.md)。CI 配有构建、vet、race、PostgreSQL 集成、SDK 和许可证检查。
+
+### Web 控制台
+
+控制台是 React 19 + TypeScript SPA，Vite 构建，组织为 pnpm workspace 三个包：`web/`（Vite 应用、外壳、hooks 与 Go 内嵌）、`web-pages/`（页面、编辑器与工作台组件）、`web-client/`（fetch client 与 API 类型）。前端开发需要 **Node.js 26+** 与 **pnpm 10**。`make build` 会先跑前端构建再编译二进制，产物 `web/static/` 内嵌并提交 git——`make check-static`（CI 同样执行）在提交产物与全新构建漂移时报错。迭代控制台时并排运行 `make dev-backend`（正常服务端）与 `make dev-frontend`（Vite dev server，热更新，API 代理到后端）。前端测试为 vitest 套件（`pnpm -r test`）；`go test ./web/` 驱动同一套 vitest 并做 Go 侧预设复验。
 
 ## 文档
 

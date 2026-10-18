@@ -19,15 +19,19 @@ RUN_PORT ?= 27002
 
 all: vet test build
 
-build:
+build: frontend
 	$(GO) build ./...
 	$(GO) build -o bin/grayling ./cmd/grayling
 	$(GO) build -o bin/grayling-proxy ./cmd/grayling-proxy
 	$(GO) build -o bin/grayling-native-proxy ./cmd/grayling-native-proxy
 	$(GO) build -o bin/nacos-native-grpc-probe ./cmd/nacos-native-grpc-probe
 
-test:
-	$(GO) test ./... -count=1
+# web/node_modules must stay out of the package list: pnpm dependencies can
+# carry Go files that `go test ./...` would otherwise scan as project packages.
+# (The pipeline form `go list | grep | xargs $(GO) test` is unrolled into
+# command substitution because $(GO) carries an env prefix xargs cannot exec.)
+test: test-static
+	$(GO) test -count=1 $$(GOWORK=$(GOWORK) go list ./... | grep -v /web/node_modules/)
 
 client-compatibility:
 	python3 scripts/check_client_compatibility.py --tier all
@@ -98,8 +102,138 @@ clean:
 test-agent-sdk:
 	$(GO) test -race ./api/agent/v1 ./pkg/agent -count=1
 
+# Agent contract checks only; these are not the full Agent/cluster/gateway
+# acceptance suites required for GA in docs/统一Agent协议实施与验收方案.md.
+.PHONY: generate-agent check-agent-generated test-agent-contract
 generate-agent:
 	sh scripts/generate_agent_proto.sh
 
 check-agent-generated:
 	sh scripts/check_agent_generated.sh
+
+test-agent-contract:
+	$(GO) test -race -count=1 ./api/agent/v1
+
+.PHONY: test-agent-resources test-agent-naming-poc
+test-agent-resources:
+	$(GO) test -race -count=1 ./pkg/agent ./internal/agent
+
+test-agent-naming-poc:
+	$(GO) test -tags=integration -race -count=1 ./test/agent -run Naming
+
+.PHONY: test-agent-channel
+test-agent-channel:
+	$(GO) test -race -count=1 ./api/agent/v1 ./internal/agent ./pkg/agent
+	$(GO) test -tags=integration -race -count=1 -timeout=5m ./test/agent -run 'TestSession|TestWSS|TestGoAgent|TestAgentApp'
+
+.PHONY: test-agent-policy
+test-agent-policy:
+	$(GO) test -race -count=1 ./pkg/agent ./internal/agent
+	$(GO) test -tags=integration -race -count=1 -timeout=5m ./test/agent -run TestPolicy
+
+.PHONY: test-agent-recovery
+test-agent-recovery:
+	$(GO) test -race -count=1 ./pkg/agent ./internal/agent
+	python3 scripts/agent_recovery_fixture.py --check
+
+.PHONY: test-agent-app
+test-agent-app:
+	$(GO) test -race -count=1 ./ ./cmd/grayling -run 'TestStartRejectsConflictingOptions|TestListenerTLS'
+	$(GO) test -tags=integration -race -count=1 -timeout=3m ./test/agent -run '^TestAgentApp'
+
+.PHONY: test-agent-admin
+test-agent-admin:
+	$(GO) test -race -count=1 ./internal/admin ./internal/api ./internal/agent ./pkg/agent
+	$(GO) test -tags=integration -race -count=1 -timeout=3m ./test/agent -run '^TestAgentAdmin|^TestAgentManaged|^TestAgentManagement'
+
+.PHONY: test-agent-instances
+test-agent-instances:
+	$(GO) test -race -count=1 ./internal/agent ./pkg/agent
+	$(GO) test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestInstance|^TestRegisteredLoop'
+
+.PHONY: test-agent-discovery
+test-agent-discovery:
+	$(GO) test -race -count=1 ./internal/agent ./pkg/agent
+	$(GO) test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestDiscovery|^TestInstanceDiscovery|^TestAgentAdminHTTP'
+
+.PHONY: test-agent-bundle
+test-agent-bundle:
+	$(GO) test -race -count=1 ./internal/admin ./internal/agent ./pkg/agent
+	$(GO) test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestBundle|^TestPublishedSourceReplica'
+
+.PHONY: test-agent-release
+test-agent-release:
+	$(GO) test -race -count=1 ./internal/agent -run '^TestRelease'
+	$(GO) test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestRelease|^TestAgentManagementMigrates|^TestInstanceDiscoveryV4Migration|^TestInstanceMigrationFromV3'
+
+.PHONY: test-agent-prepared
+test-agent-prepared:
+	$(GO) test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestPrepared'
+
+.PHONY: test-agent-preparation
+test-agent-preparation:
+	$(GO) test -race -count=1 ./internal/agent ./pkg/agent
+	$(GO) test -tags=integration -race -count=1 -timeout=5m ./test/agent -run '^TestPrepared|^TestPreparation|^TestReprepare'
+
+.PHONY: test-agent-activation
+test-agent-activation:
+	$(GO) test -race -count=1 ./pkg/agent -run '^TestActivation'
+	$(GO) test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestActivation'
+
+.PHONY: test-agent-applied
+test-agent-applied:
+	$(GO) test -race -count=1 ./pkg/agent ./internal/agent
+	$(GO) test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestApplied'
+
+.PHONY: test-agent-runtime
+test-agent-runtime:
+	$(GO) test -race -count=1 ./pkg/agent -run '^TestRuntime'
+	$(GO) test -tags=integration -race -count=1 -timeout=3m ./test/agent -run '^TestRuntimeWSS'
+
+.PHONY: test-agent-revocation
+test-agent-revocation:
+	$(GO) test -race -count=1 ./pkg/agent ./internal/agent
+	$(GO) test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestRevocation'
+
+.PHONY: test-agent-cli
+test-agent-cli:
+	$(GO) test -race -count=1 ./cmd/grayling
+	$(GO) test -tags=integration -count=1 -timeout=3m ./test/boot -run '^TestAgentBinarySigningTrustAndRevocationProof$$'
+
+# --- React console frontend --------------------------------------------------
+# pnpm workspace at the repo root (packages: web, web-client, web-pages). The
+# Vite build output web/static is embedded via web/embed.go and committed;
+# check-static fails when the committed tree drifts from a fresh build.
+.PHONY: frontend check-static test-static ensure-static build-go dev-frontend dev-backend
+
+frontend:
+	pnpm install --frozen-lockfile --prefer-offline
+	pnpm --dir web build
+
+check-static: frontend
+	@git diff --exit-code -- web/static || (echo "grayling web/static is stale; run 'make frontend' and commit the result" && exit 1)
+
+# The smallest embedded tree so clean checkouts can run Go-only commands. It
+# never clobbers a real Vite build: existing web/static/index.html wins.
+test-static:
+	@if [ ! -f web/static/index.html ]; then \
+	  mkdir -p web/static/assets; \
+	  printf '<!doctype html><html><head><meta charset="utf-8"><title>Grayling test shell</title></head><body><div id="root"></div></body></html>\n' > web/static/index.html; \
+	  : > web/static/assets/.gitkeep; \
+	fi
+
+ensure-static: test-static
+
+build-go: ensure-static
+	$(GO) build ./...
+	$(GO) build -o bin/grayling ./cmd/grayling
+	$(GO) build -o bin/grayling-proxy ./cmd/grayling-proxy
+	$(GO) build -o bin/grayling-native-proxy ./cmd/grayling-native-proxy
+	$(GO) build -o bin/nacos-native-grpc-probe ./cmd/nacos-native-grpc-probe
+
+dev-frontend:
+	pnpm --dir web dev
+
+# dev-backend is the existing run target: build everything and start the
+# server; use dev-frontend alongside it for Vite hot reload.
+dev-backend: run

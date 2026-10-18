@@ -1,0 +1,11 @@
+{
+  "name": "grayling",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.1",
+  "scripts": {
+    "build": "pnpm --dir web build",
+    "dev": "pnpm --dir web dev",
+    "test": "pnpm -r test"
+  }
+}

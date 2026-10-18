@@ -24,7 +24,7 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - name: Core tests with race detection
-        run: go test -race -count=1 ./ ./cmd/... ./internal/... ./pkg/... ./web
+        run: go test -race -count=1 ./api/... ./ ./cmd/... ./internal/... ./pkg/... ./web
       - name: Binary boot and end-to-end tests
         run: go test -count=1 ./test/boot ./test/e2e ./test/smoke
 
@@ -57,6 +57,8 @@ jobs:
           go test -race -count=1 -timeout=15m
           ./internal/platform ./internal/experiment ./internal/api
           -run 'TestGORMPostgres|TestPostgresReport|TestQuotaAdminReplicaRead'
+      - name: Agent shared-session and real WSS integration
+        run: go test -tags=integration -race -count=1 -timeout=5m ./test/agent
       - name: PostgreSQL full-stack acceptance
         run: go test -count=1 -timeout=10m ./test/e2e -run '^TestE2EPostgres'
 
@@ -84,3 +86,19 @@ jobs:
       - run: npm ci --prefix sdk/typescript
       - run: npm run typecheck --prefix sdk/typescript
       - run: npm test --prefix sdk/typescript
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r test
+      - run: pnpm --dir web build

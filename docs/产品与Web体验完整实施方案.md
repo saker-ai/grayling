@@ -2,6 +2,8 @@
 
 > 版本：2026-10-13。性质：面向实施的产品与设计规格。本文描述目标、工作包和验收门槛，不代表所有目标已经上线。现有能力以代码、`openapi.yaml` 和测试为准。
 
+> 2026-10-18 技术栈更新：Web 控制台技术栈已迁移到 React 19 + TypeScript + Vite（pnpm workspace：`web/` + `web-pages/` + `web-client/`），§1 现状基线"Web 工程"行的"原生 JS/CSS SPA、`app.js` 大文件、页面模块化"待办已由迁移消化，迁移总验收见 [React 迁移验收](acceptance/web-2026-10-18-react-migration/report.md)。
+
 ## 0. 如何使用本文
 
 本文是跨产品、服务端与 Web 的总交付路线。领域和协议细节见[增长实验实施方案](增长实验实施方案.md)，逐页字段与状态见[Web 控制台页面规格与交付清单](Web控制台页面规格与交付清单.md)，技术阶段与已有验收见[Web 控制台重设计实施方案](Web控制台重设计实施方案.md)和[Web 管理覆盖矩阵](web-management-coverage.md)。冲突时先核对实现与 API，再同步修改三份规格。每个工作包在任务单中引用本文的编号，验收证据归档到 `docs/acceptance/`。

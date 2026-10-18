@@ -6,18 +6,23 @@ import (
 	"strings"
 )
 
-// Handler serves the embedded console and delegates API requests to api.
-// Unknown non-API paths fall back to index.html for client-side routes.
+// immutableCache is the Cache-Control value for Vite-hashed assets under
+// /assets/: content-addressed file names may be cached forever.
+const immutableCache = "public, max-age=31536000, immutable"
+
+// Handler serves the embedded React console (StaticFS) and delegates API
+// requests to api. Unknown non-API paths fall back to the React index.html for
+// client-side (hash) routes.
 func Handler(api http.Handler) http.Handler {
-	assets, err := fs.Sub(Assets, ".")
+	static, err := fs.Sub(StaticFS, "static")
 	if err != nil {
 		return api
 	}
-	indexHTML, err := fs.ReadFile(assets, "index.html")
+	indexHTML, err := fs.ReadFile(static, "index.html")
 	if err != nil {
 		return api
 	}
-	fileServer := http.FileServerFS(assets)
+	staticFiles := http.FileServerFS(static)
 	serveIndex := func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
@@ -32,10 +37,19 @@ func Handler(api http.Handler) http.Handler {
 			serveIndex(w)
 			return
 		}
-		clean := strings.TrimPrefix(r.URL.Path, "/")
-		if f, err := assets.Open(clean); err == nil {
-			_ = f.Close()
-			fileServer.ServeHTTP(w, r)
+		name := strings.TrimPrefix(r.URL.Path, "/")
+		if strings.HasPrefix(name, "assets/") {
+			if _, err := static.Open(name); err == nil {
+				// Vite emits content-hashed file names: cache them forever.
+				w.Header().Set("Cache-Control", immutableCache)
+				staticFiles.ServeHTTP(w, r)
+				return
+			}
+			serveIndex(w)
+			return
+		}
+		if _, err := static.Open(name); err == nil {
+			staticFiles.ServeHTTP(w, r)
 			return
 		}
 		serveIndex(w)

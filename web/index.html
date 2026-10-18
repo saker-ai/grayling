@@ -4,77 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Grayling Console</title>
-<link rel="stylesheet" href="style.css">
+<script>
+/* Set data-theme before first paint so the console never flashes the wrong
+ * theme. Mirrors the resolve() logic in src/hooks/useTheme.ts exactly. */
+(function () {
+  var pref = 'system';
+  try {
+    var saved = localStorage.getItem('grayling_theme');
+    if (saved === 'light' || saved === 'dark') pref = saved;
+  } catch (e) { /* storage unavailable */ }
+  var resolved = pref === 'system'
+    ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+    : pref;
+  document.documentElement.dataset.theme = resolved;
+})();
+</script>
 </head>
 <body>
-<a class="skip-link" href="#main">Skip to main content</a>
-
-<div id="auth" class="auth-wrap hidden">
-  <div class="auth-card">
-    <h1>Grayling <span data-i18n="auth.subtitle">admin console</span></h1>
-    <p class="muted" data-i18n="auth.hint">Enter the configured admin password or an admin token.</p>
-    <label class="field"><span data-i18n="auth.urlLabel">Server base URL</span>
-      <input id="auth-url" data-i18n-ph="auth.urlPh" placeholder="blank = same origin (relative paths)" spellcheck="false"></label>
-    <label class="field"><span data-i18n="auth.tokenLabel">Admin password or token</span>
-      <input id="auth-token" type="password" placeholder="Password or grayling_admin_…" autocomplete="off" spellcheck="false"></label>
-    <div id="auth-error" class="err-text" role="alert"></div>
-    <button class="btn primary grow" id="btn-connect" data-i18n="auth.connect">Connect</button>
-  </div>
-</div>
-
-<div id="app" class="app hidden">
-  <aside class="sidebar">
-    <div class="brand-row">
-      <div class="brand">Grayling <span data-i18n="brand.sub">admin</span></div>
-      <button class="btn sm menu-toggle" id="btn-menu" type="button" aria-controls="nav" aria-expanded="false" data-i18n="nav.menu">Menu</button>
-    </div>
-    <nav id="nav" aria-label="Primary">
-      <div class="nav-group"><button data-view="overview" class="active" data-i18n="nav.overview">Overview</button></div>
-      <div class="nav-group"><span class="nav-group-label" data-i18n="nav.groupRelease">Release</span>
-        <button data-view="flags" data-i18n="nav.flags">Flags</button>
-        <button data-view="segments" data-i18n="nav.segments">Segments</button>
-      </div>
-      <div class="nav-group"><span class="nav-group-label" data-i18n="nav.groupExperiment">Experimentation</span>
-        <button data-view="metrics" data-i18n="nav.metrics">Metrics</button>
-        <button data-view="experiments" data-i18n="nav.experiments">Experiments</button>
-      </div>
-      <div class="nav-group"><span class="nav-group-label" data-i18n="nav.groupAI">AI governance</span>
-        <button data-view="ai" id="nav-ai" data-i18n="nav.ai">AI Resources</button>
-      </div>
-      <div class="nav-group"><span class="nav-group-label" data-i18n="nav.groupOps">Operations</span>
-        <button data-view="approvals" data-i18n="nav.approvals">Approvals</button>
-        <button data-view="debug" data-i18n="nav.debug">Debug</button>
-        <button data-view="tokens" data-i18n="nav.tokens">Tokens</button>
-        <button data-view="quotas" id="nav-quotas" class="hidden" data-i18n="nav.quotas">Quotas</button>
-        <button data-view="audit" data-i18n="nav.audit">Audit</button>
-      </div>
-    </nav>
-    <div class="side-foot"><button class="btn sm grow" id="btn-reauth" data-i18n="nav.reauth">Sign out</button></div>
-  </aside>
-  <div class="maincol">
-    <header class="topbar">
-      <label class="inline"><span data-i18n="top.workspace">Workspace</span> <select id="sel-ws"></select></label>
-      <button class="btn sm" id="btn-new-ws" data-i18n-title="top.newWs" title="New workspace">+</button>
-      <label class="inline"><span data-i18n="top.environment">Environment</span> <select id="sel-env"></select></label>
-      <button class="btn sm" id="btn-new-env" data-i18n-title="top.newEnv" title="New environment">+</button>
-      <span id="conn-info" class="conn muted"></span>
-      <label class="inline"><span data-i18n="top.theme">Theme</span> <select id="sel-theme" aria-label="Theme"><option value="system" data-i18n="theme.system">System</option><option value="light" data-i18n="theme.light">Light</option><option value="dark" data-i18n="theme.dark">Dark</option></select></label>
-      <span class="lang-switch" id="lang-switch">
-        <button class="btn sm" id="lang-zh" type="button" data-i18n="lang.zh"></button>
-        <button class="btn sm" id="lang-en" type="button" data-i18n="lang.en"></button>
-      </span>
-    </header>
-    <main id="main"></main>
-  </div>
-</div>
-
-<div id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
-<script src="i18n.js"></script>
-<script src="presets.js"></script>
-<script src="flag_editor.js"></script>
-<script src="segment_editor.js"></script>
-<script src="approvals.js"></script>
-<script src="exp_workbench.js"></script>
-<script src="app.js"></script>
+<div id="root"></div>
+<script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

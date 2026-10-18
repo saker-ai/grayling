@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grayling Console</title>
+<script>
+/* Set data-theme before first paint so the console never flashes the wrong
+ * theme. Mirrors the resolve() logic in src/hooks/useTheme.ts exactly. */
+(function () {
+  var pref = 'system';
+  try {
+    var saved = localStorage.getItem('grayling_theme');
+    if (saved === 'light' || saved === 'dark') pref = saved;
+  } catch (e) { /* storage unavailable */ }
+  var resolved = pref === 'system'
+    ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+    : pref;
+  document.documentElement.dataset.theme = resolved;
+})();
+</script>
+  <script type="module" crossorigin src="./assets/index-yjuWZ_zX.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/rolldown-runtime-WkwZ5CU-.js">
+  <link rel="modulepreload" crossorigin href="./assets/host-Ct-hd_KQ.js">
+  <link rel="modulepreload" crossorigin href="./assets/Dialog-BSipESWM.js">
+  <link rel="modulepreload" crossorigin href="./assets/Toast-TODc1HrD.js">
+  <link rel="stylesheet" crossorigin href="./assets/index-BIuSlUIk.css">
+</head>
+<body>
+<div id="root"></div>
+</body>
+</html>

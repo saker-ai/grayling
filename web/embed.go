@@ -2,5 +2,9 @@ package web
 
 import "embed"
 
-//go:embed index.html app.js approvals.js exp_workbench.js flag_editor.js i18n.js presets.js segment_editor.js style.css
-var Assets embed.FS
+// StaticFS holds the built React console (Vite output in web/static, committed
+// to git). A clean checkout without a frontend build carries the placeholder
+// produced by `make test-static`.
+//
+//go:embed all:static
+var StaticFS embed.FS

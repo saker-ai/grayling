@@ -12,7 +12,7 @@ Grayling is a self-hosted platform for feature flags, gradual rollouts, and A/B 
 - **Experimentation:** pre-registered A/B tests, exposure and conversion collection, sample-ratio mismatch checks, guardrails, reports, and staged rollout plans with manual or automatic progression.
 - **AI resource control:** versioned prompts, skills, and agent specifications; pinned versions, session-level configuration freeze, digest verification, and emergency revocation.
 - **Clients:** local evaluation with the Go SDK, remote evaluation with Python and TypeScript SDKs, and an OpenFeature Go provider. An optional proxy supports remote evaluation and gateway integration.
-- **Deployment choices:** embedded gonacos or external Nacos 3.2.1+ for configuration distribution; JSON file, pure-Go SQLite, or PostgreSQL for Grayling platform data. The web console is embedded and needs no frontend build.
+- **Deployment choices:** embedded gonacos or external Nacos 3.2.1+ for configuration distribution; JSON file, pure-Go SQLite, or PostgreSQL for Grayling platform data. The web console is an embedded React SPA whose built assets are committed to the repository, so `make run` works without Node.js.
 - **OpenAI client compatibility:** optionally relay Chat Completions, including SSE streams, to a configured OpenAI-compatible upstream by changing only the client's `baseURL`.
 
 ## Quick start
@@ -86,6 +86,10 @@ make license-check
 ```
 
 `GOWORK=off` prevents a parent Go workspace from overriding the pinned gonacos dependency. The fast test command skips environment-dependent acceptance suites. Full integration tests can use Docker or explicit PostgreSQL/Redis test endpoints; see [test guidance](CONTRIBUTING.md) and the [implementation record](docs/实施状态.md). CI covers build, vet, race tests, PostgreSQL integration, SDK tests, and license evidence.
+
+### Web console
+
+The console is a React 19 + TypeScript SPA built with Vite, organized as a pnpm workspace of three packages: `web/` (Vite app, shell, hooks, and the Go embed), `web-pages/` (page, editor, and workbench components), and `web-client/` (fetch client and API types). Working on the frontend requires **Node.js 26+** and **pnpm 10**. `make build` runs the frontend build before compiling the binaries, and the resulting `web/static/` tree is embedded and committed to git — `make check-static` (also run in CI) fails if the committed tree drifts from a fresh build. For console iteration run `make dev-backend` (the normal server) and `make dev-frontend` (Vite dev server with hot reload, proxying the API to the backend) side by side. Frontend tests are vitest suites (`pnpm -r test`); `go test ./web/` drives the same suites plus Go-side preset re-validation.
 
 ## Documentation
 
