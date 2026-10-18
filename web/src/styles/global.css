@@ -89,7 +89,7 @@
   /* ---- elevation --------------------------------------------------------- */
   --shadow-2: 0 2px 6px rgba(0, 0, 0, .45), 0 10px 26px rgba(0, 0, 0, .45);
   --shadow-3: 0 3px 8px rgba(0, 0, 0, .50), 0 18px 44px rgba(0, 0, 0, .55);
-  --edge:     inset 0 1px 0 rgba(255, 255, 255, .045);
+  --edge:     inset 0 1px 0 rgba(255, 255, 255, .06);
 
   /* ---- geometry ---------------------------------------------------------- */
   --radius-sm: 5px;
@@ -263,7 +263,15 @@ table.grid td, table.grid th, table.kv td,
               border-color var(--dur-fast) var(--ease);
 }
 .btn:hover { border-color: var(--link); background: var(--surface-float); }
-.btn:active { background: var(--surface-hover); }
+/* Pressed state: no elastic travel — the fill drops back to the base wash and
+   a 1px inner shade mixed from the theme's own text ink reads as the surface
+   giving way. text-primary is the ramp's opposite-of-surface pole in both
+   themes, so the shade stays visible without a new color literal. Variant
+   :active rules below keep their fill override; the inset carries over. */
+.btn:active {
+  background: var(--surface-hover);
+  box-shadow: inset 0 1px 2px color-mix(in oklab, var(--text-primary) 12%, transparent);
+}
 /* Disabled is not conveyed by opacity alone: the dotted border is a shape
  * channel that survives when dimming is hard to perceive. */
 .btn:disabled { opacity: .5; cursor: not-allowed; border-style: dotted; }
@@ -276,11 +284,26 @@ table.grid td, table.grid th, table.kv td,
 .btn.danger:active { background: var(--bad-soft); color: var(--bad); }
 .btn.sm { padding: 0.1875rem 0.5625rem; font-size: var(--fs-xs); }
 .btn.grow { width: 100%; padding: var(--sp-2); }
+/* Touch tiers: 44px is the narrow-shell target (media query below, and it
+   wins there — --touch-min beats this step). On the desktop shell only the
+   page-level primary actions rise one step above the dense default; table-row
+   actions, .btn.sm, zone tabs, and pagers deliberately stay compact. */
+.view-head > .btn.primary, .modal-foot .btn, .auth-card .btn {
+  min-height: 2.25rem;
+  padding-inline: var(--sp-3);
+}
 
 input, select, textarea {
   background: var(--surface-control); color: var(--text-primary);
   border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
   padding: 0.375rem 0.5rem; font: var(--fs-sm)/1.4 var(--font-ui);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+/* Hover steps the outline-control border one rung up the ramp — the same
+   value prefers-contrast promotes --line-strong to, so contrast only ever
+   improves on both themes. Disabled controls keep their quiet border. */
+input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) {
+  border-color: var(--text-tertiary);
 }
 input::placeholder, textarea::placeholder { color: var(--text-tertiary); opacity: 1; }
 input:disabled, select:disabled, textarea:disabled {
@@ -395,6 +418,11 @@ main { flex: 1; overflow: auto; padding: var(--sp-4); }
 .attention-list { list-style: none; margin: 0; padding: 0; }
 .attention-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); border-top: 1px solid var(--line-faint); padding: 0.625rem 0; }
 .attention-list li:first-child { border-top: 0; }
+/* Interactive surfaces announce themselves with the same hover wash the
+   clickable table rows already use — approval cards navigate, attention rows
+   carry an inline action. */
+.approval-item, .attention-list li { transition: background var(--dur-fast) var(--ease); }
+.approval-item:hover, .attention-list li:hover { background: var(--surface-hover); }
 .vrow { display: flex; gap: 0.375rem; margin: var(--sp-1) 0; align-items: center; }
 .vrow input { flex: 1; min-width: 0; }
 
@@ -614,6 +642,15 @@ ul.plain { margin: 0.375rem 0; padding-left: var(--sp-5); }
 .modal-foot { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-3); }
 #ro-report-evidence .mono { overflow-wrap: anywhere; }
 
+/* Dark-theme float edges: --shadow-2/3 dissolve against the dark canvas, so
+   the floating layer's boundary has to come from the border — bump it one
+   ramp step. The light theme keeps --line: its shadows read on the bright
+   canvas. Toast severity still rides on the .err text colour. */
+:root:not([data-theme="light"]) .modal,
+:root:not([data-theme="light"]) .toast {
+  border-color: var(--line-strong);
+}
+
 /* ---------- auth screen ---------- */
 .auth-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: var(--sp-5); background: var(--surface-canvas); }
 .auth-card {
@@ -685,7 +722,13 @@ ul.plain { margin: 0.375rem 0; padding-left: var(--sp-5); }
   .detail-grid { grid-template-columns: 1fr; gap: var(--sp-1); }
   .detail-grid dd { margin-bottom: var(--sp-2); }
   .btn, #nav button, .row-link { min-height: var(--touch-min); }
+  /* The desktop CTA step above loses to the larger touch target here; equal-
+     specificity restatement keeps the narrow shell at 44px. */
+  .view-head > .btn.primary, .modal-foot .btn, .auth-card .btn { min-height: var(--touch-min); }
   .row-link { display: flex; align-items: center; }
+  /* Card tree rows with a click handler get the same hover wash as the
+     desktop table's tr.clickable (fires as tap feedback on touch). */
+  .dt-card.clickable:hover { background: var(--surface-hover); }
   input, select, textarea { font-size: 1rem; } /* below 16px iOS zooms the viewport on focus */
 }
 @media (prefers-reduced-motion: reduce) {

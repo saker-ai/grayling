@@ -302,7 +302,7 @@ function MetricCatalog(): ReactElement {
           </Button>
         </form>
         <Can permission="experiment.write">
-          <Button variant="primary" size="sm" id="metric-new" onClick={() => setCreateOpen(true)}>
+          <Button variant="primary" id="metric-new" onClick={() => setCreateOpen(true)}>
             {t('metrics.new')}
           </Button>
         </Can>
@@ -446,7 +446,7 @@ function MetricVersionDetail({ metricKey, version }: { metricKey: string; versio
                 </Button>
               </Can>
               <Can permission="flag.publish">
-                <Button variant="primary" size="sm" id="metric-publish" onClick={() => setPublishOpen(true)}>
+                <Button variant="primary" id="metric-publish" onClick={() => setPublishOpen(true)}>
                   {t('metrics.publish')}
                 </Button>
               </Can>

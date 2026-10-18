@@ -104,7 +104,7 @@ export function SegmentsPage(): ReactElement {
         <span className="muted">{t('seg.count', { n: drafts.length })}</span>
         <ListSearch value={query} onChange={setQuery} noMatch={!!q && visible.length === 0} />
         <Can permission="flag.write">
-          <Button variant="primary" size="sm" id="seg-new" onClick={() => setCreateOpen(true)}>
+          <Button variant="primary" id="seg-new" onClick={() => setCreateOpen(true)}>
             {t('seg.new')}
           </Button>
         </Can>

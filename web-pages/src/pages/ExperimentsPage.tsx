@@ -127,7 +127,6 @@ export function ExperimentsPage(): ReactElement {
         <Can permission="experiment.write">
           <Button
             variant="primary"
-            size="sm"
             id="exp-new"
             onClick={() => navigate(consoleViewPath(ws, env, 'experiments', '~new'))}
           >

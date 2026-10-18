@@ -215,7 +215,7 @@ export function FlagsPage(): ReactElement {
         <span className="muted">{t('flags.count', { n: flags.length })}</span>
         <ListSearch value={query} onChange={value => { setQuery(value); setPage(0); }} noMatch={false} />
         <Can permission="flag.write">
-          <Button variant="primary" size="sm" id="flag-new" onClick={() => setCreateOpen(true)}>
+          <Button variant="primary" id="flag-new" onClick={() => setCreateOpen(true)}>
             {t('flags.new')}
           </Button>
         </Can>
