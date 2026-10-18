@@ -5,6 +5,8 @@ import { Chip } from '../components/Chip';
 import { DataTable } from '../components/DataTable';
 import type { Column } from '../components/DataTable';
 import { fmtDurNs, shortHash } from '../utils';
+import { SampleFlow } from '../viz/SampleFlow';
+import { SrmBar } from '../viz/SrmBar';
 
 // Diagnostics ports renderDiagnostics (exp_workbench.js ~703): the delivery
 // diagnostics block shared by the evidence zone (fixed-split reports always,
@@ -89,6 +91,16 @@ export function Diagnostics({ d }: { d: ExperimentDiagnostics | null | undefined
           <strong>{converted}</strong>
         </li>
       </ol>
+      {/* Proportional bars below the unchanged cards. Without assignment
+          facts the first stage is null and draws an empty track — never a
+          number borrowed from another stage. All-empty input renders nothing. */}
+      <SampleFlow
+        stages={[
+          { key: 'assignments', label: t('report.assignments'), count: hasAssignmentFacts ? assigned : null },
+          { key: 'exposures', label: t('report.exposures'), count: exposed },
+          { key: 'converters', label: t('report.collectedConverters'), count: converted },
+        ]}
+      />
       <p className="muted">
         {t(hasAssignmentFacts ? 'report.sampleFlowOnRender' : 'report.sampleFlowOnDecision')}
         {hasAssignmentFacts ? ' ' + t('report.unexposed') + ': ' + unexposed + '.' : ''}
@@ -97,10 +109,24 @@ export function Diagnostics({ d }: { d: ExperimentDiagnostics | null | undefined
       {d.window?.version === 'bandit-feedback-v1' ? (
         <p className="muted">{t('report.banditSrmSeparate')}</p>
       ) : (
-        <div className="row">
+        <>
+          {/* Each SRM layer keeps its text line, with the paired-bar figure
+              directly beneath it (same component as the evidence-zone SRM).
+              A figure renders nothing when its arrays are missing or
+              mismatched, leaving the text line as the sole carrier. */}
           {srmLine(t('report.assignmentSrm'), d.assignmentSrm)}
+          <SrmBar
+            observed={d.assignmentSrm?.observed}
+            expected={d.assignmentSrm?.expected}
+            labels={flow.map(v => v.variant)}
+          />
           {srmLine(t('report.exposureSrm'), d.exposureSrm)}
-        </div>
+          <SrmBar
+            observed={d.exposureSrm?.observed}
+            expected={d.exposureSrm?.expected}
+            labels={flow.map(v => v.variant)}
+          />
+        </>
       )}
       <DataTable
         columns={flowColumns}

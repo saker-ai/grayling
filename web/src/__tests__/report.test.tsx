@@ -152,12 +152,16 @@ describe('ReportView', () => {
     expect(screen.getByText('2026-01-08T00:00:00Z')).toBeTruthy();
     expect(screen.getByText('Complete').className).toContain('chip green');
 
-    // SRM: χ²/p, chip and the observed/expected JSON (positional arrays, one
-    // entry per arm).
+    // SRM: χ²/p, chip, and — since R3 — the observed/expected paired bars
+    // plus grid table (one row per arm), replacing the legacy JSON blob.
     expect(screen.getByText(/χ² = 1\.21 · p = 0\.271/)).toBeTruthy();
     expect(screen.getByText('no SRM').className).toContain('chip green');
-    expect(screen.getByText(/"observed": \[\s*502,\s*498\s*\]/)).toBeTruthy();
-    expect(screen.getByText(/"expected": \[\s*500,\s*500\s*\]/)).toBeTruthy();
+    const srmFigure = screen.getByRole('img', { name: /Observed versus expected/ });
+    expect(srmFigure.getAttribute('aria-label')).toContain('control: observed 502, expected 500');
+    const srmRows = within(srmFigure.nextElementSibling as HTMLElement).getAllByRole('row');
+    expect(within(srmRows[1]).getByText('502')).toBeTruthy();
+    expect(within(srmRows[1]).getByText('50.2%')).toBeTruthy();
+    expect(within(srmRows[2]).getByText('498')).toBeTruthy();
 
     // Per-variant table: all six columns for both arms. The h4 sits next to
     // its table inside a section that also holds the journeys tables, so
@@ -333,8 +337,10 @@ describe('ReportView', () => {
     expect(screen.getByText('600')).toBeTruthy();
     expect(screen.getByText('80')).toBeTruthy();
     expect(screen.getByText('150')).toBeTruthy();
-    expect(screen.getByText('0.2000')).toBeTruthy();
-    expect(screen.getByText('0.2500')).toBeTruthy();
+    // Posterior values render twice since R3: the BanditArms bars overlay and
+    // the unchanged table cells (chart + table dual channel).
+    expect(screen.getAllByText('0.2000').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('0.2500').length).toBeGreaterThanOrEqual(2);
     // No frequentist primary section in the bandit family.
     expect(screen.queryByText('Primary metric')).toBeNull();
   });

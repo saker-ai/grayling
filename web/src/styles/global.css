@@ -750,3 +750,82 @@ ul.plain { margin: 0.375rem 0; padding-left: var(--sp-5); }
   /* The forced palette erases opacity; GrayText is the system-disabled cue. */
   .btn:disabled { color: GrayText; border-color: GrayText; }
 }
+
+/* ---------- R3 dataviz layer (hand-rolled SVG) -------------------------------
+ * Paint comes only from the --chart-* / --series-* aliases over the existing
+ * ramps — no new color literals. Every chart is an additive overlay next to
+ * its numeric text/table equivalent, so these styles carry no semantics on
+ * their own. The global reduced-motion and forced-colors guards still apply.
+ */
+svg.viz { display: block; width: 100%; max-width: 20rem; height: auto; margin: var(--sp-1) 0 var(--sp-2); }
+svg.viz text { font-family: inherit; }
+.viz-label { fill: var(--text-secondary); font-size: 0.6875rem; }
+.viz-num { fill: var(--text-primary); font-size: 0.6875rem; font-variant-numeric: tabular-nums; }
+.viz-num-dim { fill: var(--text-tertiary); font-size: 0.6875rem; font-variant-numeric: tabular-nums; }
+.viz-track { fill: var(--surface-hover); }
+.viz-baseline { stroke: var(--chart-grid); stroke-width: 1; }
+.viz-null { stroke: var(--chart-axis); stroke-width: 1; stroke-dasharray: 3 3; }
+.viz-range, .viz-cap { stroke: var(--series-1); stroke-width: 2; }
+.viz-fill-1 { fill: var(--series-1); }
+/* Translucent fill + solid edge keeps the bar readable in both themes while
+ * letting in-bar numbers use the primary text ink at full contrast. */
+.viz-bar-1 { fill: var(--series-1); fill-opacity: 0.35; stroke: var(--series-1); stroke-width: 1; }
+.viz-bar-obs { fill: var(--series-1); }
+.viz-bar-exp { fill: none; stroke: var(--chart-axis); stroke-width: 1; }
+.viz-srm-table { margin-top: var(--sp-2); }
+
+/* ---------- rollout timeline (R3) --------------------------------------------
+ * Node-per-step overlay between the progress bar and the steps table. State
+ * is dual-coded by marker shape plus the table's status chips (and a
+ * visually-hidden label per item): done filled circle, current ring on the
+ * ro-current surface, held diamond, stopped square, pending hollow circle.
+ * The connector track is the li::before pseudo-element; the ≤700px query
+ * below turns the same DOM into a vertical rail — no second tree.
+ */
+.ro-timeline { display: flex; list-style: none; margin: var(--sp-3) 0; padding: 0; }
+.ro-tl-step { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); }
+.ro-tl-step::before { content: ''; position: absolute; top: 0.3125rem; left: 0; right: 0; height: 2px; background: var(--chart-grid); }
+.ro-tl-step:first-child::before { left: 50%; }
+.ro-tl-step:last-child::before { right: 50%; }
+.ro-tl-node {
+  position: relative; z-index: 1; box-sizing: border-box;
+  width: 0.75rem; height: 0.75rem; border-radius: 50%;
+  border: 2px solid var(--line-strong); background: var(--surface-panel);
+  transition: transform var(--dur-slow) var(--ease);
+}
+.ro-tl-done .ro-tl-node { background: var(--ok); border-color: var(--ok); }
+.ro-tl-current .ro-tl-node {
+  border-color: var(--action); background: var(--action-soft);
+  animation: ro-tl-pulse calc(var(--dur-slow) * 5) var(--ease) infinite;
+}
+.ro-tl-held .ro-tl-node { border-radius: 0; transform: rotate(45deg) scale(0.85); background: var(--warn); border-color: var(--warn); }
+.ro-tl-stopped .ro-tl-node { border-radius: 0; background: var(--bad); border-color: var(--bad); }
+.ro-tl-text { display: flex; flex-direction: column; align-items: center; padding: 0 var(--sp-1); border-radius: var(--radius-sm); }
+.ro-tl-current .ro-tl-text { background: var(--action-soft); color: var(--action-soft-on); }
+.ro-tl-name { font-size: var(--fs-xs); font-weight: 600; overflow-wrap: anywhere; }
+.ro-tl-ratio { font-size: var(--fs-xs); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.ro-tl-current .ro-tl-ratio { color: inherit; }
+@keyframes ro-tl-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--action-soft); }
+  50% { box-shadow: 0 0 0 0.25rem var(--action-soft); }
+}
+@media (max-width: 700px) {
+  .ro-timeline { flex-direction: column; gap: var(--sp-2); }
+  .ro-tl-step { flex-direction: row; align-items: center; gap: var(--sp-2); }
+  .ro-tl-step::before { top: 0; bottom: 0; left: 0.3125rem; right: auto; width: 2px; height: auto; }
+  .ro-tl-step:first-child::before { left: 0.3125rem; top: 50%; }
+  .ro-tl-step:last-child::before { right: auto; bottom: 50%; }
+  .ro-tl-text { flex-direction: row; align-items: baseline; gap: var(--sp-2); }
+}
+
+/* forced-colors: keep the solid-vs-hollow series distinction and the node
+ * shapes legible when the palette is forced. */
+@media (forced-colors: active) {
+  .viz-bar-1, .viz-bar-obs { fill: Highlight; fill-opacity: 1; stroke: none; }
+  .viz-bar-exp { stroke: CanvasText; }
+  .viz-track { fill: none; stroke: GrayText; }
+  .viz-baseline { stroke: GrayText; }
+  .viz-null, .viz-range, .viz-cap { stroke: CanvasText; }
+  .viz-fill-1 { fill: CanvasText; }
+  .ro-tl-node { forced-color-adjust: none; }
+}

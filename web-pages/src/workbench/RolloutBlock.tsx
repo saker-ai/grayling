@@ -12,6 +12,7 @@ import type { Column } from '../components/DataTable';
 import { useToast } from '../components/Toast';
 import { useHost } from '../host';
 import { fmtDurNs, fmtTime, scopePath } from '../utils';
+import { RolloutTimeline } from '../viz/RolloutTimeline';
 import { NS_HOUR, PLAN_ACTION_CHIP, PLAN_BLOCK_RE, PLAN_CHIP, planNextGate, validateReleaseSteps } from './classify';
 import { ReportSummary } from './ReportView';
 
@@ -243,6 +244,10 @@ export function RolloutBlock({
         ) : null}
       </div>
       <h4>{t('ro.planSteps')}</h4>
+      {/* Node-per-step timeline between the progress bar and the table; the
+          table below stays the full textual equivalent (status chips dual-
+          code what the marker shapes show). Empty plans render no timeline. */}
+      <RolloutTimeline steps={steps} currentStep={plan.currentStep} state={plan.state} />
       <RolloutSteps plan={plan} />
       <h4>
         {t('ro.actionHistory')} <span className="muted">{t('ro.historyNote')}</span>

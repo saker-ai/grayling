@@ -3,6 +3,9 @@ import { useTranslation } from 'react-i18next';
 import type { ExperimentReport } from '@saker/grayling-client';
 import { Chip } from '../components/Chip';
 import { VERDICT_CHIP, fmtTime } from '../utils';
+import { BanditArms } from '../viz/BanditArms';
+import { ConfidenceInterval } from '../viz/ConfidenceInterval';
+import { SrmBar } from '../viz/SrmBar';
 import { Diagnostics, MetricReferenceSummary } from './Diagnostics';
 
 // ReportView ports renderReport + renderReportSummary + renderBanditReport
@@ -125,7 +128,10 @@ export function ReportView({ report, locale }: { report: ExperimentReport; local
             {'χ² = ' + (srm.chiSquare ?? '—') + ' · p = ' + (srm.pValue ?? '—') + ' '}
             <Chip label={srm.healthy ? t('chip.noSrm') : t('chip.srmDetected')} cls={srm.healthy ? 'green' : 'red'} />
           </div>
-          <pre className="pre small">{JSON.stringify({ observed: srm.observed, expected: srm.expected }, null, 2)}</pre>
+          {/* The paired-bar figure plus grid table replace the legacy JSON
+              blob; SrmBar renders nothing when the arrays are missing or
+              mismatched, leaving this text line as the sole carrier. */}
+          <SrmBar observed={srm.observed} expected={srm.expected} labels={(r.perVariant || []).map(v => v.variant)} />
         </>
       ) : (
         <div className="muted">{t('report.noSrm')}</div>
@@ -204,6 +210,18 @@ export function ReportView({ report, locale }: { report: ExperimentReport; local
       </h4>
       {p ? (
         <div>
+          {/* Additive interval sketch above the unchanged numeric line; the
+              estimate sits on the absolute-diff scale, so the null reference
+              stays at the default 0. Before min runtime the track stays
+              empty instead of painting an immature interval. */}
+          <ConfidenceInterval
+            estimate={p.diff}
+            low={p.ciLow}
+            high={p.ciHigh}
+            format={(v: number) => String(v)}
+            ariaLabel={t('viz.ciAria', { low: p.ciLow, high: p.ciHigh, estimate: p.diff, null: 0 })}
+            state={r.minRuntimeSatisfied ? 'ready' : 'insufficient'}
+          />
           {'p = ' + (p.pValue ?? '—') + ' · diff = ' + (p.diff ?? '—') + ' · rel = ' + (p.relativeDiff ?? '—')}
           {p.relativeMeaningful === false ? (
             <>
@@ -378,6 +396,17 @@ export function BanditReport({ report }: { report: ExperimentReport }): ReactEle
       {report.exposureMode === 'onRender' ? <Diagnostics d={report.diagnostics} /> : null}
       {b.srmAlarm ? <div className="banner err">{t('report.banditSrm')}</div> : null}
       {b.freezeReason ? <div className="muted">{b.freezeReason}</div> : null}
+      {/* Posterior-mean bars above the unchanged per-arm table; a missing or
+          non-finite mean leaves an empty track, never a painted value. */}
+      <BanditArms
+        arms={(report.perVariant || []).map((v, i) => ({
+          key: v.variant,
+          label: v.variant,
+          mean: b.posteriorMean[i] ?? null,
+          trials: b.trials[i] ?? null,
+          successes: b.successes[i] ?? null,
+        }))}
+      />
       <table className="grid">
         <thead>
           <tr>
