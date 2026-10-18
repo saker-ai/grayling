@@ -1,0 +1,582 @@
+{
+  "generatedAt": "2026-10-18T08:01:14.169Z",
+  "checks": [
+    {
+      "group": "R",
+      "id": "R0-mint",
+      "desc": "role tokens minted (publisher/approver/analyst/viewer)",
+      "ok": true,
+      "detail": "",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R0b-collect",
+      "desc": "collect token minted for event seeding",
+      "ok": true,
+      "detail": "",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R1-caps-publisher",
+      "desc": "capabilities map matches RBAC for publisher",
+      "ok": true,
+      "detail": "7 perms",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R1-caps-approver",
+      "desc": "capabilities map matches RBAC for approver",
+      "ok": true,
+      "detail": "10 perms",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R1-caps-analyst",
+      "desc": "capabilities map matches RBAC for analyst",
+      "ok": true,
+      "detail": "4 perms",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R1-caps-viewer",
+      "desc": "capabilities map matches RBAC for viewer",
+      "ok": true,
+      "detail": "2 perms",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R2-publisher-login",
+      "desc": "publisher signed in via console login page",
+      "ok": true,
+      "detail": "http://127.0.0.1:28090 · 已登录 · mx-publisher",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R2-publisher-save",
+      "desc": "publisher saved a draft via UI",
+      "ok": true,
+      "detail": "",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R2-publisher-submit",
+      "desc": "publisher submitted draft for review via UI",
+      "ok": true,
+      "detail": "flag mx-loop-67005 state=submitted",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R3-approver-login",
+      "desc": "approver (second admin) signed in",
+      "ok": true,
+      "detail": "http://127.0.0.1:28090 · 已登录 · mx-approver",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R3-approver-sees-review",
+      "desc": "approver sees the submitted draft with approve action",
+      "ok": true,
+      "detail": "",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R3-approver-approved",
+      "desc": "approver approved; publish action now primary",
+      "ok": true,
+      "detail": "",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R3-published-rev1",
+      "desc": "flag published at revision 1 after the loop",
+      "ok": true,
+      "detail": "revision=1",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R3-audit-actors",
+      "desc": "audit attributes submit/approve/publish to two distinct admins",
+      "ok": true,
+      "detail": "submit=mx-publisher (tok-7) approve=mx-approver (tok-8) publish=mx-approver (tok-8)",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R4-analyst-read",
+      "desc": "analyst reads flag list (200)",
+      "ok": true,
+      "detail": "HTTP 200",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R4-analyst-write-403",
+      "desc": "analyst flag draft write rejected (403)",
+      "ok": true,
+      "detail": "HTTP 403",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R4-analyst-submit-403",
+      "desc": "analyst submit rejected (403)",
+      "ok": true,
+      "detail": "HTTP 403",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R4-analyst-ui-gating",
+      "desc": "analyst UI hides the new-flag action",
+      "ok": true,
+      "detail": "",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R4-analyst-detail-gating",
+      "desc": "analyst flag detail hides save/submit",
+      "ok": true,
+      "detail": "save=0 submit=0",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R4-analyst-views",
+      "desc": "analyst analysis views render",
+      "ok": true,
+      "detail": "",
+      "evidence": [
+        "matrix-role-analyst-01-flags.png",
+        "matrix-role-analyst-02-flag-detail.png",
+        "matrix-role-analyst-03-experiments.png"
+      ]
+    },
+    {
+      "group": "R",
+      "id": "R5-viewer-read",
+      "desc": "viewer reads flag list (200)",
+      "ok": true,
+      "detail": "HTTP 200",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R5-viewer-write-403",
+      "desc": "viewer flag write rejected (403)",
+      "ok": true,
+      "detail": "HTTP 403",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R5-viewer-tokens-403",
+      "desc": "viewer token management rejected (403)",
+      "ok": true,
+      "detail": "HTTP 403",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R5-viewer-quota-403",
+      "desc": "viewer quota write rejected (403)",
+      "ok": true,
+      "detail": "HTTP 403",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R5-viewer-nav-gating",
+      "desc": "viewer sidebar hides tokens/quotas (permission-gated nav)",
+      "ok": true,
+      "detail": "tokens=0 quotas=0",
+      "evidence": []
+    },
+    {
+      "group": "R",
+      "id": "R5-viewer-ui-gating",
+      "desc": "viewer UI hides new/save actions",
+      "ok": true,
+      "detail": "",
+      "evidence": [
+        "matrix-role-viewer-00-overview.png",
+        "matrix-role-viewer-01-flags.png",
+        "matrix-role-viewer-02-flag-detail.png"
+      ]
+    },
+    {
+      "group": "S",
+      "id": "S1-401-api",
+      "desc": "unauthenticated mutation → 401; anonymous read (signed-out) → 401",
+      "ok": true,
+      "detail": "POST=401 GET=401",
+      "evidence": []
+    },
+    {
+      "group": "S",
+      "id": "S1-401-ui",
+      "desc": "session-less browser is held at the login page",
+      "ok": true,
+      "detail": "",
+      "evidence": []
+    },
+    {
+      "group": "S",
+      "id": "S3-409-api",
+      "desc": "stale expectedDraftHash write rejected with 409",
+      "ok": true,
+      "detail": "HTTP 409",
+      "evidence": []
+    },
+    {
+      "group": "S",
+      "id": "S3-409-ui",
+      "desc": "UI save after concurrent edit shows the 409 conflict panel (diff preserved)",
+      "ok": true,
+      "detail": "otherSave=200",
+      "evidence": []
+    },
+    {
+      "group": "S",
+      "id": "S4-429-api",
+      "desc": "flag create at quota limit rejected with 429 quota_exceeded",
+      "ok": true,
+      "detail": "HTTP 429 code=quota_exceeded",
+      "evidence": []
+    },
+    {
+      "group": "S",
+      "id": "S4-429-ui",
+      "desc": "UI save over quota surfaces an error toast (no silent failure)",
+      "ok": true,
+      "detail": "",
+      "evidence": []
+    },
+    {
+      "group": "S",
+      "id": "S5-offline",
+      "desc": "offline navigation to a cached route degrades to the in-page error banner",
+      "ok": true,
+      "detail": "main=1 banner=1",
+      "evidence": []
+    },
+    {
+      "group": "S",
+      "id": "S5-offline-recovery",
+      "desc": "connectivity recovery restores the flags list",
+      "ok": true,
+      "detail": "rows=8",
+      "evidence": []
+    },
+    {
+      "group": "S",
+      "id": "S5-offline-chunk",
+      "desc": "offline navigation to an uncached chunk keeps the shell and offers reload",
+      "ok": true,
+      "detail": "shell=1 reload=1",
+      "evidence": []
+    },
+    {
+      "group": "S",
+      "id": "S5-offline-chunk-recovery",
+      "desc": "reload after connectivity returns renders the target page",
+      "ok": true,
+      "detail": "",
+      "evidence": []
+    },
+    {
+      "group": "D",
+      "id": "D1-empty",
+      "desc": "empty workspace renders the empty state, not an error",
+      "ok": true,
+      "detail": "links=0 empty=\"暂无开关 — 创建一个。\"",
+      "evidence": []
+    },
+    {
+      "group": "D",
+      "id": "D2-loading",
+      "desc": "loading state renders skeleton placeholders while real responses are in flight",
+      "ok": true,
+      "detail": "skeletons=4",
+      "evidence": []
+    },
+    {
+      "group": "D",
+      "id": "D3-error",
+      "desc": "nonexistent flag renders the error state (fact → impact → action)",
+      "ok": true,
+      "detail": "← 功能开关 mx-missing-404 mx-missing-404 新建 编辑中草稿 待评审 已批准待发布 已发布  保存修改后，将草稿提交审核。  已登记的关联实验  本环境中此 Flag 关联实验共 0 个，当前展示 0 个；请根",
+      "evidence": []
+    },
+    {
+      "group": "D",
+      "id": "D4-zero-data-transition",
+      "desc": "seed experiment transitioned to running",
+      "ok": true,
+      "detail": "before=scheduled transition=200 after=running",
+      "evidence": []
+    },
+    {
+      "group": "D",
+      "id": "D4-zero-data-ui",
+      "desc": "zero-data running experiment shows its real state (no fabricated results)",
+      "ok": true,
+      "detail": "← 实验 exp-5 running flag u4-bool @ r2 · epoch 1 · 创建人 configured-admin-password running epoch 1 Flag ",
+      "evidence": []
+    },
+    {
+      "group": "D",
+      "id": "D5-small-ingest",
+      "desc": "small-sample events ingested",
+      "ok": true,
+      "detail": "{\"accepted\":55,\"rejected\":0}",
+      "evidence": []
+    },
+    {
+      "group": "D",
+      "id": "D7-healthy-ingest",
+      "desc": "healthy-sample events ingested",
+      "ok": true,
+      "detail": "{\"accepted\":308,\"rejected\":0}",
+      "evidence": []
+    },
+    {
+      "group": "D",
+      "id": "D8-srm-ingest",
+      "desc": "SRM-skewed events ingested",
+      "ok": true,
+      "detail": "{\"accepted\":242,\"rejected\":0}",
+      "evidence": []
+    },
+    {
+      "group": "D",
+      "id": "D5-small-sample-ui",
+      "desc": "small sample renders the insufficient/watermark state (no fabricated significance)",
+      "ok": true,
+      "detail": "← 实验 exp-14 running flag mx-small @ r1 · epoch 1 · 创建人 configured-admin-password running epoch 1 Flag 版本 r1 注册版本 sha256:",
+      "evidence": []
+    },
+    {
+      "group": "D",
+      "id": "D7-healthy-ui",
+      "desc": "healthy report renders real CI/sample-flow charts (SVG present)",
+      "ok": true,
+      "detail": "svg=2",
+      "evidence": []
+    },
+    {
+      "group": "D",
+      "id": "D8-srm-ui",
+      "desc": "SRM-skewed allocation surfaces in the health zone",
+      "ok": true,
+      "detail": "← 实验 exp-16 running flag mx-srm @ r1 · epoch 1 · 创建人 configured-admin-password running epoch 1 Flag 版本 r1 注册版本 sha256:82",
+      "evidence": []
+    },
+    {
+      "group": "D",
+      "id": "D6-large-list",
+      "desc": "flags list renders with 1000+ drafts present (pagination intact)",
+      "ok": true,
+      "detail": "total=1007",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-390-overview",
+      "desc": "no horizontal overflow at 390px on overview",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-390-flags",
+      "desc": "no horizontal overflow at 390px on flags",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-390-flag-detail",
+      "desc": "no horizontal overflow at 390px on flag-detail",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-390-exp-summary",
+      "desc": "no horizontal overflow at 390px on exp-summary",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-768-overview",
+      "desc": "no horizontal overflow at 768px on overview",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-768-flags",
+      "desc": "no horizontal overflow at 768px on flags",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-768-flag-detail",
+      "desc": "no horizontal overflow at 768px on flag-detail",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-768-exp-summary",
+      "desc": "no horizontal overflow at 768px on exp-summary",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-1024-overview",
+      "desc": "no horizontal overflow at 1024px on overview",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-1024-flags",
+      "desc": "no horizontal overflow at 1024px on flags",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-1024-flag-detail",
+      "desc": "no horizontal overflow at 1024px on flag-detail",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-1024-exp-summary",
+      "desc": "no horizontal overflow at 1024px on exp-summary",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-1440-overview",
+      "desc": "no horizontal overflow at 1440px on overview",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-1440-flags",
+      "desc": "no horizontal overflow at 1440px on flags",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-1440-flag-detail",
+      "desc": "no horizontal overflow at 1440px on flag-detail",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "V",
+      "id": "V-1440-exp-summary",
+      "desc": "no horizontal overflow at 1440px on exp-summary",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "L",
+      "id": "L-combos",
+      "desc": "language × theme passes completed (4 combos × 6 key pages, screenshots + probes)",
+      "ok": true,
+      "detail": "24 screenshots",
+      "evidence": []
+    },
+    {
+      "group": "A",
+      "id": "A1-zoom200-overview",
+      "desc": "200% zoom equivalent (720 CSS px) keeps overview free of horizontal scroll",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "A",
+      "id": "A1-zoom200-flag-detail",
+      "desc": "200% zoom equivalent (720 CSS px) keeps flag-detail free of horizontal scroll",
+      "ok": true,
+      "detail": "overflow=0px",
+      "evidence": []
+    },
+    {
+      "group": "A",
+      "id": "A2-reduced-motion",
+      "desc": "prefers-reduced-motion neutralizes the loading pulse animation",
+      "ok": true,
+      "detail": "{\"duration\":\"1e-05s\",\"iterations\":\"1\"}",
+      "evidence": []
+    },
+    {
+      "group": "A",
+      "id": "A3-forced-colors",
+      "desc": "forced-colors mode keeps chart structure and textual status (no color-only information)",
+      "ok": true,
+      "detail": "svg=2",
+      "evidence": []
+    },
+    {
+      "group": "A",
+      "id": "A4-contrast-more",
+      "desc": "prefers-contrast:more pass completed (screenshot + probes)",
+      "ok": true,
+      "detail": "",
+      "evidence": []
+    },
+    {
+      "group": "T",
+      "id": "T-a11y-tree",
+      "desc": "a11y tree snapshots archived for the six key pages",
+      "ok": true,
+      "detail": "a11y-tree/*.yaml",
+      "evidence": []
+    }
+  ],
+  "warnings": []
+}

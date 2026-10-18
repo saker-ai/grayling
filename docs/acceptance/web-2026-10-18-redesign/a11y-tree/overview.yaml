@@ -1,0 +1,76 @@
+# a11y tree: overview (zh/light desktop) — Playwright ariaSnapshot
+- link "跳至主要内容":
+  - /url: "#main"
+- complementary:
+  - text: Grayling 管理
+  - navigation "主导航":
+    - button "总览"
+    - text: 发布
+    - button "功能开关"
+    - button "受众分段"
+    - text: 实验
+    - button "指标目录"
+    - button "实验"
+    - text: AI 治理
+    - button "AI 资源"
+    - text: 运维
+    - button "审批"
+    - button "调试"
+    - button "令牌"
+    - button "配额"
+    - button "审计"
+  - button "退出登录"
+- banner:
+  - text: 工作空间
+  - combobox "工作空间":
+    - option "Matrix Empty (mxempty)"
+    - option "U4 Acceptance (u4acc)" [selected]
+  - button "+"
+  - text: 环境
+  - combobox "环境":
+    - option "Production (prod)" [selected]
+  - button "+"
+  - text: http://127.0.0.1:28090 · 已登录 · configured-admin-password 主题
+  - combobox "主题":
+    - option "跟随系统"
+    - option "浅色" [selected]
+    - option "深色"
+  - button "中" [pressed]
+  - button "EN"
+- main:
+  - heading "工作空间总览" [level=2]
+  - text: "当前环境: u4acc / prod"
+  - button "刷新状态"
+  - heading "风险带" [level=3]
+  - list:
+    - listitem:
+      - text: 阻断
+      - strong: exp-16
+      - text: "· 报告不健康 · env-3 SRM alarm: observed [200 20] vs expected [0.5 0.5] (p=6.8e-34) — assignment pipeline suspect"
+      - button "打开实验"
+    - listitem:
+      - text: 阻断
+      - strong: exp-5
+      - text: · 报告不健康 · env-3 no randomized exposures recorded yet
+      - button "打开实验"
+  - text: 已暂停实验
+  - strong: "0"
+  - text: 运行中实验
+  - strong: "4"
+  - text: 待审批变更
+  - strong: "1"
+  - text: 已发布开关
+  - strong: "6"
+  - heading "待我处理审批" [level=3]
+  - paragraph: 1 项待你处理
+  - list:
+    - listitem:
+      - button "metric.publish · u4.metric/v1"
+      - group: 技术详情
+      - text: "待我审批 — · configured-admin-password · 2026/10/18 15:59:26 · 风险等级: 高风险"
+      - button "打开审批"
+  - heading "近期发布" [level=3]
+  - paragraph: 已扫描最近 500 条审计记录。 更早记录未扫描。
+  - paragraph: 扫描的审计窗口内没有发布记录。
+  - paragraph: 已检查当前环境全部 4 个实验的状态及可用报告。
+- status

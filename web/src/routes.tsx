@@ -8,6 +8,7 @@ import { Suspense, lazy } from 'react';
 import type { ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Skeleton } from '@saker/grayling-pages/components/Skeleton';
+import { RoutedChunkBoundary } from './components/ChunkErrorBoundary';
 import ShellLayout from './pages/ShellLayout';
 
 export const VIEW_NAMES = [
@@ -217,7 +218,15 @@ const ExperimentDetailPage = lazy(
   () => import('@saker/grayling-pages/pages/ExperimentDetailPage').then(m => ({ default: m.ExperimentDetailPage })),
 );
 
-const view = (page: ReactElement): ReactElement => <Suspense fallback={<Skeleton lines={4} />}>{page}</Suspense>;
+// view wraps every lazy page in the chunk boundary first: a failed code-split
+// fetch (offline first navigation) must degrade to an in-shell error card with
+// an explicit reload, never to the router default boundary that replaces the
+// whole console.
+const view = (page: ReactElement): ReactElement => (
+  <RoutedChunkBoundary>
+    <Suspense fallback={<Skeleton lines={4} />}>{page}</Suspense>
+  </RoutedChunkBoundary>
+);
 
 export const router = createHashRouter([
   { path: '/', element: <RootRedirect /> },

@@ -1,0 +1,348 @@
+{
+  "small": {
+    "id": "exp-14",
+    "minSamplePerArm": 1000,
+    "report": {
+      "experimentId": "exp-14",
+      "epoch": 1,
+      "flagKey": "mx-small",
+      "state": "running",
+      "generatedAt": "2026-10-18T08:00:03.925448835Z",
+      "evidenceVersion": "sha256:dccab916695244ad0f32ed45821d04ab74fe55509f3cac7041f58aa2cfe150e7",
+      "window": {
+        "version": "utc-exposure-v1",
+        "start": "2026-10-18T08:00:03.60526831Z",
+        "end": "2026-10-25T08:00:03.60526831Z",
+        "watermark": "2026-10-15T08:00:03.925448835Z",
+        "complete": true,
+        "backend": "incremental",
+        "recomputable": false
+      },
+      "primaryAttributionWindow": 604800000000000,
+      "exposureMode": "onDecision",
+      "analysisMethod": "two-proportion-z",
+      "alpha": 0.05,
+      "mde": 0,
+      "control": "control",
+      "treatment": "candidate",
+      "healthy": true,
+      "srm": {
+        "chiSquare": 0,
+        "pValue": 1,
+        "healthy": true,
+        "observed": [
+          24,
+          24
+        ],
+        "expected": [
+          24,
+          24
+        ]
+      },
+      "perVariant": [
+        {
+          "variant": "control",
+          "exposedUnits": 24,
+          "randomizedUnits": 24,
+          "exposures": 24,
+          "convertedUnits": 2,
+          "primaryValue": 0.08333333333333333
+        },
+        {
+          "variant": "candidate",
+          "exposedUnits": 24,
+          "randomizedUnits": 24,
+          "exposures": 24,
+          "convertedUnits": 0,
+          "primaryValue": 0
+        }
+      ],
+      "primary": {
+        "type": "two-proportion-z",
+        "pValue": 0.1485617748918687,
+        "diff": -0.08333333333333333,
+        "relativeDiff": -1,
+        "relativeMeaningful": true,
+        "ciLow": -0.19390849084796327,
+        "ciHigh": 0.027241824181296614,
+        "significant": false,
+        "proportion": {
+          "pa": 0.08333333333333333,
+          "pb": 0,
+          "diff": -0.08333333333333333,
+          "relativeDiff": -1,
+          "na": 24,
+          "nb": 24,
+          "xa": 2,
+          "xb": 0,
+          "z": -1.4446302370292303,
+          "pValue": 0.1485617748918687,
+          "ciDiffLow": -0.19390849084796327,
+          "ciDiffHigh": 0.027241824181296614,
+          "significant": false,
+          "relativeMeaningful": true
+        }
+      },
+      "decision": {
+        "verdict": "hold",
+        "reasons": [
+          "insufficient sample: NA=24 NB=24 below pre-registered minimum 1000 per arm"
+        ]
+      },
+      "minRuntimeSatisfied": true,
+      "bayesian": {
+        "proportion": {
+          "postAA": 3,
+          "postAB": 23,
+          "postBA": 1,
+          "postBB": 25,
+          "postMeanA": 0.11538461538461539,
+          "postMeanB": 0.038461538461538464,
+          "probBSuperior": 0.11734693824172021,
+          "expectedLossB": 0.08117092991042661,
+          "expectedLossA": 0.004247852987349054,
+          "credibleLowDiff": -0.21757859923130066,
+          "credibleHighDiff": 0.0637324453851468,
+          "alpha": 0.05,
+          "na": 24,
+          "nb": 24,
+          "xa": 2,
+          "xb": 0
+        }
+      },
+      "registrationVersion": "sha256:f2539235d07147c3447f9c8eb5f896e3d14457d1cd52ce28200f2b74add3af40"
+    }
+  },
+  "healthy": {
+    "id": "exp-15",
+    "minSamplePerArm": 10,
+    "report": {
+      "experimentId": "exp-15",
+      "epoch": 1,
+      "flagKey": "mx-healthy",
+      "state": "running",
+      "generatedAt": "2026-10-18T08:00:03.929219191Z",
+      "evidenceVersion": "sha256:e02b118753e665423337f3d2bbe703682317b0043a7a0e7b10c5bbab2c6f2cc7",
+      "window": {
+        "version": "utc-exposure-v1",
+        "start": "2026-10-18T08:00:03.685401287Z",
+        "end": "2026-10-25T08:00:03.685401287Z",
+        "watermark": "2026-10-15T08:00:03.929219191Z",
+        "complete": true,
+        "backend": "incremental",
+        "recomputable": false
+      },
+      "primaryAttributionWindow": 604800000000000,
+      "exposureMode": "onDecision",
+      "analysisMethod": "two-proportion-z",
+      "alpha": 0.05,
+      "mde": 0,
+      "control": "control",
+      "treatment": "candidate",
+      "healthy": true,
+      "srm": {
+        "chiSquare": 0,
+        "pValue": 1,
+        "healthy": true,
+        "observed": [
+          120,
+          120
+        ],
+        "expected": [
+          120,
+          120
+        ]
+      },
+      "perVariant": [
+        {
+          "variant": "control",
+          "exposedUnits": 120,
+          "randomizedUnits": 120,
+          "exposures": 120,
+          "convertedUnits": 30,
+          "primaryValue": 0.25
+        },
+        {
+          "variant": "candidate",
+          "exposedUnits": 120,
+          "randomizedUnits": 120,
+          "exposures": 120,
+          "convertedUnits": 0,
+          "primaryValue": 0
+        }
+      ],
+      "primary": {
+        "type": "two-proportion-z",
+        "pValue": 4.758620315979735e-9,
+        "diff": -0.25,
+        "relativeDiff": -1,
+        "relativeMeaningful": true,
+        "ciLow": -0.3274743790380702,
+        "ciHigh": -0.17252562096192983,
+        "significant": true,
+        "proportion": {
+          "pa": 0.25,
+          "pb": 0,
+          "diff": -0.25,
+          "relativeDiff": -1,
+          "na": 120,
+          "nb": 120,
+          "xa": 30,
+          "xb": 0,
+          "z": -5.855400437691199,
+          "pValue": 4.758620315979735e-9,
+          "ciDiffLow": -0.3274743790380702,
+          "ciDiffHigh": -0.17252562096192983,
+          "significant": true,
+          "relativeMeaningful": true
+        }
+      },
+      "decision": {
+        "verdict": "rollback",
+        "reasons": [
+          "primary metric significantly worse in treatment: diff=-0.25 CI=[-0.327474, -0.172526] p=4.759e-09 < alpha=0.05"
+        ]
+      },
+      "minRuntimeSatisfied": true,
+      "bayesian": {
+        "proportion": {
+          "postAA": 31,
+          "postAB": 91,
+          "postBA": 1,
+          "postBB": 121,
+          "postMeanA": 0.2540983606557377,
+          "postMeanB": 0.00819672131147541,
+          "probBSuperior": 5.127520340258123e-11,
+          "expectedLossB": 0.24590163934464762,
+          "expectedLossA": 3.6667148735311677e-13,
+          "credibleLowDiff": -0.3244716910271983,
+          "credibleHighDiff": -0.16733158766132628,
+          "alpha": 0.05,
+          "na": 120,
+          "nb": 120,
+          "xa": 30,
+          "xb": 0
+        }
+      },
+      "registrationVersion": "sha256:e6fc4e83ab395ae93e86a7ed22026f31c87cba9062b854350384c78865827865"
+    }
+  },
+  "srm": {
+    "id": "exp-16",
+    "minSamplePerArm": 10,
+    "report": {
+      "experimentId": "exp-16",
+      "epoch": 1,
+      "flagKey": "mx-srm",
+      "state": "running",
+      "generatedAt": "2026-10-18T08:00:03.932821672Z",
+      "evidenceVersion": "sha256:eb3d3ef78e73a8fd8919a28d2b028f47253a95a4766d3052bd1cc6bd3b8c3ead",
+      "window": {
+        "version": "utc-exposure-v1",
+        "start": "2026-10-18T08:00:03.871408254Z",
+        "end": "2026-10-25T08:00:03.871408254Z",
+        "watermark": "2026-10-15T08:00:03.932821672Z",
+        "complete": true,
+        "backend": "incremental",
+        "recomputable": false
+      },
+      "primaryAttributionWindow": 604800000000000,
+      "exposureMode": "onDecision",
+      "analysisMethod": "two-proportion-z",
+      "alpha": 0.05,
+      "mde": 0,
+      "control": "control",
+      "treatment": "candidate",
+      "healthy": false,
+      "healthIssues": [
+        "SRM alarm: observed [200 20] vs expected [0.5 0.5] (p=6.8e-34) — assignment pipeline suspect"
+      ],
+      "srm": {
+        "chiSquare": 147.27272727272728,
+        "pValue": 6.840881185196699e-34,
+        "healthy": false,
+        "observed": [
+          200,
+          20
+        ],
+        "expected": [
+          110,
+          110
+        ]
+      },
+      "perVariant": [
+        {
+          "variant": "control",
+          "exposedUnits": 200,
+          "randomizedUnits": 200,
+          "exposures": 200,
+          "convertedUnits": 20,
+          "primaryValue": 0.1
+        },
+        {
+          "variant": "candidate",
+          "exposedUnits": 20,
+          "randomizedUnits": 20,
+          "exposures": 20,
+          "convertedUnits": 0,
+          "primaryValue": 0
+        }
+      ],
+      "primary": {
+        "type": "two-proportion-z",
+        "pValue": 0.1380107375686596,
+        "diff": -0.1,
+        "relativeDiff": -1,
+        "relativeMeaningful": true,
+        "ciLow": -0.14157711473049034,
+        "ciHigh": -0.058422885269509686,
+        "significant": false,
+        "proportion": {
+          "pa": 0.1,
+          "pb": 0,
+          "diff": -0.1,
+          "relativeDiff": -1,
+          "na": 200,
+          "nb": 20,
+          "xa": 20,
+          "xb": 0,
+          "z": -1.4832396974191326,
+          "pValue": 0.1380107375686596,
+          "ciDiffLow": -0.14157711473049034,
+          "ciDiffHigh": -0.058422885269509686,
+          "significant": false,
+          "relativeMeaningful": true
+        }
+      },
+      "decision": {
+        "verdict": "hold",
+        "reasons": [
+          "data pipeline unhealthy (event loss/latency/source failure beyond reporting limits, docs §10.2)",
+          "SRM alarm: chi-square=147.2727 p=6.84e-34 below threshold; observed split inconsistent with the pre-registered allocation (docs §10.1)"
+        ]
+      },
+      "minRuntimeSatisfied": true,
+      "bayesian": {
+        "proportion": {
+          "postAA": 21,
+          "postAB": 181,
+          "postBA": 1,
+          "postBB": 21,
+          "postMeanA": 0.10396039603960396,
+          "postMeanB": 0.045454545454545456,
+          "probBSuperior": 0.11163057965165574,
+          "expectedLossB": 0.0631021361720183,
+          "expectedLossA": 0.0045962855869622465,
+          "credibleLowDiff": -0.15342424599149534,
+          "credibleHighDiff": 0.03641254482137836,
+          "alpha": 0.05,
+          "na": 200,
+          "nb": 20,
+          "xa": 20,
+          "xb": 0
+        }
+      },
+      "registrationVersion": "sha256:82a237ae609bb8aa8b7853df42c03de0678d281db285479d3aeb4ef9d64e1827"
+    }
+  }
+}

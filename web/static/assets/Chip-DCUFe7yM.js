@@ -1,0 +1,1 @@
+import{d as e}from"./host-BzLJrD7r.js";var t=e();function n({label:e,cls:n}){return(0,t.jsx)(`span`,{className:`chip `+(n||`gray`),children:e})}export{n as t};

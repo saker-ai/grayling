@@ -1,1 +1,0 @@
-import{u as e}from"./host-Ct-hd_KQ.js";var t=e();function n({label:e,cls:n}){return(0,t.jsx)(`span`,{className:`chip `+(n||`gray`),children:e})}export{n as t};

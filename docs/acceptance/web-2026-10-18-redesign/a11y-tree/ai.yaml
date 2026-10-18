@@ -1,0 +1,42 @@
+# a11y tree: ai (zh/light desktop) — Playwright ariaSnapshot
+- link "跳至主要内容":
+  - /url: "#main"
+- complementary:
+  - text: Grayling 管理
+  - navigation "主导航":
+    - button "总览"
+    - text: 发布
+    - button "功能开关"
+    - button "受众分段"
+    - text: 实验
+    - button "指标目录"
+    - button "实验"
+    - text: AI 治理
+    - button "AI 资源"
+    - text: 运维
+    - button "审批"
+    - button "调试"
+    - button "令牌"
+    - button "配额"
+    - button "审计"
+  - button "退出登录"
+- banner:
+  - text: 工作空间
+  - combobox "工作空间":
+    - option "Matrix Empty (mxempty)"
+    - option "U4 Acceptance (u4acc)" [selected]
+  - button "+"
+  - text: 环境
+  - combobox "环境":
+    - option "Production (prod)" [selected]
+  - button "+"
+  - text: http://127.0.0.1:28090 · 已登录 · configured-admin-password 主题
+  - combobox "主题":
+    - option "跟随系统"
+    - option "浅色" [selected]
+    - option "深色"
+  - button "中" [pressed]
+  - button "EN"
+- main:
+  - status: 正在加载…
+- status

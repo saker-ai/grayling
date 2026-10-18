@@ -45,6 +45,24 @@ this checkout) with a fresh isolated store — zero mocks. Evidence lands in
   two-step confirm by keyboard, viz-SVG tab-order exclusion, focus-ring
   screenshots (zh/light + zh/dark). Writes `keyboard-walkthrough.{json,md}` +
   `keyboard-*.png`.
+- `matrix.mjs` — R5B.1. Role × state × device × language matrix against a
+  fresh isolated store. Sections: **R** roles (mints publisher/approver/
+  analyst/viewer tokens via the real token API; capability maps checked
+  against RBAC; a dual-admin draft→submit→approve→publish loop driven
+  entirely through the UI with audit attribution verified server-side;
+  analyst/viewer write rejections checked at API 403 + UI gating layers);
+  **S** error states (401, 409 conflict panel, 429 quota toast, offline
+  degradation — cached chunk → in-page banner, uncached chunk → shell keeps
+  a reload card, recovery after reconnect); **D** data states (empty
+  workspace, loading skeletons via latency injection, missing-flag error,
+  zero-data running experiment, small-sample watermark, healthy CI charts,
+  SRM-skewed allocation, 1000-flag list); **V** 390/768/1024/1440 widths
+  with horizontal-overflow assertions on overview/flags/flag-detail/
+  experiment-summary; **L** zh/en × light/dark on the six key pages; **A**
+  200% zoom equivalent, reduced-motion, forced-colors, contrast-more;
+  **T** a11y-tree YAML snapshots of the six key pages. Writes
+  `matrix-results.json` + `matrix-summary.md` and `matrix-*.png`
+  screenshots into the evidence dir; exit 1 on any failed check.
 - `smoke.mjs` — harness self-check (server + seed + one axe run); not a gate.
 
 ## Running
@@ -55,6 +73,7 @@ export TMPDIR=$HOME/tmp-go        # Go builds must not touch the root partition
 node scripts/acceptance/u4/axe-audit.mjs
 node scripts/acceptance/u4/perf-baseline.mjs
 node scripts/acceptance/u4/keyboard-walkthrough.mjs
+node scripts/acceptance/u4/matrix.mjs
 
 # or boot once, run many:
 scripts/acceptance/u4/run-server.sh          # prints http://127.0.0.1:28090
