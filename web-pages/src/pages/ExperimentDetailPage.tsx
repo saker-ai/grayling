@@ -240,7 +240,11 @@ function ExperimentDetailBody({ expId, tab }: { expId: string; tab: ZoneTab }): 
         </label>
       </div>
       <ZoneNav active={tab} onSelect={gotoZone} />
+      {/* #exp-zone stays the layout hook (global.css min-width); the tabpanel
+          semantics live on an inner wrapper because the APG tab pairing needs
+          a per-tab id (exp-zonepanel-{tab}) that aria-controls can target. */}
       <div id="exp-zone">
+        <div role="tabpanel" id={'exp-zonepanel-' + tab} aria-labelledby={'exp-tab-' + tab}>
         {tab === 'health' ? (
           <HealthZoneTab expId={expId} experiment={e} report={lastReport} locale={locale} />
         ) : tab === 'evidence' ? (
@@ -328,6 +332,7 @@ function ExperimentDetailBody({ expId, tab }: { expId: string; tab: ZoneTab }): 
             </p>
           </>
         )}
+        </div>
       </div>
     </>
   );

@@ -148,7 +148,7 @@ function ShellBody({ guard }: { guard?: ReactNode }): ReactElement {
   return (
     <div className="app">
       <a className="skip-link" href="#main">
-        Skip to main content
+        {t('a11y.skipToMain')}
       </a>
       <aside className="sidebar">
         <div className="brand-row">

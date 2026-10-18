@@ -1,6 +1,7 @@
 // Every data-fetching phase-1 view shows the Skeleton block while its request
-// is in flight (the legacy single-line "Loading…" text is gone); the debug
-// view is the exception — its form renders immediately with no fetch.
+// is in flight; the debug view is the exception — its form renders immediately
+// with no fetch. The bars are aria-hidden decoration; a visually-hidden
+// role=status line carries the loading announcement for screen readers.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen } from '@testing-library/react';
 import type { ReactElement } from 'react';
@@ -29,7 +30,14 @@ describe('skeleton loading states', () => {
     pendingFetch();
     const { unmount } = renderPage(page, options);
     expect(document.querySelectorAll('.skeleton').length).toBeGreaterThan(0);
-    expect(screen.queryByText(/Loading/)).toBeNull();
+    // R1.2: the loading state is announced via a visually-hidden live region
+    // (no bare "Loading…" text); the decorative bars stay aria-hidden. The
+    // toast outlet also has role=status, so scope the lookup by text.
+    const status = screen.getByText('Loading…');
+    expect(status.getAttribute('role')).toBe('status');
+    expect(status.className).toContain('visually-hidden');
+    const bars = document.querySelector('.skeleton')?.parentElement;
+    expect(bars?.getAttribute('aria-hidden')).toBe('true');
     unmount();
   });
 
@@ -41,3 +49,4 @@ describe('skeleton loading states', () => {
     expect(mock).not.toHaveBeenCalled();
   });
 });
+

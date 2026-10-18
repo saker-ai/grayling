@@ -32,7 +32,7 @@ export function DataTable<T>({ columns, rows, rowKey, emptyText, rowProps, ariaL
         <thead>
           <tr>
             {columns.map(col => (
-              <th key={col.key} className={col.className}>
+              <th key={col.key} className={col.className} scope="col">
                 {col.header}
               </th>
             ))}

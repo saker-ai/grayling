@@ -131,6 +131,13 @@ describe('RolloutBlock', () => {
     expect(await screen.findByText(/No release plan registered/)).toBeTruthy();
     expect(document.getElementById('ro-steps-editor')).toBeTruthy();
 
+    // R1.4: every step field has a real (visually-hidden) label, so the row
+    // is locatable by accessible name — placeholders stay sighted-only hints.
+    expect(screen.getByRole('textbox', { name: 'Step name' })).toBeTruthy();
+    expect(screen.getByRole('spinbutton', { name: 'Eligibility (%)' })).toBeTruthy();
+    expect(screen.getByRole('spinbutton', { name: 'Min runtime (hours)' })).toBeTruthy();
+    expect(screen.getByRole('spinbutton', { name: 'Observation window (hours)' })).toBeTruthy();
+
     // Fill the single step row, then register.
     const name = document.querySelector('.rs-name') as HTMLInputElement;
     const ratio = document.querySelector('.rs-ratio') as HTMLInputElement;
@@ -197,6 +204,11 @@ describe('RolloutBlock', () => {
     expect(document.getElementById('ro-advance')).toBeTruthy();
     expect(document.getElementById('ro-takeover-on')).toBeTruthy();
     expect(document.getElementById('ro-resume')).toBeNull();
+    // R1.3: the plan bar is a real progressbar (0 of 3 steps done here).
+    const bar = screen.getByRole('progressbar', { name: 'Rollout progress' });
+    expect(bar.getAttribute('aria-valuenow')).toBe('0');
+    expect(bar.getAttribute('aria-valuemin')).toBe('0');
+    expect(bar.getAttribute('aria-valuemax')).toBe('100');
     // History renders newest first.
     const history = document.getElementById('ro-history-tbl') as HTMLElement;
     const rows = within(history).getAllByRole('row');
@@ -258,6 +270,7 @@ describe('RolloutBlock', () => {
     expect(banner.className).toContain('ok');
     const stepsTbl = document.getElementById('ro-steps-tbl') as HTMLElement;
     expect(within(stepsTbl).getAllByText('done')).toHaveLength(3);
+    expect(screen.getByRole('progressbar', { name: 'Rollout progress' }).getAttribute('aria-valuenow')).toBe('100');
     expect(document.getElementById('ro-pause')).toBeNull();
     expect(document.getElementById('ro-advance')).toBeNull();
   });

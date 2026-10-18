@@ -6,8 +6,9 @@
 // web-client/src/__tests__/client.test.ts.
 import type { ReactElement } from 'react';
 import { RouterProvider, createMemoryRouter, useLocation } from 'react-router-dom';
-import { afterEach } from 'vitest';
+import { afterEach, expect } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
+import { axe } from 'jest-axe';
 import { GraylingClient } from '@saker/grayling-client';
 import { HostProvider, ToastProvider, ConfirmProvider } from '@saker/grayling-pages';
 import type { HostServices } from '@saker/grayling-pages';
@@ -16,6 +17,24 @@ import '../i18n';
 // vitest runs with globals off, so @testing-library's auto-cleanup never
 // registers — do it here for every page test (they all import this module).
 afterEach(cleanup);
+
+// R1.7: the pinned axe rule set for the console — WCAG 2.x A/AA only (the
+// best-practice rules, e.g. landmark containment, are deliberately out).
+const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
+
+// expectNoA11yViolations runs axe against a rendered subtree (pass
+// document.body when the component portals, like Dialog) and fails with a
+// compact, greppable violation list.
+export async function expectNoA11yViolations(root: Element): Promise<void> {
+  const results = await axe(root, { runOnly: { type: 'tag', values: AXE_TAGS } });
+  const violations = results.violations.map(v => ({
+    id: v.id,
+    impact: v.impact,
+    help: v.help,
+    nodes: v.nodes.map(n => n.target.join(' ')),
+  }));
+  expect(violations).toEqual([]);
+}
 
 export interface MockResponse {
   status?: number;

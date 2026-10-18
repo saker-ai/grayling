@@ -1076,5 +1076,12 @@ export default {
   "ph.provider": "提供商，例如 openai",
   "ph.model": "模型，例如 gpt-4o",
   "ws.newTitle": "新建工作空间",
-  "env.newTitle": "在 {ws} 中新建环境"
+  "env.newTitle": "在 {ws} 中新建环境",
+  "a11y.loading": "正在加载…",
+  "a11y.skipToMain": "跳至主要内容",
+  "ro.progress": "放量进度",
+  "ro.stepName": "步骤名称",
+  "ro.stepRatio": "入组比例（%）",
+  "ro.stepMinRuntime": "最短运行时间（小时）",
+  "ro.stepObsWindow": "观察窗（小时）"
 };

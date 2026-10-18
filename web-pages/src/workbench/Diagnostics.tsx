@@ -90,11 +90,11 @@ export function Diagnostics({ d }: { d: ExperimentDiagnostics | null | undefined
       <table className="grid diagnostic-table">
         <thead>
           <tr>
-            <th>{t('th.variant')}</th>
-            <th>{t('report.assignments')}</th>
-            <th>{t('report.exposures')}</th>
-            <th>{t('report.unexposed')}</th>
-            <th>{t('th.converted')}</th>
+            <th scope="col">{t('th.variant')}</th>
+            <th scope="col">{t('report.assignments')}</th>
+            <th scope="col">{t('report.exposures')}</th>
+            <th scope="col">{t('report.unexposed')}</th>
+            <th scope="col">{t('th.converted')}</th>
           </tr>
         </thead>
         <tbody>

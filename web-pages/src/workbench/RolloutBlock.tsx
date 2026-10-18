@@ -218,7 +218,15 @@ export function RolloutBlock({
           ) : null}
         </span>
       </div>
-      <div className="bar" id="ro-bar">
+      <div
+        className="bar"
+        id="ro-bar"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={t('ro.progress')}
+      >
         <i style={{ width: pct + '%' }}></i>
       </div>
       <div className="row">
@@ -540,40 +548,54 @@ export function RolloutCreate({
       <div id="ro-steps-editor">
         {rows.map((row, index) => (
           <div className="vrow" key={index}>
-            <input
-              className="rs-name"
-              value={row.name}
-              placeholder={t('ph.stepName')}
-              onChange={ev => update(index, { name: ev.currentTarget.value })}
-            />
-            <input
-              className="rs-ratio"
-              type="number"
-              step="0.01"
-              min="0"
-              max="100"
-              value={row.ratio}
-              placeholder={t('ph.eligPct')}
-              onChange={ev => update(index, { ratio: ev.currentTarget.value })}
-            />
-            <input
-              className="rs-min"
-              type="number"
-              step="0.5"
-              min="0"
-              value={row.min}
-              placeholder={t('ph.minRuntimeH')}
-              onChange={ev => update(index, { min: ev.currentTarget.value })}
-            />
-            <input
-              className="rs-obs"
-              type="number"
-              step="0.5"
-              min="0"
-              value={row.obs}
-              placeholder={t('ph.obsWindowH')}
-              onChange={ev => update(index, { obs: ev.currentTarget.value })}
-            />
+            {/* Wrapping labels give each field a real accessible name (the
+                placeholders stay as sighted hints only). */}
+            <label>
+              <span className="visually-hidden">{t('ro.stepName')}</span>
+              <input
+                className="rs-name"
+                value={row.name}
+                placeholder={t('ph.stepName')}
+                onChange={ev => update(index, { name: ev.currentTarget.value })}
+              />
+            </label>
+            <label>
+              <span className="visually-hidden">{t('ro.stepRatio')}</span>
+              <input
+                className="rs-ratio"
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                value={row.ratio}
+                placeholder={t('ph.eligPct')}
+                onChange={ev => update(index, { ratio: ev.currentTarget.value })}
+              />
+            </label>
+            <label>
+              <span className="visually-hidden">{t('ro.stepMinRuntime')}</span>
+              <input
+                className="rs-min"
+                type="number"
+                step="0.5"
+                min="0"
+                value={row.min}
+                placeholder={t('ph.minRuntimeH')}
+                onChange={ev => update(index, { min: ev.currentTarget.value })}
+              />
+            </label>
+            <label>
+              <span className="visually-hidden">{t('ro.stepObsWindow')}</span>
+              <input
+                className="rs-obs"
+                type="number"
+                step="0.5"
+                min="0"
+                value={row.obs}
+                placeholder={t('ph.obsWindowH')}
+                onChange={ev => update(index, { obs: ev.currentTarget.value })}
+              />
+            </label>
             <label className="inline">
               <input
                 type="checkbox"

@@ -134,12 +134,12 @@ export function ReportView({ report, locale }: { report: ExperimentReport; local
       <table className="grid">
         <thead>
           <tr>
-            <th>{t('th.variant')}</th>
-            <th>{t('th.exposedUnits')}</th>
-            <th>{t('th.randomized')}</th>
-            <th>{t('th.exposures')}</th>
-            <th>{t('th.converted')}</th>
-            <th>{t('th.primaryValue')}</th>
+            <th scope="col">{t('th.variant')}</th>
+            <th scope="col">{t('th.exposedUnits')}</th>
+            <th scope="col">{t('th.randomized')}</th>
+            <th scope="col">{t('th.exposures')}</th>
+            <th scope="col">{t('th.converted')}</th>
+            <th scope="col">{t('th.primaryValue')}</th>
           </tr>
         </thead>
         <tbody>
@@ -174,11 +174,11 @@ export function ReportView({ report, locale }: { report: ExperimentReport; local
               <table className="grid">
                 <thead>
                   <tr>
-                    <th>{t('th.variant')}</th>
-                    <th>{t('report.denominator')}</th>
-                    <th>{t('report.numerator')}</th>
-                    <th>{t('report.immature')}</th>
-                    <th>{t('report.excluded')}</th>
+                    <th scope="col">{t('th.variant')}</th>
+                    <th scope="col">{t('report.denominator')}</th>
+                    <th scope="col">{t('report.numerator')}</th>
+                    <th scope="col">{t('report.immature')}</th>
+                    <th scope="col">{t('report.excluded')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -255,14 +255,14 @@ export function ReportView({ report, locale }: { report: ExperimentReport; local
             <table className="grid">
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>{t('th.metric')}</th>
-                  <th>{t('report.pair')}</th>
-                  <th>{t('report.rawP')}</th>
-                  <th>{t('report.adjustedP')}</th>
-                  <th>{t('report.effectiveAlpha')}</th>
-                  <th>{t('report.rank')}</th>
-                  <th>{t('report.decision')}</th>
+                  <th scope="col">ID</th>
+                  <th scope="col">{t('th.metric')}</th>
+                  <th scope="col">{t('report.pair')}</th>
+                  <th scope="col">{t('report.rawP')}</th>
+                  <th scope="col">{t('report.adjustedP')}</th>
+                  <th scope="col">{t('report.effectiveAlpha')}</th>
+                  <th scope="col">{t('report.rank')}</th>
+                  <th scope="col">{t('report.decision')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -381,10 +381,10 @@ export function BanditReport({ report }: { report: ExperimentReport }): ReactEle
       <table className="grid">
         <thead>
           <tr>
-            <th>{t('th.variant')}</th>
-            <th>{t('report.banditTrials')}</th>
-            <th>{t('report.banditSuccesses')}</th>
-            <th>{t('report.banditPosterior')}</th>
+            <th scope="col">{t('th.variant')}</th>
+            <th scope="col">{t('report.banditTrials')}</th>
+            <th scope="col">{t('report.banditSuccesses')}</th>
+            <th scope="col">{t('report.banditPosterior')}</th>
           </tr>
         </thead>
         <tbody>

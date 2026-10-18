@@ -264,7 +264,9 @@ table.grid td, table.grid th, table.kv td,
 }
 .btn:hover { border-color: var(--link); background: var(--surface-float); }
 .btn:active { background: var(--surface-hover); }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
+/* Disabled is not conveyed by opacity alone: the dotted border is a shape
+ * channel that survives when dimming is hard to perceive. */
+.btn:disabled { opacity: .5; cursor: not-allowed; border-style: dotted; }
 .btn:disabled:hover { border-color: var(--line); background: var(--surface-hover); }
 .btn.primary { background: var(--action); border-color: var(--action); color: var(--action-on); }
 .btn.primary:hover { background: var(--action-hover); border-color: var(--action-hover); }
@@ -628,7 +630,7 @@ ul.plain { margin: 0.375rem 0; padding-left: var(--sp-5); }
 .auth-card h1 span { color: var(--text-tertiary); font-weight: 400; font-size: var(--fs-sm); letter-spacing: .02em; }
 .auth-card .field { margin: var(--sp-3) 0; }
 @media (max-width: 700px) {
-  table.grid.mobile-card-table, .ai-revocations-desktop { display: none; }
+  table.grid.mobile-card-table { display: none; }
   .mobile-record-cards { display: grid; gap: 0.625rem; margin: 0.625rem 0; }
   .mobile-empty { display: block; }
   .mobile-record { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 0.625rem var(--sp-3); display: grid; gap: 0.375rem; min-width: 0; overflow-wrap: anywhere; }
@@ -747,4 +749,6 @@ ul.plain { margin: 0.375rem 0; padding-left: var(--sp-5); }
   .skeleton { border: 1px solid CanvasText; }
   .bar > i { background: Highlight; }
   .chip { border: 1px solid ButtonBorder; }
+  /* The forced palette erases opacity; GrayText is the system-disabled cue. */
+  .btn:disabled { color: GrayText; border-color: GrayText; }
 }

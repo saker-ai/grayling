@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import type { KeyboardEvent, ReactElement, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -16,8 +16,15 @@ export interface DialogProps {
   describedBy?: string;
 }
 
+// Everything keyboard-focusable, so the trap covers links and custom
+// tabindex targets as well as form fields; disabled and hidden elements are
+// filtered out of the cycle.
+const FOCUSABLE = 'a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
+
 export function Dialog({ title, onClose, busy = false, children, footer, describedBy }: DialogProps): ReactElement {
   const overlayRef = useRef<HTMLDivElement>(null);
+  // The title id must be per-instance (two stacked dialogs share no id).
+  const titleId = useId();
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const busyRef = useRef(busy);
@@ -42,9 +49,9 @@ export function Dialog({ title, onClose, busy = false, children, footer, describ
       return;
     }
     if (ev.key !== 'Tab') return;
-    const focusables = Array.from(
-      overlayRef.current?.querySelectorAll<HTMLElement>('input, select, textarea, button, summary') ?? [],
-    ).filter(el => !el.hasAttribute('disabled'));
+    const focusables = Array.from(overlayRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []).filter(
+      el => !el.hasAttribute('disabled') && !el.hidden,
+    );
     if (!focusables.length) return;
     const first = focusables[0];
     const last = focusables[focusables.length - 1];
@@ -70,10 +77,10 @@ export function Dialog({ title, onClose, busy = false, children, footer, describ
         className="modal"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
+        aria-labelledby={titleId}
         {...(describedBy ? { 'aria-describedby': describedBy } : {})}
       >
-        <h3 id="modal-title">{title}</h3>
+        <h3 id={titleId}>{title}</h3>
         <div className="modal-body">{children}</div>
         {footer ? <div className="modal-foot">{footer}</div> : null}
       </div>

@@ -34,11 +34,11 @@ export function RevisionsTable({ revisions, locale, onRollback, onEmergencyRollb
       <table className="grid">
       <thead>
         <tr>
-          <th>{t('th.rev')}</th>
-          <th>{t('th.hash')}</th>
-          <th>{t('th.published')}</th>
-          <th>{t('th.by')}</th>
-          <th>{t('th.note')}</th>
+          <th scope="col">{t('th.rev')}</th>
+          <th scope="col">{t('th.hash')}</th>
+          <th scope="col">{t('th.published')}</th>
+          <th scope="col">{t('th.by')}</th>
+          <th scope="col">{t('th.note')}</th>
           <th />
         </tr>
       </thead>

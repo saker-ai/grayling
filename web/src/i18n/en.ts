@@ -1076,5 +1076,12 @@ export default {
   "ph.provider": "provider e.g. openai",
   "ph.model": "model e.g. gpt-4o",
   "ws.newTitle": "New workspace",
-  "env.newTitle": "New environment in {ws}"
+  "env.newTitle": "New environment in {ws}",
+  "a11y.loading": "Loading…",
+  "a11y.skipToMain": "Skip to main content",
+  "ro.progress": "Rollout progress",
+  "ro.stepName": "Step name",
+  "ro.stepRatio": "Eligibility (%)",
+  "ro.stepMinRuntime": "Min runtime (hours)",
+  "ro.stepObsWindow": "Observation window (hours)"
 };

@@ -67,6 +67,14 @@ describe('AiPage list', () => {
     // The revocation reason shows in the revocations table; the revoked row
     // offers Reinstate while the active row offers Revoke.
     expect(screen.getByText('leaked in logs')).toBeTruthy();
+    // R1.0 regression pin: the revocations block stays mounted and unhidden —
+    // the ≤700px grid rule used to display:none the whole wrapper, dropping
+    // the content on mobile (the class now survives only as the R2 anchor).
+    const revBlock = document.querySelector('.ai-revocations-desktop') as HTMLElement | null;
+    expect(revBlock).toBeTruthy();
+    expect(revBlock?.style.display).not.toBe('none');
+    expect(revBlock?.hasAttribute('hidden')).toBe(false);
+    expect(within(revBlock as HTMLElement).getByText('leaked in logs')).toBeTruthy();
     expect(screen.getAllByRole('button', { name: 'Reinstate' })).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: 'Revoke' })).toHaveLength(1);
     expect(calls.some(c => c.url === '/api/v1/admin/workspaces/ws1/environments/prod/ai/resources')).toBe(true);
