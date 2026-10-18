@@ -1,11 +1,24 @@
 # Web 管理功能覆盖矩阵
 
-范围：`openapi.yaml` 中的 `/api/v1/admin/` 管理操作（共 75 项）。`GET /api/v1/health` 是健康检查，不属于管理操作。SDK config/eval/collect、原生 Nacos 协议及 HMAC 原始密钥为数据面或运维密钥，刻意不进入管理 UI。
+范围：`openapi.yaml` 中的 `/api/v1/admin/` 管理操作（共 88 项）。`GET /api/v1/health` 是健康检查，不属于管理操作。SDK config/eval/collect、原生 Nacos 协议及 HMAC 原始密钥为数据面或运维密钥，刻意不进入管理 UI。
 
-下表说明 Web 是否提供入口及代码契约，**不表示每项都已在浏览器执行**。真实浏览器的操作、截图、HTTP 结果与未覆盖项见 [2026-10-08 验收报告](acceptance/web-2026-10-08/report.md)、[跨角色发布验收](acceptance/web-2026-10-13-roles/report.md)、[故障状态模拟验收](acceptance/web-2026-10-13-failures/report.md)、[会话恢复验收](acceptance/web-2026-10-13-reauth/report.md)、[实验列表摘要验收](acceptance/web-2026-10-13-exp-list/report.md)、[实验绑定并发冲突验收](acceptance/web-2026-10-13-bind-conflict/report.md)、[实验首屏决策验收](acceptance/web-2026-10-13-exp-decision/report.md)、[总览摘要验收](acceptance/web-2026-10-13-overview/report.md)、[放量操作报告门禁验收](acceptance/web-2026-10-13-rollout-report-gate/report.md)、[Flag 关联实验验收](acceptance/web-2026-10-13-flag-experiment-impact/report.md)、[报告证据版本验收](acceptance/web-2026-10-13-rollout-report-version/report.md)、[实验审计导航验收](acceptance/web-2026-10-13-audit-navigation/report.md)和[总览三模块验收](acceptance/web-2026-10-14-overview-modules/report.md)。
+下表说明 Web 是否提供入口及代码契约，**不表示每项都已在浏览器执行**。真实浏览器的操作、截图、HTTP 结果与未覆盖项见 [2026-10-08 验收报告](acceptance/web-2026-10-08/report.md)、[跨角色发布验收](acceptance/web-2026-10-13-roles/report.md)、[故障状态模拟验收](acceptance/web-2026-10-13-failures/report.md)、[会话恢复验收](acceptance/web-2026-10-13-reauth/report.md)、[实验列表摘要验收](acceptance/web-2026-10-13-exp-list/report.md)、[实验绑定并发冲突验收](acceptance/web-2026-10-13-bind-conflict/report.md)、[实验首屏决策验收](acceptance/web-2026-10-13-exp-decision/report.md)、[总览摘要验收](acceptance/web-2026-10-13-overview/report.md)、[放量操作报告门禁验收](acceptance/web-2026-10-13-rollout-report-gate/report.md)、[Flag 关联实验验收](acceptance/web-2026-10-13-flag-experiment-impact/report.md)、[报告证据版本验收](acceptance/web-2026-10-13-rollout-report-version/report.md)、[实验审计导航验收](acceptance/web-2026-10-13-audit-navigation/report.md)、[总览三模块验收](acceptance/web-2026-10-14-overview-modules/report.md)和[重设计总验收](acceptance/web-2026-10-18-redesign/report.md)（R5：重设计后真机 axe/性能/键盘/角色×状态×设备×语言矩阵）。
 
 | 方法 | 管理端点 | 分类 | Web 入口 / 行为或仅 API 理由 | 验证证据 |
 |---|---|---|---|---|
+| `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/revocations` | 需补齐 | 签名累计撤销 API；控制台待实现 | `test/agent/revocation_http_test.go`；尚无浏览器验收 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/revocations/refresh` | 需补齐 | 仅刷新拒绝目录投递证明；控制台待实现 | `test/agent/revocation_http_test.go`；尚无浏览器验收 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/bundles/approvals` | 需补齐 | Bundle 精确提案审批 API 已接，控制台待实现 | `test/agent/bundle_http_test.go`；尚无浏览器验收 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/bundles/publications` | 需补齐 | 审批签发与相同结果恢复 API 已接，控制台待实现 | `test/agent/bundle_http_test.go`；尚无浏览器验收 |
+| `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/registration-policy` | 需补齐 | 实验 Agent：登记策略/精确部署授权 API 已接，控制台待实现 | `test/agent/admin_http_test.go`；尚无浏览器验收 |
+| `PUT` | `/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/registration-policy` | 需补齐 | 实验 Agent：登记策略/精确部署授权 API 已接，控制台待实现 | `test/agent/admin_http_test.go`；尚无浏览器验收 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/deployments` | 需补齐 | 实验 Agent：登记策略/精确部署授权 API 已接，控制台待实现 | `test/agent/admin_http_test.go`；尚无浏览器验收 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/credentials` | 需补齐 | 实验 Agent：独立机器凭证发放已接 API，控制台入口待实现 | `test/agent/admin_http_test.go`；尚无浏览器验收 |
+| `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/credentials` | 需补齐 | 实验 Agent：凭证元数据分页已接 API，控制台入口待实现 | `test/agent/admin_http_test.go`；尚无浏览器验收 |
+| `POST` | `/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/credentials/{id}/revoke` | 需补齐 | 实验 Agent：专用凭证撤销已接 API，控制台入口待实现 | `test/agent/admin_http_test.go`；尚无浏览器验收 |
+| `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/limits` | 需补齐 | 实验 Agent：显式 scope 准入配额已接 API，控制台入口待实现 | `test/agent/admin_http_test.go`；尚无浏览器验收 |
+| `PUT` | `/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/limits` | 需补齐 | 实验 Agent：配额 CAS 更新已接 API，控制台入口待实现 | `test/agent/admin_http_test.go`；尚无浏览器验收 |
+| `GET` | `/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/audit` | 需补齐 | 实验 Agent：Agent 同事务管理审计已接 API，控制台入口待实现 | `test/agent/admin_http_test.go`；尚无浏览器验收 |
 | `POST` | `/api/v1/admin/session` | 已覆盖 | 登录：换取 HttpOnly 管理会话 | 会话生命周期与 CSRF 测试；API 路由契约 |
 | `GET` | `/api/v1/admin/session` | 已覆盖 | 页面刷新后恢复登录状态 | 会话生命周期测试；API 路由契约 |
 | `DELETE` | `/api/v1/admin/session` | 已覆盖 | 顶栏退出登录 | 会话生命周期测试；API 路由契约 |
@@ -91,3 +104,6 @@
 - **编辑与检索**：flag、segment 草稿在切换视图、作用域或离开页面时提醒未保存修改。flag、segment、experiment 列表支持键盘操作和页内筛选；审计查询在服务端筛选并通过游标翻页。
 - **中英文本**：`web/i18n_contract.mjs` 和能力 DOM 契约覆盖双语文本、权限动作与语言切换。
 - **测试列含义**：DOM 契约验证页面入口和行为，API 契约验证服务端工作空间权限；不代表外部部署的现场验收。
+- **重设计复验（2026-10-18 R5）**：重设计后的新 React 控制台上，上表各横向项由 U4 验收设施对真实 `bin/grayling` 复验：四角色（publisher/approver/analyst/viewer）能力地图与 RBAC 逐项一致，写拒绝为 UI 隐藏 + API 403 双层；401/409/429/离线降级、空/加载/错误/零数据/小样本/SRM/大列表数据态、390–1440 四档宽度、中英×深浅四组合均有真实浏览器截图证据（71 项检查全过）。证据与采样矩阵见[重设计总验收](acceptance/web-2026-10-18-redesign/report.md)及同目录 `matrix-*.png`、`a11y-tree/*.yaml`。
+
+Agent Bundle 撤销和证明刷新新增两个 owner/TLS 管理操作（独立 ReleaseVerifier 启用时注册），要求 agent.revocation.manage；管理控制台入口仍待实现，API 测试不代表 UI 覆盖。
