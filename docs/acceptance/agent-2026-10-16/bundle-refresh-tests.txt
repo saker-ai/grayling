@@ -1,0 +1,10 @@
+=== RUN   TestBundleRefreshReplicaDedupCASAndAuthorizationCeiling
+--- PASS: TestBundleRefreshReplicaDedupCASAndAuthorizationCeiling (3.48s)
+=== RUN   TestBundleRefreshVerifiesSourceAndSignerRoots
+--- PASS: TestBundleRefreshVerifiesSourceAndSignerRoots (3.17s)
+=== RUN   TestBundleRefreshWSSAdvancesCacheWithoutRenewingOldView
+--- PASS: TestBundleRefreshWSSAdvancesCacheWithoutRenewingOldView (4.40s)
+=== RUN   TestBundleRefreshFailureLeavesNoNewArtifactOrOperation
+--- PASS: TestBundleRefreshFailureLeavesNoNewArtifactOrOperation (4.00s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	16.125s

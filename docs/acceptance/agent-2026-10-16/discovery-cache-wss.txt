@@ -1,0 +1,7 @@
+=== RUN   TestDiscoveryWSSRealNamingCrossReplicaAndImmutableDownload
+2026/10/16 12:54:24 INFO  snapshot loaded
+2026/10/16 12:54:29 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:54:29 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestDiscoveryWSSRealNamingCrossReplicaAndImmutableDownload (9.47s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	10.552s

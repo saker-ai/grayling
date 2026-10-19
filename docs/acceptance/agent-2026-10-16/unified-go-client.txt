@@ -1,0 +1,4 @@
+=== RUN   TestGoAgentClientSession
+--- PASS: TestGoAgentClientSession (3.30s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	4.375s

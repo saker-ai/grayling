@@ -1,0 +1,41 @@
+=== RUN   TestRevocationHTTPOwnerTLSCASAndProofRefresh
+2026/10/16 15:54:51 INFO  snapshot loaded
+2026/10/16 15:54:56 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 15:54:56 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestRevocationHTTPOwnerTLSCASAndProofRefresh (8.43s)
+=== RUN   TestRevocationProofAppWorkerRunsAndDrains
+2026/10/16 15:54:59 INFO  snapshot loaded
+2026/10/16 15:55:04 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 15:55:04 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestRevocationProofAppWorkerRunsAndDrains (48.57s)
+=== RUN   TestRevocationAtomicCatalogReplicaReplayAndAuthority
+--- PASS: TestRevocationAtomicCatalogReplicaReplayAndAuthority (3.65s)
+=== RUN   TestRevocationWSSSignedDenialCancelsRuntimeAndReconnects
+    revocation_test.go:170: connected publication-to-runtime cancellation: 1.886048445s
+--- PASS: TestRevocationWSSSignedDenialCancelsRuntimeAndReconnects (9.61s)
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_resources
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_resource_heads
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_admin_audit
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_admin_operations
+--- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt (14.68s)
+    --- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_resources (3.60s)
+    --- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_resource_heads (3.73s)
+    --- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_admin_audit (3.63s)
+    --- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_admin_operations (3.72s)
+=== RUN   TestRevocationDeliveryProofRefreshPreservesExpiredDenials
+--- PASS: TestRevocationDeliveryProofRefreshPreservesExpiredDenials (4.50s)
+=== RUN   TestRevocationActivationBootstrapsExactNonzeroCatalog
+--- PASS: TestRevocationActivationBootstrapsExactNonzeroCatalog (5.96s)
+=== RUN   TestRevocationBlocksPreemptivelyDeniedPublication
+--- PASS: TestRevocationBlocksPreemptivelyDeniedPublication (3.19s)
+=== RUN   TestRevocationProofScanBoundedAndIndependentOfRegistration
+--- PASS: TestRevocationProofScanBoundedAndIndependentOfRegistration (4.41s)
+=== RUN   TestRevocationProofWorkersReplicaDeduplicateAndStop
+--- PASS: TestRevocationProofWorkersReplicaDeduplicateAndStop (7.38s)
+=== RUN   TestRevocationProofWorkerDoesNotStarvePastLockedScopes
+--- PASS: TestRevocationProofWorkerDoesNotStarvePastLockedScopes (6.07s)
+=== RUN   TestRevocationProofWSSRefreshPreservesInstalledSource
+--- PASS: TestRevocationProofWSSRefreshPreservesInstalledSource (7.89s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	125.425s

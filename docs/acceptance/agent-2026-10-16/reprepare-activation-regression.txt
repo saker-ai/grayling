@@ -1,0 +1,62 @@
+=== RUN   TestActivationRefreshReplicaReplayAndNewApplied
+--- PASS: TestActivationRefreshReplicaReplayAndNewApplied (6.98s)
+=== RUN   TestActivationRefreshRollbackAndAuthorityGuards
+--- PASS: TestActivationRefreshRollbackAndAuthorityGuards (6.85s)
+=== RUN   TestActivationRefreshWSSInstallsActualNewView
+--- PASS: TestActivationRefreshWSSInstallsActualNewView (8.46s)
+=== RUN   TestActivationRefreshRejectsTamperedProofSignerAndRevokedBundle
+--- PASS: TestActivationRefreshRejectsTamperedProofSignerAndRevokedBundle (4.10s)
+=== RUN   TestActivationAtomicReplicaReplayPinnedViewAndSource
+--- PASS: TestActivationAtomicReplicaReplayPinnedViewAndSource (4.40s)
+=== RUN   TestActivationRefusesHistoricalPreparedCapacityAndUnpreparedSource
+--- PASS: TestActivationRefusesHistoricalPreparedCapacityAndUnpreparedSource (6.11s)
+=== RUN   TestActivationWriteRollbackDeadlineAndSignerTrust
+--- PASS: TestActivationWriteRollbackDeadlineAndSignerTrust (4.87s)
+=== RUN   TestActivationSourceWSSExactDownloadAndOtherInstanceDenied
+--- PASS: TestActivationSourceWSSExactDownloadAndOtherInstanceDenied (4.56s)
+=== RUN   TestActivationV8MigrationSourceIntentAndPermission
+--- PASS: TestActivationV8MigrationSourceIntentAndPermission (4.07s)
+=== RUN   TestActivationV10MigrationPreservesExactOutcome
+--- PASS: TestActivationV10MigrationPreservesExactOutcome (3.96s)
+=== RUN   TestActivationArtifactsIsolateCommandsReportsAndStatus
+--- PASS: TestActivationArtifactsIsolateCommandsReportsAndStatus (4.69s)
+=== RUN   TestActivationV10MigrationPreservesLegacyRejectedReplay
+--- PASS: TestActivationV10MigrationPreservesLegacyRejectedReplay (4.15s)
+=== RUN   TestAppliedReplicaImmutableReceiptStatusAndNoActive
+--- PASS: TestAppliedReplicaImmutableReceiptStatusAndNoActive (4.77s)
+=== RUN   TestAppliedVersionsIdentityAndOutcomeRace
+--- PASS: TestAppliedVersionsIdentityAndOutcomeRace (4.72s)
+=== RUN   TestAppliedWriteRollbackDeadlineAndNegativeReadiness
+--- PASS: TestAppliedWriteRollbackDeadlineAndNegativeReadiness (5.31s)
+=== RUN   TestAppliedV9MigrationPreservesActivationAndUnknownFields
+--- PASS: TestAppliedV9MigrationPreservesActivationAndUnknownFields (4.25s)
+=== RUN   TestAppliedExpiredAuthorizationKeepsDiagnosticFact
+--- PASS: TestAppliedExpiredAuthorizationKeepsDiagnosticFact (5.90s)
+=== RUN   TestAppliedUint64CountersFailClosed
+--- PASS: TestAppliedUint64CountersFailClosed (3.89s)
+=== RUN   TestAppliedOldLeaseCrossScopeAndActiveReplayBarriers
+--- PASS: TestAppliedOldLeaseCrossScopeAndActiveReplayBarriers (3.88s)
+=== RUN   TestActivationRejectedExactArtifactDoesNotConsumeCommand
+--- PASS: TestActivationRejectedExactArtifactDoesNotConsumeCommand (3.76s)
+=== RUN   TestAppliedWSSActivateReplicaRecoveryAndReceipt
+--- PASS: TestAppliedWSSActivateReplicaRecoveryAndReceipt (12.25s)
+=== RUN   TestAppliedWSSCapabilityNegativeAndDeadline
+--- PASS: TestAppliedWSSCapabilityNegativeAndDeadline (9.26s)
+=== RUN   TestAppliedStatusPaginationPinsCatalogAndPartialSources
+--- PASS: TestAppliedStatusPaginationPinsCatalogAndPartialSources (4.28s)
+=== RUN   TestRuntimeWSSActualInstallationAndAppliedReceipt
+=== RUN   TestRuntimeWSSActualInstallationAndAppliedReceipt/wrong_command
+=== RUN   TestRuntimeWSSActualInstallationAndAppliedReceipt/wrong_artifact
+=== RUN   TestRuntimeWSSActualInstallationAndAppliedReceipt/wrong_bundle
+=== RUN   TestRuntimeWSSActualInstallationAndAppliedReceipt/expired_command
+--- PASS: TestRuntimeWSSActualInstallationAndAppliedReceipt (7.34s)
+    --- PASS: TestRuntimeWSSActualInstallationAndAppliedReceipt/wrong_command (0.03s)
+    --- PASS: TestRuntimeWSSActualInstallationAndAppliedReceipt/wrong_artifact (0.02s)
+    --- PASS: TestRuntimeWSSActualInstallationAndAppliedReceipt/wrong_bundle (0.03s)
+    --- PASS: TestRuntimeWSSActualInstallationAndAppliedReceipt/expired_command (0.00s)
+=== RUN   TestRuntimeWSSFailedBuilderDoesNotConsumeOutcome
+--- PASS: TestRuntimeWSSFailedBuilderDoesNotConsumeOutcome (6.53s)
+=== RUN   TestRuntimeWSSInstalledViewSurvivesReportConnectionLoss
+--- PASS: TestRuntimeWSSInstalledViewSurvivesReportConnectionLoss (8.14s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	148.597s

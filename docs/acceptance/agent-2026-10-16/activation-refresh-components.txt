@@ -1,0 +1,10 @@
+=== RUN   TestActivationRefreshReplicaReplayAndNewApplied
+--- PASS: TestActivationRefreshReplicaReplayAndNewApplied (8.12s)
+=== RUN   TestActivationRefreshRollbackAndAuthorityGuards
+--- PASS: TestActivationRefreshRollbackAndAuthorityGuards (8.73s)
+=== RUN   TestActivationRefreshWSSInstallsActualNewView
+--- PASS: TestActivationRefreshWSSInstallsActualNewView (9.68s)
+=== RUN   TestActivationRefreshRejectsTamperedProofSignerAndRevokedBundle
+--- PASS: TestActivationRefreshRejectsTamperedProofSignerAndRevokedBundle (4.58s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	32.275s

@@ -1,0 +1,22 @@
+=== RUN   TestPreparationDriverOwnedResourcesReconnectAndActualRuntime
+--- PASS: TestPreparationDriverOwnedResourcesReconnectAndActualRuntime (8.45s)
+=== RUN   TestPreparationDriverFailuresNeverReportPrepared
+--- PASS: TestPreparationDriverFailuresNeverReportPrepared (5.67s)
+=== RUN   TestPreparationDriverExpiryClosesCandidateWithoutActivation
+--- PASS: TestPreparationDriverExpiryClosesCandidateWithoutActivation (8.39s)
+=== RUN   TestPreparationSetHotSwapReconnectAndStaleBarrier
+--- PASS: TestPreparationSetHotSwapReconnectAndStaleBarrier (11.91s)
+=== RUN   TestPreparationSetSlowOldBuilderCannotOverwriteNewTarget
+--- PASS: TestPreparationSetSlowOldBuilderCannotOverwriteNewTarget (7.82s)
+=== RUN   TestPreparationSetBoundsStuckConstructionAndCleanup
+=== RUN   TestPreparationSetBoundsStuckConstructionAndCleanup/construction
+=== RUN   TestPreparationSetBoundsStuckConstructionAndCleanup/cleanup
+--- PASS: TestPreparationSetBoundsStuckConstructionAndCleanup (36.62s)
+    --- PASS: TestPreparationSetBoundsStuckConstructionAndCleanup/construction (13.70s)
+    --- PASS: TestPreparationSetBoundsStuckConstructionAndCleanup/cleanup (22.92s)
+=== RUN   TestPreparationSetKnownRemoteConflictDoesNotRemainSelected
+--- PASS: TestPreparationSetKnownRemoteConflictDoesNotRemainSelected (5.83s)
+=== RUN   TestPreparationSetCleanupFailureStopsNewConstruction
+--- PASS: TestPreparationSetCleanupFailureStopsNewConstruction (5.65s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	91.448s

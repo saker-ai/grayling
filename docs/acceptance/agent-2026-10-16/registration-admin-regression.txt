@@ -1,0 +1,49 @@
+=== RUN   TestAgentAdminHTTPProvisionConnectRevokeAndRBAC
+2026/10/16 12:22:14 INFO  snapshot loaded
+2026/10/16 12:22:19 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:22:19 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+    admin_http_test.go:226: connected credential revocation observed after 1.93770636s
+--- PASS: TestAgentAdminHTTPProvisionConnectRevokeAndRBAC (10.37s)
+=== RUN   TestAgentManagedCredentialConcurrentDedupAndAudit
+--- PASS: TestAgentManagedCredentialConcurrentDedupAndAudit (3.24s)
+=== RUN   TestAgentManagedScopeLimitCASAndReplay
+--- PASS: TestAgentManagedScopeLimitCASAndReplay (3.03s)
+=== RUN   TestAgentAdminAuditFailureRollsBackAllMutations
+--- PASS: TestAgentAdminAuditFailureRollsBackAllMutations (3.16s)
+=== RUN   TestAgentManagementMigratesV2WithoutResettingSessions
+--- PASS: TestAgentManagementMigratesV2WithoutResettingSessions (3.27s)
+=== RUN   TestAgentManagementMetadataAndAuditPagination
+--- PASS: TestAgentManagementMetadataAndAuditPagination (3.11s)
+=== RUN   TestInstanceRealEmbeddedNamingReconcileAndStaleCleanup
+2026/10/16 12:22:40 INFO  snapshot loaded
+2026/10/16 12:22:45 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:22:45 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestInstanceRealEmbeddedNamingReconcileAndStaleCleanup (8.09s)
+=== RUN   TestInstanceRegistrationLeaseLifecycleAndFencing
+--- PASS: TestInstanceRegistrationLeaseLifecycleAndFencing (3.33s)
+=== RUN   TestInstanceRegisterConcurrentDedupAndExactDeployment
+--- PASS: TestInstanceRegisterConcurrentDedupAndExactDeployment (3.45s)
+=== RUN   TestInstanceExpiryRevocationAndPolicyChangeFailClosed
+--- PASS: TestInstanceExpiryRevocationAndPolicyChangeFailClosed (3.23s)
+=== RUN   TestInstanceBootTakeoverExcludesOldBootBeforeNewRegistration
+--- PASS: TestInstanceBootTakeoverExcludesOldBootBeforeNewRegistration (3.16s)
+=== RUN   TestInstanceIntentFailureAndUint64OverflowDoNotPartiallyCommit
+--- PASS: TestInstanceIntentFailureAndUint64OverflowDoNotPartiallyCommit (3.40s)
+=== RUN   TestInstanceEndpointAdmissionAndConcurrentTakeoverNoDeadlock
+--- PASS: TestInstanceEndpointAdmissionAndConcurrentTakeoverNoDeadlock (3.31s)
+=== RUN   TestInstanceIdentityQuotaAndNamingQueueFairness
+--- PASS: TestInstanceIdentityQuotaAndNamingQueueFairness (5.83s)
+=== RUN   TestInstanceMigrationFromV3PreservesManagementData
+--- PASS: TestInstanceMigrationFromV3PreservesManagementData (3.16s)
+=== RUN   TestInstanceCredentialRotationRebindsLeaseWithoutResurrection
+--- PASS: TestInstanceCredentialRotationRebindsLeaseWithoutResurrection (3.08s)
+=== RUN   TestInstanceEmptyDiscoveryRefreshesWithoutRevisionChange
+--- PASS: TestInstanceEmptyDiscoveryRefreshesWithoutRevisionChange (3.07s)
+=== RUN   TestInstanceWSSSDKLifecycleAndReconnectDedup
+--- PASS: TestInstanceWSSSDKLifecycleAndReconnectDedup (3.27s)
+=== RUN   TestInstanceWSSPermissionCannotRegisterOrRenew
+--- PASS: TestInstanceWSSPermissionCannotRegisterOrRenew (3.19s)
+=== RUN   TestInstanceWSSDeadlineCancelsBlockedMutation
+--- PASS: TestInstanceWSSDeadlineCancelsBlockedMutation (3.45s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	80.323s

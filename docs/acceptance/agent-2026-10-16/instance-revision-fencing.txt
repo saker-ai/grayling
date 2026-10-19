@@ -1,0 +1,25 @@
+=== RUN   TestInstanceRealEmbeddedNamingReconcileAndStaleCleanup
+2026/10/16 12:13:06 INFO  snapshot loaded
+2026/10/16 12:13:11 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:13:11 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestInstanceRealEmbeddedNamingReconcileAndStaleCleanup (8.79s)
+=== RUN   TestInstanceRegistrationLeaseLifecycleAndFencing
+--- PASS: TestInstanceRegistrationLeaseLifecycleAndFencing (3.47s)
+=== RUN   TestInstanceRegisterConcurrentDedupAndExactDeployment
+--- PASS: TestInstanceRegisterConcurrentDedupAndExactDeployment (3.45s)
+=== RUN   TestInstanceExpiryRevocationAndPolicyChangeFailClosed
+--- PASS: TestInstanceExpiryRevocationAndPolicyChangeFailClosed (3.30s)
+=== RUN   TestInstanceBootTakeoverExcludesOldBootBeforeNewRegistration
+--- PASS: TestInstanceBootTakeoverExcludesOldBootBeforeNewRegistration (3.18s)
+=== RUN   TestInstanceIntentFailureAndUint64OverflowDoNotPartiallyCommit
+--- PASS: TestInstanceIntentFailureAndUint64OverflowDoNotPartiallyCommit (3.39s)
+=== RUN   TestInstanceEndpointAdmissionAndConcurrentTakeoverNoDeadlock
+--- PASS: TestInstanceEndpointAdmissionAndConcurrentTakeoverNoDeadlock (3.26s)
+=== RUN   TestInstanceIdentityQuotaAndNamingQueueFairness
+--- PASS: TestInstanceIdentityQuotaAndNamingQueueFairness (5.39s)
+=== RUN   TestInstanceMigrationFromV3PreservesManagementData
+--- PASS: TestInstanceMigrationFromV3PreservesManagementData (3.20s)
+=== RUN   TestInstanceCredentialRotationRebindsLeaseWithoutResurrection
+--- PASS: TestInstanceCredentialRotationRebindsLeaseWithoutResurrection (3.10s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	41.616s

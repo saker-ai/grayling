@@ -1,0 +1,24 @@
+=== RUN   TestAppliedReplicaImmutableReceiptStatusAndNoActive
+--- PASS: TestAppliedReplicaImmutableReceiptStatusAndNoActive (4.38s)
+=== RUN   TestAppliedVersionsIdentityAndOutcomeRace
+--- PASS: TestAppliedVersionsIdentityAndOutcomeRace (3.81s)
+=== RUN   TestAppliedWriteRollbackDeadlineAndNegativeReadiness
+--- PASS: TestAppliedWriteRollbackDeadlineAndNegativeReadiness (4.14s)
+=== RUN   TestAppliedV9MigrationPreservesActivationAndUnknownFields
+--- PASS: TestAppliedV9MigrationPreservesActivationAndUnknownFields (3.95s)
+=== RUN   TestAppliedExpiredAuthorizationKeepsDiagnosticFact
+--- PASS: TestAppliedExpiredAuthorizationKeepsDiagnosticFact (5.53s)
+=== RUN   TestAppliedUint64CountersFailClosed
+--- PASS: TestAppliedUint64CountersFailClosed (4.30s)
+=== RUN   TestAppliedOldLeaseCrossScopeAndActiveReplayBarriers
+--- PASS: TestAppliedOldLeaseCrossScopeAndActiveReplayBarriers (3.71s)
+=== RUN   TestActivationRejectedExactArtifactDoesNotConsumeCommand
+--- PASS: TestActivationRejectedExactArtifactDoesNotConsumeCommand (3.78s)
+=== RUN   TestAppliedWSSActivateReplicaRecoveryAndReceipt
+--- PASS: TestAppliedWSSActivateReplicaRecoveryAndReceipt (10.28s)
+=== RUN   TestAppliedWSSCapabilityNegativeAndDeadline
+--- PASS: TestAppliedWSSCapabilityNegativeAndDeadline (8.31s)
+=== RUN   TestAppliedStatusPaginationPinsCatalogAndPartialSources
+--- PASS: TestAppliedStatusPaginationPinsCatalogAndPartialSources (3.94s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	57.242s

@@ -128,7 +128,7 @@ func parseRouteTable(t *testing.T) map[op]bool {
 			return true
 		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "HandleFunc" || len(call.Args) < 1 {
+		if !ok || (sel.Sel.Name != "HandleFunc" && sel.Sel.Name != "Handle") || len(call.Args) < 1 {
 			return true
 		}
 		lit, ok := call.Args[0].(*ast.BasicLit)

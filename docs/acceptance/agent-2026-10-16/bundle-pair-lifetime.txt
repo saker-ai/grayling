@@ -1,0 +1,4 @@
+=== RUN   TestBundlePairUsesMinimumPublisherLifetime
+--- PASS: TestBundlePairUsesMinimumPublisherLifetime (3.25s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	4.322s

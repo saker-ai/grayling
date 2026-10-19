@@ -1,0 +1,10 @@
+=== RUN   TestPreparedEvidenceIndependentOfCommandAndLeaseDeadline
+--- PASS: TestPreparedEvidenceIndependentOfCommandAndLeaseDeadline (4.24s)
+=== RUN   TestReprepareAfterInitialWindowAndExpiredCommand
+--- PASS: TestReprepareAfterInitialWindowAndExpiredCommand (6.95s)
+=== RUN   TestReprepareExpiredFirstReportAndApprovalRollback
+--- PASS: TestReprepareExpiredFirstReportAndApprovalRollback (4.61s)
+=== RUN   TestReprepareWSSNegativeThenNewPositiveAndActivation
+--- PASS: TestReprepareWSSNegativeThenNewPositiveAndActivation (11.72s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	28.660s

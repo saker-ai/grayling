@@ -1,0 +1,4 @@
+=== RUN   TestInstanceDiscoveryUint64ExhaustionAndFutureArtifact
+--- PASS: TestInstanceDiscoveryUint64ExhaustionAndFutureArtifact (3.66s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	4.733s

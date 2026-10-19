@@ -5,6 +5,7 @@ package grayling
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/godeps/gonacos/pkg/server"
+	agentservice "github.com/saker-ai/grayling/internal/agent"
 	"github.com/saker-ai/grayling/internal/ai"
 	"github.com/saker-ai/grayling/internal/api"
 	"github.com/saker-ai/grayling/internal/configstore"
@@ -27,6 +29,7 @@ import (
 	"github.com/saker-ai/grayling/internal/openaiproxy"
 	"github.com/saker-ai/grayling/internal/platform"
 	"github.com/saker-ai/grayling/internal/recovery"
+	agentclient "github.com/saker-ai/grayling/pkg/agent"
 	"github.com/saker-ai/grayling/web"
 )
 
@@ -34,6 +37,20 @@ import (
 // selects an in-memory platform store; empty NacosURL selects embedded gonacos.
 // The zero-value embedded listener addresses use ephemeral loopback ports.
 type Options struct {
+	// AgentEnabled opens the experimental machine channel only with shared PostgreSQL,
+	// explicit host/connection limits and TLS terminated by the caller listener.
+	AgentEnabled        bool
+	AgentAllowedHosts   []string
+	AgentMaxConnections int
+	// Optional discovery signing key. Trust roots are provisioned independently.
+	AgentSigningKeyID string
+	AgentSigningKey   ed25519.PrivateKey
+	// Independent trust roots for release preparation; nil disables the capability.
+	AgentReleaseVerifier *agentclient.Verifier
+	// AgentRevocationRefresh delegates only proof maintenance to the deployment
+	// service identity; it never adds denials or extends positive authorization.
+	AgentRevocationRefresh bool
+
 	DataFile      string
 	SQLitePath    string
 	PostgresDSN   string
@@ -228,9 +245,46 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 		}
 	}
 
+	var agentSessions *agentservice.Sessions
+	var agentChannel *agentservice.Channel
+	var agentHandler http.Handler
+	var agentNaming agentservice.NamingBackend
+	var agentPublisher *agentservice.Publisher
+	if opts.AgentEnabled {
+		agentSessions, err = agentservice.OpenSessions(ctx, opts.PostgresDSN)
+		if err != nil {
+			return nil, fmt.Errorf("grayling: Agent storage: %w", err)
+		}
+		defer func() {
+			if cleanupStore {
+				agentSessions.Close()
+			}
+		}()
+		if len(opts.AgentSigningKey) > 0 {
+			agentPublisher, err = agentservice.NewPublisher(agentSessions, opts.AgentSigningKeyID, opts.AgentSigningKey, time.Minute)
+			if err != nil {
+				return nil, err
+			}
+		}
+		agentChannel, err = agentservice.NewChannel(agentSessions, agentservice.ChannelOptions{AllowedHosts: opts.AgentAllowedHosts, MaxConnections: opts.AgentMaxConnections, DiscoveryPublisher: agentPublisher, ReleaseVerifier: opts.AgentReleaseVerifier})
+		if err != nil {
+			return nil, err
+		}
+		if gsrv != nil {
+			agentNaming, err = agentservice.NewEmbeddedNaming(gsrv.Services().Naming)
+			if err != nil {
+				return nil, err
+			}
+		}
+		agentHandler = agentChannel
+	}
 	apiServer := api.NewServer(store, cfg, api.Options{
 		Logger: opts.Logger, AdminPassword: opts.AdminPassword, DevAutoLogin: opts.DevAutoLogin,
 		ChatCompletions:      chatHandler,
+		AgentChannel:         agentHandler,
+		AgentManagement:      agentSessions,
+		AgentPublisher:       agentPublisher,
+		AgentReleaseVerifier: opts.AgentReleaseVerifier,
 		OpenAIWorkspace:      opts.OpenAIWorkspace,
 		OpenAIEnvironment:    opts.OpenAIEnvironment,
 		OpenAIFlagKey:        opts.OpenAIFlagKey,
@@ -252,11 +306,39 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 		errors: make(chan error, 1), done: make(chan struct{}),
 	}
 	cleanupStore = false
+	// Keep substrate services alive until all application users have drained.
+	substrateDone := make(chan struct{})
+	stopSubstrate := func() {}
 	if gsrv != nil {
-		app.wg.Go(func() {
-			if err := gsrv.Start(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+		substrateCtx, stop := context.WithCancel(context.WithoutCancel(runCtx))
+		stopSubstrate = stop
+		go func() {
+			defer close(substrateDone)
+			defer cancel()
+			startErr := gsrv.Start(substrateCtx)
+			if startErr == nil && runCtx.Err() == nil {
+				startErr = errors.New("substrate stopped unexpectedly")
+			}
+			if err := startErr; err != nil && !errors.Is(err, context.Canceled) {
 				select {
 				case app.errors <- fmt.Errorf("grayling: embedded gonacos stopped: %w", err):
+				default:
+				}
+				cancel()
+			}
+		}()
+	} else {
+		close(substrateDone)
+	}
+	if agentNaming != nil {
+		app.wg.Go(func() { agentSessions.RunNaming(runCtx, agentNaming, opts.Logger.Printf) })
+	}
+
+	if opts.AgentRevocationRefresh {
+		app.wg.Go(func() {
+			if err := agentPublisher.RunRevocationRefresh(runCtx, opts.AgentReleaseVerifier, opts.Logger.Printf); err != nil && runCtx.Err() == nil {
+				select {
+				case app.errors <- fmt.Errorf("grayling: revocation proof refresh stopped: %w", err):
 				default:
 				}
 				cancel()
@@ -281,11 +363,22 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 	}
 	go func() {
 		<-runCtx.Done()
+		if agentChannel != nil {
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			shutdownErr := agentChannel.Shutdown(shutdownCtx)
+			shutdownCancel()
+			app.closeErr = errors.Join(app.closeErr, shutdownErr)
+		}
 		app.wg.Wait()
+		if agentSessions != nil {
+			agentSessions.Close()
+		}
+		stopSubstrate()
+		<-substrateDone
 		if app.chatProxy != nil {
 			app.chatProxy.CloseIdleConnections()
 		}
-		app.closeErr = store.Close()
+		app.closeErr = errors.Join(app.closeErr, store.Close())
 		close(app.done)
 		close(app.errors)
 	}()
@@ -293,6 +386,31 @@ func Start(ctx context.Context, opts Options) (*App, error) {
 }
 
 func validateOptions(opts Options) error {
+	if opts.AgentReleaseVerifier != nil && !opts.AgentEnabled {
+		return errors.New("grayling: Agent ReleaseVerifier requires AgentEnabled")
+	}
+	if opts.AgentRevocationRefresh && (!opts.AgentEnabled || len(opts.AgentSigningKey) == 0 || opts.AgentReleaseVerifier == nil) {
+		return errors.New("grayling: revocation proof refresh requires Agent, signing key and independent ReleaseVerifier")
+	}
+	if len(opts.AgentSigningKey) > 0 || opts.AgentSigningKeyID != "" {
+		if !opts.AgentEnabled || len(opts.AgentSigningKey) != ed25519.PrivateKeySize || opts.AgentSigningKeyID == "" {
+			return errors.New("grayling: discovery signing requires Agent and an explicit Ed25519 key ID/key pair")
+		}
+	}
+	if opts.AgentEnabled {
+		if opts.PostgresDSN == "" {
+			return errors.New("grayling: Agent requires shared PostgreSQL")
+		}
+		if opts.RecoveryPoint != "" {
+			return errors.New("grayling: Agent backup restore requires an authorized new control-plane epoch; startup recovery gate is not yet connected")
+		}
+		if err := (agentservice.ChannelOptions{AllowedHosts: opts.AgentAllowedHosts, MaxConnections: opts.AgentMaxConnections}).Validate(); err != nil {
+			return err
+		}
+	} else if len(opts.AgentAllowedHosts) > 0 || opts.AgentMaxConnections != 0 {
+		return errors.New("grayling: Agent host and connection settings require AgentEnabled")
+	}
+
 	if opts.OpenAIUpstreamURL != "" && (opts.OpenAIWorkspace == "" || opts.OpenAIEnvironment == "") {
 		return fmt.Errorf("grayling: OpenAI workspace and environment are required with an upstream")
 	}

@@ -1,0 +1,11 @@
+=== RUN   TestWSSCommandDeadlineCancelsStorageAndPreservesSession
+--- PASS: TestWSSCommandDeadlineCancelsStorageAndPreservesSession (4.57s)
+=== RUN   TestDiscoveryWSSRealNamingCrossReplicaAndImmutableDownload
+2026/10/16 13:00:57 INFO  snapshot loaded
+2026/10/16 13:01:02 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 13:01:02 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestDiscoveryWSSRealNamingCrossReplicaAndImmutableDownload (9.43s)
+=== RUN   TestPolicyWSSCrossReplicaAndLargeDownload
+--- PASS: TestPolicyWSSCrossReplicaAndLargeDownload (7.63s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	22.715s

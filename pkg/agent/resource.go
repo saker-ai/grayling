@@ -28,7 +28,11 @@ var (
 )
 
 // Scope contains immutable internal identifiers, never display names.
-type Scope struct{ WorkspaceID, EnvironmentID, ServiceKey string }
+type Scope struct {
+	WorkspaceID   string `json:"workspaceId"`
+	EnvironmentID string `json:"environmentId"`
+	ServiceKey    string `json:"serviceKey"`
+}
 
 // Claims uses a fixed, versioned binary encoding specified in the protocol ADR.
 // BundleHash and PayloadHash contain raw SHA-256 bytes, not hexadecimal text.
@@ -63,7 +67,7 @@ func validText(s string) bool {
 	return true
 }
 func (c Claims) valid() bool {
-	return validText(c.Scope.WorkspaceID) && validText(c.Scope.EnvironmentID) && validText(c.Scope.ServiceKey) && validText(c.Key) && validText(c.KeyID) && c.Kind >= agentv1.ResourceKind_RESOURCE_KIND_POLICY && c.Kind <= agentv1.ResourceKind_RESOURCE_KIND_REVOCATION && c.ControlPlaneEpoch > 0 && c.Revision > 0 && c.IssuedUnixMs > 0 && c.ExpiresUnixMs > c.IssuedUnixMs && c.BundleHash != [32]byte{} && c.PayloadHash != [32]byte{}
+	return validText(c.Scope.WorkspaceID) && validText(c.Scope.EnvironmentID) && validText(c.Scope.ServiceKey) && validText(c.Key) && validText(c.KeyID) && c.Kind >= agentv1.ResourceKind_RESOURCE_KIND_POLICY && c.Kind <= agentv1.ResourceKind_RESOURCE_KIND_ACTIVATION && c.ControlPlaneEpoch > 0 && c.Revision > 0 && c.IssuedUnixMs > 0 && c.ExpiresUnixMs > c.IssuedUnixMs && c.BundleHash != [32]byte{} && c.PayloadHash != [32]byte{}
 }
 
 // MarshalClaims produces the sole supported canonical claims encoding.

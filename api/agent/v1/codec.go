@@ -17,8 +17,10 @@ const (
 
 // ProtocolError is safe to return to a peer: it never includes payload data.
 type ProtocolError struct {
-	Code   ErrorCode
-	Reason string
+	Code         ErrorCode
+	Reason       string
+	Retryable    bool
+	RetryAfterMs uint32
 }
 
 func (e *ProtocolError) Error() string { return fmt.Sprintf("agent: %s: %s", e.Code, e.Reason) }
@@ -122,7 +124,7 @@ func Validate(e *Envelope) error {
 		if h.Hello.AgentId == "" || h.Hello.InstanceId == "" || h.Hello.BootId == "" || len(h.Hello.AgentId) > 128 || len(h.Hello.InstanceId) > 128 || len(h.Hello.BootId) > 128 {
 			return invalid("invalid hello identity")
 		}
-	} else if e.SessionId == "" || e.ConnectionEpoch == 0 {
+	} else if (e.SessionId == "" || e.ConnectionEpoch == 0) && !(e.GetError() != nil && e.SessionId == "" && e.ConnectionEpoch == 0) {
 		return invalid("missing server session")
 	}
 	switch e.Payload.(type) {

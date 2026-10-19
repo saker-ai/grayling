@@ -1,0 +1,36 @@
+=== RUN   TestAgentSigningIndependentTrustAndVerification
+--- PASS: TestAgentSigningIndependentTrustAndVerification (0.02s)
+=== RUN   TestAgentSigningRejectsInvalidCombinations
+--- PASS: TestAgentSigningRejectsInvalidCombinations (0.00s)
+=== RUN   TestAgentSigningRejectsMalformedTrustAndMismatchedKey
+=== RUN   TestAgentSigningRejectsMalformedTrustAndMismatchedKey/schema
+=== RUN   TestAgentSigningRejectsMalformedTrustAndMismatchedKey/empty
+=== RUN   TestAgentSigningRejectsMalformedTrustAndMismatchedKey/duplicate
+=== RUN   TestAgentSigningRejectsMalformedTrustAndMismatchedKey/expired
+=== RUN   TestAgentSigningRejectsMalformedTrustAndMismatchedKey/future
+=== RUN   TestAgentSigningRejectsMalformedTrustAndMismatchedKey/short_signing_lifetime
+=== RUN   TestAgentSigningRejectsMalformedTrustAndMismatchedKey/public_key_length
+=== RUN   TestAgentSigningRejectsMalformedTrustAndMismatchedKey/noncanonical_public_key
+=== RUN   TestAgentSigningRejectsMalformedTrustAndMismatchedKey/mismatch
+=== RUN   TestAgentSigningRejectsMalformedTrustAndMismatchedKey/too_many
+--- PASS: TestAgentSigningRejectsMalformedTrustAndMismatchedKey (0.01s)
+    --- PASS: TestAgentSigningRejectsMalformedTrustAndMismatchedKey/schema (0.00s)
+    --- PASS: TestAgentSigningRejectsMalformedTrustAndMismatchedKey/empty (0.00s)
+    --- PASS: TestAgentSigningRejectsMalformedTrustAndMismatchedKey/duplicate (0.00s)
+    --- PASS: TestAgentSigningRejectsMalformedTrustAndMismatchedKey/expired (0.00s)
+    --- PASS: TestAgentSigningRejectsMalformedTrustAndMismatchedKey/future (0.00s)
+    --- PASS: TestAgentSigningRejectsMalformedTrustAndMismatchedKey/short_signing_lifetime (0.00s)
+    --- PASS: TestAgentSigningRejectsMalformedTrustAndMismatchedKey/public_key_length (0.00s)
+    --- PASS: TestAgentSigningRejectsMalformedTrustAndMismatchedKey/noncanonical_public_key (0.00s)
+    --- PASS: TestAgentSigningRejectsMalformedTrustAndMismatchedKey/mismatch (0.00s)
+    --- PASS: TestAgentSigningRejectsMalformedTrustAndMismatchedKey/too_many (0.00s)
+=== RUN   TestAgentSigningMaterialPermissionsTypesAndNoSecretErrors
+--- PASS: TestAgentSigningMaterialPermissionsTypesAndNoSecretErrors (0.00s)
+=== RUN   TestAgentSigningRejectsOtherKeyFormatsAndExtraBlocks
+--- PASS: TestAgentSigningRejectsOtherKeyFormatsAndExtraBlocks (0.00s)
+=== RUN   TestAgentSigningTrustOverlapRetainsAndStagesRoots
+--- PASS: TestAgentSigningTrustOverlapRetainsAndStagesRoots (0.00s)
+=== RUN   TestListenerTLS
+--- PASS: TestListenerTLS (0.00s)
+PASS
+ok  	github.com/saker-ai/grayling/cmd/grayling	1.100s

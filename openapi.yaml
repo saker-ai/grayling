@@ -34,6 +34,10 @@ info:
     viewer；所有风险等级的草稿与审批均可自批，自审记入审计（紧急操作的
     事后复核除外）。
 
+    可选 Agent 通道使用独立的 `grayling_agent_` 机器受众，当前提供会话和策略资源读取。
+    Agent 的非 Upgrade HTTP 错误使用脱敏 text/plain；WSS 内使用 Protobuf Error。
+    Agent 不接受管理 Cookie、开发自动登录、Origin 或 query token。
+
     ## 错误约定
 
     错误响应统一为 `{"error":{"code":"...","message":"..."}}`（见
@@ -86,6 +90,8 @@ servers:
 security:
   - bearerAuth: []
 tags:
+  - name: agent
+    description: 默认关闭的 Agent WSS 与签名资源通道
   - name: health
     description: 存活/健康检查（无鉴权）
   - name: workspaces
@@ -109,6 +115,468 @@ tags:
   - name: openai
     description: 可选的 OpenAI Chat Completions 治理入口（上游 Bearer API Key）
 paths:
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/registration-policy":
+    parameters:
+      - {$ref: '#/components/parameters/WsPath'}
+      - {$ref: '#/components/parameters/EnvPath'}
+      - name: service
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$'}
+    get:
+      tags: [workspaces]
+      operationId: getAgentRegistrationPolicy
+      summary: 管理 Agent 登记策略或精确部署授权
+      security: [{bearerAuth: []}, {cookieSession: []}]
+      description: >-
+        Agent 启用时可用；真实 TLS、workspace owner 的 agent.credential.manage 权限。
+        scope 与 actor 从路径及认证解析；同 operationId 重试不重复变更，审计与变更同事务。
+      responses:
+        '200':
+          description: 当前状态或幂等成功结果
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentRegistrationPolicyState'}
+        '400': {description: 非法字段、地址、期限、JSON 或缺少 revision}
+        '401': {description: 未认证}
+        '403': {description: 权限不足、跨 workspace 或非真实 TLS}
+        '404': {description: 当前 scope 未配置策略或功能未启用}
+        '409': {description: CAS、部署唯一约束或幂等载荷冲突}
+        '429': {description: 请求限流}
+        '503': {description: 权威存储暂时不可用}
+    put:
+      tags: [workspaces]
+      operationId: setAgentRegistrationPolicy
+      summary: 管理 Agent 登记策略或精确部署授权
+      security: [{bearerAuth: []}, {cookieSession: []}]
+      description: >-
+        Agent 启用时可用；真实 TLS、workspace owner 的 agent.credential.manage 权限。
+        scope 与 actor 从路径及认证解析；同 operationId 重试不重复变更，审计与变更同事务。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentRegistrationPolicyRequest'}
+      responses:
+        '200':
+          description: 当前状态或幂等成功结果
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentRegistrationPolicyState'}
+        '400': {description: 非法字段、地址、期限、JSON 或缺少 revision}
+        '401': {description: 未认证}
+        '403': {description: 权限不足、跨 workspace 或非真实 TLS}
+        '404': {description: 当前 scope 未配置策略或功能未启用}
+        '409': {description: CAS、部署唯一约束或幂等载荷冲突}
+        '429': {description: 请求限流}
+        '503': {description: 权威存储暂时不可用}
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/bundles/approvals":
+    parameters:
+      - {$ref: '#/components/parameters/WsPath'}
+      - {$ref: '#/components/parameters/EnvPath'}
+      - name: service
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$'}
+    post:
+      tags: [workspaces]
+      operationId: requestAgentBundleApproval
+      summary: 请求精确 Bundle 发布审批
+      security: [{bearerAuth: []}, {cookieSession: []}]
+      description: >-
+        仅 Agent 和签名密钥均启用时注册，要求真实 TLS 和 flag.publish 权限。
+        严格 JSON 最多 32 KiB；scope、epoch、策略版本和 source digest 由服务端装配。
+        审批绑定完整已发布快照和映射。回执、签发、审计为独立事务；未知结果重试原 approvalId。
+        成功不代表 Prepare 或激活。响应 Cache-Control 为 no-store。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentBundleApprovalRequest'}
+      responses:
+        '201':
+          description: 审批已提交，尚未签发
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Approval'}
+        '400': {description: 非法字段、映射、期限或 JSON}
+        '401': {description: 未认证}
+        '403': {description: TLS、scope 或当前调用者/审批者权限不足}
+        '404': {description: scope 或审批不存在，或功能未启用}
+        '409': {description: 审批未批准、过期、source 或策略 CAS 冲突}
+        '429': {description: 请求限流}
+        '503':
+          description: 审批创建或请求审计未确认；先查询已有审批。若已确认创建，响应包含 approvalId。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approvalId: {type: string, description: 已确认创建的审批 ID；不代表请求审计已写入。}
+                  error:
+                    type: object
+                    properties:
+                      code: {type: string}
+                      message: {type: string}
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/bundles/publications":
+    parameters:
+      - {$ref: '#/components/parameters/WsPath'}
+      - {$ref: '#/components/parameters/EnvPath'}
+      - name: service
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$'}
+    post:
+      tags: [workspaces]
+      operationId: publishApprovedAgentBundle
+      summary: 执行审批并恢复精确 Bundle 签发结果
+      security: [{bearerAuth: []}, {cookieSession: []}]
+      description: >-
+        仅 Agent 和签名密钥均启用时注册，要求真实 TLS 和 flag.publish 权限。
+        严格 JSON 最多 32 KiB；scope、epoch、策略版本和 source digest 由服务端装配。
+        审批绑定完整已发布快照和映射。回执、签发、审计为独立事务；未知结果重试原 approvalId。
+        成功不代表 Prepare 或激活。响应 Cache-Control 为 no-store。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentBundlePublicationRequest'}
+      responses:
+        '200':
+          description: 已确认签发结果或相同操作原结果
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentBundlePublication'}
+        '400': {description: 非法字段、映射、期限或 JSON}
+        '401': {description: 未认证}
+        '403': {description: TLS、scope 或当前调用者/审批者权限不足}
+        '404': {description: scope 或审批不存在，或功能未启用}
+        '409': {description: 审批未批准、过期、source 或策略 CAS 冲突}
+        '429': {description: 请求限流}
+        '503': {description: 未确认权威结果，使用原 approvalId 重试}
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/deployments":
+    parameters:
+      - {$ref: '#/components/parameters/WsPath'}
+      - {$ref: '#/components/parameters/EnvPath'}
+      - name: service
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$'}
+    post:
+      tags: [workspaces]
+      operationId: authorizeAgentDeployment
+      summary: 管理 Agent 登记策略或精确部署授权
+      security: [{bearerAuth: []}, {cookieSession: []}]
+      description: >-
+        Agent 启用时可用；真实 TLS、workspace owner 的 agent.credential.manage 权限。
+        scope 与 actor 从路径及认证解析；同 operationId 重试不重复变更，审计与变更同事务。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentDeploymentRequest'}
+      responses:
+        '200':
+          description: 当前状态或幂等成功结果
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentDeploymentGrant'}
+        '400': {description: 非法字段、地址、期限、JSON 或缺少 revision}
+        '401': {description: 未认证}
+        '403': {description: 权限不足、跨 workspace 或非真实 TLS}
+        '404': {description: 当前 scope 未配置策略或功能未启用}
+        '409': {description: CAS、部署唯一约束或幂等载荷冲突}
+        '429': {description: 请求限流}
+        '503': {description: 权威存储暂时不可用}
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/credentials":
+    parameters:
+      - {$ref: '#/components/parameters/WsPath'}
+      - {$ref: '#/components/parameters/EnvPath'}
+      - name: service
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$'}
+    post:
+      tags: [workspaces]
+      operationId: issueAgentCredential
+      summary: 独立签发机器凭证（agent.credential.manage）
+      security: [{bearerAuth: []}, {cookieSession: []}]
+      description: >-
+        实验 Agent 开关启用时注册；要求 TLS 和 workspace owner 权限。请求体最多 32 KiB，拒绝重复字段及尾随 JSON。
+        变更与审计同一事务；operationId 在完整 scope 与管理身份下去重，24 小时过期后拒绝复用。
+        凭证密文只在首次成功签发响应返回，重试返回原凭证元数据且不重复密文。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentCredentialRequest'}
+      responses:
+        '201':
+          description: 首次成功，secret 只返回一次
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentIssuedCredential'
+
+        '200':
+          description: 幂等重试，省略 secret
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentIssuedCredential'
+
+        '400': {description: 无效字段、重复/未知权限、过长有效期或非法 JSON}
+        '401': {description: 未认证}
+        '403': {description: 非 owner、越工作空间或未使用真实 TLS}
+        '404': {description: 当前 scope 中对象不存在，不能查询外 scope}
+        '409': {description: operationId 改变载荷、已过期或配额 CAS 冲突}
+        '429': {description: 管理请求限流}
+        '503': {description: 权威存储不可用或提交结果未知，不泄露底层错误}
+    get:
+      tags: [workspaces]
+      operationId: listAgentCredentials
+      summary: 列出当前 scope 凭证元数据（不含摘要或密文）
+      security: [{bearerAuth: []}, {cookieSession: []}]
+      description: >-
+        实验 Agent 开关启用时注册；要求 TLS 和 workspace owner 权限。请求体最多 32 KiB，拒绝重复字段及尾随 JSON。
+        变更与审计同一事务；operationId 在完整 scope 与管理身份下去重，24 小时过期后拒绝复用。
+        凭证密文只在首次成功签发响应返回，重试返回原凭证元数据且不重复密文。
+      parameters:
+        - name: after
+          in: query
+          schema: {type: string}
+          description: 上页 nextCursor，默认每页至多 100 条。
+      responses:
+        '200':
+          description: 有界元数据页
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/AgentCredentialInfo'}
+                  nextCursor: {type: string}
+
+        '400': {description: 无效字段、重复/未知权限、过长有效期或非法 JSON}
+        '401': {description: 未认证}
+        '403': {description: 非 owner、越工作空间或未使用真实 TLS}
+        '404': {description: 当前 scope 中对象不存在，不能查询外 scope}
+        '409': {description: operationId 改变载荷、已过期或配额 CAS 冲突}
+        '429': {description: 管理请求限流}
+        '503': {description: 权威存储不可用或提交结果未知，不泄露底层错误}
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/credentials/{id}/revoke":
+    parameters:
+      - {$ref: '#/components/parameters/WsPath'}
+      - {$ref: '#/components/parameters/EnvPath'}
+      - name: service
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$'}
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [workspaces]
+      operationId: revokeAgentCredential
+      summary: 撤销指定 scope 内机器凭证
+      security: [{bearerAuth: []}, {cookieSession: []}]
+      description: >-
+        实验 Agent 开关启用时注册；要求 TLS 和 workspace owner 权限。请求体最多 32 KiB，拒绝重复字段及尾随 JSON。
+        变更与审计同一事务；operationId 在完整 scope 与管理身份下去重，24 小时过期后拒绝复用。
+        凭证密文只在首次成功签发响应返回，重试返回原凭证元数据且不重复密文。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentOperationRequest'}
+      responses:
+        '204': {description: 撤销与审计已提交，或同一 operationId 的成功重试}
+        '400': {description: 无效字段、重复/未知权限、过长有效期或非法 JSON}
+        '401': {description: 未认证}
+        '403': {description: 非 owner、越工作空间或未使用真实 TLS}
+        '404': {description: 当前 scope 中对象不存在，不能查询外 scope}
+        '409': {description: operationId 改变载荷、已过期或配额 CAS 冲突}
+        '429': {description: 管理请求限流}
+        '503': {description: 权威存储不可用或提交结果未知，不泄露底层错误}
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/limits":
+    parameters:
+      - {$ref: '#/components/parameters/WsPath'}
+      - {$ref: '#/components/parameters/EnvPath'}
+      - name: service
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$'}
+    get:
+      tags: [workspaces]
+      operationId: getAgentScopeLimit
+      summary: 查询显式 scope 连接配额（agent.quota.manage）
+      security: [{bearerAuth: []}, {cookieSession: []}]
+      description: >-
+        实验 Agent 开关启用时注册；要求 TLS 和 workspace owner 权限。请求体最多 32 KiB，拒绝重复字段及尾随 JSON。
+        变更与审计同一事务；operationId 在完整 scope 与管理身份下去重，24 小时过期后拒绝复用。
+        凭证密文只在首次成功签发响应返回，重试返回原凭证元数据且不重复密文。
+      responses:
+        '200':
+          description: 当前配额
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentScopeLimit'
+
+        '400': {description: 无效字段、重复/未知权限、过长有效期或非法 JSON}
+        '401': {description: 未认证}
+        '403': {description: 非 owner、越工作空间或未使用真实 TLS}
+        '404': {description: 当前 scope 中对象不存在，不能查询外 scope}
+        '409': {description: operationId 改变载荷、已过期或配额 CAS 冲突}
+        '429': {description: 管理请求限流}
+        '503': {description: 权威存储不可用或提交结果未知，不泄露底层错误}
+    put:
+      tags: [workspaces]
+      operationId: setAgentScopeLimit
+      summary: 按期望值 CAS 设置 scope 连接配额
+      security: [{bearerAuth: []}, {cookieSession: []}]
+      description: >-
+        实验 Agent 开关启用时注册；要求 TLS 和 workspace owner 权限。请求体最多 32 KiB，拒绝重复字段及尾随 JSON。
+        变更与审计同一事务；operationId 在完整 scope 与管理身份下去重，24 小时过期后拒绝复用。
+        凭证密文只在首次成功签发响应返回，重试返回原凭证元数据且不重复密文。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentScopeLimitRequest'}
+      responses:
+        '200':
+          description: 已提交的原操作结果；重试不覆盖后续配额
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentScopeLimit'
+
+        '400': {description: 无效字段、重复/未知权限、过长有效期或非法 JSON}
+        '401': {description: 未认证}
+        '403': {description: 非 owner、越工作空间或未使用真实 TLS}
+        '404': {description: 当前 scope 中对象不存在，不能查询外 scope}
+        '409': {description: operationId 改变载荷、已过期或配额 CAS 冲突}
+        '429': {description: 管理请求限流}
+        '503': {description: 权威存储不可用或提交结果未知，不泄露底层错误}
+  "/api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/audit":
+    parameters:
+      - {$ref: '#/components/parameters/WsPath'}
+      - {$ref: '#/components/parameters/EnvPath'}
+      - name: service
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$'}
+    get:
+      tags: [workspaces]
+      operationId: listAgentAdminAudit
+      summary: 读取 scope 内 Agent 管理审计（agent.audit.read）
+      security: [{bearerAuth: []}, {cookieSession: []}]
+      description: >-
+        实验 Agent 开关启用时注册；要求 TLS 和 workspace owner 权限。请求体最多 32 KiB，拒绝重复字段及尾随 JSON。
+        变更与审计同一事务；operationId 在完整 scope 与管理身份下去重，24 小时过期后拒绝复用。
+        凭证密文只在首次成功签发响应返回，重试返回原凭证元数据且不重复密文。
+      parameters:
+        - name: before
+          in: query
+          schema: {type: string}
+          description: 上页 nextCursor，默认每页至多 100 条。
+      responses:
+        '200':
+          description: ID 为十进制字符串；倒序分页
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/AgentAdminAudit'}
+                  nextCursor: {type: string}
+
+        '400': {description: 无效字段、重复/未知权限、过长有效期或非法 JSON}
+        '401': {description: 未认证}
+        '403': {description: 非 owner、越工作空间或未使用真实 TLS}
+        '404': {description: 当前 scope 中对象不存在，不能查询外 scope}
+        '409': {description: operationId 改变载荷、已过期或配额 CAS 冲突}
+        '429': {description: 管理请求限流}
+        '503': {description: 权威存储不可用或提交结果未知，不泄露底层错误}
+  "/api/v1/agent/connect":
+    get:
+      tags: [agent]
+      summary: 可选 Agent WSS 接入口
+      operationId: connectAgent
+      security: [{agentBearer: []}]
+      description: >-
+        默认关闭，App/CLI 可显式启用 Agent Channel。只接受真实 TLS、配置允许的 Host、
+        专用机器 Authorization；拒绝 Origin、Cookie 及所有 query。
+        协议为 grayling.agent.v1，每个二进制消息承载 api/agent/v1/agent.proto 中一个 Envelope。
+        当前提供 session、按凭证授权的 config.read、bundle.read、instance.register、instance.renew；
+        仅配置签名发布器时提供按凭证授权的 discovery.read，其他能力未启用。
+        当前每连接最多一个活动发现订阅，集合变化及刷新推送完整 Snapshot。
+        Upgrade 前错误为不含凭证和资源明文的 text/plain，Upgrade 后使用 Protobuf Error。
+      parameters:
+        - name: Sec-WebSocket-Protocol
+          in: header
+          required: true
+          schema: {type: string, enum: [grayling.agent.v1]}
+      responses:
+        "101": {description: WebSocket Upgrade，客户端仍须 Hello/Welcome 协商和同步}
+        "400": {description: 非法 Upgrade 或子协议}
+        "401": {description: 无效或不属于 Agent 的凭证}
+        "403": {description: TLS、Host、Origin、Cookie 或 query 检查失败}
+        "429": {description: 节点准入容量不足，Retry-After 为最短等待秒数}
+        "503": {description: 共享存储不可用或通道正在关闭}
+  "/api/v1/agent/resources/{kind}/{key}/{revision}":
+    get:
+      tags: [agent]
+      summary: 以当前 Agent 身份下载不可变签名资源
+      operationId: downloadAgentResource
+      security: [{agentBearer: []}]
+      description: >-
+        与 WSS 共用 TLS/Host/无 Origin/无 Cookie/无 query 限制。
+        作用域从凭证派生，下载必须携带当前 sessionId 和 connectionEpoch。
+        响应为序列化 SignedResource，总大小最多 64 MiB；其线缆 SHA-256 在 ResourceRef 中。
+        下载后还必须校验签名 claims、scope、版本、有效期及资源 schema，不能把下载成功当作实际生效。
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema: {type: string, enum: ["1", "2", "3"]}
+          description: 1 为 policy；2 为 discovery（需配置签名发布器）；3 为 Bundle（需 config.read，固定正版本，无 latest 回退）。
+        - name: key
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$'}
+        - name: revision
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[1-9][0-9]{0,19}$'}
+          description: 正 uint64 十进制字符串，避免 JavaScript 精度丢失。
+        - name: X-Grayling-Agent-Session
+          in: header
+          required: true
+          schema: {type: string}
+        - name: X-Grayling-Agent-Epoch
+          in: header
+          required: true
+          schema: {type: string, pattern: '^[1-9][0-9]*$'}
+      responses:
+        "200":
+          description: 不可变签名资源，Cache-Control 为 no-store
+          content:
+            application/x-protobuf:
+              schema: {type: string, format: binary}
+        "400": {description: 缺少或损坏的资源/会话标识}
+        "401": {description: 无效 Agent 凭证}
+        "403": {description: 无权限、旧 session/epoch 或不允许的请求来源}
+        "404": {description: 当前授权作用域内无此资源，不查询其他租户}
+        "410": {description: 资源授权已到期}
+        "429": {description: 独立下载容量不足}
+        "503": {description: 共享存储不可用或通道关闭}
   "/v1/chat/completions":
     post:
       tags: [openai]
@@ -2857,8 +3325,84 @@ paths:
               schema:
                 $ref: "#/components/schemas/PublishResult"
         "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/revocations:
+    parameters:
+      - {$ref: '#/components/parameters/WsPath'}
+      - {$ref: '#/components/parameters/EnvPath'}
+      - name: service
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [workspaces]
+      operationId: revokeAgentBundles
+      summary: 撤销 Bundle 并签发累计拒绝目录
+      security: [{bearerAuth: []}, {cookieSession: []}]
+      description: >-
+        Agent、签名密钥和独立 ReleaseVerifier 均启用时注册。要求真实 TLS、scope 内 owner
+        和 agent.revocation.manage。严格 JSON 最多 32 KiB；expectedEpoch 为完整 uint64 字符串。
+        同 operationId 精确重放；拒绝集合、epoch、签名资源、结果和审计同事务提交。
+        内容变化推进撤销 epoch；刷新保持 payload/epoch 不变，只推进 artifactRevision。
+        不删除拒绝或取消标记，不延长任何正向授权。响应 no-store。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentRevocationRequest'}
+      responses:
+        '200':
+          description: 累计目录已提交，远端执行需另查 SDK 证据
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentRevocationReceipt'}
+        '400': {description: 非法字段、hash、CAS 或 JSON}
+        '401': {description: 缺失或已撤销管理员身份}
+        '403': {description: TLS、owner 或 scope 权限不足}
+        '409': {description: epoch 已变或 operationId 内容冲突}
+        '503': {description: 不能确认权威提交；保留原 operationId 重试}
+  /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/revocations/refresh:
+    parameters:
+      - {$ref: '#/components/parameters/WsPath'}
+      - {$ref: '#/components/parameters/EnvPath'}
+      - name: service
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [workspaces]
+      operationId: refreshAgentRevocation
+      summary: 刷新累计撤销目录的投递证明
+      security: [{bearerAuth: []}, {cookieSession: []}]
+      description: >-
+        Agent、签名密钥和独立 ReleaseVerifier 均启用时注册。要求真实 TLS、scope 内 owner
+        和 agent.revocation.manage。严格 JSON 最多 32 KiB；expectedEpoch 为完整 uint64 字符串。
+        同 operationId 精确重放；拒绝集合、epoch、签名资源、结果和审计同事务提交。
+        内容变化推进撤销 epoch；刷新保持 payload/epoch 不变，只推进 artifactRevision。
+        不删除拒绝或取消标记，不延长任何正向授权。响应 no-store。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentRevocationRefresh'}
+      responses:
+        '200':
+          description: 累计目录已提交，远端执行需另查 SDK 证据
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentRevocationReceipt'}
+        '400': {description: 非法字段、hash、CAS 或 JSON}
+        '401': {description: 缺失或已撤销管理员身份}
+        '403': {description: TLS、owner 或 scope 权限不足}
+        '409': {description: epoch 已变或 operationId 内容冲突}
+        '503': {description: 不能确认权威提交；保留原 operationId 重试}
+
 components:
   securitySchemes:
+    agentBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: grayling_agent_*
+      description: 专用机器身份，绑定 workspace/environment/service 与部署 boot；不能复用管理 Cookie 或 SDK/collect 凭证。
     cookieSession:
       type: apiKey
       in: cookie
@@ -3040,6 +3584,222 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    AgentRevocationRequest:
+      type: object
+      additionalProperties: false
+      required: [operationId, expectedEpoch, bundleHashes, reason]
+      properties:
+        operationId: {type: string, minLength: 1, maxLength: 128}
+        expectedEpoch: {type: string, pattern: '^[0-9]{1,20}$'}
+        expectedArtifactRevision: {type: string, pattern: '^[0-9]{1,20}$', description: 可选证明版本 CAS；后台刷新必须指定}
+        bundleHashes:
+          type: array
+          minItems: 1
+          maxItems: 128
+          uniqueItems: true
+          items: {type: string, pattern: '^[0-9a-f]{64}$'}
+        cancelActiveStreams: {type: boolean, default: false}
+        reason: {type: string, minLength: 1, maxLength: 128}
+    AgentRevocationRefresh:
+      type: object
+      additionalProperties: false
+      required: [operationId, expectedEpoch]
+      properties:
+        operationId: {type: string, minLength: 1, maxLength: 128}
+        expectedEpoch: {type: string, pattern: '^[0-9]{1,20}$'}
+        expectedArtifactRevision: {type: string, pattern: '^[0-9]{1,20}$', description: 可选证明版本 CAS；后台刷新必须指定}
+    AgentRevocationReceipt:
+      type: object
+      required: [epoch, artifactRevision, expiresAt, operationId]
+      properties:
+        epoch: {type: string, pattern: '^[0-9]{1,20}$'}
+        artifactRevision: {type: string, pattern: '^[0-9]{1,20}$'}
+        expiresAt: {type: string, format: date-time}
+        operationId: {type: string}
+    AgentRegistrationPolicy:
+      type: object
+      additionalProperties: false
+      required: [allowedNetworks, maxInstances]
+      properties:
+        allowedNetworks: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string}, description: 规范化 CIDR，禁止零长度前缀}
+        forbiddenAddresses: {type: array, maxItems: 128, uniqueItems: true, items: {type: string}}
+        allowLoopback: {type: boolean, default: false}
+        maxInstances: {type: integer, minimum: 1, maximum: 100000}
+    AgentRegistrationPolicyState:
+      type: object
+      required: [revision, discoveryRevision, policy]
+      properties:
+        revision: {type: string, pattern: '^[0-9]+$', maxLength: 20}
+        discoveryRevision: {type: string, pattern: '^[0-9]+$', maxLength: 20}
+        policy: {$ref: '#/components/schemas/AgentRegistrationPolicy'}
+    AgentRegistrationPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [operationId, expectedRevision, policy]
+      properties:
+        operationId: {type: string, minLength: 1, maxLength: 128}
+        expectedRevision: {type: string, pattern: '^[0-9]+$', maxLength: 20}
+        policy: {$ref: '#/components/schemas/AgentRegistrationPolicy'}
+    AgentBundleBuild:
+      type: object
+      additionalProperties: false
+      required: [id, imageDigest, protocolVersion, resources]
+      properties:
+        id: {type: string}
+        imageDigest: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+        protocolVersion: {type: integer, minimum: 1}
+        resources:
+          type: array
+          maxItems: 1024
+          description: 按 key 排序的精确资源摘要。
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, sha256]
+            properties:
+              key: {type: string}
+              sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    AgentBundleApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [sourceRevision, expectedPolicyRevision, policyKey, routeFlag, valueBuilds, minimumProtocolVersion, defaultBehavior, validUntilUnixMs, builds, reason]
+      properties:
+        sourceRevision: {type: integer, format: int64, minimum: 1}
+        expectedPolicyRevision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+        policyKey: {type: string}
+        routeFlag: {type: string}
+        valueBuilds:
+          type: object
+          additionalProperties: {type: string}
+          description: 路由开关实际字符串值到 build ID 的完整映射。
+        minimumProtocolVersion: {type: integer, minimum: 1}
+        defaultBehavior: {type: string, enum: [reject, build]}
+        defaultBuild: {type: string}
+        validUntilUnixMs: {type: string, pattern: '^[0-9]+$'}
+        builds:
+          type: array
+          minItems: 1
+          maxItems: 256
+          description: 按 ID 排序，不包含重复 build。
+          items: {$ref: '#/components/schemas/AgentBundleBuild'}
+        reason: {type: string, minLength: 1}
+    AgentBundlePublicationRequest:
+      type: object
+      additionalProperties: false
+      required: [approvalId]
+      properties:
+        approvalId: {type: string, minLength: 1}
+    AgentBundlePublication:
+      type: object
+      required: [bundleHash, bundleKey, artifactRevision, policyRevision, expiresAt]
+      properties:
+        bundleHash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        bundleKey: {type: string}
+        artifactRevision: {type: string, pattern: '^[1-9][0-9]*$'}
+        policyRevision: {type: string, pattern: '^[1-9][0-9]*$'}
+        expiresAt: {type: string, format: date-time}
+    AgentDeploymentInstance:
+      type: object
+      additionalProperties: false
+      required: [instanceId, bootId, buildId, imageDigest, address, port, tlsServerName, zone, protocolVersion]
+      properties:
+        instanceId: {type: string, minLength: 1, maxLength: 128}
+        bootId: {type: string, minLength: 1, maxLength: 128}
+        buildId: {type: string, minLength: 1, maxLength: 128}
+        imageDigest: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+        address: {type: string, description: 规范 IP 字面量，禁止 DNS、URL、mapped IPv4、未指定及链路本地地址}
+        port: {type: integer, minimum: 1, maximum: 65535}
+        tlsServerName: {type: string, minLength: 1, maxLength: 253}
+        zone: {type: string, minLength: 1, maxLength: 128}
+        protocolVersion: {type: integer, enum: [1]}
+    AgentDeploymentRequest:
+      type: object
+      additionalProperties: false
+      required: [operationId, principalId, agentId, policyRevision, expiresAt, instance]
+      properties:
+        operationId: {type: string, minLength: 1, maxLength: 128}
+        principalId: {type: string, minLength: 1, maxLength: 128}
+        agentId: {type: string, minLength: 1, maxLength: 128}
+        policyRevision: {type: string, pattern: '^[0-9]+$', maxLength: 20}
+        expiresAt: {type: string, format: date-time, description: 数据库当前时间之后且不超过 24 小时}
+        instance: {$ref: '#/components/schemas/AgentDeploymentInstance'}
+    AgentDeploymentGrant:
+      type: object
+      required: [id, policyRevision, expiresAt]
+      properties:
+        id: {type: string, description: 非 bearer 凭证的不可转移授权引用，仍须机器身份匹配}
+        policyRevision: {type: string, pattern: '^[0-9]+$', maxLength: 20}
+        expiresAt: {type: string, format: date-time}
+    AgentOperationRequest:
+      type: object
+      additionalProperties: false
+      required: [operationId]
+      properties:
+        operationId: {type: string, minLength: 1, maxLength: 128}
+    AgentScopeLimit:
+      type: object
+      properties:
+        maxConnections: {type: integer, minimum: 1, maximum: 100000}
+    AgentScopeLimitRequest:
+      type: object
+      additionalProperties: false
+      required: [operationId, expectedMaxConnections, maxConnections]
+      properties:
+        operationId: {type: string, minLength: 1, maxLength: 128}
+        expectedMaxConnections: {type: integer, minimum: 0, description: 0 仅用于尚不存在的配额}
+        maxConnections: {type: integer, minimum: 1, maximum: 100000}
+    AgentCredentialRequest:
+      type: object
+      additionalProperties: false
+      required: [operationId, principalId, agentId, instanceId, bootId, permissions, expiresAt]
+      properties:
+        operationId: {type: string, minLength: 1, maxLength: 128}
+        principalId: {type: string, minLength: 1, maxLength: 128}
+        agentId: {type: string, minLength: 1, maxLength: 128}
+        instanceId: {type: string, minLength: 1, maxLength: 128}
+        bootId: {type: string, minLength: 1, maxLength: 128}
+        takeoverFromBootId: {type: string, maxLength: 128}
+        permissions:
+          type: array
+          minItems: 1
+          maxItems: 6
+          uniqueItems: true
+          items: {type: string, enum: [config.read, discovery.read, instance.register, instance.renew, release.report, events.write]}
+        expiresAt: {type: string, format: date-time, description: 必须晚于数据库当前时间且不超过 24 小时}
+    AgentCredentialInfo:
+      type: object
+      properties:
+        id: {type: string}
+        principalId: {type: string}
+        scope:
+          type: object
+          properties:
+            workspaceId: {type: string}
+            environmentId: {type: string}
+            serviceKey: {type: string}
+        agentId: {type: string}
+        instanceId: {type: string}
+        bootId: {type: string}
+        takeoverFromBootId: {type: string}
+        permissions: {type: array, items: {type: string}}
+        expiresAt: {type: string, format: date-time}
+        revoked: {type: boolean}
+    AgentIssuedCredential:
+      type: object
+      properties:
+        credential: {$ref: '#/components/schemas/AgentCredentialInfo'}
+        secret: {type: string, description: 仅首次成功响应返回，不写入去重结果或审计}
+        replayed: {type: boolean}
+    AgentAdminAudit:
+      type: object
+      properties:
+        id: {type: string, pattern: '^[1-9][0-9]*$'}
+        occurredAt: {type: string, format: date-time}
+        actorId: {type: string}
+        actorRole: {type: string}
+        operationId: {type: string}
+        action: {type: string}
+        objectId: {type: string}
     SubmitRequest:
       type: object
       additionalProperties: false
@@ -3095,6 +3855,8 @@ components:
         rejectedAt: { type: string, format: date-time }
         rejectionReason: { type: string }
         usedAt: { type: string, format: date-time }
+        usedOperationId: { type: string, description: 已消费审批绑定的固定效果操作 ID。 }
+        usedPrincipalId: { type: string, description: 已消费审批绑定的服务端派生效果身份。 }
     ApprovalComparison:
       type: object
       required: [available, stale, beforeRevision, afterRevision]

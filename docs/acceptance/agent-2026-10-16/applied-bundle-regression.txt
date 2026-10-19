@@ -1,0 +1,6 @@
+GOWORK=off go test -race -count=1 ./internal/admin ./internal/agent ./pkg/agent
+ok  	github.com/saker-ai/grayling/internal/admin	1.285s
+ok  	github.com/saker-ai/grayling/internal/agent	1.084s
+ok  	github.com/saker-ai/grayling/pkg/agent	10.756s
+GOWORK=off go test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestBundle|^TestPublishedSourceReplica'
+ok  	github.com/saker-ai/grayling/test/agent	85.708s

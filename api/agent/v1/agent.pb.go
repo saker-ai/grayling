@@ -29,6 +29,7 @@ const (
 	ResourceKind_RESOURCE_KIND_DISCOVERY   ResourceKind = 2
 	ResourceKind_RESOURCE_KIND_BUNDLE      ResourceKind = 3
 	ResourceKind_RESOURCE_KIND_REVOCATION  ResourceKind = 4
+	ResourceKind_RESOURCE_KIND_ACTIVATION  ResourceKind = 5
 )
 
 // Enum value maps for ResourceKind.
@@ -39,6 +40,7 @@ var (
 		2: "RESOURCE_KIND_DISCOVERY",
 		3: "RESOURCE_KIND_BUNDLE",
 		4: "RESOURCE_KIND_REVOCATION",
+		5: "RESOURCE_KIND_ACTIVATION",
 	}
 	ResourceKind_value = map[string]int32{
 		"RESOURCE_KIND_UNSPECIFIED": 0,
@@ -46,6 +48,7 @@ var (
 		"RESOURCE_KIND_DISCOVERY":   2,
 		"RESOURCE_KIND_BUNDLE":      3,
 		"RESOURCE_KIND_REVOCATION":  4,
+		"RESOURCE_KIND_ACTIVATION":  5,
 	}
 )
 
@@ -291,10 +294,13 @@ type Envelope struct {
 	//	*Envelope_Abort
 	//	*Envelope_Revoke
 	//	*Envelope_ReleaseStatus
+	//	*Envelope_PreparedAck
 	//	*Envelope_ReadinessReport
 	//	*Envelope_DrainReport
 	//	*Envelope_DrainRequested
 	//	*Envelope_DrainStatus
+	//	*Envelope_PrepareRejectedAck
+	//	*Envelope_ActivationReportAck
 	//	*Envelope_EventBatch
 	//	*Envelope_EventBatchAck
 	Payload       isEnvelope_Payload `protobuf_oneof:"payload"`
@@ -745,6 +751,15 @@ func (x *Envelope) GetReleaseStatus() *ReleaseStatus {
 	return nil
 }
 
+func (x *Envelope) GetPreparedAck() *PreparedAck {
+	if x != nil {
+		if x, ok := x.Payload.(*Envelope_PreparedAck); ok {
+			return x.PreparedAck
+		}
+	}
+	return nil
+}
+
 func (x *Envelope) GetReadinessReport() *ReadinessReport {
 	if x != nil {
 		if x, ok := x.Payload.(*Envelope_ReadinessReport); ok {
@@ -776,6 +791,24 @@ func (x *Envelope) GetDrainStatus() *DrainStatus {
 	if x != nil {
 		if x, ok := x.Payload.(*Envelope_DrainStatus); ok {
 			return x.DrainStatus
+		}
+	}
+	return nil
+}
+
+func (x *Envelope) GetPrepareRejectedAck() *PrepareRejectedAck {
+	if x != nil {
+		if x, ok := x.Payload.(*Envelope_PrepareRejectedAck); ok {
+			return x.PrepareRejectedAck
+		}
+	}
+	return nil
+}
+
+func (x *Envelope) GetActivationReportAck() *ActivationReportAck {
+	if x != nil {
+		if x, ok := x.Payload.(*Envelope_ActivationReportAck); ok {
+			return x.ActivationReportAck
 		}
 	}
 	return nil
@@ -943,6 +976,10 @@ type Envelope_ReleaseStatus struct {
 	ReleaseStatus *ReleaseStatus `protobuf:"bytes,68,opt,name=release_status,json=releaseStatus,proto3,oneof"`
 }
 
+type Envelope_PreparedAck struct {
+	PreparedAck *PreparedAck `protobuf:"bytes,69,opt,name=prepared_ack,json=preparedAck,proto3,oneof"`
+}
+
 type Envelope_ReadinessReport struct {
 	ReadinessReport *ReadinessReport `protobuf:"bytes,70,opt,name=readiness_report,json=readinessReport,proto3,oneof"`
 }
@@ -957,6 +994,14 @@ type Envelope_DrainRequested struct {
 
 type Envelope_DrainStatus struct {
 	DrainStatus *DrainStatus `protobuf:"bytes,73,opt,name=drain_status,json=drainStatus,proto3,oneof"`
+}
+
+type Envelope_PrepareRejectedAck struct {
+	PrepareRejectedAck *PrepareRejectedAck `protobuf:"bytes,74,opt,name=prepare_rejected_ack,json=prepareRejectedAck,proto3,oneof"`
+}
+
+type Envelope_ActivationReportAck struct {
+	ActivationReportAck *ActivationReportAck `protobuf:"bytes,75,opt,name=activation_report_ack,json=activationReportAck,proto3,oneof"`
 }
 
 type Envelope_EventBatch struct {
@@ -1037,6 +1082,8 @@ func (*Envelope_Revoke) isEnvelope_Payload() {}
 
 func (*Envelope_ReleaseStatus) isEnvelope_Payload() {}
 
+func (*Envelope_PreparedAck) isEnvelope_Payload() {}
+
 func (*Envelope_ReadinessReport) isEnvelope_Payload() {}
 
 func (*Envelope_DrainReport) isEnvelope_Payload() {}
@@ -1044,6 +1091,10 @@ func (*Envelope_DrainReport) isEnvelope_Payload() {}
 func (*Envelope_DrainRequested) isEnvelope_Payload() {}
 
 func (*Envelope_DrainStatus) isEnvelope_Payload() {}
+
+func (*Envelope_PrepareRejectedAck) isEnvelope_Payload() {}
+
+func (*Envelope_ActivationReportAck) isEnvelope_Payload() {}
 
 func (*Envelope_EventBatch) isEnvelope_Payload() {}
 
@@ -3253,22 +3304,177 @@ func (x *Prepared) GetAppliedGeneration() uint64 {
 	return 0
 }
 
+// Persistence receipt only; does not assert capacity, eligibility or activation.
+type PreparedAck struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Release          *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
+	CommandId        string                 `protobuf:"bytes,2,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	EvidenceRevision uint64                 `protobuf:"varint,3,opt,name=evidence_revision,json=evidenceRevision,proto3" json:"evidence_revision,omitempty"`
+	ReceivedUnixMs   int64                  `protobuf:"varint,4,opt,name=received_unix_ms,json=receivedUnixMs,proto3" json:"received_unix_ms,omitempty"`
+	ExpiresUnixMs    int64                  `protobuf:"varint,5,opt,name=expires_unix_ms,json=expiresUnixMs,proto3" json:"expires_unix_ms,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *PreparedAck) Reset() {
+	*x = PreparedAck{}
+	mi := &file_api_agent_v1_agent_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PreparedAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PreparedAck) ProtoMessage() {}
+
+func (x *PreparedAck) ProtoReflect() protoreflect.Message {
+	mi := &file_api_agent_v1_agent_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PreparedAck.ProtoReflect.Descriptor instead.
+func (*PreparedAck) Descriptor() ([]byte, []int) {
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *PreparedAck) GetRelease() *ReleaseIdentity {
+	if x != nil {
+		return x.Release
+	}
+	return nil
+}
+
+func (x *PreparedAck) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *PreparedAck) GetEvidenceRevision() uint64 {
+	if x != nil {
+		return x.EvidenceRevision
+	}
+	return 0
+}
+
+func (x *PreparedAck) GetReceivedUnixMs() int64 {
+	if x != nil {
+		return x.ReceivedUnixMs
+	}
+	return 0
+}
+
+func (x *PreparedAck) GetExpiresUnixMs() int64 {
+	if x != nil {
+		return x.ExpiresUnixMs
+	}
+	return 0
+}
+
+type PrepareRejectedAck struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Release          *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
+	CommandId        string                 `protobuf:"bytes,2,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	EvidenceRevision uint64                 `protobuf:"varint,3,opt,name=evidence_revision,json=evidenceRevision,proto3" json:"evidence_revision,omitempty"`
+	ReceivedUnixMs   int64                  `protobuf:"varint,4,opt,name=received_unix_ms,json=receivedUnixMs,proto3" json:"received_unix_ms,omitempty"`
+	ExpiresUnixMs    int64                  `protobuf:"varint,5,opt,name=expires_unix_ms,json=expiresUnixMs,proto3" json:"expires_unix_ms,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *PrepareRejectedAck) Reset() {
+	*x = PrepareRejectedAck{}
+	mi := &file_api_agent_v1_agent_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PrepareRejectedAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PrepareRejectedAck) ProtoMessage() {}
+
+func (x *PrepareRejectedAck) ProtoReflect() protoreflect.Message {
+	mi := &file_api_agent_v1_agent_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PrepareRejectedAck.ProtoReflect.Descriptor instead.
+func (*PrepareRejectedAck) Descriptor() ([]byte, []int) {
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *PrepareRejectedAck) GetRelease() *ReleaseIdentity {
+	if x != nil {
+		return x.Release
+	}
+	return nil
+}
+
+func (x *PrepareRejectedAck) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *PrepareRejectedAck) GetEvidenceRevision() uint64 {
+	if x != nil {
+		return x.EvidenceRevision
+	}
+	return 0
+}
+
+func (x *PrepareRejectedAck) GetReceivedUnixMs() int64 {
+	if x != nil {
+		return x.ReceivedUnixMs
+	}
+	return 0
+}
+
+func (x *PrepareRejectedAck) GetExpiresUnixMs() int64 {
+	if x != nil {
+		return x.ExpiresUnixMs
+	}
+	return 0
+}
+
 type Applied struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Release           *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
-	InstanceId        string                 `protobuf:"bytes,2,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
-	BootId            string                 `protobuf:"bytes,3,opt,name=boot_id,json=bootId,proto3" json:"boot_id,omitempty"`
-	PolicyRevision    uint64                 `protobuf:"varint,4,opt,name=policy_revision,json=policyRevision,proto3" json:"policy_revision,omitempty"`
-	DiscoveryRevision uint64                 `protobuf:"varint,5,opt,name=discovery_revision,json=discoveryRevision,proto3" json:"discovery_revision,omitempty"`
-	PreparedRevision  uint64                 `protobuf:"varint,6,opt,name=prepared_revision,json=preparedRevision,proto3" json:"prepared_revision,omitempty"`
-	RevocationEpoch   uint64                 `protobuf:"varint,7,opt,name=revocation_epoch,json=revocationEpoch,proto3" json:"revocation_epoch,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                      protoimpl.MessageState `protogen:"open.v1"`
+	Release                    *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
+	InstanceId                 string                 `protobuf:"bytes,2,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	BootId                     string                 `protobuf:"bytes,3,opt,name=boot_id,json=bootId,proto3" json:"boot_id,omitempty"`
+	PolicyRevision             uint64                 `protobuf:"varint,4,opt,name=policy_revision,json=policyRevision,proto3" json:"policy_revision,omitempty"`
+	DiscoveryRevision          uint64                 `protobuf:"varint,5,opt,name=discovery_revision,json=discoveryRevision,proto3" json:"discovery_revision,omitempty"`
+	PreparedRevision           uint64                 `protobuf:"varint,6,opt,name=prepared_revision,json=preparedRevision,proto3" json:"prepared_revision,omitempty"`
+	RevocationEpoch            uint64                 `protobuf:"varint,7,opt,name=revocation_epoch,json=revocationEpoch,proto3" json:"revocation_epoch,omitempty"`
+	ActivationArtifactRevision uint64                 `protobuf:"varint,8,opt,name=activation_artifact_revision,json=activationArtifactRevision,proto3" json:"activation_artifact_revision,omitempty"`
+	ControlPlaneEpoch          uint64                 `protobuf:"varint,9,opt,name=control_plane_epoch,json=controlPlaneEpoch,proto3" json:"control_plane_epoch,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
 }
 
 func (x *Applied) Reset() {
 	*x = Applied{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[35]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3280,7 +3486,7 @@ func (x *Applied) String() string {
 func (*Applied) ProtoMessage() {}
 
 func (x *Applied) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[35]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3293,7 +3499,7 @@ func (x *Applied) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Applied.ProtoReflect.Descriptor instead.
 func (*Applied) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{35}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *Applied) GetRelease() *ReleaseIdentity {
@@ -3345,17 +3551,35 @@ func (x *Applied) GetRevocationEpoch() uint64 {
 	return 0
 }
 
+func (x *Applied) GetActivationArtifactRevision() uint64 {
+	if x != nil {
+		return x.ActivationArtifactRevision
+	}
+	return 0
+}
+
+func (x *Applied) GetControlPlaneEpoch() uint64 {
+	if x != nil {
+		return x.ControlPlaneEpoch
+	}
+	return 0
+}
+
 type Rejected struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Release       *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
-	Error         *Error                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Release    *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
+	Error      *Error                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	InstanceId string                 `protobuf:"bytes,3,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	BootId     string                 `protobuf:"bytes,4,opt,name=boot_id,json=bootId,proto3" json:"boot_id,omitempty"`
+	// Required for activation rejection; unused for Prepare rejection.
+	ActivationArtifactRevision uint64 `protobuf:"varint,5,opt,name=activation_artifact_revision,json=activationArtifactRevision,proto3" json:"activation_artifact_revision,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
 }
 
 func (x *Rejected) Reset() {
 	*x = Rejected{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[36]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3367,7 +3591,7 @@ func (x *Rejected) String() string {
 func (*Rejected) ProtoMessage() {}
 
 func (x *Rejected) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[36]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3380,7 +3604,7 @@ func (x *Rejected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Rejected.ProtoReflect.Descriptor instead.
 func (*Rejected) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{36}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *Rejected) GetRelease() *ReleaseIdentity {
@@ -3397,17 +3621,43 @@ func (x *Rejected) GetError() *Error {
 	return nil
 }
 
+func (x *Rejected) GetInstanceId() string {
+	if x != nil {
+		return x.InstanceId
+	}
+	return ""
+}
+
+func (x *Rejected) GetBootId() string {
+	if x != nil {
+		return x.BootId
+	}
+	return ""
+}
+
+func (x *Rejected) GetActivationArtifactRevision() uint64 {
+	if x != nil {
+		return x.ActivationArtifactRevision
+	}
+	return 0
+}
+
 type ReleaseStatusQuery struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ReleaseId     string                 `protobuf:"bytes,1,opt,name=release_id,json=releaseId,proto3" json:"release_id,omitempty"`
-	OperationId   string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                              protoimpl.MessageState `protogen:"open.v1"`
+	ReleaseId                          string                 `protobuf:"bytes,1,opt,name=release_id,json=releaseId,proto3" json:"release_id,omitempty"`
+	OperationId                        string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	PageSize                           uint32                 `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	AfterInstanceId                    string                 `protobuf:"bytes,4,opt,name=after_instance_id,json=afterInstanceId,proto3" json:"after_instance_id,omitempty"`
+	ExpectedReportRevision             *uint64                `protobuf:"varint,5,opt,name=expected_report_revision,json=expectedReportRevision,proto3,oneof" json:"expected_report_revision,omitempty"`
+	ExpectedReleaseRevision            *uint64                `protobuf:"varint,6,opt,name=expected_release_revision,json=expectedReleaseRevision,proto3,oneof" json:"expected_release_revision,omitempty"`
+	ExpectedActivationArtifactRevision *uint64                `protobuf:"varint,7,opt,name=expected_activation_artifact_revision,json=expectedActivationArtifactRevision,proto3,oneof" json:"expected_activation_artifact_revision,omitempty"`
+	unknownFields                      protoimpl.UnknownFields
+	sizeCache                          protoimpl.SizeCache
 }
 
 func (x *ReleaseStatusQuery) Reset() {
 	*x = ReleaseStatusQuery{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[37]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3419,7 +3669,7 @@ func (x *ReleaseStatusQuery) String() string {
 func (*ReleaseStatusQuery) ProtoMessage() {}
 
 func (x *ReleaseStatusQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[37]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3432,7 +3682,7 @@ func (x *ReleaseStatusQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseStatusQuery.ProtoReflect.Descriptor instead.
 func (*ReleaseStatusQuery) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{37}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ReleaseStatusQuery) GetReleaseId() string {
@@ -3449,18 +3699,54 @@ func (x *ReleaseStatusQuery) GetOperationId() string {
 	return ""
 }
 
+func (x *ReleaseStatusQuery) GetPageSize() uint32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ReleaseStatusQuery) GetAfterInstanceId() string {
+	if x != nil {
+		return x.AfterInstanceId
+	}
+	return ""
+}
+
+func (x *ReleaseStatusQuery) GetExpectedReportRevision() uint64 {
+	if x != nil && x.ExpectedReportRevision != nil {
+		return *x.ExpectedReportRevision
+	}
+	return 0
+}
+
+func (x *ReleaseStatusQuery) GetExpectedReleaseRevision() uint64 {
+	if x != nil && x.ExpectedReleaseRevision != nil {
+		return *x.ExpectedReleaseRevision
+	}
+	return 0
+}
+
+func (x *ReleaseStatusQuery) GetExpectedActivationArtifactRevision() uint64 {
+	if x != nil && x.ExpectedActivationArtifactRevision != nil {
+		return *x.ExpectedActivationArtifactRevision
+	}
+	return 0
+}
+
 type Prepare struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Release       *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
-	Bundle        *ResourceRef           `protobuf:"bytes,2,opt,name=bundle,proto3" json:"bundle,omitempty"`
-	ExpiresUnixMs int64                  `protobuf:"varint,3,opt,name=expires_unix_ms,json=expiresUnixMs,proto3" json:"expires_unix_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Release        *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
+	Bundle         *ResourceRef           `protobuf:"bytes,2,opt,name=bundle,proto3" json:"bundle,omitempty"`
+	ExpiresUnixMs  int64                  `protobuf:"varint,3,opt,name=expires_unix_ms,json=expiresUnixMs,proto3" json:"expires_unix_ms,omitempty"`
+	TargetRevision uint64                 `protobuf:"varint,4,opt,name=target_revision,json=targetRevision,proto3" json:"target_revision,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Prepare) Reset() {
 	*x = Prepare{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[38]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3472,7 +3758,7 @@ func (x *Prepare) String() string {
 func (*Prepare) ProtoMessage() {}
 
 func (x *Prepare) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[38]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3485,7 +3771,7 @@ func (x *Prepare) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Prepare.ProtoReflect.Descriptor instead.
 func (*Prepare) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{38}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *Prepare) GetRelease() *ReleaseIdentity {
@@ -3509,18 +3795,29 @@ func (x *Prepare) GetExpiresUnixMs() int64 {
 	return 0
 }
 
+func (x *Prepare) GetTargetRevision() uint64 {
+	if x != nil {
+		return x.TargetRevision
+	}
+	return 0
+}
+
 type Activate struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Release          *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
-	PolicyRevision   uint64                 `protobuf:"varint,2,opt,name=policy_revision,json=policyRevision,proto3" json:"policy_revision,omitempty"`
-	PreparedRevision uint64                 `protobuf:"varint,3,opt,name=prepared_revision,json=preparedRevision,proto3" json:"prepared_revision,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Release           *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
+	PolicyRevision    uint64                 `protobuf:"varint,2,opt,name=policy_revision,json=policyRevision,proto3" json:"policy_revision,omitempty"`
+	PreparedRevision  uint64                 `protobuf:"varint,3,opt,name=prepared_revision,json=preparedRevision,proto3" json:"prepared_revision,omitempty"`
+	View              *ResourceRef           `protobuf:"bytes,4,opt,name=view,proto3" json:"view,omitempty"`
+	DiscoveryRevision uint64                 `protobuf:"varint,5,opt,name=discovery_revision,json=discoveryRevision,proto3" json:"discovery_revision,omitempty"`
+	RevocationEpoch   uint64                 `protobuf:"varint,6,opt,name=revocation_epoch,json=revocationEpoch,proto3" json:"revocation_epoch,omitempty"`
+	ExpiresUnixMs     int64                  `protobuf:"varint,7,opt,name=expires_unix_ms,json=expiresUnixMs,proto3" json:"expires_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Activate) Reset() {
 	*x = Activate{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[39]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3532,7 +3829,7 @@ func (x *Activate) String() string {
 func (*Activate) ProtoMessage() {}
 
 func (x *Activate) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[39]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3545,7 +3842,7 @@ func (x *Activate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Activate.ProtoReflect.Descriptor instead.
 func (*Activate) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{39}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *Activate) GetRelease() *ReleaseIdentity {
@@ -3569,6 +3866,126 @@ func (x *Activate) GetPreparedRevision() uint64 {
 	return 0
 }
 
+func (x *Activate) GetView() *ResourceRef {
+	if x != nil {
+		return x.View
+	}
+	return nil
+}
+
+func (x *Activate) GetDiscoveryRevision() uint64 {
+	if x != nil {
+		return x.DiscoveryRevision
+	}
+	return 0
+}
+
+func (x *Activate) GetRevocationEpoch() uint64 {
+	if x != nil {
+		return x.RevocationEpoch
+	}
+	return 0
+}
+
+func (x *Activate) GetExpiresUnixMs() int64 {
+	if x != nil {
+		return x.ExpiresUnixMs
+	}
+	return 0
+}
+
+type ActivationReportAck struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Release         *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
+	CommandId       string                 `protobuf:"bytes,2,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	ReportRevision  uint64                 `protobuf:"varint,3,opt,name=report_revision,json=reportRevision,proto3" json:"report_revision,omitempty"`
+	ReceivedUnixMs  int64                  `protobuf:"varint,4,opt,name=received_unix_ms,json=receivedUnixMs,proto3" json:"received_unix_ms,omitempty"`
+	Rejected        bool                   `protobuf:"varint,5,opt,name=rejected,proto3" json:"rejected,omitempty"`
+	State           ReleaseState           `protobuf:"varint,6,opt,name=state,proto3,enum=grayling.agent.v1.ReleaseState" json:"state,omitempty"`
+	ReleaseRevision uint64                 `protobuf:"varint,7,opt,name=release_revision,json=releaseRevision,proto3" json:"release_revision,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ActivationReportAck) Reset() {
+	*x = ActivationReportAck{}
+	mi := &file_api_agent_v1_agent_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActivationReportAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActivationReportAck) ProtoMessage() {}
+
+func (x *ActivationReportAck) ProtoReflect() protoreflect.Message {
+	mi := &file_api_agent_v1_agent_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActivationReportAck.ProtoReflect.Descriptor instead.
+func (*ActivationReportAck) Descriptor() ([]byte, []int) {
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *ActivationReportAck) GetRelease() *ReleaseIdentity {
+	if x != nil {
+		return x.Release
+	}
+	return nil
+}
+
+func (x *ActivationReportAck) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *ActivationReportAck) GetReportRevision() uint64 {
+	if x != nil {
+		return x.ReportRevision
+	}
+	return 0
+}
+
+func (x *ActivationReportAck) GetReceivedUnixMs() int64 {
+	if x != nil {
+		return x.ReceivedUnixMs
+	}
+	return 0
+}
+
+func (x *ActivationReportAck) GetRejected() bool {
+	if x != nil {
+		return x.Rejected
+	}
+	return false
+}
+
+func (x *ActivationReportAck) GetState() ReleaseState {
+	if x != nil {
+		return x.State
+	}
+	return ReleaseState_RELEASE_STATE_UNSPECIFIED
+}
+
+func (x *ActivationReportAck) GetReleaseRevision() uint64 {
+	if x != nil {
+		return x.ReleaseRevision
+	}
+	return 0
+}
+
 type Abort struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Release       *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
@@ -3579,7 +3996,7 @@ type Abort struct {
 
 func (x *Abort) Reset() {
 	*x = Abort{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[40]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3591,7 +4008,7 @@ func (x *Abort) String() string {
 func (*Abort) ProtoMessage() {}
 
 func (x *Abort) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[40]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3604,7 +4021,7 @@ func (x *Abort) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Abort.ProtoReflect.Descriptor instead.
 func (*Abort) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{40}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *Abort) GetRelease() *ReleaseIdentity {
@@ -3621,18 +4038,21 @@ func (x *Abort) GetReason() string {
 	return ""
 }
 
+// release.revoke requires the signed view. Its cumulative per-Bundle cancellation
+// set is authoritative; cancel_active_streams only summarizes whether any exists.
 type Revoke struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	Epoch               uint64                 `protobuf:"varint,1,opt,name=epoch,proto3" json:"epoch,omitempty"`
 	BundleHashes        []string               `protobuf:"bytes,2,rep,name=bundle_hashes,json=bundleHashes,proto3" json:"bundle_hashes,omitempty"`
 	CancelActiveStreams bool                   `protobuf:"varint,3,opt,name=cancel_active_streams,json=cancelActiveStreams,proto3" json:"cancel_active_streams,omitempty"`
+	View                *ResourceRef           `protobuf:"bytes,4,opt,name=view,proto3" json:"view,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
 
 func (x *Revoke) Reset() {
 	*x = Revoke{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[41]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3644,7 +4064,7 @@ func (x *Revoke) String() string {
 func (*Revoke) ProtoMessage() {}
 
 func (x *Revoke) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[41]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3657,7 +4077,7 @@ func (x *Revoke) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Revoke.ProtoReflect.Descriptor instead.
 func (*Revoke) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{41}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *Revoke) GetEpoch() uint64 {
@@ -3681,19 +4101,33 @@ func (x *Revoke) GetCancelActiveStreams() bool {
 	return false
 }
 
+func (x *Revoke) GetView() *ResourceRef {
+	if x != nil {
+		return x.View
+	}
+	return nil
+}
+
 type ReleaseStatus struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Release       *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
-	State         ReleaseState           `protobuf:"varint,2,opt,name=state,proto3,enum=grayling.agent.v1.ReleaseState" json:"state,omitempty"`
-	Applied       []*Applied             `protobuf:"bytes,3,rep,name=applied,proto3" json:"applied,omitempty"`
-	Rejected      []*Rejected            `protobuf:"bytes,4,rep,name=rejected,proto3" json:"rejected,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                      protoimpl.MessageState `protogen:"open.v1"`
+	Release                    *ReleaseIdentity       `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
+	State                      ReleaseState           `protobuf:"varint,2,opt,name=state,proto3,enum=grayling.agent.v1.ReleaseState" json:"state,omitempty"`
+	Applied                    []*Applied             `protobuf:"bytes,3,rep,name=applied,proto3" json:"applied,omitempty"`
+	Rejected                   []*Rejected            `protobuf:"bytes,4,rep,name=rejected,proto3" json:"rejected,omitempty"`
+	ReleaseRevision            uint64                 `protobuf:"varint,5,opt,name=release_revision,json=releaseRevision,proto3" json:"release_revision,omitempty"`
+	ReportRevision             uint64                 `protobuf:"varint,6,opt,name=report_revision,json=reportRevision,proto3" json:"report_revision,omitempty"`
+	NextInstanceId             string                 `protobuf:"bytes,7,opt,name=next_instance_id,json=nextInstanceId,proto3" json:"next_instance_id,omitempty"`
+	More                       bool                   `protobuf:"varint,8,opt,name=more,proto3" json:"more,omitempty"`
+	RequiredSources            uint64                 `protobuf:"varint,9,opt,name=required_sources,json=requiredSources,proto3" json:"required_sources,omitempty"`
+	PendingSourceIds           []string               `protobuf:"bytes,10,rep,name=pending_source_ids,json=pendingSourceIds,proto3" json:"pending_source_ids,omitempty"`
+	ActivationArtifactRevision uint64                 `protobuf:"varint,11,opt,name=activation_artifact_revision,json=activationArtifactRevision,proto3" json:"activation_artifact_revision,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
 }
 
 func (x *ReleaseStatus) Reset() {
 	*x = ReleaseStatus{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[42]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3705,7 +4139,7 @@ func (x *ReleaseStatus) String() string {
 func (*ReleaseStatus) ProtoMessage() {}
 
 func (x *ReleaseStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[42]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3718,7 +4152,7 @@ func (x *ReleaseStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseStatus.ProtoReflect.Descriptor instead.
 func (*ReleaseStatus) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{42}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *ReleaseStatus) GetRelease() *ReleaseIdentity {
@@ -3749,6 +4183,55 @@ func (x *ReleaseStatus) GetRejected() []*Rejected {
 	return nil
 }
 
+func (x *ReleaseStatus) GetReleaseRevision() uint64 {
+	if x != nil {
+		return x.ReleaseRevision
+	}
+	return 0
+}
+
+func (x *ReleaseStatus) GetReportRevision() uint64 {
+	if x != nil {
+		return x.ReportRevision
+	}
+	return 0
+}
+
+func (x *ReleaseStatus) GetNextInstanceId() string {
+	if x != nil {
+		return x.NextInstanceId
+	}
+	return ""
+}
+
+func (x *ReleaseStatus) GetMore() bool {
+	if x != nil {
+		return x.More
+	}
+	return false
+}
+
+func (x *ReleaseStatus) GetRequiredSources() uint64 {
+	if x != nil {
+		return x.RequiredSources
+	}
+	return 0
+}
+
+func (x *ReleaseStatus) GetPendingSourceIds() []string {
+	if x != nil {
+		return x.PendingSourceIds
+	}
+	return nil
+}
+
+func (x *ReleaseStatus) GetActivationArtifactRevision() uint64 {
+	if x != nil {
+		return x.ActivationArtifactRevision
+	}
+	return 0
+}
+
 type ReadinessReport struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	InstanceId    string                 `protobuf:"bytes,1,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
@@ -3761,7 +4244,7 @@ type ReadinessReport struct {
 
 func (x *ReadinessReport) Reset() {
 	*x = ReadinessReport{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[43]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3773,7 +4256,7 @@ func (x *ReadinessReport) String() string {
 func (*ReadinessReport) ProtoMessage() {}
 
 func (x *ReadinessReport) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[43]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3786,7 +4269,7 @@ func (x *ReadinessReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadinessReport.ProtoReflect.Descriptor instead.
 func (*ReadinessReport) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{43}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *ReadinessReport) GetInstanceId() string {
@@ -3830,7 +4313,7 @@ type DrainReport struct {
 
 func (x *DrainReport) Reset() {
 	*x = DrainReport{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[44]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3842,7 +4325,7 @@ func (x *DrainReport) String() string {
 func (*DrainReport) ProtoMessage() {}
 
 func (x *DrainReport) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[44]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3855,7 +4338,7 @@ func (x *DrainReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DrainReport.ProtoReflect.Descriptor instead.
 func (*DrainReport) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{44}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *DrainReport) GetInstanceId() string {
@@ -3903,7 +4386,7 @@ type DrainRequested struct {
 
 func (x *DrainRequested) Reset() {
 	*x = DrainRequested{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[45]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3915,7 +4398,7 @@ func (x *DrainRequested) String() string {
 func (*DrainRequested) ProtoMessage() {}
 
 func (x *DrainRequested) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[45]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3928,7 +4411,7 @@ func (x *DrainRequested) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DrainRequested.ProtoReflect.Descriptor instead.
 func (*DrainRequested) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{45}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *DrainRequested) GetStopAcceptingUnixMs() int64 {
@@ -3955,7 +4438,7 @@ type DrainStatus struct {
 
 func (x *DrainStatus) Reset() {
 	*x = DrainStatus{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[46]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3967,7 +4450,7 @@ func (x *DrainStatus) String() string {
 func (*DrainStatus) ProtoMessage() {}
 
 func (x *DrainStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[46]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3980,7 +4463,7 @@ func (x *DrainStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DrainStatus.ProtoReflect.Descriptor instead.
 func (*DrainStatus) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{46}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *DrainStatus) GetComplete() bool {
@@ -4009,7 +4492,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[47]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4021,7 +4504,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[47]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4034,7 +4517,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{47}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *Event) GetEventId() string {
@@ -4075,7 +4558,7 @@ type EventBatch struct {
 
 func (x *EventBatch) Reset() {
 	*x = EventBatch{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[48]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4087,7 +4570,7 @@ func (x *EventBatch) String() string {
 func (*EventBatch) ProtoMessage() {}
 
 func (x *EventBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[48]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4100,7 +4583,7 @@ func (x *EventBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventBatch.ProtoReflect.Descriptor instead.
 func (*EventBatch) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{48}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *EventBatch) GetEvents() []*Event {
@@ -4128,7 +4611,7 @@ type EventResult struct {
 
 func (x *EventResult) Reset() {
 	*x = EventResult{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[49]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4140,7 +4623,7 @@ func (x *EventResult) String() string {
 func (*EventResult) ProtoMessage() {}
 
 func (x *EventResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[49]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4153,7 +4636,7 @@ func (x *EventResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventResult.ProtoReflect.Descriptor instead.
 func (*EventResult) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{49}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *EventResult) GetEventId() string {
@@ -4187,7 +4670,7 @@ type EventBatchAck struct {
 
 func (x *EventBatchAck) Reset() {
 	*x = EventBatchAck{}
-	mi := &file_api_agent_v1_agent_proto_msgTypes[50]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4199,7 +4682,7 @@ func (x *EventBatchAck) String() string {
 func (*EventBatchAck) ProtoMessage() {}
 
 func (x *EventBatchAck) ProtoReflect() protoreflect.Message {
-	mi := &file_api_agent_v1_agent_proto_msgTypes[50]
+	mi := &file_api_agent_v1_agent_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4212,7 +4695,7 @@ func (x *EventBatchAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventBatchAck.ProtoReflect.Descriptor instead.
 func (*EventBatchAck) Descriptor() ([]byte, []int) {
-	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{50}
+	return file_api_agent_v1_agent_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *EventBatchAck) GetResults() []*EventResult {
@@ -4233,7 +4716,7 @@ var File_api_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_api_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x18api/agent/v1/agent.proto\x12\x11grayling.agent.v1\"\xaf\x19\n" +
+	"\x18api/agent/v1/agent.proto\x12\x11grayling.agent.v1\"\xad\x1b\n" +
 	"\bEnvelope\x12%\n" +
 	"\x0eprotocol_major\x18\x01 \x01(\rR\rprotocolMajor\x12%\n" +
 	"\x0eprotocol_minor\x18\x02 \x01(\rR\rprotocolMinor\x12\x1d\n" +
@@ -4291,11 +4774,14 @@ const file_api_agent_v1_agent_proto_rawDesc = "" +
 	"\bactivate\x18A \x01(\v2\x1b.grayling.agent.v1.ActivateH\x00R\bactivate\x120\n" +
 	"\x05abort\x18B \x01(\v2\x18.grayling.agent.v1.AbortH\x00R\x05abort\x123\n" +
 	"\x06revoke\x18C \x01(\v2\x19.grayling.agent.v1.RevokeH\x00R\x06revoke\x12I\n" +
-	"\x0erelease_status\x18D \x01(\v2 .grayling.agent.v1.ReleaseStatusH\x00R\rreleaseStatus\x12O\n" +
+	"\x0erelease_status\x18D \x01(\v2 .grayling.agent.v1.ReleaseStatusH\x00R\rreleaseStatus\x12C\n" +
+	"\fprepared_ack\x18E \x01(\v2\x1e.grayling.agent.v1.PreparedAckH\x00R\vpreparedAck\x12O\n" +
 	"\x10readiness_report\x18F \x01(\v2\".grayling.agent.v1.ReadinessReportH\x00R\x0freadinessReport\x12C\n" +
 	"\fdrain_report\x18G \x01(\v2\x1e.grayling.agent.v1.DrainReportH\x00R\vdrainReport\x12L\n" +
 	"\x0fdrain_requested\x18H \x01(\v2!.grayling.agent.v1.DrainRequestedH\x00R\x0edrainRequested\x12C\n" +
-	"\fdrain_status\x18I \x01(\v2\x1e.grayling.agent.v1.DrainStatusH\x00R\vdrainStatus\x12@\n" +
+	"\fdrain_status\x18I \x01(\v2\x1e.grayling.agent.v1.DrainStatusH\x00R\vdrainStatus\x12Y\n" +
+	"\x14prepare_rejected_ack\x18J \x01(\v2%.grayling.agent.v1.PrepareRejectedAckH\x00R\x12prepareRejectedAck\x12\\\n" +
+	"\x15activation_report_ack\x18K \x01(\v2&.grayling.agent.v1.ActivationReportAckH\x00R\x13activationReportAck\x12@\n" +
 	"\vevent_batch\x18P \x01(\v2\x1d.grayling.agent.v1.EventBatchH\x00R\n" +
 	"eventBatch\x12J\n" +
 	"\x0fevent_batch_ack\x18Q \x01(\v2 .grayling.agent.v1.EventBatchAckH\x00R\reventBatchAckB\t\n" +
@@ -4470,7 +4956,21 @@ const file_api_agent_v1_agent_proto_rawDesc = "" +
 	"\x19accepted_protocol_version\x18\x05 \x01(\rR\x17acceptedProtocolVersion\x12(\n" +
 	"\x10prepared_unix_ms\x18\x06 \x01(\x03R\x0epreparedUnixMs\x12&\n" +
 	"\x0fexpires_unix_ms\x18\a \x01(\x03R\rexpiresUnixMs\x12-\n" +
-	"\x12applied_generation\x18\b \x01(\x04R\x11appliedGeneration\"\xb1\x02\n" +
+	"\x12applied_generation\x18\b \x01(\x04R\x11appliedGeneration\"\xe9\x01\n" +
+	"\vPreparedAck\x12<\n" +
+	"\arelease\x18\x01 \x01(\v2\".grayling.agent.v1.ReleaseIdentityR\arelease\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x02 \x01(\tR\tcommandId\x12+\n" +
+	"\x11evidence_revision\x18\x03 \x01(\x04R\x10evidenceRevision\x12(\n" +
+	"\x10received_unix_ms\x18\x04 \x01(\x03R\x0ereceivedUnixMs\x12&\n" +
+	"\x0fexpires_unix_ms\x18\x05 \x01(\x03R\rexpiresUnixMs\"\xf0\x01\n" +
+	"\x12PrepareRejectedAck\x12<\n" +
+	"\arelease\x18\x01 \x01(\v2\".grayling.agent.v1.ReleaseIdentityR\arelease\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x02 \x01(\tR\tcommandId\x12+\n" +
+	"\x11evidence_revision\x18\x03 \x01(\x04R\x10evidenceRevision\x12(\n" +
+	"\x10received_unix_ms\x18\x04 \x01(\x03R\x0ereceivedUnixMs\x12&\n" +
+	"\x0fexpires_unix_ms\x18\x05 \x01(\x03R\rexpiresUnixMs\"\xa3\x03\n" +
 	"\aApplied\x12<\n" +
 	"\arelease\x18\x01 \x01(\v2\".grayling.agent.v1.ReleaseIdentityR\arelease\x12\x1f\n" +
 	"\vinstance_id\x18\x02 \x01(\tR\n" +
@@ -4479,34 +4979,71 @@ const file_api_agent_v1_agent_proto_rawDesc = "" +
 	"\x0fpolicy_revision\x18\x04 \x01(\x04R\x0epolicyRevision\x12-\n" +
 	"\x12discovery_revision\x18\x05 \x01(\x04R\x11discoveryRevision\x12+\n" +
 	"\x11prepared_revision\x18\x06 \x01(\x04R\x10preparedRevision\x12)\n" +
-	"\x10revocation_epoch\x18\a \x01(\x04R\x0frevocationEpoch\"x\n" +
+	"\x10revocation_epoch\x18\a \x01(\x04R\x0frevocationEpoch\x12@\n" +
+	"\x1cactivation_artifact_revision\x18\b \x01(\x04R\x1aactivationArtifactRevision\x12.\n" +
+	"\x13control_plane_epoch\x18\t \x01(\x04R\x11controlPlaneEpoch\"\xf4\x01\n" +
 	"\bRejected\x12<\n" +
 	"\arelease\x18\x01 \x01(\v2\".grayling.agent.v1.ReleaseIdentityR\arelease\x12.\n" +
-	"\x05error\x18\x02 \x01(\v2\x18.grayling.agent.v1.ErrorR\x05error\"V\n" +
+	"\x05error\x18\x02 \x01(\v2\x18.grayling.agent.v1.ErrorR\x05error\x12\x1f\n" +
+	"\vinstance_id\x18\x03 \x01(\tR\n" +
+	"instanceId\x12\x17\n" +
+	"\aboot_id\x18\x04 \x01(\tR\x06bootId\x12@\n" +
+	"\x1cactivation_artifact_revision\x18\x05 \x01(\x04R\x1aactivationArtifactRevision\"\xdc\x03\n" +
 	"\x12ReleaseStatusQuery\x12\x1d\n" +
 	"\n" +
 	"release_id\x18\x01 \x01(\tR\treleaseId\x12!\n" +
-	"\foperation_id\x18\x02 \x01(\tR\voperationId\"\xa7\x01\n" +
+	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x1b\n" +
+	"\tpage_size\x18\x03 \x01(\rR\bpageSize\x12*\n" +
+	"\x11after_instance_id\x18\x04 \x01(\tR\x0fafterInstanceId\x12=\n" +
+	"\x18expected_report_revision\x18\x05 \x01(\x04H\x00R\x16expectedReportRevision\x88\x01\x01\x12?\n" +
+	"\x19expected_release_revision\x18\x06 \x01(\x04H\x01R\x17expectedReleaseRevision\x88\x01\x01\x12V\n" +
+	"%expected_activation_artifact_revision\x18\a \x01(\x04H\x02R\"expectedActivationArtifactRevision\x88\x01\x01B\x1b\n" +
+	"\x19_expected_report_revisionB\x1c\n" +
+	"\x1a_expected_release_revisionB(\n" +
+	"&_expected_activation_artifact_revision\"\xd0\x01\n" +
 	"\aPrepare\x12<\n" +
 	"\arelease\x18\x01 \x01(\v2\".grayling.agent.v1.ReleaseIdentityR\arelease\x126\n" +
 	"\x06bundle\x18\x02 \x01(\v2\x1e.grayling.agent.v1.ResourceRefR\x06bundle\x12&\n" +
-	"\x0fexpires_unix_ms\x18\x03 \x01(\x03R\rexpiresUnixMs\"\x9e\x01\n" +
+	"\x0fexpires_unix_ms\x18\x03 \x01(\x03R\rexpiresUnixMs\x12'\n" +
+	"\x0ftarget_revision\x18\x04 \x01(\x04R\x0etargetRevision\"\xd4\x02\n" +
 	"\bActivate\x12<\n" +
 	"\arelease\x18\x01 \x01(\v2\".grayling.agent.v1.ReleaseIdentityR\arelease\x12'\n" +
 	"\x0fpolicy_revision\x18\x02 \x01(\x04R\x0epolicyRevision\x12+\n" +
-	"\x11prepared_revision\x18\x03 \x01(\x04R\x10preparedRevision\"]\n" +
+	"\x11prepared_revision\x18\x03 \x01(\x04R\x10preparedRevision\x122\n" +
+	"\x04view\x18\x04 \x01(\v2\x1e.grayling.agent.v1.ResourceRefR\x04view\x12-\n" +
+	"\x12discovery_revision\x18\x05 \x01(\x04R\x11discoveryRevision\x12)\n" +
+	"\x10revocation_epoch\x18\x06 \x01(\x04R\x0frevocationEpoch\x12&\n" +
+	"\x0fexpires_unix_ms\x18\a \x01(\x03R\rexpiresUnixMs\"\xc3\x02\n" +
+	"\x13ActivationReportAck\x12<\n" +
+	"\arelease\x18\x01 \x01(\v2\".grayling.agent.v1.ReleaseIdentityR\arelease\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x02 \x01(\tR\tcommandId\x12'\n" +
+	"\x0freport_revision\x18\x03 \x01(\x04R\x0ereportRevision\x12(\n" +
+	"\x10received_unix_ms\x18\x04 \x01(\x03R\x0ereceivedUnixMs\x12\x1a\n" +
+	"\brejected\x18\x05 \x01(\bR\brejected\x125\n" +
+	"\x05state\x18\x06 \x01(\x0e2\x1f.grayling.agent.v1.ReleaseStateR\x05state\x12)\n" +
+	"\x10release_revision\x18\a \x01(\x04R\x0freleaseRevision\"]\n" +
 	"\x05Abort\x12<\n" +
 	"\arelease\x18\x01 \x01(\v2\".grayling.agent.v1.ReleaseIdentityR\arelease\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"w\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xab\x01\n" +
 	"\x06Revoke\x12\x14\n" +
 	"\x05epoch\x18\x01 \x01(\x04R\x05epoch\x12#\n" +
 	"\rbundle_hashes\x18\x02 \x03(\tR\fbundleHashes\x122\n" +
-	"\x15cancel_active_streams\x18\x03 \x01(\bR\x13cancelActiveStreams\"\xf3\x01\n" +
+	"\x15cancel_active_streams\x18\x03 \x01(\bR\x13cancelActiveStreams\x122\n" +
+	"\x04view\x18\x04 \x01(\v2\x1e.grayling.agent.v1.ResourceRefR\x04view\"\xa0\x04\n" +
 	"\rReleaseStatus\x12<\n" +
 	"\arelease\x18\x01 \x01(\v2\".grayling.agent.v1.ReleaseIdentityR\arelease\x125\n" +
 	"\x05state\x18\x02 \x01(\x0e2\x1f.grayling.agent.v1.ReleaseStateR\x05state\x124\n" +
 	"\aapplied\x18\x03 \x03(\v2\x1a.grayling.agent.v1.AppliedR\aapplied\x127\n" +
-	"\brejected\x18\x04 \x03(\v2\x1b.grayling.agent.v1.RejectedR\brejected\"y\n" +
+	"\brejected\x18\x04 \x03(\v2\x1b.grayling.agent.v1.RejectedR\brejected\x12)\n" +
+	"\x10release_revision\x18\x05 \x01(\x04R\x0freleaseRevision\x12'\n" +
+	"\x0freport_revision\x18\x06 \x01(\x04R\x0ereportRevision\x12(\n" +
+	"\x10next_instance_id\x18\a \x01(\tR\x0enextInstanceId\x12\x12\n" +
+	"\x04more\x18\b \x01(\bR\x04more\x12)\n" +
+	"\x10required_sources\x18\t \x01(\x04R\x0frequiredSources\x12,\n" +
+	"\x12pending_source_ids\x18\n" +
+	" \x03(\tR\x10pendingSourceIds\x12@\n" +
+	"\x1cactivation_artifact_revision\x18\v \x01(\x04R\x1aactivationArtifactRevision\"y\n" +
 	"\x0fReadinessReport\x12\x1f\n" +
 	"\vinstance_id\x18\x01 \x01(\tR\n" +
 	"instanceId\x12\x17\n" +
@@ -4541,13 +5078,14 @@ const file_api_agent_v1_agent_proto_rawDesc = "" +
 	"\x05error\x18\x03 \x01(\v2\x18.grayling.agent.v1.ErrorR\x05error\"|\n" +
 	"\rEventBatchAck\x128\n" +
 	"\aresults\x18\x01 \x03(\v2\x1e.grayling.agent.v1.EventResultR\aresults\x121\n" +
-	"\x15dedup_expires_unix_ms\x18\x02 \x01(\x03R\x12dedupExpiresUnixMs*\x9c\x01\n" +
+	"\x15dedup_expires_unix_ms\x18\x02 \x01(\x03R\x12dedupExpiresUnixMs*\xba\x01\n" +
 	"\fResourceKind\x12\x1d\n" +
 	"\x19RESOURCE_KIND_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14RESOURCE_KIND_POLICY\x10\x01\x12\x1b\n" +
 	"\x17RESOURCE_KIND_DISCOVERY\x10\x02\x12\x18\n" +
 	"\x14RESOURCE_KIND_BUNDLE\x10\x03\x12\x1c\n" +
-	"\x18RESOURCE_KIND_REVOCATION\x10\x04*\xbb\x03\n" +
+	"\x18RESOURCE_KIND_REVOCATION\x10\x04\x12\x1c\n" +
+	"\x18RESOURCE_KIND_ACTIVATION\x10\x05*\xbb\x03\n" +
 	"\tErrorCode\x12\x1a\n" +
 	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aERROR_CODE_UNAUTHENTICATED\x10\x01\x12 \n" +
@@ -4593,62 +5131,65 @@ func file_api_agent_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_api_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_api_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
+var file_api_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
 var file_api_agent_v1_agent_proto_goTypes = []any{
-	(ResourceKind)(0),          // 0: grayling.agent.v1.ResourceKind
-	(ErrorCode)(0),             // 1: grayling.agent.v1.ErrorCode
-	(ReleaseState)(0),          // 2: grayling.agent.v1.ReleaseState
-	(*Envelope)(nil),           // 3: grayling.agent.v1.Envelope
-	(*Scope)(nil),              // 4: grayling.agent.v1.Scope
-	(*Cursor)(nil),             // 5: grayling.agent.v1.Cursor
-	(*Hello)(nil),              // 6: grayling.agent.v1.Hello
-	(*Limits)(nil),             // 7: grayling.agent.v1.Limits
-	(*Welcome)(nil),            // 8: grayling.agent.v1.Welcome
-	(*Heartbeat)(nil),          // 9: grayling.agent.v1.Heartbeat
-	(*HeartbeatAck)(nil),       // 10: grayling.agent.v1.HeartbeatAck
-	(*Goodbye)(nil),            // 11: grayling.agent.v1.Goodbye
-	(*GoAway)(nil),             // 12: grayling.agent.v1.GoAway
-	(*Error)(nil),              // 13: grayling.agent.v1.Error
-	(*Subscribe)(nil),          // 14: grayling.agent.v1.Subscribe
-	(*Unsubscribe)(nil),        // 15: grayling.agent.v1.Unsubscribe
-	(*Resume)(nil),             // 16: grayling.agent.v1.Resume
-	(*Snapshot)(nil),           // 17: grayling.agent.v1.Snapshot
-	(*Delta)(nil),              // 18: grayling.agent.v1.Delta
-	(*Invalidated)(nil),        // 19: grayling.agent.v1.Invalidated
-	(*ResyncRequired)(nil),     // 20: grayling.agent.v1.ResyncRequired
-	(*Instance)(nil),           // 21: grayling.agent.v1.Instance
-	(*Lease)(nil),              // 22: grayling.agent.v1.Lease
-	(*Register)(nil),           // 23: grayling.agent.v1.Register
-	(*RenewLease)(nil),         // 24: grayling.agent.v1.RenewLease
-	(*UpdateInstance)(nil),     // 25: grayling.agent.v1.UpdateInstance
-	(*Deregister)(nil),         // 26: grayling.agent.v1.Deregister
-	(*Registered)(nil),         // 27: grayling.agent.v1.Registered
-	(*LeaseRenewed)(nil),       // 28: grayling.agent.v1.LeaseRenewed
-	(*InstanceChanged)(nil),    // 29: grayling.agent.v1.InstanceChanged
-	(*FetchResource)(nil),      // 30: grayling.agent.v1.FetchResource
-	(*ResourceApplied)(nil),    // 31: grayling.agent.v1.ResourceApplied
-	(*ResourceRejected)(nil),   // 32: grayling.agent.v1.ResourceRejected
-	(*ResourceRef)(nil),        // 33: grayling.agent.v1.ResourceRef
-	(*SignedResource)(nil),     // 34: grayling.agent.v1.SignedResource
-	(*ConfigInvalidated)(nil),  // 35: grayling.agent.v1.ConfigInvalidated
-	(*ReleaseIdentity)(nil),    // 36: grayling.agent.v1.ReleaseIdentity
-	(*Prepared)(nil),           // 37: grayling.agent.v1.Prepared
-	(*Applied)(nil),            // 38: grayling.agent.v1.Applied
-	(*Rejected)(nil),           // 39: grayling.agent.v1.Rejected
-	(*ReleaseStatusQuery)(nil), // 40: grayling.agent.v1.ReleaseStatusQuery
-	(*Prepare)(nil),            // 41: grayling.agent.v1.Prepare
-	(*Activate)(nil),           // 42: grayling.agent.v1.Activate
-	(*Abort)(nil),              // 43: grayling.agent.v1.Abort
-	(*Revoke)(nil),             // 44: grayling.agent.v1.Revoke
-	(*ReleaseStatus)(nil),      // 45: grayling.agent.v1.ReleaseStatus
-	(*ReadinessReport)(nil),    // 46: grayling.agent.v1.ReadinessReport
-	(*DrainReport)(nil),        // 47: grayling.agent.v1.DrainReport
-	(*DrainRequested)(nil),     // 48: grayling.agent.v1.DrainRequested
-	(*DrainStatus)(nil),        // 49: grayling.agent.v1.DrainStatus
-	(*Event)(nil),              // 50: grayling.agent.v1.Event
-	(*EventBatch)(nil),         // 51: grayling.agent.v1.EventBatch
-	(*EventResult)(nil),        // 52: grayling.agent.v1.EventResult
-	(*EventBatchAck)(nil),      // 53: grayling.agent.v1.EventBatchAck
+	(ResourceKind)(0),           // 0: grayling.agent.v1.ResourceKind
+	(ErrorCode)(0),              // 1: grayling.agent.v1.ErrorCode
+	(ReleaseState)(0),           // 2: grayling.agent.v1.ReleaseState
+	(*Envelope)(nil),            // 3: grayling.agent.v1.Envelope
+	(*Scope)(nil),               // 4: grayling.agent.v1.Scope
+	(*Cursor)(nil),              // 5: grayling.agent.v1.Cursor
+	(*Hello)(nil),               // 6: grayling.agent.v1.Hello
+	(*Limits)(nil),              // 7: grayling.agent.v1.Limits
+	(*Welcome)(nil),             // 8: grayling.agent.v1.Welcome
+	(*Heartbeat)(nil),           // 9: grayling.agent.v1.Heartbeat
+	(*HeartbeatAck)(nil),        // 10: grayling.agent.v1.HeartbeatAck
+	(*Goodbye)(nil),             // 11: grayling.agent.v1.Goodbye
+	(*GoAway)(nil),              // 12: grayling.agent.v1.GoAway
+	(*Error)(nil),               // 13: grayling.agent.v1.Error
+	(*Subscribe)(nil),           // 14: grayling.agent.v1.Subscribe
+	(*Unsubscribe)(nil),         // 15: grayling.agent.v1.Unsubscribe
+	(*Resume)(nil),              // 16: grayling.agent.v1.Resume
+	(*Snapshot)(nil),            // 17: grayling.agent.v1.Snapshot
+	(*Delta)(nil),               // 18: grayling.agent.v1.Delta
+	(*Invalidated)(nil),         // 19: grayling.agent.v1.Invalidated
+	(*ResyncRequired)(nil),      // 20: grayling.agent.v1.ResyncRequired
+	(*Instance)(nil),            // 21: grayling.agent.v1.Instance
+	(*Lease)(nil),               // 22: grayling.agent.v1.Lease
+	(*Register)(nil),            // 23: grayling.agent.v1.Register
+	(*RenewLease)(nil),          // 24: grayling.agent.v1.RenewLease
+	(*UpdateInstance)(nil),      // 25: grayling.agent.v1.UpdateInstance
+	(*Deregister)(nil),          // 26: grayling.agent.v1.Deregister
+	(*Registered)(nil),          // 27: grayling.agent.v1.Registered
+	(*LeaseRenewed)(nil),        // 28: grayling.agent.v1.LeaseRenewed
+	(*InstanceChanged)(nil),     // 29: grayling.agent.v1.InstanceChanged
+	(*FetchResource)(nil),       // 30: grayling.agent.v1.FetchResource
+	(*ResourceApplied)(nil),     // 31: grayling.agent.v1.ResourceApplied
+	(*ResourceRejected)(nil),    // 32: grayling.agent.v1.ResourceRejected
+	(*ResourceRef)(nil),         // 33: grayling.agent.v1.ResourceRef
+	(*SignedResource)(nil),      // 34: grayling.agent.v1.SignedResource
+	(*ConfigInvalidated)(nil),   // 35: grayling.agent.v1.ConfigInvalidated
+	(*ReleaseIdentity)(nil),     // 36: grayling.agent.v1.ReleaseIdentity
+	(*Prepared)(nil),            // 37: grayling.agent.v1.Prepared
+	(*PreparedAck)(nil),         // 38: grayling.agent.v1.PreparedAck
+	(*PrepareRejectedAck)(nil),  // 39: grayling.agent.v1.PrepareRejectedAck
+	(*Applied)(nil),             // 40: grayling.agent.v1.Applied
+	(*Rejected)(nil),            // 41: grayling.agent.v1.Rejected
+	(*ReleaseStatusQuery)(nil),  // 42: grayling.agent.v1.ReleaseStatusQuery
+	(*Prepare)(nil),             // 43: grayling.agent.v1.Prepare
+	(*Activate)(nil),            // 44: grayling.agent.v1.Activate
+	(*ActivationReportAck)(nil), // 45: grayling.agent.v1.ActivationReportAck
+	(*Abort)(nil),               // 46: grayling.agent.v1.Abort
+	(*Revoke)(nil),              // 47: grayling.agent.v1.Revoke
+	(*ReleaseStatus)(nil),       // 48: grayling.agent.v1.ReleaseStatus
+	(*ReadinessReport)(nil),     // 49: grayling.agent.v1.ReadinessReport
+	(*DrainReport)(nil),         // 50: grayling.agent.v1.DrainReport
+	(*DrainRequested)(nil),      // 51: grayling.agent.v1.DrainRequested
+	(*DrainStatus)(nil),         // 52: grayling.agent.v1.DrainStatus
+	(*Event)(nil),               // 53: grayling.agent.v1.Event
+	(*EventBatch)(nil),          // 54: grayling.agent.v1.EventBatch
+	(*EventResult)(nil),         // 55: grayling.agent.v1.EventResult
+	(*EventBatchAck)(nil),       // 56: grayling.agent.v1.EventBatchAck
 }
 var file_api_agent_v1_agent_proto_depIdxs = []int32{
 	0,  // 0: grayling.agent.v1.Envelope.resource_kind:type_name -> grayling.agent.v1.ResourceKind
@@ -4679,64 +5220,73 @@ var file_api_agent_v1_agent_proto_depIdxs = []int32{
 	33, // 25: grayling.agent.v1.Envelope.resource_ref:type_name -> grayling.agent.v1.ResourceRef
 	35, // 26: grayling.agent.v1.Envelope.config_invalidated:type_name -> grayling.agent.v1.ConfigInvalidated
 	37, // 27: grayling.agent.v1.Envelope.prepared:type_name -> grayling.agent.v1.Prepared
-	38, // 28: grayling.agent.v1.Envelope.applied:type_name -> grayling.agent.v1.Applied
-	39, // 29: grayling.agent.v1.Envelope.rejected:type_name -> grayling.agent.v1.Rejected
-	40, // 30: grayling.agent.v1.Envelope.release_status_query:type_name -> grayling.agent.v1.ReleaseStatusQuery
-	41, // 31: grayling.agent.v1.Envelope.prepare:type_name -> grayling.agent.v1.Prepare
-	42, // 32: grayling.agent.v1.Envelope.activate:type_name -> grayling.agent.v1.Activate
-	43, // 33: grayling.agent.v1.Envelope.abort:type_name -> grayling.agent.v1.Abort
-	44, // 34: grayling.agent.v1.Envelope.revoke:type_name -> grayling.agent.v1.Revoke
-	45, // 35: grayling.agent.v1.Envelope.release_status:type_name -> grayling.agent.v1.ReleaseStatus
-	46, // 36: grayling.agent.v1.Envelope.readiness_report:type_name -> grayling.agent.v1.ReadinessReport
-	47, // 37: grayling.agent.v1.Envelope.drain_report:type_name -> grayling.agent.v1.DrainReport
-	48, // 38: grayling.agent.v1.Envelope.drain_requested:type_name -> grayling.agent.v1.DrainRequested
-	49, // 39: grayling.agent.v1.Envelope.drain_status:type_name -> grayling.agent.v1.DrainStatus
-	51, // 40: grayling.agent.v1.Envelope.event_batch:type_name -> grayling.agent.v1.EventBatch
-	53, // 41: grayling.agent.v1.Envelope.event_batch_ack:type_name -> grayling.agent.v1.EventBatchAck
-	0,  // 42: grayling.agent.v1.Cursor.kind:type_name -> grayling.agent.v1.ResourceKind
-	5,  // 43: grayling.agent.v1.Hello.cursors:type_name -> grayling.agent.v1.Cursor
-	4,  // 44: grayling.agent.v1.Welcome.scope:type_name -> grayling.agent.v1.Scope
-	7,  // 45: grayling.agent.v1.Welcome.limits:type_name -> grayling.agent.v1.Limits
-	1,  // 46: grayling.agent.v1.Error.code:type_name -> grayling.agent.v1.ErrorCode
-	4,  // 47: grayling.agent.v1.Subscribe.scope:type_name -> grayling.agent.v1.Scope
-	5,  // 48: grayling.agent.v1.Subscribe.cursor:type_name -> grayling.agent.v1.Cursor
-	4,  // 49: grayling.agent.v1.Snapshot.scope:type_name -> grayling.agent.v1.Scope
-	34, // 50: grayling.agent.v1.Snapshot.inline_resource:type_name -> grayling.agent.v1.SignedResource
-	33, // 51: grayling.agent.v1.Snapshot.reference:type_name -> grayling.agent.v1.ResourceRef
-	33, // 52: grayling.agent.v1.Delta.reference:type_name -> grayling.agent.v1.ResourceRef
-	4,  // 53: grayling.agent.v1.Instance.scope:type_name -> grayling.agent.v1.Scope
-	22, // 54: grayling.agent.v1.Instance.lease:type_name -> grayling.agent.v1.Lease
-	21, // 55: grayling.agent.v1.Register.instance:type_name -> grayling.agent.v1.Instance
-	22, // 56: grayling.agent.v1.RenewLease.lease:type_name -> grayling.agent.v1.Lease
-	21, // 57: grayling.agent.v1.UpdateInstance.instance:type_name -> grayling.agent.v1.Instance
-	22, // 58: grayling.agent.v1.Deregister.lease:type_name -> grayling.agent.v1.Lease
-	21, // 59: grayling.agent.v1.Registered.instance:type_name -> grayling.agent.v1.Instance
-	22, // 60: grayling.agent.v1.LeaseRenewed.lease:type_name -> grayling.agent.v1.Lease
-	21, // 61: grayling.agent.v1.InstanceChanged.instance:type_name -> grayling.agent.v1.Instance
-	0,  // 62: grayling.agent.v1.FetchResource.kind:type_name -> grayling.agent.v1.ResourceKind
-	13, // 63: grayling.agent.v1.ResourceRejected.error:type_name -> grayling.agent.v1.Error
-	4,  // 64: grayling.agent.v1.ResourceRef.scope:type_name -> grayling.agent.v1.Scope
-	0,  // 65: grayling.agent.v1.ResourceRef.kind:type_name -> grayling.agent.v1.ResourceKind
-	36, // 66: grayling.agent.v1.Prepared.release:type_name -> grayling.agent.v1.ReleaseIdentity
-	36, // 67: grayling.agent.v1.Applied.release:type_name -> grayling.agent.v1.ReleaseIdentity
-	36, // 68: grayling.agent.v1.Rejected.release:type_name -> grayling.agent.v1.ReleaseIdentity
-	13, // 69: grayling.agent.v1.Rejected.error:type_name -> grayling.agent.v1.Error
-	36, // 70: grayling.agent.v1.Prepare.release:type_name -> grayling.agent.v1.ReleaseIdentity
-	33, // 71: grayling.agent.v1.Prepare.bundle:type_name -> grayling.agent.v1.ResourceRef
-	36, // 72: grayling.agent.v1.Activate.release:type_name -> grayling.agent.v1.ReleaseIdentity
-	36, // 73: grayling.agent.v1.Abort.release:type_name -> grayling.agent.v1.ReleaseIdentity
-	36, // 74: grayling.agent.v1.ReleaseStatus.release:type_name -> grayling.agent.v1.ReleaseIdentity
-	2,  // 75: grayling.agent.v1.ReleaseStatus.state:type_name -> grayling.agent.v1.ReleaseState
-	38, // 76: grayling.agent.v1.ReleaseStatus.applied:type_name -> grayling.agent.v1.Applied
-	39, // 77: grayling.agent.v1.ReleaseStatus.rejected:type_name -> grayling.agent.v1.Rejected
-	50, // 78: grayling.agent.v1.EventBatch.events:type_name -> grayling.agent.v1.Event
-	13, // 79: grayling.agent.v1.EventResult.error:type_name -> grayling.agent.v1.Error
-	52, // 80: grayling.agent.v1.EventBatchAck.results:type_name -> grayling.agent.v1.EventResult
-	81, // [81:81] is the sub-list for method output_type
-	81, // [81:81] is the sub-list for method input_type
-	81, // [81:81] is the sub-list for extension type_name
-	81, // [81:81] is the sub-list for extension extendee
-	0,  // [0:81] is the sub-list for field type_name
+	40, // 28: grayling.agent.v1.Envelope.applied:type_name -> grayling.agent.v1.Applied
+	41, // 29: grayling.agent.v1.Envelope.rejected:type_name -> grayling.agent.v1.Rejected
+	42, // 30: grayling.agent.v1.Envelope.release_status_query:type_name -> grayling.agent.v1.ReleaseStatusQuery
+	43, // 31: grayling.agent.v1.Envelope.prepare:type_name -> grayling.agent.v1.Prepare
+	44, // 32: grayling.agent.v1.Envelope.activate:type_name -> grayling.agent.v1.Activate
+	46, // 33: grayling.agent.v1.Envelope.abort:type_name -> grayling.agent.v1.Abort
+	47, // 34: grayling.agent.v1.Envelope.revoke:type_name -> grayling.agent.v1.Revoke
+	48, // 35: grayling.agent.v1.Envelope.release_status:type_name -> grayling.agent.v1.ReleaseStatus
+	38, // 36: grayling.agent.v1.Envelope.prepared_ack:type_name -> grayling.agent.v1.PreparedAck
+	49, // 37: grayling.agent.v1.Envelope.readiness_report:type_name -> grayling.agent.v1.ReadinessReport
+	50, // 38: grayling.agent.v1.Envelope.drain_report:type_name -> grayling.agent.v1.DrainReport
+	51, // 39: grayling.agent.v1.Envelope.drain_requested:type_name -> grayling.agent.v1.DrainRequested
+	52, // 40: grayling.agent.v1.Envelope.drain_status:type_name -> grayling.agent.v1.DrainStatus
+	39, // 41: grayling.agent.v1.Envelope.prepare_rejected_ack:type_name -> grayling.agent.v1.PrepareRejectedAck
+	45, // 42: grayling.agent.v1.Envelope.activation_report_ack:type_name -> grayling.agent.v1.ActivationReportAck
+	54, // 43: grayling.agent.v1.Envelope.event_batch:type_name -> grayling.agent.v1.EventBatch
+	56, // 44: grayling.agent.v1.Envelope.event_batch_ack:type_name -> grayling.agent.v1.EventBatchAck
+	0,  // 45: grayling.agent.v1.Cursor.kind:type_name -> grayling.agent.v1.ResourceKind
+	5,  // 46: grayling.agent.v1.Hello.cursors:type_name -> grayling.agent.v1.Cursor
+	4,  // 47: grayling.agent.v1.Welcome.scope:type_name -> grayling.agent.v1.Scope
+	7,  // 48: grayling.agent.v1.Welcome.limits:type_name -> grayling.agent.v1.Limits
+	1,  // 49: grayling.agent.v1.Error.code:type_name -> grayling.agent.v1.ErrorCode
+	4,  // 50: grayling.agent.v1.Subscribe.scope:type_name -> grayling.agent.v1.Scope
+	5,  // 51: grayling.agent.v1.Subscribe.cursor:type_name -> grayling.agent.v1.Cursor
+	4,  // 52: grayling.agent.v1.Snapshot.scope:type_name -> grayling.agent.v1.Scope
+	34, // 53: grayling.agent.v1.Snapshot.inline_resource:type_name -> grayling.agent.v1.SignedResource
+	33, // 54: grayling.agent.v1.Snapshot.reference:type_name -> grayling.agent.v1.ResourceRef
+	33, // 55: grayling.agent.v1.Delta.reference:type_name -> grayling.agent.v1.ResourceRef
+	4,  // 56: grayling.agent.v1.Instance.scope:type_name -> grayling.agent.v1.Scope
+	22, // 57: grayling.agent.v1.Instance.lease:type_name -> grayling.agent.v1.Lease
+	21, // 58: grayling.agent.v1.Register.instance:type_name -> grayling.agent.v1.Instance
+	22, // 59: grayling.agent.v1.RenewLease.lease:type_name -> grayling.agent.v1.Lease
+	21, // 60: grayling.agent.v1.UpdateInstance.instance:type_name -> grayling.agent.v1.Instance
+	22, // 61: grayling.agent.v1.Deregister.lease:type_name -> grayling.agent.v1.Lease
+	21, // 62: grayling.agent.v1.Registered.instance:type_name -> grayling.agent.v1.Instance
+	22, // 63: grayling.agent.v1.LeaseRenewed.lease:type_name -> grayling.agent.v1.Lease
+	21, // 64: grayling.agent.v1.InstanceChanged.instance:type_name -> grayling.agent.v1.Instance
+	0,  // 65: grayling.agent.v1.FetchResource.kind:type_name -> grayling.agent.v1.ResourceKind
+	13, // 66: grayling.agent.v1.ResourceRejected.error:type_name -> grayling.agent.v1.Error
+	4,  // 67: grayling.agent.v1.ResourceRef.scope:type_name -> grayling.agent.v1.Scope
+	0,  // 68: grayling.agent.v1.ResourceRef.kind:type_name -> grayling.agent.v1.ResourceKind
+	36, // 69: grayling.agent.v1.Prepared.release:type_name -> grayling.agent.v1.ReleaseIdentity
+	36, // 70: grayling.agent.v1.PreparedAck.release:type_name -> grayling.agent.v1.ReleaseIdentity
+	36, // 71: grayling.agent.v1.PrepareRejectedAck.release:type_name -> grayling.agent.v1.ReleaseIdentity
+	36, // 72: grayling.agent.v1.Applied.release:type_name -> grayling.agent.v1.ReleaseIdentity
+	36, // 73: grayling.agent.v1.Rejected.release:type_name -> grayling.agent.v1.ReleaseIdentity
+	13, // 74: grayling.agent.v1.Rejected.error:type_name -> grayling.agent.v1.Error
+	36, // 75: grayling.agent.v1.Prepare.release:type_name -> grayling.agent.v1.ReleaseIdentity
+	33, // 76: grayling.agent.v1.Prepare.bundle:type_name -> grayling.agent.v1.ResourceRef
+	36, // 77: grayling.agent.v1.Activate.release:type_name -> grayling.agent.v1.ReleaseIdentity
+	33, // 78: grayling.agent.v1.Activate.view:type_name -> grayling.agent.v1.ResourceRef
+	36, // 79: grayling.agent.v1.ActivationReportAck.release:type_name -> grayling.agent.v1.ReleaseIdentity
+	2,  // 80: grayling.agent.v1.ActivationReportAck.state:type_name -> grayling.agent.v1.ReleaseState
+	36, // 81: grayling.agent.v1.Abort.release:type_name -> grayling.agent.v1.ReleaseIdentity
+	33, // 82: grayling.agent.v1.Revoke.view:type_name -> grayling.agent.v1.ResourceRef
+	36, // 83: grayling.agent.v1.ReleaseStatus.release:type_name -> grayling.agent.v1.ReleaseIdentity
+	2,  // 84: grayling.agent.v1.ReleaseStatus.state:type_name -> grayling.agent.v1.ReleaseState
+	40, // 85: grayling.agent.v1.ReleaseStatus.applied:type_name -> grayling.agent.v1.Applied
+	41, // 86: grayling.agent.v1.ReleaseStatus.rejected:type_name -> grayling.agent.v1.Rejected
+	53, // 87: grayling.agent.v1.EventBatch.events:type_name -> grayling.agent.v1.Event
+	13, // 88: grayling.agent.v1.EventResult.error:type_name -> grayling.agent.v1.Error
+	55, // 89: grayling.agent.v1.EventBatchAck.results:type_name -> grayling.agent.v1.EventResult
+	90, // [90:90] is the sub-list for method output_type
+	90, // [90:90] is the sub-list for method input_type
+	90, // [90:90] is the sub-list for extension type_name
+	90, // [90:90] is the sub-list for extension extendee
+	0,  // [0:90] is the sub-list for field type_name
 }
 
 func init() { file_api_agent_v1_agent_proto_init() }
@@ -4780,10 +5330,13 @@ func file_api_agent_v1_agent_proto_init() {
 		(*Envelope_Abort)(nil),
 		(*Envelope_Revoke)(nil),
 		(*Envelope_ReleaseStatus)(nil),
+		(*Envelope_PreparedAck)(nil),
 		(*Envelope_ReadinessReport)(nil),
 		(*Envelope_DrainReport)(nil),
 		(*Envelope_DrainRequested)(nil),
 		(*Envelope_DrainStatus)(nil),
+		(*Envelope_PrepareRejectedAck)(nil),
+		(*Envelope_ActivationReportAck)(nil),
 		(*Envelope_EventBatch)(nil),
 		(*Envelope_EventBatchAck)(nil),
 	}
@@ -4791,13 +5344,14 @@ func file_api_agent_v1_agent_proto_init() {
 		(*Snapshot_InlineResource)(nil),
 		(*Snapshot_Reference)(nil),
 	}
+	file_api_agent_v1_agent_proto_msgTypes[39].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_agent_v1_agent_proto_rawDesc), len(file_api_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   51,
+			NumMessages:   54,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

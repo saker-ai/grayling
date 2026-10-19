@@ -1,0 +1,4 @@
+=== RUN   TestActivationWriteRollbackDeadlineAndSignerTrust
+--- PASS: TestActivationWriteRollbackDeadlineAndSignerTrust (7.01s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	8.103s

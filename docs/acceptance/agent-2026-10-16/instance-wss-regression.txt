@@ -1,0 +1,32 @@
+=== RUN   TestWSSReplicaFencingRevocationAndShutdown
+--- PASS: TestWSSReplicaFencingRevocationAndShutdown (5.38s)
+=== RUN   TestWSSGuardsAndCapabilities
+=== RUN   TestWSSGuardsAndCapabilities/query_credential
+=== RUN   TestWSSGuardsAndCapabilities/browser_origin
+=== RUN   TestWSSGuardsAndCapabilities/developer_cookie
+=== RUN   TestWSSGuardsAndCapabilities/admin_audience
+=== RUN   TestWSSGuardsAndCapabilities/unknown_token
+=== RUN   TestWSSGuardsAndCapabilities/wrong_host
+--- PASS: TestWSSGuardsAndCapabilities (3.16s)
+    --- PASS: TestWSSGuardsAndCapabilities/query_credential (0.02s)
+    --- PASS: TestWSSGuardsAndCapabilities/browser_origin (0.00s)
+    --- PASS: TestWSSGuardsAndCapabilities/developer_cookie (0.00s)
+    --- PASS: TestWSSGuardsAndCapabilities/admin_audience (0.00s)
+    --- PASS: TestWSSGuardsAndCapabilities/unknown_token (0.01s)
+    --- PASS: TestWSSGuardsAndCapabilities/wrong_host (0.00s)
+=== RUN   TestGoAgentClientSession
+--- PASS: TestGoAgentClientSession (3.11s)
+=== RUN   TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend
+=== RUN   TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend/text_message
+=== RUN   TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend/malformed_protobuf
+--- PASS: TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend (5.12s)
+    --- PASS: TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend/text_message (0.03s)
+    --- PASS: TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend/malformed_protobuf (0.02s)
+=== RUN   TestInstanceWSSSDKLifecycleAndReconnectDedup
+--- PASS: TestInstanceWSSSDKLifecycleAndReconnectDedup (3.35s)
+=== RUN   TestInstanceWSSPermissionCannotRegisterOrRenew
+--- PASS: TestInstanceWSSPermissionCannotRegisterOrRenew (3.10s)
+=== RUN   TestInstanceWSSDeadlineCancelsBlockedMutation
+--- PASS: TestInstanceWSSDeadlineCancelsBlockedMutation (3.57s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	27.899s

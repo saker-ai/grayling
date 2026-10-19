@@ -1,0 +1,24 @@
+=== RUN   TestWSSReplicaFencingRevocationAndShutdown
+--- PASS: TestWSSReplicaFencingRevocationAndShutdown (5.31s)
+=== RUN   TestWSSGuardsAndCapabilities
+=== RUN   TestWSSGuardsAndCapabilities/query_credential
+=== RUN   TestWSSGuardsAndCapabilities/browser_origin
+=== RUN   TestWSSGuardsAndCapabilities/developer_cookie
+=== RUN   TestWSSGuardsAndCapabilities/admin_audience
+=== RUN   TestWSSGuardsAndCapabilities/unknown_token
+=== RUN   TestWSSGuardsAndCapabilities/wrong_host
+--- PASS: TestWSSGuardsAndCapabilities (4.13s)
+    --- PASS: TestWSSGuardsAndCapabilities/query_credential (0.01s)
+    --- PASS: TestWSSGuardsAndCapabilities/browser_origin (0.00s)
+    --- PASS: TestWSSGuardsAndCapabilities/developer_cookie (0.00s)
+    --- PASS: TestWSSGuardsAndCapabilities/admin_audience (0.00s)
+    --- PASS: TestWSSGuardsAndCapabilities/unknown_token (0.00s)
+    --- PASS: TestWSSGuardsAndCapabilities/wrong_host (0.00s)
+=== RUN   TestSessionReplicaFencingAndRevocation
+--- PASS: TestSessionReplicaFencingAndRevocation (3.58s)
+=== RUN   TestSessionDeploymentBootCASAndAdmission
+--- PASS: TestSessionDeploymentBootCASAndAdmission (2.92s)
+=== RUN   TestSessionConcurrentConnectAndReopen
+--- PASS: TestSessionConcurrentConnectAndReopen (3.37s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	20.382s

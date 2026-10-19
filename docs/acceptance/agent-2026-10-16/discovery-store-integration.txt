@@ -1,0 +1,14 @@
+=== RUN   TestAgentManagementMigratesV2WithoutResettingSessions
+--- PASS: TestAgentManagementMigratesV2WithoutResettingSessions (3.45s)
+=== RUN   TestInstanceDiscoveryDurableConcurrentCaptureAndMembership
+--- PASS: TestInstanceDiscoveryDurableConcurrentCaptureAndMembership (3.57s)
+=== RUN   TestInstanceDiscoveryRefreshAndFailureAtomicity
+--- PASS: TestInstanceDiscoveryRefreshAndFailureAtomicity (3.99s)
+=== RUN   TestInstanceDiscoveryV4MigrationPreservesGovernance
+--- PASS: TestInstanceDiscoveryV4MigrationPreservesGovernance (3.33s)
+=== RUN   TestInstanceDiscoveryEncodingRequiresNamingConfirmation
+--- PASS: TestInstanceDiscoveryEncodingRequiresNamingConfirmation (3.13s)
+=== RUN   TestInstanceMigrationFromV3PreservesManagementData
+--- PASS: TestInstanceMigrationFromV3PreservesManagementData (3.16s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	21.722s

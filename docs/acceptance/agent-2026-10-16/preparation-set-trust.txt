@@ -1,0 +1,4 @@
+=== RUN   TestPreparationSetTrustUpdateFencesInflightBuilder
+--- PASS: TestPreparationSetTrustUpdateFencesInflightBuilder (7.02s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	8.087s

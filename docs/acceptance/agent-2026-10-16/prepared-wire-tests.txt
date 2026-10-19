@@ -1,0 +1,2 @@
+GOWORK=off go test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestPrepared'
+ok  	github.com/saker-ai/grayling/test/agent	49.879s

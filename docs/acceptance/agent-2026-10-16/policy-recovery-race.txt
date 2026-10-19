@@ -1,0 +1,5 @@
+GOWORK=off go test -race -count=1 ./pkg/agent ./internal/agent
+ok  	github.com/saker-ai/grayling/pkg/agent	6.232s
+ok  	github.com/saker-ai/grayling/internal/agent	1.078s
+python3 scripts/agent_recovery_fixture.py --check
+Python independent recovery fixture matches

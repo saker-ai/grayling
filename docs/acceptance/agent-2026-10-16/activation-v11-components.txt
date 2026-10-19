@@ -1,0 +1,6 @@
+=== RUN   TestActivationArtifactsIsolateCommandsReportsAndStatus
+--- PASS: TestActivationArtifactsIsolateCommandsReportsAndStatus (4.57s)
+=== RUN   TestActivationV10MigrationPreservesLegacyRejectedReplay
+--- PASS: TestActivationV10MigrationPreservesLegacyRejectedReplay (4.07s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	9.747s

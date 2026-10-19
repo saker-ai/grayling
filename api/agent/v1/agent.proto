@@ -54,10 +54,13 @@ message Envelope {
     Abort abort = 66;
     Revoke revoke = 67;
     ReleaseStatus release_status = 68;
+    PreparedAck prepared_ack = 69;
     ReadinessReport readiness_report = 70;
     DrainReport drain_report = 71;
     DrainRequested drain_requested = 72;
     DrainStatus drain_status = 73;
+    PrepareRejectedAck prepare_rejected_ack = 74;
+    ActivationReportAck activation_report_ack = 75;
     EventBatch event_batch = 80;
     EventBatchAck event_batch_ack = 81;
   }
@@ -69,6 +72,7 @@ enum ResourceKind {
   RESOURCE_KIND_DISCOVERY = 2;
   RESOURCE_KIND_BUNDLE = 3;
   RESOURCE_KIND_REVOCATION = 4;
+  RESOURCE_KIND_ACTIVATION = 5;
 }
 enum ErrorCode {
   ERROR_CODE_UNSPECIFIED = 0;
@@ -206,6 +210,21 @@ message Prepared {
   int64 expires_unix_ms = 7;
   uint64 applied_generation = 8;
 }
+// Persistence receipt only; does not assert capacity, eligibility or activation.
+message PreparedAck {
+  ReleaseIdentity release = 1;
+  string command_id = 2;
+  uint64 evidence_revision = 3;
+  int64 received_unix_ms = 4;
+  int64 expires_unix_ms = 5;
+}
+message PrepareRejectedAck {
+  ReleaseIdentity release = 1;
+  string command_id = 2;
+  uint64 evidence_revision = 3;
+  int64 received_unix_ms = 4;
+  int64 expires_unix_ms = 5;
+}
 message Applied {
   ReleaseIdentity release = 1;
   string instance_id = 2;
@@ -214,13 +233,41 @@ message Applied {
   uint64 discovery_revision = 5;
   uint64 prepared_revision = 6;
   uint64 revocation_epoch = 7;
+  uint64 activation_artifact_revision = 8;
+  uint64 control_plane_epoch = 9;
 }
-message Rejected { ReleaseIdentity release = 1; Error error = 2; }
-message ReleaseStatusQuery { string release_id = 1; string operation_id = 2; }
-message Prepare { ReleaseIdentity release = 1; ResourceRef bundle = 2; int64 expires_unix_ms = 3; }
-message Activate { ReleaseIdentity release = 1; uint64 policy_revision = 2; uint64 prepared_revision = 3; }
+message Rejected {
+ ReleaseIdentity release = 1;
+ Error error = 2;
+ string instance_id = 3;
+ string boot_id = 4;
+ // Required for activation rejection; unused for Prepare rejection.
+ uint64 activation_artifact_revision = 5;
+}
+message ReleaseStatusQuery { string release_id = 1; string operation_id = 2; uint32 page_size = 3; string after_instance_id = 4; optional uint64 expected_report_revision = 5; optional uint64 expected_release_revision = 6; optional uint64 expected_activation_artifact_revision = 7; }
+message Prepare { ReleaseIdentity release = 1; ResourceRef bundle = 2; int64 expires_unix_ms = 3; uint64 target_revision = 4; }
+message Activate {
+ ReleaseIdentity release = 1;
+ uint64 policy_revision = 2;
+ uint64 prepared_revision = 3;
+ ResourceRef view = 4;
+ uint64 discovery_revision = 5;
+ uint64 revocation_epoch = 6;
+ int64 expires_unix_ms = 7;
+}
+message ActivationReportAck {
+ ReleaseIdentity release = 1;
+ string command_id = 2;
+ uint64 report_revision = 3;
+ int64 received_unix_ms = 4;
+ bool rejected = 5;
+ ReleaseState state = 6;
+ uint64 release_revision = 7;
+}
 message Abort { ReleaseIdentity release = 1; string reason = 2; }
-message Revoke { uint64 epoch = 1; repeated string bundle_hashes = 2; bool cancel_active_streams = 3; }
+// release.revoke requires the signed view. Its cumulative per-Bundle cancellation
+// set is authoritative; cancel_active_streams only summarizes whether any exists.
+message Revoke { uint64 epoch = 1; repeated string bundle_hashes = 2; bool cancel_active_streams = 3; ResourceRef view = 4; }
 enum ReleaseState {
   RELEASE_STATE_UNSPECIFIED = 0;
   RELEASE_STATE_DRAFT = 1;
@@ -236,7 +283,7 @@ enum ReleaseState {
   RELEASE_STATE_ROLLBACK_VERIFYING = 11;
   RELEASE_STATE_ROLLED_BACK = 12;
 }
-message ReleaseStatus { ReleaseIdentity release = 1; ReleaseState state = 2; repeated Applied applied = 3; repeated Rejected rejected = 4; }
+message ReleaseStatus { ReleaseIdentity release = 1; ReleaseState state = 2; repeated Applied applied = 3; repeated Rejected rejected = 4; uint64 release_revision = 5; uint64 report_revision = 6; string next_instance_id = 7; bool more = 8; uint64 required_sources = 9; repeated string pending_source_ids = 10; uint64 activation_artifact_revision = 11; }
 message ReadinessReport { string instance_id = 1; string boot_id = 2; bool ready = 3; string reason = 4; }
 message DrainReport { string instance_id = 1; string boot_id = 2; uint64 active_streams = 3; uint64 forced_closes = 4; bool complete = 5; }
 message DrainRequested { int64 stop_accepting_unix_ms = 1; int64 force_close_unix_ms = 2; }

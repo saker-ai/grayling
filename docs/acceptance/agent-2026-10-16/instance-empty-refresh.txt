@@ -1,0 +1,4 @@
+=== RUN   TestInstanceEmptyDiscoveryRefreshesWithoutRevisionChange
+--- PASS: TestInstanceEmptyDiscoveryRefreshesWithoutRevisionChange (3.33s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	4.408s

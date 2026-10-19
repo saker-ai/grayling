@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,7 +50,7 @@ func serverOptions(t *testing.T, modify func(*agentv1.Envelope), handle func(con
 			t.Error(err)
 			return
 		}
-		welcome := &agentv1.Envelope{ProtocolMajor: 1, SessionId: "session", ConnectionEpoch: 2, MessageId: "welcome", ReplyTo: hello.MessageId, Payload: &agentv1.Envelope_Welcome{Welcome: &agentv1.Welcome{Scope: &agentv1.Scope{WorkspaceId: "ws", EnvironmentId: "env", ServiceKey: "svc"}, ControlPlaneEpoch: 1, Limits: &agentv1.Limits{MaxFrameBytes: agentv1.MaxFrameBytes, MaxResourceBytes: MaxResourceBytes, HeartbeatIntervalMs: 20, HeartbeatTimeoutMs: 100}}}}
+		welcome := &agentv1.Envelope{ProtocolMajor: 1, SessionId: "session", ConnectionEpoch: 2, MessageId: "welcome", ReplyTo: hello.MessageId, Payload: &agentv1.Envelope_Welcome{Welcome: &agentv1.Welcome{Scope: &agentv1.Scope{WorkspaceId: "ws", EnvironmentId: "env", ServiceKey: "svc"}, ControlPlaneEpoch: 1, ServerUnixMs: time.Now().UnixMilli(), Limits: &agentv1.Limits{MaxFrameBytes: agentv1.MaxFrameBytes, MaxResourceBytes: MaxResourceBytes, HeartbeatIntervalMs: 20, HeartbeatTimeoutMs: 100}}}}
 		if modify != nil {
 			modify(welcome)
 		}
@@ -65,7 +66,7 @@ func serverOptions(t *testing.T, modify func(*agentv1.Envelope), handle func(con
 				return
 			}
 			if h := e.GetHeartbeat(); h != nil {
-				writePeer(t, ctx, c, &agentv1.Envelope{ProtocolMajor: 1, SessionId: "session", ConnectionEpoch: 2, MessageId: "beat", ReplyTo: e.MessageId, Payload: &agentv1.Envelope_HeartbeatAck{HeartbeatAck: &agentv1.HeartbeatAck{Nonce: h.Nonce}}})
+				writePeer(t, ctx, c, &agentv1.Envelope{ProtocolMajor: 1, SessionId: "session", ConnectionEpoch: 2, MessageId: "beat", ReplyTo: e.MessageId, Payload: &agentv1.Envelope_HeartbeatAck{HeartbeatAck: &agentv1.HeartbeatAck{Nonce: h.Nonce, ServerUnixMs: time.Now().UnixMilli()}}})
 				continue
 			}
 			if handle != nil {
@@ -328,6 +329,8 @@ func TestTypedOperations(t *testing.T) {
 		seen <- e
 		reply := peerReply(e, &agentv1.ReleaseStatus{})
 		switch e.Payload.(type) {
+		case *agentv1.Envelope_ReleaseStatusQuery:
+			reply.Payload = &agentv1.Envelope_ReleaseStatus{ReleaseStatus: &agentv1.ReleaseStatus{Release: &agentv1.ReleaseIdentity{ReleaseId: e.GetReleaseStatusQuery().ReleaseId, Generation: 1, BundleHash: strings.Repeat("a", 64)}, State: agentv1.ReleaseState_RELEASE_STATE_ACTIVATING, ReleaseRevision: 3, ActivationArtifactRevision: 1, RequiredSources: 1, PendingSourceIds: []string{"source"}}}
 		case *agentv1.Envelope_Register:
 			reply.Payload = &agentv1.Envelope_Registered{Registered: &agentv1.Registered{Instance: e.GetRegister().Instance}}
 		case *agentv1.Envelope_RenewLease:
@@ -357,7 +360,7 @@ func TestTypedOperations(t *testing.T) {
 		t.Fatalf("%v %v", resource, err)
 	}
 	<-seen
-	if _, err := c.ReleaseStatus(t.Context(), &agentv1.ReleaseStatusQuery{}); err != nil {
+	if _, err := c.ReleaseStatus(t.Context(), &agentv1.ReleaseStatusQuery{ReleaseId: "release-1"}); err != nil {
 		t.Fatal(err)
 	}
 	<-seen
@@ -409,5 +412,126 @@ func TestGoAwayTransfersEventOwnership(t *testing.T) {
 	away, ok := errors.AsType[*GoAwayError](c.Err())
 	if !ok || away.RetryAfter != 1200*time.Millisecond {
 		t.Fatal(c.Err())
+	}
+}
+
+func TestServerClockBudget(t *testing.T) {
+	for _, offset := range []time.Duration{-6 * time.Second, 6 * time.Second} {
+		t.Run(offset.String(), func(t *testing.T) {
+			options := serverOptions(t, func(e *agentv1.Envelope) { e.GetWelcome().ServerUnixMs = time.Now().Add(offset).UnixMilli() }, nil)
+			if c, err := Dial(t.Context(), options); !errors.Is(err, ErrProtocol) {
+				if c != nil {
+					c.Close()
+				}
+				t.Fatalf("server clock outside budget accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestReplyImmediatelyBeforeDisconnect(t *testing.T) {
+	for i := range 20 {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			options := serverOptions(t, nil, func(ctx context.Context, conn *websocket.Conn, request *agentv1.Envelope) {
+				reply := peerReply(request, nil)
+				reply.Payload = &agentv1.Envelope_Error{Error: &agentv1.Error{Code: agentv1.ErrorCode_ERROR_CODE_FENCED, Reason: "superseded"}}
+				writePeer(t, ctx, conn, reply)
+				_ = conn.CloseNow()
+			})
+			c := connect(t, options)
+			_, err := c.CallMessage(t.Context(), &agentv1.ReleaseStatusQuery{}, Metadata{})
+			remote, ok := errors.AsType[*RemoteError](err)
+			if !ok || remote.Detail.Code != agentv1.ErrorCode_ERROR_CODE_FENCED {
+				t.Fatalf("correlated NACK lost to close: %v", err)
+			}
+		})
+	}
+}
+
+func TestTypedActivationReceiptsRejectUnboundAcknowledgments(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*agentv1.Envelope)
+	}{
+		{"valid", func(*agentv1.Envelope) {}},
+		{"wrong command", func(e *agentv1.Envelope) { e.GetActivationReportAck().CommandId = "other" }},
+		{"wrong release", func(e *agentv1.Envelope) { e.GetActivationReportAck().Release.BundleHash = strings.Repeat("b", 64) }},
+		{"wrong outcome", func(e *agentv1.Envelope) { e.GetActivationReportAck().Rejected = true }},
+		{"premature active", func(e *agentv1.Envelope) {
+			e.GetActivationReportAck().State = agentv1.ReleaseState_RELEASE_STATE_ACTIVE
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := serverOptions(t, nil, func(ctx context.Context, c *websocket.Conn, e *agentv1.Envelope) {
+				ack := &agentv1.ActivationReportAck{Release: proto.Clone(e.GetApplied().Release).(*agentv1.ReleaseIdentity), CommandId: e.OperationId, ReportRevision: ^uint64(0), ReceivedUnixMs: time.Now().UnixMilli(), State: agentv1.ReleaseState_RELEASE_STATE_VERIFYING, ReleaseRevision: ^uint64(0)}
+				reply := peerReply(e, nil)
+				reply.Payload = &agentv1.Envelope_ActivationReportAck{ActivationReportAck: ack}
+				reply.OperationId = e.OperationId
+				tc.change(reply)
+				writePeer(t, ctx, c, reply)
+			})
+			c := connect(t, opts)
+			_, err := c.ReportApplied(t.Context(), "activate-1", &agentv1.Applied{Release: &agentv1.ReleaseIdentity{ReleaseId: "release-1", Generation: 1, BundleHash: strings.Repeat("a", 64)}, InstanceId: "instance", BootId: "boot"})
+			if (err == nil) != (tc.name == "valid") {
+				t.Fatal("unbound activation receipt", err)
+			}
+		})
+	}
+}
+
+func TestActivationRejectedRequiresArtifactBeforeSending(t *testing.T) {
+	// A missing activation revision must fail before touching the connection.
+	var c Client
+	_, err := c.ReportActivationRejected(t.Context(), "activate-1", &agentv1.Rejected{Release: &agentv1.ReleaseIdentity{Generation: 1}})
+	if !errors.Is(err, ErrProtocol) {
+		t.Fatal("unbound activation rejection accepted", err)
+	}
+}
+
+func TestReleaseStatusRejectsMixedActivationArtifacts(t *testing.T) {
+	identity := &agentv1.ReleaseIdentity{ReleaseId: "release-1", Generation: 1, BundleHash: strings.Repeat("a", 64)}
+	q := &agentv1.ReleaseStatusQuery{ReleaseId: identity.ReleaseId}
+	r := &agentv1.ReleaseStatus{Release: identity, State: agentv1.ReleaseState_RELEASE_STATE_VERIFYING, ReleaseRevision: 5, ReportRevision: 2, ActivationArtifactRevision: 2, RequiredSources: 1, Applied: []*agentv1.Applied{{Release: identity, InstanceId: "source", ActivationArtifactRevision: 1}}}
+	if validReleaseStatus(q, r) {
+		t.Fatal("mixed artifact status accepted")
+	}
+	r.Applied[0].ActivationArtifactRevision = 2
+	if !validReleaseStatus(q, r) {
+		t.Fatal("current artifact status rejected")
+	}
+	q.ExpectedActivationArtifactRevision = new(uint64(1))
+	if validReleaseStatus(q, r) {
+		t.Fatal("status ignored pinned artifact")
+	}
+	q.ExpectedActivationArtifactRevision = nil
+	r.Applied = nil
+	r.Rejected = []*agentv1.Rejected{{Release: identity, InstanceId: "source"}}
+	if validReleaseStatus(q, r) {
+		t.Fatal("legacy NACK assigned to a newer artifact")
+	}
+	r.ActivationArtifactRevision = 1
+	if !validReleaseStatus(q, r) {
+		t.Fatal("historical artifact 1 NACK lost")
+	}
+}
+
+func TestPreparedReceiptCannotExtendRequestedEvidence(t *testing.T) {
+	for _, delta := range []int64{0, 1} {
+		t.Run(strconv.FormatInt(delta, 10), func(t *testing.T) {
+			opts := serverOptions(t, nil, func(ctx context.Context, conn *websocket.Conn, e *agentv1.Envelope) {
+				report := e.GetPrepared()
+				ack := &agentv1.PreparedAck{Release: report.Release, CommandId: e.OperationId, EvidenceRevision: 1, ReceivedUnixMs: report.PreparedUnixMs, ExpiresUnixMs: report.ExpiresUnixMs + delta}
+				reply := peerReply(e, nil)
+				reply.Payload = &agentv1.Envelope_PreparedAck{PreparedAck: ack}
+				reply.OperationId = e.OperationId
+				writePeer(t, ctx, conn, reply)
+			})
+			c := connect(t, opts)
+			now := time.Now().UnixMilli()
+			_, err := c.ReportPrepared(t.Context(), "prepare-1", &agentv1.Prepared{Release: &agentv1.ReleaseIdentity{Generation: 1}, PreparedUnixMs: now, ExpiresUnixMs: now + 300000})
+			if (err == nil) != (delta == 0) {
+				t.Fatal("invalid evidence receipt boundary", err)
+			}
+		})
 	}
 }

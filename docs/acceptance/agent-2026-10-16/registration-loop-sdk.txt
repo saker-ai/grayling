@@ -1,0 +1,22 @@
+=== RUN   TestRunRegisteredReplaysUnknownRegisterAndRenew
+--- PASS: TestRunRegisteredReplaysUnknownRegisterAndRenew (3.06s)
+=== RUN   TestRunRegisteredRejectsIdentityAndLeaseReplies
+=== RUN   TestRunRegisteredRejectsIdentityAndLeaseReplies/boot
+=== RUN   TestRunRegisteredRejectsIdentityAndLeaseReplies/readiness
+=== RUN   TestRunRegisteredRejectsIdentityAndLeaseReplies/expired
+=== RUN   TestRunRegisteredRejectsIdentityAndLeaseReplies/oversized_lifetime
+=== RUN   TestRunRegisteredRejectsIdentityAndLeaseReplies/zero_epoch
+--- PASS: TestRunRegisteredRejectsIdentityAndLeaseReplies (0.14s)
+    --- PASS: TestRunRegisteredRejectsIdentityAndLeaseReplies/boot (0.02s)
+    --- PASS: TestRunRegisteredRejectsIdentityAndLeaseReplies/readiness (0.03s)
+    --- PASS: TestRunRegisteredRejectsIdentityAndLeaseReplies/expired (0.03s)
+    --- PASS: TestRunRegisteredRejectsIdentityAndLeaseReplies/oversized_lifetime (0.03s)
+    --- PASS: TestRunRegisteredRejectsIdentityAndLeaseReplies/zero_epoch (0.03s)
+=== RUN   TestRunRegisteredCancellationWaitsForCallback
+--- PASS: TestRunRegisteredCancellationWaitsForCallback (0.06s)
+=== RUN   TestRunRegisteredZeroOwnerDoesNotDial
+--- PASS: TestRunRegisteredZeroOwnerDoesNotDial (0.00s)
+=== RUN   TestRunRegisteredSameExpiryCannotKeepLeaseAlive
+--- PASS: TestRunRegisteredSameExpiryCannotKeepLeaseAlive (1.06s)
+PASS
+ok  	github.com/saker-ai/grayling/pkg/agent	5.370s

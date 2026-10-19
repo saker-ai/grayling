@@ -1,0 +1,3 @@
+sh scripts/check_agent_generated.sh
+GOWORK=off go test -race -count=1 ./api/agent/v1
+ok  	github.com/saker-ai/grayling/api/agent/v1	1.035s

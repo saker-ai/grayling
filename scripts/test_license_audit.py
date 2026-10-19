@@ -34,6 +34,17 @@ class LicenseAuditTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "LICENSE and NOTICE"):
                     license_audit.check(modified, modified, release=True)
 
+    def test_isc_requires_notice_and_disclaimer(self):
+        license_text = b"""Copyright (c) 2025 Example
+Permission to use, copy, modify, and distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+THE SOFTWARE IS PROVIDED AS IS AND THE AUTHOR DISCLAIMS ALL WARRANTIES.
+"""
+        self.assertEqual(license_audit.license_type(license_text), "ISC")
+        self.assertEqual(license_audit.license_type(license_text.replace(
+            b"copyright notice and this permission notice appear in all copies", b"NOTICE REMOVED")), "REVIEW")
+
     def test_notice_tracks_every_runtime_module(self):
         text = license_audit.notice_text(self.inventory)
         for row in self.inventory["go"]:

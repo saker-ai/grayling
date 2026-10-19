@@ -1,0 +1,4 @@
+=== RUN   TestPublishedSourceReplicaReadToSignedWSSPolicy
+--- PASS: TestPublishedSourceReplicaReadToSignedWSSPolicy (4.44s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	5.517s

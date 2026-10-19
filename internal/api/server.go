@@ -33,16 +33,22 @@ import (
 	"time"
 
 	"github.com/saker-ai/grayling/internal/admin"
+	agentservice "github.com/saker-ai/grayling/internal/agent"
 	aisvc "github.com/saker-ai/grayling/internal/ai"
 	"github.com/saker-ai/grayling/internal/configstore"
 	"github.com/saker-ai/grayling/internal/openaiproxy"
 	"github.com/saker-ai/grayling/internal/platform"
 	"github.com/saker-ai/grayling/internal/rollout"
+	agentclient "github.com/saker-ai/grayling/pkg/agent"
 	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // Server wires the HTTP surface.
 type Server struct {
+	agentChannel         http.Handler
+	agentManagement      *agentservice.Sessions
+	agentPublisher       *agentservice.Publisher
+	agentReleaseVerifier *agentclient.Verifier
 	Admin                *admin.Service
 	Store                *platform.Store
 	Config               configstore.Store
@@ -85,11 +91,18 @@ type cachedSnapshot struct {
 
 // Options configures server construction.
 type Options struct {
-	Logger            *log.Logger
-	ChatCompletions   http.Handler
-	OpenAIWorkspace   string
-	OpenAIEnvironment string
-	OpenAIFlagKey     string
+	// AgentChannel is opt-in and performs its own machine authentication.
+	// Console sessions and DevAutoLogin never wrap this route.
+	AgentChannel http.Handler
+	// AgentManagement enables scope-bound owner management with atomic audit.
+	AgentManagement      *agentservice.Sessions
+	AgentPublisher       *agentservice.Publisher
+	AgentReleaseVerifier *agentclient.Verifier
+	Logger               *log.Logger
+	ChatCompletions      http.Handler
+	OpenAIWorkspace      string
+	OpenAIEnvironment    string
+	OpenAIFlagKey        string
 	// EvaluationSampleRate enables bounded, safe evaluation telemetry [0,1].
 	EvaluationSampleRate float64
 	// AdminPassword permits a configured password on admin endpoints only.
@@ -119,18 +132,22 @@ func NewServer(store *platform.Store, cfg configstore.Store, opts Options) *Serv
 		rps = 200
 	}
 	s := &Server{
-		Store:             store,
-		Config:            cfg,
-		Hub:               NewSSEHub(),
-		limiter:           newRateLimiter(rps, int(rps)),
-		logger:            opts.Logger,
-		chatCompletions:   opts.ChatCompletions,
-		openAIWorkspace:   opts.OpenAIWorkspace,
-		openAIEnvironment: opts.OpenAIEnvironment,
-		openAIFlagKey:     opts.OpenAIFlagKey,
-		decisions:         make(map[string]scopedDecision),
-		sampleRate:        opts.EvaluationSampleRate,
-		sampledEvents:     make(chan model.EvaluationEvent, 256),
+		agentChannel:         opts.AgentChannel,
+		agentManagement:      opts.AgentManagement,
+		agentPublisher:       opts.AgentPublisher,
+		agentReleaseVerifier: opts.AgentReleaseVerifier,
+		Store:                store,
+		Config:               cfg,
+		Hub:                  NewSSEHub(),
+		limiter:              newRateLimiter(rps, int(rps)),
+		logger:               opts.Logger,
+		chatCompletions:      opts.ChatCompletions,
+		openAIWorkspace:      opts.OpenAIWorkspace,
+		openAIEnvironment:    opts.OpenAIEnvironment,
+		openAIFlagKey:        opts.OpenAIFlagKey,
+		decisions:            make(map[string]scopedDecision),
+		sampleRate:           opts.EvaluationSampleRate,
+		sampledEvents:        make(chan model.EvaluationEvent, 256),
 	}
 	if err := s.initConsoleSessionKey(opts.ConsoleSessionSecret); err != nil {
 		panic(fmt.Errorf("initialize console session key: %w", err))
@@ -158,7 +175,30 @@ func (s *Server) DroppedSamples() int64 { return s.droppedSamples.Load() }
 // Handler returns the routed HTTP handler.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	if s.agentChannel != nil {
+		mux.Handle("GET /api/v1/agent/connect", s.agentChannel)
+		mux.Handle("GET /api/v1/agent/resources/{kind}/{key}/{revision}", s.agentChannel)
+	}
 
+	if s.agentManagement != nil {
+		mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/credentials", s.adminOnly(s.handleIssueAgentCredential))
+		mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/credentials", s.adminOnly(s.handleListAgentCredentials))
+		mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/credentials/{id}/revoke", s.adminOnly(s.handleRevokeAgentCredential))
+		mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/limits", s.adminOnly(s.handleGetAgentLimit))
+		mux.HandleFunc("PUT /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/limits", s.adminOnly(s.handleSetAgentLimit))
+		mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/audit", s.adminOnly(s.handleAgentAudit))
+		mux.HandleFunc("GET /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/registration-policy", s.adminOnly(s.handleGetAgentRegistrationPolicy))
+		mux.HandleFunc("PUT /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/registration-policy", s.adminOnly(s.handleSetAgentRegistrationPolicy))
+		mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/deployments", s.adminOnly(s.handleAuthorizeAgentDeployment))
+	}
+	if s.agentManagement != nil && s.agentPublisher != nil {
+		if s.agentReleaseVerifier != nil {
+			mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/revocations", s.adminOnly(s.handleRevokeAgentBundles))
+			mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/revocations/refresh", s.adminOnly(s.handleRefreshAgentRevocation))
+		}
+		mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/bundles/approvals", s.adminOnly(s.handleRequestBundleApproval))
+		mux.HandleFunc("POST /api/v1/admin/workspaces/{ws}/environments/{env}/agent/services/{service}/bundles/publications", s.adminOnly(s.handlePublishApprovedBundle))
+	}
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	mux.HandleFunc("POST /v1/chat/completions", s.handleChatCompletions)
 	mux.HandleFunc("POST /api/v1/admin/session", s.handleConsoleLogin)

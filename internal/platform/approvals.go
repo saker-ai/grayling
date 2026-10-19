@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // Approval is a durable, scoped grant for one exact operation and payload.
@@ -37,6 +39,8 @@ type Approval struct {
 	RejectedAt       *time.Time `json:"rejectedAt,omitempty"`
 	RejectionReason  string     `json:"rejectionReason,omitempty"`
 	UsedAt           *time.Time `json:"usedAt,omitempty"`
+	UsedOperationID  string     `json:"usedOperationId,omitempty"`
+	UsedPrincipalID  string     `json:"usedPrincipalId,omitempty"`
 }
 
 const (
@@ -89,6 +93,9 @@ func (s *Store) RequestApproval(a Approval) (*Approval, error) {
 	}
 	a.ID = s.nextID("approval")
 	a.State = DraftSubmitted
+	a.UsedAt = nil
+	a.UsedOperationID = ""
+	a.UsedPrincipalID = ""
 	a.SubmittedAt = s.now()
 	a.Risk = RiskHigh
 	s.data.Approvals[a.ID] = &a
@@ -213,4 +220,64 @@ func (s *Store) useApprovalLocked(id, workspaceID, environmentID, action, object
 	a.UsedAt = &now
 	s.changes.markDirty(collApprovals, id)
 	return a, nil
+}
+
+// ApprovalOperation binds a durable approval receipt to the exact effect
+// deduplication namespace. Authorization of the caller remains a service duty.
+type ApprovalOperation struct {
+	ApprovalID, WorkspaceID, EnvironmentID, Action, Object, PayloadHash string
+	BaseRevision                                                        int64
+	PrincipalID, OperationID                                            string
+}
+type ApprovalOperationReceipt struct {
+	Approval *Approval
+	Replayed bool
+}
+
+// UseApprovalForOperation consumes a grant once and can recover that same
+// receipt after a failed/unknown effect commit. A receipt is not proof that the
+// effect committed or that authorization is still live. The effect transaction
+// must independently enforce the original ExpiresAt for a new write.
+// Shared-backend callers must hold the scope publish lock and reload first.
+func (s *Store) UseApprovalForOperation(request ApprovalOperation) (ApprovalOperationReceipt, error) {
+	if !model.KeyPattern.MatchString(request.PrincipalID) || !model.KeyPattern.MatchString(request.OperationID) {
+		return ApprovalOperationReceipt{}, ErrValidation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a := s.data.Approvals[request.ApprovalID]
+	if a == nil {
+		return ApprovalOperationReceipt{}, fmt.Errorf("%w: approval %s", ErrNotFound, request.ApprovalID)
+	}
+	if a.WorkspaceID != request.WorkspaceID || a.EnvironmentID != request.EnvironmentID || a.Action != request.Action || a.Object != request.Object {
+		return ApprovalOperationReceipt{}, fmt.Errorf("%w: approval scope or operation mismatch", ErrAccessDenied)
+	}
+	if a.PayloadHash != request.PayloadHash || a.BaseRevision != request.BaseRevision {
+		return ApprovalOperationReceipt{}, fmt.Errorf("%w: operation changed after review", ErrConflict)
+	}
+	replayed := a.State == ApprovalUsed
+	if replayed {
+		if a.UsedOperationID == "" || a.UsedPrincipalID == "" || a.UsedAt == nil {
+			return ApprovalOperationReceipt{}, ErrInvalidState
+		}
+		if a.UsedOperationID != request.OperationID || a.UsedPrincipalID != request.PrincipalID {
+			return ApprovalOperationReceipt{}, fmt.Errorf("%w: approval already bound to another operation", ErrConflict)
+		}
+	} else {
+		now := s.now()
+		if a.State != DraftApproved || a.ExpiresAt == nil || !now.Before(*a.ExpiresAt) {
+			return ApprovalOperationReceipt{}, fmt.Errorf("%w: approval missing, used or expired", ErrInvalidState)
+		}
+		a.State = ApprovalUsed
+		a.UsedAt = &now
+		a.UsedOperationID = request.OperationID
+		a.UsedPrincipalID = request.PrincipalID
+		s.changes.markDirty(collApprovals, a.ID)
+	}
+	// A previous failed commit may have retained this mutation in the working set.
+	// Even an exact receipt replay must finish that persistence before succeeding.
+	if err := s.commitLocked(); err != nil {
+		return ApprovalOperationReceipt{}, err
+	}
+	return ApprovalOperationReceipt{Approval: copyApproval(a), Replayed: replayed}, nil
 }

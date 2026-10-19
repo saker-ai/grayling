@@ -1,0 +1,14 @@
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_kind
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_key
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_revision
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing/extended_authorization
+--- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing (3.58s)
+    --- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_kind (0.00s)
+    --- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_key (0.00s)
+    --- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_revision (0.01s)
+    --- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing/extended_authorization (0.01s)
+=== RUN   TestBundleReadRequiresConfigPermissionBeforeExistence
+--- PASS: TestBundleReadRequiresConfigPermissionBeforeExistence (3.13s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	7.788s

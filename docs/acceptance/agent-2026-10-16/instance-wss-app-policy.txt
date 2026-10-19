@@ -1,0 +1,17 @@
+=== RUN   TestAgentAppTLSLifecycleAndRestart
+2026/10/16 12:19:14 INFO  snapshot loaded
+2026/10/16 12:19:18 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:19:18 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+2026/10/16 12:19:19 INFO  snapshot loaded
+2026/10/16 12:19:23 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:19:23 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestAgentAppTLSLifecycleAndRestart (13.11s)
+=== RUN   TestAgentAppDisabledKeepsRouteUnavailable
+2026/10/16 12:19:24 INFO  snapshot loaded
+2026/10/16 12:19:28 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:19:28 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestAgentAppDisabledKeepsRouteUnavailable (4.54s)
+=== RUN   TestPolicyWSSCrossReplicaAndLargeDownload
+--- PASS: TestPolicyWSSCrossReplicaAndLargeDownload (7.59s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	26.336s

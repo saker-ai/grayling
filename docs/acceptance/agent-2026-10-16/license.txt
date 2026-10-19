@@ -1,0 +1,4 @@
+python3 scripts/license_audit.py check
+license inventory matches: 285 Go modules, 23 npm packages
+python3 scripts/license_audit.py release-check
+license inventory matches: 285 Go modules, 23 npm packages

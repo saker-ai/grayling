@@ -517,9 +517,14 @@
     {
       "module": "github.com/cenkalti/backoff/v5",
       "version": "v5.0.3",
-      "runtime": false,
-      "license": "NOT_DISTRIBUTED",
-      "evidence": []
+      "runtime": true,
+      "license": "MIT",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "5c0476add4c38b55d0ed5ac11b85e00c38f26e1caee20dfe3ab58190103d1fbc"
+        }
+      ]
     },
     {
       "module": "github.com/census-instrumentation/opencensus-proto",
@@ -599,9 +604,14 @@
     {
       "module": "github.com/coder/websocket",
       "version": "v1.8.15",
-      "runtime": false,
-      "license": "NOT_DISTRIBUTED",
-      "evidence": []
+      "runtime": true,
+      "license": "ISC",
+      "evidence": [
+        {
+          "file": "LICENSE.txt",
+          "sha256": "cc0975a5f6305145bdd7b41ce9479632fdac3870e6ac4281f28017f18c767c4e"
+        }
+      ]
     },
     {
       "module": "github.com/creack/pty",
@@ -1985,9 +1995,14 @@
     {
       "module": "google.golang.org/protobuf",
       "version": "v1.36.12-0.20260120151049-f2248ac996af",
-      "runtime": false,
-      "license": "NOT_DISTRIBUTED",
-      "evidence": []
+      "runtime": true,
+      "license": "BSD-3-Clause",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "4835612df0098ca95f8e7d9e3bffcb02358d435dbb38057c844c99d7f725eb20"
+        }
+      ]
     },
     {
       "module": "gopkg.in/alecthomas/kingpin.v2",

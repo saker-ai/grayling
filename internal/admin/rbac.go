@@ -40,7 +40,15 @@ const (
 	PermReportRead      Permission = "report.read"
 	PermAIWrite         Permission = "ai.write"
 	PermAIContentRead   Permission = "ai.content.read" // raw prompt/AI content (§9: 单独授权)
-	PermQuotaManage     Permission = "quota.manage"
+
+	PermQuotaManage Permission = "quota.manage"
+)
+
+const (
+	PermAgentCredentialManage Permission = "agent.credential.manage"
+	PermAgentQuotaManage      Permission = "agent.quota.manage"
+	PermAgentAuditRead        Permission = "agent.audit.read"
+	PermAgentRevocationManage Permission = "agent.revocation.manage"
 )
 
 // Authorize enforces object-level RBAC. The workspace scope comes from the
@@ -59,7 +67,8 @@ func Authorize(actor Actor, workspaceID string, perm Permission) error {
 	switch perm {
 	case PermWorkspaceAdmin:
 		return fmt.Errorf("%w: %s requires a global owner token", platform.ErrAccessDenied, perm)
-	case PermTokenManage, PermQuotaManage, PermAIContentRead:
+	case PermTokenManage, PermQuotaManage, PermAIContentRead,
+		PermAgentCredentialManage, PermAgentQuotaManage, PermAgentAuditRead, PermAgentRevocationManage:
 		if actor.Role != platform.RoleOwner {
 			return fmt.Errorf("%w: %s requires the owner role", platform.ErrAccessDenied, perm)
 		}

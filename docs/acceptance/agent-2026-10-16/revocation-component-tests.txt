@@ -1,0 +1,32 @@
+=== RUN   TestBundlePairConcurrentReplicaDedupAndCAS
+--- PASS: TestBundlePairConcurrentReplicaDedupAndCAS (4.40s)
+=== RUN   TestPolicyPublicationCASDedupAndReplicaRead
+--- PASS: TestPolicyPublicationCASDedupAndReplicaRead (3.66s)
+=== RUN   TestRevocationHTTPOwnerTLSCASAndProofRefresh
+2026/10/16 15:39:32 INFO  snapshot loaded
+2026/10/16 15:39:36 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 15:39:37 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestRevocationHTTPOwnerTLSCASAndProofRefresh (9.01s)
+=== RUN   TestRevocationAtomicCatalogReplicaReplayAndAuthority
+--- PASS: TestRevocationAtomicCatalogReplicaReplayAndAuthority (4.35s)
+=== RUN   TestRevocationWSSSignedDenialCancelsRuntimeAndReconnects
+    revocation_test.go:170: connected publication-to-runtime cancellation: 1.953958485s
+--- PASS: TestRevocationWSSSignedDenialCancelsRuntimeAndReconnects (10.26s)
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_resources
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_resource_heads
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_admin_audit
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_admin_operations
+--- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt (15.76s)
+    --- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_resources (3.77s)
+    --- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_resource_heads (4.14s)
+    --- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_admin_audit (4.20s)
+    --- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_admin_operations (3.66s)
+=== RUN   TestRevocationDeliveryProofRefreshPreservesExpiredDenials
+--- PASS: TestRevocationDeliveryProofRefreshPreservesExpiredDenials (4.97s)
+=== RUN   TestRevocationActivationBootstrapsExactNonzeroCatalog
+--- PASS: TestRevocationActivationBootstrapsExactNonzeroCatalog (5.83s)
+=== RUN   TestRevocationBlocksPreemptivelyDeniedPublication
+--- PASS: TestRevocationBlocksPreemptivelyDeniedPublication (3.15s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	62.507s

@@ -1,0 +1,20 @@
+=== RUN   TestAgentManagementMigratesV2WithoutResettingSessions
+--- PASS: TestAgentManagementMigratesV2WithoutResettingSessions (3.46s)
+=== RUN   TestInstanceRegistrationLeaseLifecycleAndFencing
+--- PASS: TestInstanceRegistrationLeaseLifecycleAndFencing (3.39s)
+=== RUN   TestInstanceRegisterConcurrentDedupAndExactDeployment
+--- PASS: TestInstanceRegisterConcurrentDedupAndExactDeployment (3.48s)
+=== RUN   TestInstanceExpiryRevocationAndPolicyChangeFailClosed
+--- PASS: TestInstanceExpiryRevocationAndPolicyChangeFailClosed (3.24s)
+=== RUN   TestInstanceBootTakeoverExcludesOldBootBeforeNewRegistration
+--- PASS: TestInstanceBootTakeoverExcludesOldBootBeforeNewRegistration (3.21s)
+=== RUN   TestInstanceIntentFailureAndUint64OverflowDoNotPartiallyCommit
+--- PASS: TestInstanceIntentFailureAndUint64OverflowDoNotPartiallyCommit (3.32s)
+=== RUN   TestInstanceEndpointAdmissionAndConcurrentTakeoverNoDeadlock
+--- PASS: TestInstanceEndpointAdmissionAndConcurrentTakeoverNoDeadlock (3.21s)
+=== RUN   TestInstanceIdentityQuotaAndNamingQueueFairness
+--- PASS: TestInstanceIdentityQuotaAndNamingQueueFairness (5.76s)
+=== RUN   TestInstanceMigrationFromV3PreservesManagementData
+--- PASS: TestInstanceMigrationFromV3PreservesManagementData (3.31s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	33.457s

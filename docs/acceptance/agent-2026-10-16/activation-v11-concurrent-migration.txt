@@ -1,0 +1,4 @@
+=== RUN   TestActivationV10MigrationPreservesExactOutcome
+--- PASS: TestActivationV10MigrationPreservesExactOutcome (4.36s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	5.436s

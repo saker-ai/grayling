@@ -9,7 +9,9 @@ A release bundle includes the full license and NOTICE texts for every linked mod
 | github.com/alicebob/miniredis/v2 | v2.38.0 | MIT | LICENSE `9964909ed0def8840643886cdc465b063b5978827bac01b886b15a47488064d4` |
 | github.com/antlr4-go/antlr/v4 | v4.13.0 | BSD-2-Clause | LICENSE `683fcd416d83b64781e229a3c2a598462fbf55c5c9fea54be244766b22c033cf` |
 | github.com/blang/semver/v4 | v4.0.0 | MIT | LICENSE `895d625d7bae6d50064367de0c9f283fbd4565da9cdeb103620fe357d80d52a1` |
+| github.com/cenkalti/backoff/v5 | v5.0.3 | MIT | LICENSE `5c0476add4c38b55d0ed5ac11b85e00c38f26e1caee20dfe3ab58190103d1fbc` |
 | github.com/cespare/xxhash/v2 | v2.3.0 | MIT | LICENSE.txt `f566a9f97bacdaf00d9f21dd991e81dc11201c4e016c86b470799429a1c9a79c` |
+| github.com/coder/websocket | v1.8.15 | ISC | LICENSE.txt `cc0975a5f6305145bdd7b41ce9479632fdac3870e6ac4281f28017f18c767c4e` |
 | github.com/diegoholiveira/jsonlogic/v3 | v3.10.1 | MIT | LICENSE `83cc4811d39670c6e26357aa500dac3e78ebee3445ae2055a5a60ec61080a490` |
 | github.com/dustin/go-humanize | v1.0.1 | MIT | LICENSE `a973b4498c13eb74baa2a8e5c351426a6826f2fcdd909916dbe53ee2e755fd71` |
 | github.com/godeps/gonacos | v0.0.0-20261006194453-ea39c83bf6f0 | Apache-2.0 | LICENSE `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`<br>NOTICE `f51c9c2c8fff66b0eb813fa9daf4476a5be3cf392fc6d6d5ea3603cc3ede9127` |
@@ -41,6 +43,7 @@ A release bundle includes the full license and NOTICE texts for every linked mod
 | golang.org/x/sys | v0.48.0 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
 | golang.org/x/text | v0.42.0 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
 | golang.org/x/time | v0.12.0 | BSD-3-Clause | LICENSE `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad` |
+| google.golang.org/protobuf | v1.36.12-0.20260120151049-f2248ac996af | BSD-3-Clause | LICENSE `4835612df0098ca95f8e7d9e3bffcb02358d435dbb38057c844c99d7f725eb20` |
 | gopkg.in/yaml.v3 | v3.0.1 | MIT | LICENSE `d18f6323b71b0b768bb5e9616e36da390fbd39369a81807cca352de4e4e6aa0b`<br>NOTICE `f6c2dd3a67b576eafb89b80200b8b1627230bf3821a0c14cb99a22ac19107d00` |
 | gorm.io/driver/postgres | v1.6.3 | MIT | License `59f62caa972078dc1664ce928b5e5d51b78633fc43b78894d2dab83bc504edee` |
 | gorm.io/gorm | v1.31.2 | MIT | LICENSE `a7535fe9fee1f534b47846eee31be7492c73fb766e6f4fe9433a427e16e147c3` |

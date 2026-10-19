@@ -1,0 +1,128 @@
+{"Time":"2026-10-16T10:51:31.133791112+08:00","Action":"start","Package":"github.com/saker-ai/grayling/api/agent/v1"}
+{"Time":"2026-10-16T10:51:31.140900141+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation"}
+{"Time":"2026-10-16T10:51:31.141182443+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation","Output":"=== RUN   TestFrameValidation\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.141231816+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation","Output":"=== PAUSE TestFrameValidation\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.141240805+08:00","Action":"pause","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation"}
+{"Time":"2026-10-16T10:51:31.141249784+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants"}
+{"Time":"2026-10-16T10:51:31.141259931+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants","Output":"=== RUN   TestEnvelopeInvariants\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.141269964+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants","Output":"=== PAUSE TestEnvelopeInvariants\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.141277113+08:00","Action":"pause","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants"}
+{"Time":"2026-10-16T10:51:31.141284192+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestRevisionJSONPrecision"}
+{"Time":"2026-10-16T10:51:31.141290529+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestRevisionJSONPrecision","Output":"=== RUN   TestRevisionJSONPrecision\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.141299078+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestRevisionJSONPrecision","Output":"=== PAUSE TestRevisionJSONPrecision\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.141305715+08:00","Action":"pause","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestRevisionJSONPrecision"}
+{"Time":"2026-10-16T10:51:31.141312576+08:00","Action":"cont","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation"}
+{"Time":"2026-10-16T10:51:31.141318137+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation","Output":"=== CONT  TestFrameValidation\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.142142576+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/valid"}
+{"Time":"2026-10-16T10:51:31.142173122+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/valid","Output":"=== RUN   TestFrameValidation/valid\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.142228479+08:00","Action":"cont","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestRevisionJSONPrecision"}
+{"Time":"2026-10-16T10:51:31.142234583+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestRevisionJSONPrecision","Output":"=== CONT  TestRevisionJSONPrecision\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.142348138+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/valid","Output":"--- PASS: TestFrameValidation/valid (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.142363248+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/valid","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.142374408+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/unknown_optional_field"}
+{"Time":"2026-10-16T10:51:31.142378479+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/unknown_optional_field","Output":"=== RUN   TestFrameValidation/unknown_optional_field\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.142403073+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/unknown_optional_field","Output":"--- PASS: TestFrameValidation/unknown_optional_field (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.142408444+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/unknown_optional_field","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.142483999+08:00","Action":"cont","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants"}
+{"Time":"2026-10-16T10:51:31.142527001+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants","Output":"=== CONT  TestEnvelopeInvariants\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.142564565+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/typed_nil_hello"}
+{"Time":"2026-10-16T10:51:31.142572501+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/typed_nil_hello","Output":"=== RUN   TestEnvelopeInvariants/typed_nil_hello\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.142726016+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/empty"}
+{"Time":"2026-10-16T10:51:31.142733242+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/empty","Output":"=== RUN   TestFrameValidation/empty\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.142859686+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/typed_nil_hello","Output":"--- PASS: TestEnvelopeInvariants/typed_nil_hello (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.142876159+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/typed_nil_hello","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.14288693+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/empty","Output":"--- PASS: TestFrameValidation/empty (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.142897445+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/empty","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.142903662+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestRevisionJSONPrecision","Output":"--- PASS: TestRevisionJSONPrecision (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.142911162+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestRevisionJSONPrecision","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.142969522+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/typed_nil_register"}
+{"Time":"2026-10-16T10:51:31.142977666+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/typed_nil_register","Output":"=== RUN   TestEnvelopeInvariants/typed_nil_register\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.14299604+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/oversize"}
+{"Time":"2026-10-16T10:51:31.143000218+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/oversize","Output":"=== RUN   TestFrameValidation/oversize\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143007625+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/typed_nil_register","Output":"--- PASS: TestEnvelopeInvariants/typed_nil_register (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.14301254+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/typed_nil_register","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.14302492+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/nil_heartbeat"}
+{"Time":"2026-10-16T10:51:31.143029728+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/nil_heartbeat","Output":"=== RUN   TestEnvelopeInvariants/nil_heartbeat\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143036457+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/oversize","Output":"--- PASS: TestFrameValidation/oversize (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.14304117+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/oversize","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.14304517+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/nil_heartbeat","Output":"--- PASS: TestEnvelopeInvariants/nil_heartbeat (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143058803+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/nil_heartbeat","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143064975+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/major"}
+{"Time":"2026-10-16T10:51:31.143068543+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/major","Output":"=== RUN   TestEnvelopeInvariants/major\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.14307528+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/major","Output":"--- PASS: TestEnvelopeInvariants/major (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143084647+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/major","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143091516+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/truncated"}
+{"Time":"2026-10-16T10:51:31.143096908+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/truncated","Output":"=== RUN   TestFrameValidation/truncated\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143103895+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/minor"}
+{"Time":"2026-10-16T10:51:31.143110764+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/minor","Output":"=== RUN   TestEnvelopeInvariants/minor\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143118821+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/minor","Output":"--- PASS: TestEnvelopeInvariants/minor (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143125311+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/minor","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143129503+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/truncated","Output":"--- PASS: TestFrameValidation/truncated (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143135741+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/truncated","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143139547+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/duplicate_command"}
+{"Time":"2026-10-16T10:51:31.143142923+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/duplicate_command","Output":"=== RUN   TestFrameValidation/duplicate_command\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143169508+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_identity"}
+{"Time":"2026-10-16T10:51:31.143174088+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_identity","Output":"=== RUN   TestEnvelopeInvariants/missing_identity\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143182876+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/duplicate_command","Output":"--- PASS: TestFrameValidation/duplicate_command (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143188047+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/duplicate_command","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143195522+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_identity","Output":"--- PASS: TestEnvelopeInvariants/missing_identity (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143201648+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_identity","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143205024+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/future_command"}
+{"Time":"2026-10-16T10:51:31.143208663+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/future_command","Output":"=== RUN   TestFrameValidation/future_command\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143243419+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/future_command","Output":"--- PASS: TestFrameValidation/future_command (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143249742+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/future_command","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143253263+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/client_chosen_session"}
+{"Time":"2026-10-16T10:51:31.143256742+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/client_chosen_session","Output":"=== RUN   TestEnvelopeInvariants/client_chosen_session\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143262821+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/ambiguous_future_command"}
+{"Time":"2026-10-16T10:51:31.143269318+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/ambiguous_future_command","Output":"=== RUN   TestFrameValidation/ambiguous_future_command\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143278351+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/client_chosen_session","Output":"--- PASS: TestEnvelopeInvariants/client_chosen_session (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143282697+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/client_chosen_session","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143289791+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/ambiguous_future_command","Output":"--- PASS: TestFrameValidation/ambiguous_future_command (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143294381+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation/ambiguous_future_command","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143297619+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/client_chosen_epoch"}
+{"Time":"2026-10-16T10:51:31.143305722+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/client_chosen_epoch","Output":"=== RUN   TestEnvelopeInvariants/client_chosen_epoch\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143320191+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation","Output":"--- PASS: TestFrameValidation (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143325657+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestFrameValidation","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143329481+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/client_chosen_epoch","Output":"--- PASS: TestEnvelopeInvariants/client_chosen_epoch (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143336259+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/client_chosen_epoch","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143340381+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_message_id"}
+{"Time":"2026-10-16T10:51:31.143343956+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_message_id","Output":"=== RUN   TestEnvelopeInvariants/missing_message_id\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143360069+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_message_id","Output":"--- PASS: TestEnvelopeInvariants/missing_message_id (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143367278+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_message_id","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.14338098+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_session"}
+{"Time":"2026-10-16T10:51:31.143384846+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_session","Output":"=== RUN   TestEnvelopeInvariants/missing_session\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.14343554+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_session","Output":"--- PASS: TestEnvelopeInvariants/missing_session (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143453708+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_session","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143462668+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_operation"}
+{"Time":"2026-10-16T10:51:31.143468565+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_operation","Output":"=== RUN   TestEnvelopeInvariants/missing_operation\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143480289+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_operation","Output":"--- PASS: TestEnvelopeInvariants/missing_operation (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143488179+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/missing_operation","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.14349718+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/negative_deadline"}
+{"Time":"2026-10-16T10:51:31.143503401+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/negative_deadline","Output":"=== RUN   TestEnvelopeInvariants/negative_deadline\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.14351629+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/negative_deadline","Output":"--- PASS: TestEnvelopeInvariants/negative_deadline (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143539364+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/negative_deadline","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143547208+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/unknown_resource"}
+{"Time":"2026-10-16T10:51:31.143552467+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/unknown_resource","Output":"=== RUN   TestEnvelopeInvariants/unknown_resource\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143562128+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/unknown_resource","Output":"--- PASS: TestEnvelopeInvariants/unknown_resource (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143569367+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants/unknown_resource","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143576787+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants","Output":"--- PASS: TestEnvelopeInvariants (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143623811+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"TestEnvelopeInvariants","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143633672+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode"}
+{"Time":"2026-10-16T10:51:31.143639386+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode","Output":"=== RUN   FuzzDecode\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143758418+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode/seed#0"}
+{"Time":"2026-10-16T10:51:31.143768138+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode/seed#0","Output":"=== RUN   FuzzDecode/seed#0\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143905917+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode/seed#0","Output":"--- PASS: FuzzDecode/seed#0 (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143921723+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode/seed#0","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143933637+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode/seed#1"}
+{"Time":"2026-10-16T10:51:31.143939684+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode/seed#1","Output":"=== RUN   FuzzDecode/seed#1\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143951167+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode/seed#1","Output":"--- PASS: FuzzDecode/seed#1 (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143958203+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode/seed#1","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.143966145+08:00","Action":"run","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode/seed#2"}
+{"Time":"2026-10-16T10:51:31.143972324+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode/seed#2","Output":"=== RUN   FuzzDecode/seed#2\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143982064+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode/seed#2","Output":"--- PASS: FuzzDecode/seed#2 (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.143991201+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode/seed#2","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.144011352+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode","Output":"--- PASS: FuzzDecode (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.144020578+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Test":"FuzzDecode","Elapsed":0}
+{"Time":"2026-10-16T10:51:31.144027042+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:51:31.145131818+08:00","Action":"output","Package":"github.com/saker-ai/grayling/api/agent/v1","Output":"ok  \tgithub.com/saker-ai/grayling/api/agent/v1\t0.011s\n"}
+{"Time":"2026-10-16T10:51:31.145196031+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/api/agent/v1","Elapsed":0.011}

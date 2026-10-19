@@ -1,0 +1,1502 @@
+{
+  "complete": false,
+  "checks": [
+    {
+      "command": "GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test -short ./ ./cmd/... ./internal/... ./pkg/... ./web",
+      "status": "PASS",
+      "log": "baseline-tests.txt",
+      "limitation": "Explicitly skips PostgreSQL; no Agent runtime coverage"
+    },
+    {
+      "command": "GOWORK=off go vet ./...",
+      "status": "PASS",
+      "log": "vet.txt"
+    },
+    {
+      "command": "make sdk-test",
+      "status": "PASS",
+      "log": "sdk-tests.txt"
+    },
+    {
+      "command": "make license-check release-check",
+      "status": "PASS",
+      "log": "license.txt"
+    },
+    {
+      "command": "make check-agent-generated test-agent-contract",
+      "status": "PASS",
+      "log": [
+        "contract-tests.jsonl",
+        "contract-race.txt"
+      ]
+    },
+    {
+      "command": "GOWORK=off go test ./api/agent/v1 -run '^$' -fuzz '^FuzzDecode$' -fuzztime=10s",
+      "status": "PASS",
+      "log": "contract-fuzz.txt",
+      "executions": 1542790
+    },
+    {
+      "command": "GOWORK=off go test -race -count=1 ./pkg/agent ./internal/agent",
+      "status": "PASS",
+      "log": "resource-race.txt",
+      "limitation": "Pure signature/claims/watermark checks; no persistent cache or running Agent"
+    },
+    {
+      "command": "GOWORK=off go test -json -tags=integration -race -count=1 ./test/agent -run Naming",
+      "status": "PASS",
+      "log": "naming-poc.jsonl",
+      "limitation": "Embedded API/lease/notification-hook POC only; not external Nacos, auth or real subscriber push"
+    },
+    {
+      "command": "GOWORK=off go test ./pkg/agent -run '^$' -fuzz '^FuzzClaims$' -fuzztime=10s -parallel=4",
+      "status": "PASS",
+      "log": "claims-fuzz.txt",
+      "executions": 398854
+    },
+    {
+      "command": "python3 scripts/agent_signature_fixture.py --check",
+      "status": "PASS",
+      "log": "test/agent/fixtures/signed-policy-v1.json"
+    },
+    {
+      "command": "GOWORK=off go vet ./api/... ./pkg/agent ./internal/agent && GOWORK=off go vet -tags=integration ./test/agent",
+      "status": "PASS",
+      "limitation": "Static checks only"
+    },
+    {
+      "command": "GOWORK=off go test -tags=integration -race ./test/agent -run '^TestSession|^TestWSS' -count=1 -v",
+      "status": "PASS",
+      "log": "sessions-wss.txt",
+      "limitation": "Shared sessions and session-only WSS; no instance lease or full protocol dispatch"
+    },
+    {
+      "command": "GOWORK=off go test -tags=integration -race ./test/agent -run '^TestWSSRejects|^TestGoAgentClient' -count=1 -v",
+      "status": "PASS",
+      "log": "client-wss-faults.txt",
+      "limitation": "Go session client and malformed message/backend-pool-closed checks only"
+    },
+    {
+      "command": "GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test -short ./api/... ./ ./cmd/... ./internal/... ./pkg/... ./web",
+      "status": "PASS",
+      "log": "channel-regression.txt",
+      "limitation": "Explicitly skips PG; separate Agent PG suite executes against real Docker PostgreSQL"
+    },
+    {
+      "command": "make test-agent-channel",
+      "status": "PASS",
+      "log": "channel-final.txt",
+      "limitation": "Session skeleton only; all A01—A28 remain incomplete"
+    },
+    {
+      "command": "GOWORK=off go test -tags=integration -race -count=1 ./test/agent -run '^TestSessionDeploymentBootCASAndAdmission$'",
+      "status": "PASS",
+      "log": "boot-cas-missing.txt",
+      "limitation": "Includes refusing replacement authorization when the expected prior instance is absent"
+    },
+    {
+      "command": "GOWORK=off go vet ./... && GOWORK=off go vet -tags=integration ./test/agent",
+      "status": "PASS"
+    },
+    {
+      "command": "make license-check release-check check-agent-generated && git diff --check",
+      "status": "PASS",
+      "limitation": "Existing dependency versions unchanged; websocket/time/protobuf moved from indirect to direct requirements"
+    },
+    {
+      "command": "GOWORK=off go test -json -tags=integration -race -count=1 -timeout=5m ./test/agent",
+      "status": "PASS",
+      "log": "policy-and-channel.jsonl",
+      "passedTestsIncludingSubtests": 20,
+      "skips": 0,
+      "failures": 0,
+      "limitation": "Component integration against real PG/WSS; not full Agent/gogw/production acceptance"
+    },
+    {
+      "command": "GOWORK=off go test -race ./pkg/agent ./internal/agent",
+      "status": "PASS",
+      "log": "policy-unit-race.txt",
+      "limitation": "Includes server clock guard and correlated NACK-before-disconnect regression"
+    },
+    {
+      "command": "GOWORK=off go test -tags=integration -race -count=1 ./test/agent -run 'TestPolicyWSS|TestWSSGuards'",
+      "status": "PASS",
+      "log": "policy-final-wss.txt"
+    },
+    {
+      "command": "GOWORK=off go test -tags=integration -race -count=1 ./test/agent -run '^TestGoAgentClientSession$'",
+      "status": "PASS",
+      "log": "unified-go-client.txt",
+      "limitation": "Unified 805a696 Go SDK; earlier duplicate DialConnection skeleton removed"
+    },
+    {
+      "command": "GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test -short ./api/... ./ ./cmd/... ./internal/... ./pkg/... ./web",
+      "status": "PASS",
+      "log": "policy-regression.txt"
+    },
+    {
+      "command": "make license-check release-check check-agent-generated",
+      "status": "PASS",
+      "log": "policy-checks.txt"
+    },
+    {
+      "command": "GOWORK=off go vet ./... && GOWORK=off go vet -tags=integration ./test/agent",
+      "status": "PASS"
+    },
+    {
+      "command": "GOWORK=off go test ./internal/api -run TestOpenAPI -count=1",
+      "status": "PASS"
+    },
+    {
+      "command": "go test -race -count=1 ./internal/admin ./internal/api ./internal/agent ./pkg/agent",
+      "status": "PASS",
+      "log": "agent-admin-unit.txt",
+      "limitation": "Component tests and existing API regression; does not prove complete Agent acceptance"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=3m -v ./test/agent -run '^TestAgentAdminHTTP|^TestAgentManaged|^TestAgentAdminAudit|^TestAgentManagementMigrates|^TestAgentManagementMetadata'",
+      "status": "PASS",
+      "log": "agent-admin-integration.txt",
+      "limitation": "Real PG/App/WSS management subset; no management browser, instance lease or release acceptance"
+    },
+    {
+      "command": "GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test -short ./ ./cmd/... ./internal/... ./pkg/... ./web",
+      "status": "PASS",
+      "log": "agent-admin-regression.txt",
+      "limitation": "Explicit PG skip; real database assertions are in separate integration log"
+    },
+    {
+      "command": "make license-check release-check check-agent-generated",
+      "status": "PASS",
+      "log": "agent-admin-checks.txt"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=5m -json ./test/agent",
+      "status": "PASS",
+      "log": "agent-admin-full-integration.jsonl",
+      "passedTestsIncludingSubtests": 28,
+      "skips": 0,
+      "failures": 0,
+      "durationSeconds": 92.867,
+      "limitation": "Complete current Agent component integration suite, not complete A01-A28 acceptance; external Nacos, instances/releases/gogw/load and ops pending"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=3m -v ./test/agent -run ^TestInstance",
+      "status": "PASS",
+      "log": "instance-revision-fencing.txt",
+      "limitation": "Component governance and embedded Naming only; no WSS registration/discovery or external Nacos acceptance."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=2m -v ./test/agent -run ^TestInstanceEmpty",
+      "status": "PASS",
+      "log": "instance-empty-refresh.txt"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=8m -json ./test/agent",
+      "status": "PASS",
+      "log": "instance-full-integration.jsonl",
+      "tests": {
+        "pass": 39,
+        "fail": 0,
+        "skip": 0
+      },
+      "elapsedSeconds": 133.256,
+      "limitation": "All current component tests only. Full A01–A28 acceptance remains incomplete."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=3m -v ./test/agent -run ^TestInstanceWSS|^TestWSS|^TestGoAgent",
+      "status": "PASS",
+      "log": "instance-wss-regression.txt",
+      "limitation": "Registration commands, WSS lifecycle and SDK session only; discovery/release unavailable."
+    },
+    {
+      "command": "go test -race -count=1 ./api/agent/v1 ./internal/agent ./pkg/agent",
+      "status": "PASS",
+      "log": "instance-wss-unit.txt"
+    },
+    {
+      "command": "go vet -tags=integration ./internal/agent ./pkg/agent ./test/agent",
+      "status": "PASS",
+      "log": "instance-wss-vet.txt"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=3m -v ./test/agent -run '^TestPolicyWSS|^TestAgentApp'",
+      "status": "PASS",
+      "log": "instance-wss-app-policy.txt",
+      "elapsedSeconds": 26.336
+    },
+    {
+      "command": "go test -race ./internal/api ./internal/agent",
+      "status": "PASS",
+      "log": "registration-admin-unit.txt",
+      "limitation": "OpenAPI and route coverage plus API/Agent component tests; browser UI remains absent."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=3m -v ./test/agent -run '^TestAgentAdminHTTP'",
+      "status": "PASS",
+      "log": "registration-admin-http.txt",
+      "limitation": "Initial registration management flow; expanded audit-failure cases are recorded separately in registration-admin-regression.txt."
+    },
+    {
+      "command": "go vet -tags=integration ./internal/api ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "registration-admin-vet.txt"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=4m -v ./test/agent -run '^TestAgentAdmin|^TestAgentManaged|^TestAgentManagement|^TestInstance'",
+      "status": "PASS",
+      "log": "registration-admin-regression.txt",
+      "topLevelTestsPassed": 20,
+      "elapsedSeconds": 80.323,
+      "limitation": "Registration governance, management and WSS components only; no full discovery/release/gogw acceptance."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=1m -v ./test/agent -run '^TestAgentAppDisabled'",
+      "status": "PASS",
+      "log": "registration-admin-disabled.txt"
+    },
+    {
+      "command": "go test -race -count=1 ./ ./internal/agent",
+      "status": "PASS",
+      "log": "naming-worker-unit.txt"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=3m -v ./test/agent -run '^TestAgentAdminHTTP|^TestAgentApp'",
+      "status": "PASS",
+      "log": "naming-worker-app.txt",
+      "elapsedSeconds": 29.479,
+      "limitation": "Embedded adapter/App only; noncancellable substrate callbacks can delay final resource release."
+    },
+    {
+      "command": "go vet -tags=integration ./ ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "naming-worker-vet.txt"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=2m -v ./test/agent -run '^TestInstanceNaming'",
+      "status": "PASS",
+      "log": "naming-worker-integration.txt",
+      "topLevelTestsPassed": 3,
+      "limitation": "Scope pagination, callback drain and exact embedded projection recovery; no external backend or performance acceptance."
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent ./internal/agent",
+      "status": "PASS",
+      "log": "discovery-codec-regression.txt",
+      "limitation": "Payload schema, signature verification, rollback and immutable candidate access only; no durable discovery publication/transport or Prepared authorization."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=1m -v ./test/agent -run '^TestInstanceDiscovery'",
+      "status": "PASS",
+      "log": "discovery-codec-integration.txt",
+      "limitation": "Governance-to-payload filtering with simulated Naming acknowledgement; real Naming evidence is separate."
+    },
+    {
+      "command": "go vet ./pkg/agent ./internal/agent",
+      "status": "PASS",
+      "log": "discovery-codec-vet.txt"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=3m -v ./test/agent -run '^TestInstanceDiscovery|^TestAgentManagementMigrates|^TestInstanceMigration'",
+      "status": "PASS",
+      "log": "discovery-store-integration.txt",
+      "limitation": "Durable candidate artifact components only; governance acknowledgement is simulated in some tests."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=2m -v ./test/agent -run '^TestInstanceDiscoveryUint64'",
+      "status": "PASS",
+      "log": "discovery-store-boundaries.txt"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=2m -v ./test/agent -run '^TestInstanceDiscoveryRejectsSession'",
+      "status": "PASS",
+      "log": "discovery-store-session-expiry.txt"
+    },
+    {
+      "command": "go test -race -count=1 ./internal/agent ./pkg/agent",
+      "status": "PASS",
+      "log": "discovery-store-unit.txt"
+    },
+    {
+      "command": "go vet -tags=integration ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "discovery-store-vet.txt"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=3m -v ./test/agent -run '^TestDiscovery'",
+      "status": "PASS",
+      "log": "discovery-channel-integration.txt",
+      "topLevelTestsPassed": 3,
+      "elapsedSeconds": 18.84,
+      "limitation": "Registered candidate transport only. No Prepared/route eligibility, trusted cache, or external Naming acceptance."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=3m -v ./test/agent -run '^TestAgentAdminHTTP|^TestPolicyWSS|^TestWSS|^TestGoAgent'",
+      "status": "PASS",
+      "log": "discovery-channel-regression.txt",
+      "elapsedSeconds": 38.621
+    },
+    {
+      "command": "go test -race -count=1 ./ ./internal/agent ./pkg/agent",
+      "status": "PASS",
+      "log": "discovery-channel-unit.txt"
+    },
+    {
+      "command": "go vet -tags=integration ./ ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "discovery-channel-vet.txt"
+    },
+    {
+      "command": "go test ./internal/api -run 'TestOpenAPI|TestWebManagement'",
+      "status": "PASS",
+      "log": "discovery-channel-openapi.txt"
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent",
+      "status": "PASS",
+      "log": "discovery-cache-regression.txt",
+      "limitation": "Component tests include discovery cache and process-exit WAL recovery; no RuntimeView, Prepared, or host power-loss acceptance."
+    },
+    {
+      "command": "go test -race -tags=integration ./test/agent -run TestDiscoveryWSSReal -count=1 -v",
+      "status": "PASS",
+      "log": "discovery-cache-wss.txt",
+      "limitation": "Real embedded Naming/WSS/HTTPS download, sealed cache install/reopen and failover; no route eligibility."
+    },
+    {
+      "command": "go vet -tags=integration ./pkg/agent ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "discovery-cache-vet.txt"
+    },
+    {
+      "command": "go test -race -tags=integration ./test/agent -run '^TestWSSCommandDeadline' -count=3 -v",
+      "status": "PASS",
+      "log": "command-deadline.txt",
+      "limitation": "Real PostgreSQL lock-wait cancellation and WSS session/subscription behavior; no full runtime or release acceptance."
+    },
+    {
+      "command": "go test -race -tags=integration ./test/agent -run '^TestInstanceWSS' -count=1 -v",
+      "status": "PASS",
+      "log": "command-deadline-registration.txt"
+    },
+    {
+      "command": "go test -race ./internal/agent",
+      "status": "PASS",
+      "log": "command-deadline-unit.txt"
+    },
+    {
+      "command": "go vet -tags=integration ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "command-deadline-vet.txt"
+    },
+    {
+      "command": "go test -race -tags=integration ./test/agent -run '^(TestWSSCommandDeadline|TestPolicyWSSCrossReplica|TestDiscoveryWSSRealNaming)' -count=1 -v",
+      "status": "PASS",
+      "log": "command-deadline-regression.txt",
+      "limitation": "Command deadlines and existing signed policy/discovery WSS/HTTPS regression only; full RuntimeView and release gates remain incomplete."
+    },
+    {
+      "command": "go test -race ./pkg/agent -run '^TestBundle' -count=1 -v",
+      "status": "PASS",
+      "log": "bundle-tests.txt",
+      "limitation": "Local signed Bundle/schema/exact policy dependency validation only; no approved source, durable Bundle publication, Prepared or RuntimeView."
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent",
+      "status": "PASS",
+      "log": "bundle-regression.txt"
+    },
+    {
+      "command": "go vet ./pkg/agent",
+      "status": "PASS",
+      "log": "bundle-vet.txt"
+    },
+    {
+      "command": "go test -race ./internal/admin -run '^TestPublishedSnapshot' -count=1 -v",
+      "status": "PASS",
+      "log": "published-source-tests.txt"
+    },
+    {
+      "command": "go test -race ./internal/admin -count=1",
+      "status": "PASS",
+      "log": "published-source-regression.txt"
+    },
+    {
+      "command": "go test -race -tags=integration ./test/agent -run '^TestPublishedSourceReplica' -count=1 -v",
+      "status": "PASS",
+      "log": "published-source-wss.txt",
+      "limitation": "Explicit internal-component orchestration with real PostgreSQL and WSS/HTTPS; no Bundle approval/API, atomic pair publication or automatic workflow."
+    },
+    {
+      "command": "go vet -tags=integration ./internal/admin ./test/agent",
+      "status": "PASS",
+      "log": "published-source-vet.txt"
+    },
+    {
+      "command": "go test -race -tags=integration ./test/agent -run '^(TestBundlePair|TestPublishedSourceReplica|TestPolicyPublicationCASDedupAndReplicaRead|TestPolicyWSSCrossReplica)' -count=1 -v",
+      "status": "PASS",
+      "log": "bundle-pair-integration.txt",
+      "limitation": "Atomic internal publication and explicit source-to-policy transport only; no approval/API, Bundle transport/cache, Prepared or activation acceptance."
+    },
+    {
+      "command": "go test -race ./pkg/agent ./internal/agent",
+      "status": "PASS",
+      "log": "bundle-pair-unit.txt"
+    },
+    {
+      "command": "go vet -tags=integration ./internal/agent ./pkg/agent ./test/agent",
+      "status": "PASS",
+      "log": "bundle-pair-vet.txt"
+    },
+    {
+      "command": "go test -race -tags=integration ./test/agent -run '^TestBundlePairUsesMinimum' -count=1 -v",
+      "status": "PASS",
+      "log": "bundle-pair-lifetime.txt",
+      "limitation": "Verifies the supported one-second publisher lifetime is preserved by pair publication."
+    },
+    {
+      "command": "go test -race -tags=integration ./test/agent -run '^(TestBundleWSSHTTPS|TestBundleReadRequires)' -count=1 -v",
+      "status": "PASS",
+      "log": "bundle-download-integration.txt"
+    },
+    {
+      "command": "go test -race -tags=integration ./test/agent -run '^(TestBundleWSSHTTPS|TestBundleReadRequires|TestDiscoveryWSSRealNaming|TestPolicyWSSCrossReplica|TestPublishedSourceReplica)' -count=1 -v",
+      "status": "PASS",
+      "log": "bundle-download-regression.txt"
+    },
+    {
+      "command": "go test -race ./pkg/agent ./internal/agent ./internal/api",
+      "status": "PASS",
+      "log": "bundle-download-unit.txt"
+    },
+    {
+      "command": "go vet -tags=integration ./internal/agent ./pkg/agent ./test/agent",
+      "status": "PASS",
+      "log": "bundle-download-vet.txt"
+    },
+    {
+      "command": "make test-agent-bundle",
+      "status": "PASS",
+      "log": "bundle-download-make.txt",
+      "limitation": "Bundle/schema/dependency, atomic storage and exact network fetch components; no Bundle cache, approval/API, Prepared, RuntimeView or actual gateway acceptance."
+    },
+    {
+      "command": "go test -race ./pkg/agent -run '^TestBundleCache' -count=1 -v",
+      "status": "PASS",
+      "log": "bundle-cache-tests.txt",
+      "limitation": "Dedicated Bundle cache component and process-exit WAL tests; host power-loss acceptance remains pending."
+    },
+    {
+      "command": "go test -race -tags=integration ./test/agent -run '^TestBundleWSSHTTPS' -count=1 -v",
+      "status": "PASS",
+      "log": "bundle-cache-wss.txt",
+      "limitation": "Network Bundle install/reopen and durable policy dependency join only; no complete RuntimeView or Prepared."
+    },
+    {
+      "command": "make test-agent-bundle",
+      "status": "PASS",
+      "log": "bundle-cache-regression.txt",
+      "limitation": "Current full SDK/admin/Agent and Bundle transport/storage/cache component regression; overall A01-A28 incomplete."
+    },
+    {
+      "command": "go vet -tags=integration ./pkg/agent ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "bundle-cache-vet.txt"
+    },
+    {
+      "command": "go test -race -tags=integration ./test/agent -run '^TestBundleRefresh' -count=1 -v",
+      "status": "PASS",
+      "log": "bundle-refresh-tests.txt",
+      "limitation": "Internal refresh core and explicit WSS/cache workflow; no approval/revocation orchestration or scheduled service."
+    },
+    {
+      "command": "make test-agent-bundle",
+      "status": "PASS",
+      "log": "bundle-refresh-regression.txt",
+      "limitation": "Bundle component regression; complete runtime/release/gateway acceptance remains incomplete."
+    },
+    {
+      "command": "go vet -tags=integration ./internal/agent ./pkg/agent ./test/agent",
+      "status": "PASS",
+      "log": "bundle-refresh-vet.txt"
+    },
+    {
+      "command": "go test -race ./internal/platform ./internal/api -run Approval -count=1",
+      "status": "PASS",
+      "log": "approval-receipt-regression.txt",
+      "limitation": "Receipt and internal publication deadline only; approval service/API orchestration remains pending."
+    },
+    {
+      "command": "go test -race -tags integration ./test/agent -run ^TestBundleAuthorization -count=1",
+      "status": "PASS",
+      "log": "approval-publication-deadline.txt",
+      "limitation": "Receipt and internal publication deadline only; approval service/API orchestration remains pending."
+    },
+    {
+      "command": "go vet ./internal/platform ./internal/agent",
+      "status": "PASS",
+      "log": "approval-receipt-vet.txt",
+      "limitation": "Receipt and internal publication deadline only; approval service/API orchestration remains pending."
+    },
+    {
+      "command": "go test -race ./internal/admin ./internal/platform -run TestBundleApproval|TestPublishedSnapshot|TestApprovalOperation -count=1",
+      "status": "PASS",
+      "log": "bundle-approval-unit.txt",
+      "limitation": "Internal approval publication service and explicit real PostgreSQL/WSS path; Bundle HTTP/API, activation and complete acceptance remain pending."
+    },
+    {
+      "command": "go test -race -tags integration ./test/agent -run ^TestPublishedSourceReplica -count=1",
+      "status": "PASS",
+      "log": "bundle-approval-integration.txt",
+      "limitation": "Internal approval publication service and explicit real PostgreSQL/WSS path; Bundle HTTP/API, activation and complete acceptance remain pending."
+    },
+    {
+      "command": "make test-agent-bundle",
+      "status": "PASS",
+      "log": "bundle-approval-regression.txt",
+      "limitation": "Component checks only; full protocol/runtime/release/gateway acceptance incomplete."
+    },
+    {
+      "command": "go vet -tags integration ./internal/admin ./internal/platform ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "bundle-approval-vet.txt",
+      "limitation": "Component checks only; full protocol/runtime/release/gateway acceptance incomplete."
+    },
+    {
+      "command": "go test -race -tags integration ./test/agent -run '^TestBundleHTTP' -count=1",
+      "status": "PASS",
+      "log": "bundle-http-tests.txt",
+      "limitation": "Bundle HTTP approval/publication, audit-failure recovery and route contract only; no UI, release activation or full acceptance."
+    },
+    {
+      "command": "go test -race ./internal/api ./internal/admin . -run 'TestBundle|TestOpenAPI|TestWebManagementCoverageMatrix|TestEmbeddedAppCanBeMountedAndRestarted' -count=1",
+      "status": "PASS",
+      "log": "bundle-http-regression.txt",
+      "limitation": "Bundle HTTP approval/publication, audit-failure recovery and route contract only; no UI, release activation or full acceptance."
+    },
+    {
+      "command": "go vet -tags integration ./internal/api ./internal/admin ./test/agent .",
+      "status": "PASS",
+      "log": "bundle-http-vet.txt",
+      "limitation": "Bundle HTTP approval/publication, audit-failure recovery and route contract only; no UI, release activation or full acceptance."
+    },
+    {
+      "command": "make test-agent-bundle",
+      "status": "PASS",
+      "log": "bundle-http-bundle-regression.txt",
+      "limitation": "Bundle, SDK, internal approval and HTTP component suite; complete A01–A28 remains unproven."
+    },
+    {
+      "command": "make test-agent-release",
+      "status": "PASS",
+      "log": "release-generation-tests.txt",
+      "limitation": "Internal release generation/intent/abort/resource pins and schema migration only; no Prepare delivery, Prepared capacity gate, activation, probes or complete runtime acceptance."
+    },
+    {
+      "command": "make test-agent-bundle",
+      "status": "PASS",
+      "log": "release-generation-bundle-regression.txt",
+      "limitation": "Internal release generation/intent/abort/resource pins and schema migration only; no Prepare delivery, Prepared capacity gate, activation, probes or complete runtime acceptance."
+    },
+    {
+      "command": "go test -race ./internal/admin ./internal/api . -run 'TestBundle|TestOpenAPI|TestWebManagementCoverageMatrix|TestEmbeddedAppCanBeMountedAndRestarted' -count=1",
+      "status": "PASS",
+      "log": "release-generation-api-regression.txt",
+      "limitation": "Internal release generation/intent/abort/resource pins and schema migration only; no Prepare delivery, Prepared capacity gate, activation, probes or complete runtime acceptance."
+    },
+    {
+      "command": "go vet -tags integration ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "release-generation-vet.txt",
+      "limitation": "Internal release generation/intent/abort/resource pins and schema migration only; no Prepare delivery, Prepared capacity gate, activation, probes or complete runtime acceptance."
+    },
+    {
+      "command": "make test-agent-prepared",
+      "status": "PASS",
+      "log": "prepared-evidence-tests.txt",
+      "limitation": "Internal directed Prepare intent, live-session eligibility, immutable Prepared receipts and v7 migration only; no WSS delivery, capacity/NACK gate, activation or runtime acceptance."
+    },
+    {
+      "command": "make test-agent-release",
+      "status": "PASS",
+      "log": "prepared-release-regression.txt",
+      "limitation": "Internal directed Prepare intent, live-session eligibility, immutable Prepared receipts and v7 migration only; no WSS delivery, capacity/NACK gate, activation or runtime acceptance."
+    },
+    {
+      "command": "go vet -tags=integration ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "prepared-evidence-vet.txt",
+      "limitation": "Internal directed Prepare intent, live-session eligibility, immutable Prepared receipts and v7 migration only; no WSS delivery, capacity/NACK gate, activation or runtime acceptance."
+    },
+    {
+      "command": "make test-agent-bundle",
+      "status": "PASS",
+      "log": "prepared-bundle-regression.txt",
+      "limitation": "Shared schema v7 regression; no full release/runtime acceptance."
+    },
+    {
+      "command": "go test ./internal/agent ./pkg/agent ./api/agent/v1",
+      "status": "PASS",
+      "log": "prepared-wire-unit.txt",
+      "limitation": "Directed preparation transport and persistence components; no external approved release intent, capacity/NACK gate, activation or runtime acceptance."
+    },
+    {
+      "command": "make check-agent-generated test-agent-contract",
+      "status": "PASS",
+      "log": "prepared-wire-contract.txt",
+      "limitation": "Directed preparation transport and persistence components; no external approved release intent, capacity/NACK gate, activation or runtime acceptance."
+    },
+    {
+      "command": "GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test -short ./ ./internal/api ./internal/admin ./pkg/agent",
+      "status": "PASS",
+      "log": "prepared-wire-regression.txt",
+      "limitation": "Directed preparation transport and persistence components; no external approved release intent, capacity/NACK gate, activation or runtime acceptance."
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent",
+      "status": "PASS",
+      "log": "prepared-wire-sdk.txt",
+      "limitation": "Directed preparation transport and persistence components; no external approved release intent, capacity/NACK gate, activation or runtime acceptance."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=2m ./test/agent -run '^TestPreparedWSSDeadline'",
+      "status": "PASS",
+      "log": "prepared-wire-deadline.txt",
+      "limitation": "Directed preparation transport and persistence components; no external approved release intent, capacity/NACK gate, activation or runtime acceptance."
+    },
+    {
+      "command": "make test-agent-prepared",
+      "status": "PASS",
+      "log": "prepared-wire-tests.txt",
+      "limitation": "Preparation network/persistence only; no NACK/capacity state gate, activation or full acceptance."
+    },
+    {
+      "command": "go vet -tags=integration ./ ./internal/agent ./pkg/agent ./test/agent",
+      "status": "PASS",
+      "log": "prepared-wire-vet.txt",
+      "limitation": "Preparation network/persistence only; no NACK/capacity state gate, activation or full acceptance."
+    },
+    {
+      "command": "make test-agent-channel",
+      "status": "PASS",
+      "log": "prepared-wire-channel.txt",
+      "limitation": "Session, WSS and App compatibility regression; full acceptance remains incomplete."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestPreparation'",
+      "status": "PASS",
+      "log": "preparation-gate-tests.txt",
+      "limitation": "Preparation outcome and capacity gate components only; no external approved release orchestration, Activate/Applied, runtime or full A16 acceptance."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestPreparationGateRollback|^TestPreparationPositive|^TestPreparationV7'",
+      "status": "PASS",
+      "log": "preparation-gate-boundaries.txt",
+      "limitation": "Preparation outcome and capacity gate components only; no external approved release orchestration, Activate/Applied, runtime or full A16 acceptance."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=2m ./test/agent -run '^TestPreparationGateEveryCarriedBuild'",
+      "status": "PASS",
+      "log": "preparation-build-matrix.txt",
+      "limitation": "Preparation outcome and capacity gate components only; no external approved release orchestration, Activate/Applied, runtime or full A16 acceptance."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=2m ./test/agent -run '^TestPreparationWSS'",
+      "status": "PASS",
+      "log": "preparation-nack-wss.txt",
+      "limitation": "Preparation outcome and capacity gate components only; no external approved release orchestration, Activate/Applied, runtime or full A16 acceptance."
+    },
+    {
+      "command": "make test-agent-preparation",
+      "status": "PASS",
+      "log": "preparation-final.txt",
+      "limitation": "Preparation outcome and capacity gate components only; no external approved release orchestration, Activate/Applied, runtime or full A16 acceptance."
+    },
+    {
+      "command": "make test-agent-release",
+      "status": "PASS",
+      "log": "preparation-release-regression.txt",
+      "limitation": "Preparation outcome and capacity gate components only; no external approved release orchestration, Activate/Applied, runtime or full A16 acceptance."
+    },
+    {
+      "command": "make test-agent-bundle",
+      "status": "PASS",
+      "log": "preparation-bundle-regression.txt",
+      "limitation": "Preparation outcome and capacity gate components only; no external approved release orchestration, Activate/Applied, runtime or full A16 acceptance."
+    },
+    {
+      "command": "make check-agent-generated test-agent-contract",
+      "status": "PASS",
+      "log": "preparation-contract.txt",
+      "limitation": "Preparation outcome and capacity gate components only; no external approved release orchestration, Activate/Applied, runtime or full A16 acceptance."
+    },
+    {
+      "command": "go vet -tags=integration ./ ./internal/agent ./pkg/agent ./test/agent",
+      "status": "PASS",
+      "log": "preparation-vet.txt",
+      "limitation": "Preparation outcome and capacity gate components only; no external approved release orchestration, Activate/Applied, runtime or full A16 acceptance."
+    },
+    {
+      "command": "GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test -short ./ ./internal/api ./internal/admin ./internal/platform",
+      "status": "PASS",
+      "log": "preparation-api-regression.txt",
+      "limitation": "Preparation outcome and capacity gate components only; no external approved release orchestration, Activate/Applied, runtime or full A16 acceptance."
+    },
+    {
+      "command": "make test-agent-activation",
+      "status": "PASS",
+      "log": "activation-core-tests.txt",
+      "limitation": "Internal atomic activation intent, signed prepared/source view and exact authenticated download only; no Activate dispatch, Applied, RuntimeView installation, probes or full A16 acceptance."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=2m ./test/agent -run '^TestActivationV8Migration'",
+      "status": "PASS",
+      "log": "activation-v8-migration.txt",
+      "limitation": "Internal atomic activation intent, signed prepared/source view and exact authenticated download only; no Activate dispatch, Applied, RuntimeView installation, probes or full A16 acceptance."
+    },
+    {
+      "command": "make test-agent-release",
+      "status": "PASS",
+      "log": "activation-release-regression.txt",
+      "limitation": "Internal atomic activation intent, signed prepared/source view and exact authenticated download only; no Activate dispatch, Applied, RuntimeView installation, probes or full A16 acceptance."
+    },
+    {
+      "command": "make test-agent-preparation",
+      "status": "PASS",
+      "log": "activation-preparation-regression.txt",
+      "limitation": "Internal atomic activation intent, signed prepared/source view and exact authenticated download only; no Activate dispatch, Applied, RuntimeView installation, probes or full A16 acceptance."
+    },
+    {
+      "command": "make check-agent-generated test-agent-contract",
+      "status": "PASS",
+      "log": "activation-contract.txt",
+      "limitation": "Internal atomic activation intent, signed prepared/source view and exact authenticated download only; no Activate dispatch, Applied, RuntimeView installation, probes or full A16 acceptance."
+    },
+    {
+      "command": "go vet -tags=integration ./ ./internal/agent ./pkg/agent ./test/agent",
+      "status": "PASS",
+      "log": "activation-vet.txt",
+      "limitation": "Internal atomic activation intent, signed prepared/source view and exact authenticated download only; no Activate dispatch, Applied, RuntimeView installation, probes or full A16 acceptance."
+    },
+    {
+      "command": "GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test -short ./ ./internal/api ./internal/admin ./internal/platform",
+      "status": "PASS",
+      "log": "activation-api-regression.txt",
+      "limitation": "Internal atomic activation intent, signed prepared/source view and exact authenticated download only; no Activate dispatch, Applied, RuntimeView installation, probes or full A16 acceptance."
+    },
+    {
+      "command": "make test-agent-bundle",
+      "status": "PASS",
+      "log": "activation-bundle-regression.txt",
+      "limitation": "Shared v9 schema and Bundle publication/transport/cache regression; no complete activation or runtime acceptance."
+    },
+    {
+      "command": "make test-agent-applied",
+      "status": "PASS",
+      "log": "applied-tests.txt",
+      "limitation": "Activate delivery and simulated authenticated source Applied/Rejected transport/persistence/status components; no actual RuntimeView installation, expiry refresh, business probes, ACTIVE or complete A16 acceptance."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=3m ./test/agent -run '^TestAppliedV9|^TestAppliedExpired|^TestAppliedUint64'",
+      "status": "PASS",
+      "log": "applied-boundaries.txt",
+      "limitation": "Activate delivery and simulated authenticated source Applied/Rejected transport/persistence/status components; no actual RuntimeView installation, expiry refresh, business probes, ACTIVE or complete A16 acceptance."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -timeout=2m ./test/agent -run '^TestAppliedOldLease'",
+      "status": "PASS",
+      "log": "applied-fencing.txt",
+      "limitation": "Activate delivery and simulated authenticated source Applied/Rejected transport/persistence/status components; no actual RuntimeView installation, expiry refresh, business probes, ACTIVE or complete A16 acceptance."
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent",
+      "status": "PASS",
+      "log": "applied-sdk-tests.txt",
+      "limitation": "Activate delivery and simulated authenticated source Applied/Rejected transport/persistence/status components; no actual RuntimeView installation, expiry refresh, business probes, ACTIVE or complete A16 acceptance."
+    },
+    {
+      "command": "make test-agent-activation",
+      "status": "PASS",
+      "log": "applied-activation-regression.txt",
+      "limitation": "Activate delivery and simulated authenticated source Applied/Rejected transport/persistence/status components; no actual RuntimeView installation, expiry refresh, business probes, ACTIVE or complete A16 acceptance."
+    },
+    {
+      "command": "make test-agent-release",
+      "status": "PASS",
+      "log": "applied-release-regression.txt",
+      "limitation": "Activate delivery and simulated authenticated source Applied/Rejected transport/persistence/status components; no actual RuntimeView installation, expiry refresh, business probes, ACTIVE or complete A16 acceptance."
+    },
+    {
+      "command": "make test-agent-bundle",
+      "status": "PASS",
+      "log": "applied-bundle-regression.txt",
+      "limitation": "Activate delivery and simulated authenticated source Applied/Rejected transport/persistence/status components; no actual RuntimeView installation, expiry refresh, business probes, ACTIVE or complete A16 acceptance."
+    },
+    {
+      "command": "make check-agent-generated test-agent-contract",
+      "status": "PASS",
+      "log": "applied-contract.txt",
+      "limitation": "Activate delivery and simulated authenticated source Applied/Rejected transport/persistence/status components; no actual RuntimeView installation, expiry refresh, business probes, ACTIVE or complete A16 acceptance."
+    },
+    {
+      "command": "go vet -tags=integration ./ ./internal/agent ./pkg/agent ./test/agent",
+      "status": "PASS",
+      "log": "applied-vet.txt",
+      "limitation": "Activate delivery and simulated authenticated source Applied/Rejected transport/persistence/status components; no actual RuntimeView installation, expiry refresh, business probes, ACTIVE or complete A16 acceptance."
+    },
+    {
+      "command": "GRAYLING_TEST_PG_SKIP=1 GOWORK=off go test -short ./ ./internal/api ./internal/admin ./internal/platform",
+      "status": "PASS",
+      "log": "applied-api-regression.txt",
+      "limitation": "Activate delivery and simulated authenticated source Applied/Rejected transport/persistence/status components; no actual RuntimeView installation, expiry refresh, business probes, ACTIVE or complete A16 acceptance."
+    },
+    {
+      "command": "make test-agent-preparation",
+      "status": "PASS",
+      "log": "applied-preparation-regression.txt",
+      "limitation": "Shared schema v10 and preparation positive/negative/capacity regression; no complete RuntimeView or business activation acceptance."
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent",
+      "status": "PASS",
+      "log": "runtime-sdk-full-race.txt",
+      "limitation": "SDK regression including RuntimeView process resources, sealed SQLite and process-exit WAL; final added commit-expiry case is in runtime-sdk-tests.txt. No actual gogw, WSS install adapter, probes, ACTIVE or complete A16/A17 acceptance."
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent -run TestRuntime",
+      "status": "PASS",
+      "log": "runtime-sdk-tests.txt",
+      "limitation": "Actual owned HTTP handler construction and execution, failed build preserving old capture, slow-builder ordering, cancellation, bounded lifetime, revocation, reboot/expiry rejection, sealed-record tamper, ignored-write failure and committed WAL restoration. Commit-expiry tested with real SQLite concurrent writer; no storage power-loss simulation."
+    },
+    {
+      "command": "go vet ./pkg/agent ./internal/agent",
+      "status": "PASS",
+      "log": "runtime-sdk-vet.txt"
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent",
+      "status": "PASS",
+      "log": "runtime-activation-sdk-race.txt",
+      "limitation": "SDK component regression; no actual gogw or complete acceptance matrix."
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent -run TestRuntime",
+      "status": "PASS",
+      "log": "runtime-activation-runtime-tests.txt",
+      "limitation": "Includes independent discovery revision advancement at fixed policy/generation and rejection of discovery rollback under a higher generation. No server-side signed activation refresh scheduler yet."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=3m ./test/agent -run '^TestRuntimeWSS'",
+      "status": "PASS",
+      "log": "runtime-activation-wss-tests.txt",
+      "limitation": "Real Docker PostgreSQL + TLS WSS/HTTPS exact resource download + SDK-owned handler installation and execution + Applied receipt/VERIFYING. Asserts command/artifact/Bundle/deadline mismatch rejection; pinned policy after mutable head advances; no terminal outcome on build failure; installed view survives connection loss and retry avoids rebuild. Does not test actual gogw, mTLS/final tickets, continuous authority refresh, ACTIVE probes or full A16/A17."
+    },
+    {
+      "command": "go vet -tags=integration ./pkg/agent ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "runtime-activation-vet.txt"
+    },
+    {
+      "command": "make check-agent-generated test-agent-contract",
+      "status": "PASS",
+      "log": "runtime-activation-contract.txt"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=4m ./test/agent -run '^TestRevocation|^TestPolicyPublication|^TestBundlePairConcurrent'",
+      "status": "PASS",
+      "log": "revocation-component-tests.txt",
+      "limitation": "Real PostgreSQL/WSS and App/GORM/TLS owner API components: cumulative epoch CAS/replica replay, per-Bundle cancellation, exact nonzero catalog bootstrap, proof expiry/refresh, signed denial enforcement across issuance/read/prepare/activation/Applied, suppressed resource/head/audit/result rollback. One connected handler cancellation observed at 1.953958485s within component 5s bound; no scale/p99, network partition, actual gogw, automatic scheduler, active-view refresh or complete A22/A26 acceptance. Generated fixture state SQL payloads omitted from log."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=8m ./test/agent -run '^TestRevocation|^TestRuntimeWSS|^TestApplied|^TestActivation|^TestPrepared|^TestPreparation|^TestPolicy|^TestBundle|^TestDiscovery'",
+      "status": "PASS",
+      "log": "revocation-integration-regression.txt",
+      "limitation": "373.841s real PostgreSQL/WSS component regression with initial revocation barriers. Final proof-bootstrap/issuance additions covered separately by revocation-component-tests.txt. Not the full production acceptance matrix. Generated fixture state SQL payloads omitted from log."
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent ./internal/agent",
+      "status": "PASS",
+      "log": "revocation-sdk-race.txt",
+      "limitation": "Includes signed cumulative catalog, per-Bundle graceful/urgent cancellation, proof replay/tamper/expiry, independent external revocation floor detecting whole SQLite-file replay, and no positive authorization from empty bootstrap before required floor recovery."
+    },
+    {
+      "command": "go test -short ./internal/api ./internal/admin ./",
+      "status": "PASS",
+      "log": "revocation-api-short.txt",
+      "limitation": "102 route/spec operations and 88 management classifications; new owner revocation UI remains explicitly incomplete."
+    },
+    {
+      "command": "go vet -tags=integration ./pkg/agent ./internal/agent ./internal/api ./test/agent",
+      "status": "PASS",
+      "log": "revocation-vet.txt"
+    },
+    {
+      "command": "make check-agent-generated test-agent-contract",
+      "status": "PASS",
+      "log": "revocation-contract.txt"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=4m ./test/agent -run ^TestRevocation",
+      "status": "PASS",
+      "log": "proof-refresh-integration.txt",
+      "limitation": "Real PostgreSQL/WSS/App components, 125.425s. Precedes final exact historical download fix, covered separately below."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=3m ./test/agent -run ^TestRevocationProofWSSRefreshPreservesInstalledSource$",
+      "status": "PASS",
+      "log": "proof-refresh-historical-wss.txt",
+      "limitation": "Exact old proof remains downloadable after same-content renewal; rejected after content changes. No scale/partition/continuous positive authority acceptance."
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent ./internal/agent",
+      "status": "PASS",
+      "log": "proof-refresh-sdk-race.txt",
+      "limitation": "Includes independent semantic/proof floors, unchanged Runtime freshness and exact uint64 maximum persistence."
+    },
+    {
+      "command": "go test -short ./ ./internal/api ./internal/admin",
+      "status": "PASS",
+      "log": "proof-refresh-api-short.txt",
+      "limitation": "Short regression only."
+    },
+    {
+      "command": "go vet -tags=integration ./pkg/agent ./internal/agent ./internal/api ./test/agent",
+      "status": "PASS",
+      "log": "proof-refresh-vet.txt",
+      "limitation": "Static checks."
+    },
+    {
+      "command": "make test-agent-contract",
+      "status": "PASS",
+      "log": "proof-refresh-contract.txt",
+      "limitation": "Contract/generated checks only."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=3m ./test/agent -run TestActivationRejectedExactArtifact|TestApplied|TestActivationRejected",
+      "status": "PASS",
+      "log": "rejection-artifact-pg.txt",
+      "limitation": "Exact activation artifact binding prerequisite only. Continuous activation refresh, versioned source/report schema, probe/ACTIVE and complete acceptance remain unfinished."
+    },
+    {
+      "command": "go test -race -count=1 ./api/agent/v1 ./pkg/agent ./internal/agent",
+      "status": "PASS",
+      "log": "rejection-artifact-unit.txt",
+      "limitation": "Exact activation artifact binding prerequisite only. Continuous activation refresh, versioned source/report schema, probe/ACTIVE and complete acceptance remain unfinished."
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent -run ^TestActivationRejectedRequiresArtifactBeforeSending$",
+      "status": "PASS",
+      "log": "rejection-artifact-sdk.txt",
+      "limitation": "Exact activation artifact binding prerequisite only. Continuous activation refresh, versioned source/report schema, probe/ACTIVE and complete acceptance remain unfinished."
+    },
+    {
+      "command": "make check-agent-generated",
+      "status": "PASS",
+      "log": "rejection-artifact-generated.txt",
+      "limitation": "Exact activation artifact binding prerequisite only. Continuous activation refresh, versioned source/report schema, probe/ACTIVE and complete acceptance remain unfinished."
+    },
+    {
+      "command": "go vet -tags=integration ./api/agent/v1 ./pkg/agent ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "rejection-artifact-vet.txt",
+      "limitation": "Exact activation artifact binding prerequisite only. Continuous activation refresh, versioned source/report schema, probe/ACTIVE and complete acceptance remain unfinished."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=2m ./test/agent -run '^TestAppliedWSS'",
+      "status": "PASS",
+      "log": "rejection-artifact-wss.txt",
+      "limitation": "Actual WSS wrong-artifact rejection does not consume command; subsequent exact negative result succeeds. Does not prove continuous activation renewal."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=5m ./test/agent -run 'Migrat|^TestActivationArtifacts|^TestApplied|^TestActivationRejectedExactArtifact'",
+      "status": "PASS",
+      "log": "activation-v11-regression.txt",
+      "limitation": "Real PostgreSQL v2-v10 migrations and Applied/WSS regression, 99.759s. Predates final legacy-replay fix covered below."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=2m ./test/agent -run '^TestActivationArtifacts|^TestActivationV10MigrationPreservesLegacy'",
+      "status": "PASS",
+      "log": "activation-v11-components.txt",
+      "limitation": "Actual PostgreSQL two signed artifacts, full compound FK rejects splicing, isolated pending/status, old receipt replay; migrated legacy NACK WSS replay. Second artifact is a fixture that does not extend authority, not production RefreshActivation."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=2m ./test/agent -run '^TestActivationV10MigrationPreservesExactOutcome$'",
+      "status": "PASS",
+      "log": "activation-v11-concurrent-migration.txt",
+      "limitation": "Concurrent replica upgrade from real v10 table shape preserves report/hash/ACK/resource bytes."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=2m ./test/agent -run '^TestActivationWriteRollback'",
+      "status": "PASS",
+      "log": "activation-v11-rollback.txt",
+      "limitation": "Includes suppression of new immutable activation version insertion: transaction must roll back all activation state."
+    },
+    {
+      "command": "go test -race -count=1 ./api/agent/v1 ./pkg/agent ./internal/agent",
+      "status": "PASS",
+      "log": "activation-v11-unit.txt",
+      "limitation": "SDK/server/protocol component regression."
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent -run '^TestReleaseStatusRejectsMixedActivationArtifacts$'",
+      "status": "PASS",
+      "log": "activation-v11-sdk-status.txt",
+      "limitation": "SDK rejects mixed artifacts and changed pagination artifact; legacy zero NACK only belongs to artifact 1."
+    },
+    {
+      "command": "go test -short ./ ./internal/api",
+      "status": "PASS",
+      "log": "activation-v11-api.txt",
+      "limitation": "Short API regression."
+    },
+    {
+      "command": "make check-agent-generated",
+      "status": "PASS",
+      "log": "activation-v11-generated.txt",
+      "limitation": "Generated protobuf consistency."
+    },
+    {
+      "command": "go vet -tags=integration ./api/agent/v1 ./pkg/agent ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "activation-v11-vet.txt",
+      "limitation": "Static checks, not full acceptance."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=3m ./test/agent -run '^TestActivationRefresh'",
+      "status": "PASS",
+      "log": "activation-refresh-components.txt",
+      "limitation": "Real PostgreSQL replica dedup/CAS, expired old delivery proof with live positive authority, strict source set, real WSS/HTTPS Runtime handler replacement and Applied, tampered signed proof/hash, untrusted issuer and revoked Bundle denial. No automatic or long-term authority renewal."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=2m ./test/agent -run '^TestActivationRefreshRollbackAndAuthorityGuards$|^TestActivationRefreshReplicaReplayAndNewApplied$'",
+      "status": "PASS",
+      "log": "activation-refresh-guards.txt",
+      "limitation": "Final tests add suppressed dual-head updates, suppressed resource/version/source/pin/event writes, approval/lease expiry, caller deadline under an actual PostgreSQL lock, complete release/operation rollback, and Prepared expiry cap."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=4m ./test/agent -run '^TestActivation|^TestApplied|^TestRuntimeWSS'",
+      "status": "PASS",
+      "log": "activation-refresh-regression.txt",
+      "limitation": "145.617s full activation/Applied/Runtime WSS components. Predates final additional guard assertions, separately covered in activation-refresh-guards.txt. No probes/ACTIVE/gogw/full acceptance."
+    },
+    {
+      "command": "go test -race -count=1 ./api/agent/v1 ./pkg/agent ./internal/agent",
+      "status": "PASS",
+      "log": "activation-refresh-race.txt",
+      "limitation": "Full protocol/SDK/server race regression."
+    },
+    {
+      "command": "go test -short ./ ./internal/api",
+      "status": "PASS",
+      "log": "activation-refresh-api.txt",
+      "limitation": "Short App/API regression only."
+    },
+    {
+      "command": "go vet -tags=integration ./api/agent/v1 ./pkg/agent ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "activation-refresh-vet.txt",
+      "limitation": "Static checks, not complete acceptance."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=3m ./test/agent -run '^TestReprepare|^TestPreparedEvidenceIndependent'",
+      "status": "PASS",
+      "log": "reprepare-components.txt",
+      "limitation": "Real PostgreSQL/WSS components; defaults 120/300 asserted. A shortened initial fixture window exercises actual elapsed command/release expiry without changing production constants. No full long-running or scale acceptance. Predates final deadline-presence/read-back guards, covered below."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=5m ./test/agent -run '^TestPrepared|^TestPreparation|^TestReprepare'",
+      "status": "PASS",
+      "log": "reprepare-final-regression.txt",
+      "limitation": "132.027s current positive/negative Prepare, independent evidence TTL, replica/target CAS, late first-report rejection, expired approval rollback, hasDeadline distinction, WSS NACK→new target→positive→refreshed activation. Includes Naming reconfirmation and stable evidence TTL across lease renewal. No automatic scheduler/actual local preparation driver/probe/ACTIVE acceptance."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=5m ./test/agent -run '^TestActivation|^TestApplied|^TestRuntimeWSS'",
+      "status": "PASS",
+      "log": "reprepare-activation-regression.txt",
+      "limitation": "148.597s real activation/Applied/Runtime WSS regression with lease-clipped member authority and longer-lived positive evidence."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=2m ./test/agent -run '^TestPreparedStoredTimingCannotBeLaundered$'",
+      "status": "PASS",
+      "log": "reprepare-stored-timing.txt",
+      "limitation": "Invalid stored positive report timing with recomputed outer hash cannot advance release."
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent ./internal/agent ./api/agent/v1",
+      "status": "PASS",
+      "log": "reprepare-race.txt",
+      "limitation": "SDK/server/protocol race regression; SDK refuses evidence ACK extending requested expiry or 300s."
+    },
+    {
+      "command": "go test -short ./ ./internal/api",
+      "status": "PASS",
+      "log": "reprepare-api.txt",
+      "limitation": "Short App/API regression."
+    },
+    {
+      "command": "go vet -tags=integration ./api/agent/v1 ./pkg/agent ./internal/agent ./test/agent",
+      "status": "PASS",
+      "log": "reprepare-vet.txt",
+      "limitation": "Static checks."
+    },
+    {
+      "command": "go test -race -count=1 -v ./cmd/grayling -run '^TestAgentSigning|^TestListenerTLS'",
+      "status": "PASS",
+      "log": "agent-cli-loader.txt",
+      "limitation": "PKCS8 Ed25519, independent root match, root overlap/future bounds, strict JSON/duplicate IDs, distinct 33-key rejection, file type/permissions/size/symlink restrictions, multiple PEM blocks/headers/other algorithms, no secret error echo. Unit components only."
+    },
+    {
+      "command": "go test -tags=integration -count=1 -v -timeout=3m ./test/boot -run '^TestAgentBinarySigningTrustAndRevocationProof$'",
+      "status": "PASS",
+      "log": "agent-cli-boot.txt",
+      "limitation": "Actual compiled CLI/PostgreSQL/TLS/WSS. Invalid private permissions rejected before any public schema tables; disabled/offline mode conflicts rejected. Management-issued credential and signed denial, capability opt-in and independent verification; observes scheduled artifact 2 with unchanged denial epoch/payload, then SIGTERM drains. 49.614s. No actual gogw or positive scheduling/ACTIVE/full acceptance."
+    },
+    {
+      "command": "go test -race -count=1 ./cmd/grayling ./ ./internal/api",
+      "status": "PASS",
+      "log": "agent-cli-regression.txt",
+      "limitation": "App requires AgentEnabled for verifier before connecting to stores; full CLI/App/API race regression. Later additional loader cases covered in agent-cli-loader.txt."
+    },
+    {
+      "command": "go vet -tags=integration ./cmd/grayling ./test/boot ./",
+      "status": "PASS",
+      "log": "agent-cli-vet.txt",
+      "limitation": "Static checks."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=3m ./test/agent -run '^TestPreparationDriver'",
+      "status": "PASS",
+      "log": "preparation-driver-wss.txt",
+      "limitation": "Real PostgreSQL/WSS/HTTPS and application-owned candidate bytes, immutable retry across reconnect, trust-root change, boot mismatch, no activation at Prepared, actual handler installation/Applied, bounded close preserving active references, hash/health failures create no terminal result, timed expiry cleanup. 23.170s. Application bytes are supplied by a test-local actual provider, not an implementation of an application-specific remote artifact downloader. No automatic candidate selection/Agent loop, actual gogw or full acceptance."
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent ./internal/agent ./api/agent/v1",
+      "status": "PASS",
+      "log": "preparation-driver-race.txt",
+      "limitation": "Full SDK/server/protocol race regression with new preparation helpers. Subsequent Retire method exposes the already-tested internal retirement path without altering lifecycle."
+    },
+    {
+      "command": "go vet -tags=integration ./pkg/agent ./test/agent",
+      "status": "PASS",
+      "log": "preparation-driver-vet.txt",
+      "limitation": "Static checks."
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=5m ./test/agent -run '^TestPreparation(Set|Driver)'",
+      "status": "PASS",
+      "log": "preparation-set-integration.txt",
+      "limitation": "Component verification only; full Agent lifecycle and production acceptance remain incomplete"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=1m ./test/agent -run '^TestPreparationSetTrustUpdate'",
+      "status": "PASS",
+      "log": "preparation-set-trust.txt",
+      "limitation": "Component verification only; full Agent lifecycle and production acceptance remain incomplete"
+    },
+    {
+      "command": "go test -race ./pkg/agent ./api/agent/v1 ./internal/agent",
+      "status": "PASS",
+      "log": "preparation-set-race.txt",
+      "limitation": "Component verification only; full Agent lifecycle and production acceptance remain incomplete"
+    },
+    {
+      "command": "go test -race ./api/agent/v1",
+      "status": "PASS",
+      "log": "preparation-set-protocol.txt",
+      "limitation": "Component verification only; full Agent lifecycle and production acceptance remain incomplete"
+    },
+    {
+      "command": "make check-agent-generated",
+      "status": "PASS",
+      "log": "preparation-set-generated.txt",
+      "limitation": "Component verification only; full Agent lifecycle and production acceptance remain incomplete"
+    },
+    {
+      "command": "go vet ./pkg/agent ./internal/agent ./api/agent/v1",
+      "status": "PASS",
+      "log": "preparation-set-vet.txt",
+      "limitation": "Component verification only; full Agent lifecycle and production acceptance remain incomplete"
+    },
+    {
+      "command": "go test -race -count=1 -v -timeout=45s ./pkg/agent -run '^TestRunRegistered'",
+      "status": "PASS",
+      "log": "registration-loop-sdk.txt",
+      "limitation": "Registration/renewal ownership component only; full event orchestration and production acceptance remain incomplete"
+    },
+    {
+      "command": "go test -race -count=1 ./pkg/agent",
+      "status": "PASS",
+      "log": "registration-loop-all-sdk.txt",
+      "limitation": "Registration/renewal ownership component only; full event orchestration and production acceptance remain incomplete"
+    },
+    {
+      "command": "go test -tags=integration -race -count=1 -v -timeout=2m ./test/agent -run '^TestRegisteredLoop'",
+      "status": "PASS",
+      "log": "registration-loop-integration.txt",
+      "limitation": "Registration/renewal ownership component only; full event orchestration and production acceptance remain incomplete"
+    },
+    {
+      "command": "go vet ./pkg/agent",
+      "status": "PASS",
+      "log": "registration-loop-vet.txt",
+      "limitation": "Registration/renewal ownership component only; full event orchestration and production acceptance remain incomplete"
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "A01",
+      "status": "SKIP",
+      "reason": "Codec and real WSS binary/corruption/capability subsets pass; all compatibility/oversize transport cases not complete",
+      "assertions": null,
+      "durationMs": null,
+      "log": [
+        "contract-tests.jsonl",
+        "client-wss-faults.txt"
+      ]
+    },
+    {
+      "id": "A02",
+      "status": "SKIP",
+      "reason": "WSS audience/scope guards and TLS owner-only credential/quota/audit APIs tested, including cross-scope revoke existence denial; registration/release scope handlers and full negative matrix pending",
+      "assertions": null,
+      "durationMs": null,
+      "log": [
+        "sessions-wss.txt",
+        "agent-admin-integration.txt"
+      ]
+    },
+    {
+      "id": "A03",
+      "status": "SKIP",
+      "reason": "Real PostgreSQL and WSS connection epoch/boot takeover checks pass; instance leaseEpoch delayed-renew checks pending",
+      "assertions": null,
+      "durationMs": null,
+      "log": "sessions-wss.txt"
+    },
+    {
+      "id": "A04",
+      "status": "SKIP",
+      "reason": "Real PostgreSQL publication operation dedup/CAS/conflict tested across independent publishers; registration/activation operations and response-loss injection incomplete",
+      "assertions": null,
+      "durationMs": null,
+      "log": "policy-and-channel.jsonl"
+    },
+    {
+      "id": "A05",
+      "status": "SKIP",
+      "reason": "Signed resource verification, full policy compilation, cross-node delivery and forged reference revision tested; complete runtime/candidate retention and resource dependency cases pending",
+      "assertions": null,
+      "durationMs": null,
+      "log": [
+        "policy-and-channel.jsonl",
+        "resource-race.txt"
+      ]
+    },
+    {
+      "id": "A06",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A07",
+      "status": "SKIP",
+      "reason": "Durable sealed cache and independent GRA1 recovery grant reject stale/conflicting policies and authorize exact higher-epoch transitions; control-plane recovery approval/epoch distribution and full backup restore acceptance pending",
+      "assertions": null,
+      "durationMs": null,
+      "log": "policy-and-channel.jsonl"
+    },
+    {
+      "id": "A08",
+      "status": "SKIP",
+      "reason": "Real WSS cross-node polling invalidation and explicit ResyncRequired/full snapshot tested; production reconnect/resume/fault-proxy and persistent cursor recovery incomplete",
+      "assertions": null,
+      "durationMs": null,
+      "log": "policy-and-channel.jsonl"
+    },
+    {
+      "id": "A09",
+      "status": "SKIP",
+      "reason": "Embedded direct API and lease POC passed; real subscriber delivery/auth/external Nacos not tested",
+      "assertions": null,
+      "durationMs": null,
+      "log": "naming-poc.jsonl"
+    },
+    {
+      "id": "A10",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A11",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A12",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A13",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A14",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A15",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A16",
+      "status": "SKIP",
+      "reason": "Release/Prepare/capacity/signed activation components plus current-source Activate delivery, exact-version Applied/Rejected mutually exclusive persistence, atomic VERIFYING revisions, cross-replica replay, expired historical diagnostics, pinned paginated status, rollback, old lease/cross-scope fencing and v2-v10 migrations have component coverage. Reports are simulated source assertions; actual RuntimeView installation, continuous authority refresh, VERIFYING timeout/recovery and business probe/ACTIVE gates remain incomplete.",
+      "assertions": null,
+      "durationMs": null,
+      "log": [
+        "release-generation-tests.txt",
+        "prepared-evidence-tests.txt",
+        "prepared-release-regression.txt",
+        "prepared-wire-tests.txt",
+        "prepared-wire-deadline.txt",
+        "preparation-final.txt",
+        "preparation-build-matrix.txt",
+        "preparation-gate-boundaries.txt",
+        "activation-core-tests.txt",
+        "activation-v8-migration.txt",
+        "applied-tests.txt",
+        "applied-boundaries.txt",
+        "applied-fencing.txt"
+      ]
+    },
+    {
+      "id": "A17",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A18",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A19",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A20",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A21",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A22",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A23",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A24",
+      "status": "SKIP",
+      "reason": "Runtime acceptance not implemented or executed at this checkpoint",
+      "assertions": null,
+      "durationMs": null,
+      "log": null
+    },
+    {
+      "id": "A25",
+      "status": "SKIP",
+      "reason": "Real two-pool shared publication dedup/head reads, session fencing/revocation/reopen tested; full leases/releases/outbox/partitions still pending",
+      "assertions": null,
+      "durationMs": null,
+      "log": "policy-and-channel.jsonl"
+    },
+    {
+      "id": "A26",
+      "status": "SKIP",
+      "reason": "Signer/verifier key-window tests and SDK handshake clock budget tests pass; WSS revocation tested; full certificate/root/token rotation, isolation and epoch recovery remain incomplete",
+      "assertions": null,
+      "durationMs": null,
+      "log": [
+        "resource-race.txt",
+        "policy-unit-race.txt",
+        "policy-and-channel.jsonl"
+      ]
+    },
+    {
+      "id": "A27",
+      "status": "SKIP",
+      "reason": "Separate bounded priority queues/download slots and 300 KiB resource path tested with heartbeats; full slow-consumer, storm, memory/resource/latency profiles not executed",
+      "assertions": null,
+      "durationMs": null,
+      "log": "policy-and-channel.jsonl"
+    },
+    {
+      "id": "A28",
+      "status": "SKIP",
+      "reason": "Default-off App routes/capabilities, existing API short regression and management RBAC tested; complete old SDK/OpenFeature/native client/approval runtime compatibility pending",
+      "assertions": null,
+      "durationMs": null,
+      "log": [
+        "agent-app-integration.txt",
+        "agent-admin-unit.txt",
+        "agent-admin-regression.txt"
+      ]
+    }
+  ]
+}

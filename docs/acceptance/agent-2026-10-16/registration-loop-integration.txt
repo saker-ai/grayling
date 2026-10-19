@@ -1,0 +1,8 @@
+=== RUN   TestRegisteredLoopReplicaReconnectAndIndependentRenewal
+--- PASS: TestRegisteredLoopReplicaReconnectAndIndependentRenewal (23.25s)
+=== RUN   TestRegisteredLoopShutdownStopsCallback
+--- PASS: TestRegisteredLoopShutdownStopsCallback (3.35s)
+=== RUN   TestRegisteredLoopCredentialRevocationStopsCallback
+--- PASS: TestRegisteredLoopCredentialRevocationStopsCallback (5.25s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	32.919s

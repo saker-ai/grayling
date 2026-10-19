@@ -1,0 +1,4 @@
+GOWORK=off go test -race -count=1 ./internal/agent -run '^TestRelease'
+ok  	github.com/saker-ai/grayling/internal/agent	1.059s
+GOWORK=off go test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestRelease|^TestAgentManagementMigrates|^TestInstanceDiscoveryV4Migration|^TestInstanceMigrationFromV3'
+ok  	github.com/saker-ai/grayling/test/agent	41.029s

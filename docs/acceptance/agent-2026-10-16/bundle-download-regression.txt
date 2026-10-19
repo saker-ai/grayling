@@ -1,0 +1,23 @@
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_kind
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_key
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_revision
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing/extended_authorization
+--- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing (3.62s)
+    --- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_kind (0.00s)
+    --- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_key (0.00s)
+    --- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_revision (0.01s)
+    --- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing/extended_authorization (0.01s)
+=== RUN   TestBundleReadRequiresConfigPermissionBeforeExistence
+--- PASS: TestBundleReadRequiresConfigPermissionBeforeExistence (3.14s)
+=== RUN   TestDiscoveryWSSRealNamingCrossReplicaAndImmutableDownload
+2026/10/16 13:17:15 INFO  snapshot loaded
+2026/10/16 13:17:20 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 13:17:20 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestDiscoveryWSSRealNamingCrossReplicaAndImmutableDownload (9.41s)
+=== RUN   TestPublishedSourceReplicaReadToSignedWSSPolicy
+--- PASS: TestPublishedSourceReplicaReadToSignedWSSPolicy (4.56s)
+=== RUN   TestPolicyWSSCrossReplicaAndLargeDownload
+--- PASS: TestPolicyWSSCrossReplicaAndLargeDownload (7.62s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	29.439s

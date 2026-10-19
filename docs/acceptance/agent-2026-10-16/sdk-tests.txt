@@ -1,0 +1,37 @@
+cd sdk/python && (test -d .venv || python3 -m venv .venv) \
+  && .venv/bin/python -m pip install -q pytest \
+  && .venv/bin/python -m pytest tests/ -q
+........................                                                 [100%]
+24 passed in 7.97s
+cd sdk/typescript && (test -d node_modules || npm install --no-audit --no-fund) \
+  && npm run typecheck --silent && npm test --silent
+✔ golden vectors match the Go reference (9.252613ms)
+✔ purpose coordinates are disjoint (0.590103ms)
+✔ input validation (0.564649ms)
+✔ test/helpers.ts (143.444494ms)
+✔ bool variation: targeting + default rule (3767.018631ms)
+✔ string / number / json variations (11.51895ms)
+✔ unknown flag → caller default + FLAG_NOT_FOUND (3.847862ms)
+✔ type mismatch → caller default + TYPE_MISMATCH (8.437403ms)
+✔ transport error → caller default + ERROR, counted (2.182676ms)
+✔ remote status expires and recovers after revision probe (46.292042ms)
+✔ wrong audience token → caller default (never crashes) (2.387704ms)
+✔ experiment enrollment: server-side exposure + deterministic variant (217.266458ms)
+✔ trackConversion attribution lands in the report (131.766679ms)
+✔ trackConversion requires attribution and collect token (9.060314ms)
+✔ cache: second identical eval served from cache (5.346437ms)
+✔ poller invalidates cache after publish (465.420326ms)
+✔ eval response piggy-backs revision invalidation (no polling) (76.749866ms)
+✔ collect contract: dedup by eventId, unit required, epoch mismatch rejected (25.754909ms)
+✔ partial collect counts successful and rejected events (6.782221ms)
+✔ manual exposure reporting via collect contract (5.394026ms)
+✔ revision projection stays minimal (4.834045ms)
+✔ onRender records assignment before explicit exposure (170.331885ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 22
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 20206.123553

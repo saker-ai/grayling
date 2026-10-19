@@ -1,0 +1,6 @@
+=== RUN   TestInstanceWSSSDKLifecycleAndReconnectDedup
+--- PASS: TestInstanceWSSSDKLifecycleAndReconnectDedup (3.42s)
+=== RUN   TestInstanceWSSPermissionCannotRegisterOrRenew
+--- PASS: TestInstanceWSSPermissionCannotRegisterOrRenew (3.13s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	7.630s

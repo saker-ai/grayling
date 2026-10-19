@@ -1,0 +1,14 @@
+{"Time":"2026-10-16T10:55:24.354450026+08:00","Action":"start","Package":"github.com/saker-ai/grayling/test/agent"}
+{"Time":"2026-10-16T10:55:24.381898882+08:00","Action":"run","Package":"github.com/saker-ai/grayling/test/agent","Test":"TestEmbeddedNamingDirectPOC"}
+{"Time":"2026-10-16T10:55:24.381996599+08:00","Action":"output","Package":"github.com/saker-ai/grayling/test/agent","Test":"TestEmbeddedNamingDirectPOC","Output":"=== RUN   TestEmbeddedNamingDirectPOC\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:55:24.399405633+08:00","Action":"output","Package":"github.com/saker-ai/grayling/test/agent","Test":"TestEmbeddedNamingDirectPOC","Output":"2026/10/16 10:55:24 INFO  snapshot loaded\n"}
+{"Time":"2026-10-16T10:55:29.150475436+08:00","Action":"output","Package":"github.com/saker-ai/grayling/test/agent","Test":"TestEmbeddedNamingDirectPOC","Output":"2026/10/16 10:55:29 INFO  admin user \"nacos\" bootstrapped with default password — change it after first login\n"}
+{"Time":"2026-10-16T10:55:29.271351649+08:00","Action":"output","Package":"github.com/saker-ai/grayling/test/agent","Test":"TestEmbeddedNamingDirectPOC","Output":"--- PASS: TestEmbeddedNamingDirectPOC (4.89s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:55:29.271398953+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/test/agent","Test":"TestEmbeddedNamingDirectPOC","Elapsed":4.89}
+{"Time":"2026-10-16T10:55:29.271560957+08:00","Action":"run","Package":"github.com/saker-ai/grayling/test/agent","Test":"TestEmbeddedNamingLeaseSemanticsPOC"}
+{"Time":"2026-10-16T10:55:29.271568378+08:00","Action":"output","Package":"github.com/saker-ai/grayling/test/agent","Test":"TestEmbeddedNamingLeaseSemanticsPOC","Output":"=== RUN   TestEmbeddedNamingLeaseSemanticsPOC\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:55:29.272198078+08:00","Action":"output","Package":"github.com/saker-ai/grayling/test/agent","Test":"TestEmbeddedNamingLeaseSemanticsPOC","Output":"--- PASS: TestEmbeddedNamingLeaseSemanticsPOC (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:55:29.272218679+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/test/agent","Test":"TestEmbeddedNamingLeaseSemanticsPOC","Elapsed":0}
+{"Time":"2026-10-16T10:55:29.272381635+08:00","Action":"output","Package":"github.com/saker-ai/grayling/test/agent","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-10-16T10:55:30.278456075+08:00","Action":"output","Package":"github.com/saker-ai/grayling/test/agent","Output":"ok  \tgithub.com/saker-ai/grayling/test/agent\t5.924s\n"}
+{"Time":"2026-10-16T10:55:30.278544136+08:00","Action":"pass","Package":"github.com/saker-ai/grayling/test/agent","Elapsed":5.924}

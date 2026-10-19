@@ -86,6 +86,11 @@ func (s *Server) handleWorkspaceCapabilities(w http.ResponseWriter, r *http.Requ
 	} {
 		permissions[perm] = admin.Authorize(actor, ws.ID, perm) == nil
 	}
+	if s.agentManagement != nil {
+		for _, perm := range []admin.Permission{admin.PermAgentCredentialManage, admin.PermAgentQuotaManage, admin.PermAgentAuditRead, admin.PermAgentRevocationManage} {
+			permissions[perm] = admin.Authorize(actor, ws.ID, perm) == nil
+		}
+	}
 	writeJSON(w, http.StatusOK, struct {
 		WorkspaceID string                    `json:"workspaceId"`
 		Permissions map[admin.Permission]bool `json:"permissions"`

@@ -1,0 +1,26 @@
+=== RUN   TestPublishedSnapshotPinsApprovedRevisionAndExcludesDrafts
+--- PASS: TestPublishedSnapshotPinsApprovedRevisionAndExcludesDrafts (0.01s)
+=== RUN   TestPublishedSnapshotRejectsSubstrateManifestDrift
+=== RUN   TestPublishedSnapshotRejectsSubstrateManifestDrift/foreign_scope
+=== RUN   TestPublishedSnapshotRejectsSubstrateManifestDrift/unknown_schema
+=== RUN   TestPublishedSnapshotRejectsSubstrateManifestDrift/duplicate_entry
+=== RUN   TestPublishedSnapshotRejectsSubstrateManifestDrift/different_content_head
+=== RUN   TestPublishedSnapshotRejectsSubstrateManifestDrift/ahead_revision
+=== RUN   TestPublishedSnapshotRejectsSubstrateManifestDrift/missing_generated_time
+--- PASS: TestPublishedSnapshotRejectsSubstrateManifestDrift (0.02s)
+    --- PASS: TestPublishedSnapshotRejectsSubstrateManifestDrift/foreign_scope (0.00s)
+    --- PASS: TestPublishedSnapshotRejectsSubstrateManifestDrift/unknown_schema (0.00s)
+    --- PASS: TestPublishedSnapshotRejectsSubstrateManifestDrift/duplicate_entry (0.00s)
+    --- PASS: TestPublishedSnapshotRejectsSubstrateManifestDrift/different_content_head (0.00s)
+    --- PASS: TestPublishedSnapshotRejectsSubstrateManifestDrift/ahead_revision (0.00s)
+    --- PASS: TestPublishedSnapshotRejectsSubstrateManifestDrift/missing_generated_time (0.00s)
+=== RUN   TestPublishedSnapshotComputesReadbackHashIndependently
+--- PASS: TestPublishedSnapshotComputesReadbackHashIndependently (0.00s)
+=== RUN   TestPublishedSnapshotRejectsMissingPublishedDocument
+--- PASS: TestPublishedSnapshotRejectsMissingPublishedDocument (0.00s)
+=== RUN   TestPublishedSnapshotIncludesApprovedDeletion
+--- PASS: TestPublishedSnapshotIncludesApprovedDeletion (0.00s)
+=== RUN   TestPublishedSnapshotIncludesExactSegmentDependency
+--- PASS: TestPublishedSnapshotIncludesExactSegmentDependency (0.01s)
+PASS
+ok  	github.com/saker-ai/grayling/internal/admin	1.099s

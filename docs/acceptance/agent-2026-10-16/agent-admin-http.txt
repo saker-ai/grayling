@@ -1,0 +1,8 @@
+=== RUN   TestAgentAdminHTTPProvisionConnectRevokeAndRBAC
+2026/10/16 11:47:27 ERROR load snapshot: snapshot dump tampered: HMAC mismatch (starting with empty state)
+2026/10/16 11:47:31 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 11:47:31 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+    admin_http_test.go:158: connected credential revocation observed after 1.973012104s
+--- PASS: TestAgentAdminHTTPProvisionConnectRevokeAndRBAC (9.90s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	10.971s

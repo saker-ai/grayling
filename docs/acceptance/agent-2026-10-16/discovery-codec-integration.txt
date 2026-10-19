@@ -1,0 +1,4 @@
+=== RUN   TestInstanceDiscoveryEncodingRequiresNamingConfirmation
+--- PASS: TestInstanceDiscoveryEncodingRequiresNamingConfirmation (3.27s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	4.345s

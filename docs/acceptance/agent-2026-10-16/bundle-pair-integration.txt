@@ -1,0 +1,14 @@
+=== RUN   TestBundlePairConcurrentReplicaDedupAndCAS
+--- PASS: TestBundlePairConcurrentReplicaDedupAndCAS (3.46s)
+=== RUN   TestBundlePairSecondWriteFailureRollsBackEverything
+--- PASS: TestBundlePairSecondWriteFailureRollsBackEverything (3.44s)
+=== RUN   TestBundlePairInvalidDependencyAndEpochLeaveNoState
+--- PASS: TestBundlePairInvalidDependencyAndEpochLeaveNoState (3.13s)
+=== RUN   TestPublishedSourceReplicaReadToSignedWSSPolicy
+--- PASS: TestPublishedSourceReplicaReadToSignedWSSPolicy (4.05s)
+=== RUN   TestPolicyWSSCrossReplicaAndLargeDownload
+--- PASS: TestPolicyWSSCrossReplicaAndLargeDownload (7.65s)
+=== RUN   TestPolicyPublicationCASDedupAndReplicaRead
+--- PASS: TestPolicyPublicationCASDedupAndReplicaRead (3.42s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	26.236s

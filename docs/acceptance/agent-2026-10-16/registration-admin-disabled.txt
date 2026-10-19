@@ -1,0 +1,7 @@
+=== RUN   TestAgentAppDisabledKeepsRouteUnavailable
+2026/10/16 12:22:51 INFO  snapshot loaded
+2026/10/16 12:22:55 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:22:55 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestAgentAppDisabledKeepsRouteUnavailable (4.68s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	5.751s

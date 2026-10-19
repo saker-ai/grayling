@@ -2,7 +2,9 @@ package grayling_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
+	agentclient "github.com/saker-ai/grayling/pkg/agent"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +28,15 @@ func TestEmbeddedAppCanBeMountedAndRestarted(t *testing.T) {
 	}
 	if !strings.HasPrefix(app.BootstrapOwnerToken(), "grayling_admin_") {
 		t.Fatal("missing bootstrap owner credential")
+	}
+	for _, suffix := range []string{"approvals", "publications"} {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/workspaces/unknown/environments/prod/agent/services/gateway/bundles/"+suffix, strings.NewReader(`{}`))
+		request.Header.Set("Authorization", "Bearer "+app.BootstrapOwnerToken())
+		response := httptest.NewRecorder()
+		app.APIHandler().ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("Agent disabled route %s: %d", suffix, response.Code)
+		}
 	}
 	httpAddr, grpcAddr := app.GonacosAddrs()
 	if httpAddr == "" || grpcAddr == "" {
@@ -119,6 +130,12 @@ func TestExternalAppUsesHostHTTPListener(t *testing.T) {
 func TestStartRejectsConflictingOptions(t *testing.T) {
 	for _, opts := range []grayling.Options{
 		{SQLitePath: "x", PostgresDSN: "postgres://example"},
+		{AgentEnabled: true},
+		{AgentEnabled: true, PostgresDSN: "postgres://example"},
+		{AgentAllowedHosts: []string{"localhost"}},
+		{AgentMaxConnections: 10},
+		{AgentEnabled: true, PostgresDSN: "postgres://example", AgentAllowedHosts: []string{"localhost/path"}, AgentMaxConnections: 1},
+		{AgentEnabled: true, PostgresDSN: "postgres://example", AgentAllowedHosts: []string{"localhost"}, AgentMaxConnections: 1, RecoveryPoint: "backup"},
 		{NacosURL: "http://example.com", NativeConfigAuth: true},
 		{GonacosAddr: "0.0.0.0:1234"},
 		{RecoveryPoint: "point.json", NacosURL: "http://example.com"},
@@ -159,5 +176,30 @@ func TestOpenAICompatibleRouteThroughEmbeddedApp(t *testing.T) {
 	app.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("console handler response = %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAgentRevocationRefreshRequiresSigningAndTrust(t *testing.T) {
+	for _, opts := range []grayling.Options{
+		{AgentRevocationRefresh: true},
+		{AgentRevocationRefresh: true, AgentEnabled: true, PostgresDSN: "not-a-database"},
+	} {
+		if app, err := grayling.Start(t.Context(), opts); err == nil {
+			app.Close(t.Context())
+			t.Fatal("proof refresh enabled without its explicit prerequisites")
+		}
+	}
+}
+
+func TestAgentVerifierRequiresAgentBeforeOpeningStores(t *testing.T) {
+	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+	now := time.Now()
+	verifier, err := agentclient.NewVerifier(map[string]agentclient.TrustKey{"test": {PublicKey: key.Public().(ed25519.PublicKey), NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = grayling.Start(t.Context(), grayling.Options{PostgresDSN: "postgres://invalid.example/unreachable", AgentReleaseVerifier: verifier})
+	if err == nil || !strings.Contains(err.Error(), "ReleaseVerifier requires AgentEnabled") {
+		t.Fatal("invalid Agent trust configuration reached stores", err)
 	}
 }

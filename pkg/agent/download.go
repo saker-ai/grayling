@@ -8,12 +8,27 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	agentv1 "github.com/saker-ai/grayling/api/agent/v1"
 	"google.golang.org/protobuf/proto"
 )
+
+// ErrDownload marks a sanitized transient transport/read failure, without URLs
+// or credential-bearing errors from a custom transport.
+var ErrDownload = errors.New("agent: resource transport failed")
+
+func retryAfterDelay(header string) time.Duration {
+	if seconds, err := strconv.ParseUint(header, 10, 32); err == nil {
+		return time.Duration(seconds) * time.Second
+	}
+	if date, err := http.ParseTime(header); err == nil {
+		return max(0, time.Until(date))
+	}
+	return 0
+}
 
 // Download retrieves a serialized SignedResource from the authenticated origin.
 // It validates the reference and wire digest, but callers must still use Verifier
@@ -29,7 +44,7 @@ func (c *Client) Download(ctx context.Context, ref *agentv1.ResourceRef) (*agent
 		return nil, ErrScope
 	}
 	limit := min(uint64(MaxResourceBytes), c.welcome.GetWelcome().Limits.MaxResourceBytes)
-	if ref.SizeBytes == 0 || ref.SizeBytes > limit || ref.Revision == 0 || ref.Key == "" || ref.Kind < 1 || ref.Kind > 4 {
+	if ref.SizeBytes == 0 || ref.SizeBytes > limit || ref.Revision == 0 || ref.Key == "" || ref.Kind < 1 || ref.Kind > 5 {
 		return nil, ErrResource
 	}
 	if ref.ExpiresUnixMs <= time.Now().UnixMilli() {
@@ -58,20 +73,25 @@ func (c *Client) Download(ctx context.Context, ref *agentv1.ResourceRef) (*agent
 	}
 	req.Header.Set("Authorization", "Bearer "+c.opts.Token)
 	req.Header.Set("Accept", "application/x-protobuf")
+	req.Header.Set("X-Grayling-Agent-Session", c.welcome.SessionId)
+	req.Header.Set("X-Grayling-Agent-Epoch", strconv.FormatUint(c.welcome.ConnectionEpoch, 10))
 	resp, err := c.opts.HTTPClient.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, errors.New("agent: resource download failed")
+		return nil, ErrDownload
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, &HandshakeError{StatusCode: resp.StatusCode}
+		return nil, &HandshakeError{StatusCode: resp.StatusCode, RetryAfter: retryAfterDelay(resp.Header.Get("Retry-After"))}
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, int64(ref.SizeBytes)+1))
 	if err != nil {
-		return nil, errors.New("agent: resource read failed")
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, ErrDownload
 	}
 	if uint64(len(raw)) != ref.SizeBytes {
 		return nil, ErrResource

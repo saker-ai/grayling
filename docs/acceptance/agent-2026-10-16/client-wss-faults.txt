@@ -1,0 +1,10 @@
+=== RUN   TestGoAgentClientSession
+--- PASS: TestGoAgentClientSession (3.18s)
+=== RUN   TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend
+=== RUN   TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend/text_message
+=== RUN   TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend/malformed_protobuf
+--- PASS: TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend (5.02s)
+    --- PASS: TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend/text_message (0.03s)
+    --- PASS: TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend/malformed_protobuf (0.02s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	9.268s

@@ -1,0 +1,34 @@
+=== RUN   TestAgentAdminHTTPProvisionConnectRevokeAndRBAC
+2026/10/16 12:42:51 INFO  snapshot loaded
+2026/10/16 12:42:55 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:42:55 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+    admin_http_test.go:248: connected credential revocation observed after 1.8145901s
+--- PASS: TestAgentAdminHTTPProvisionConnectRevokeAndRBAC (10.82s)
+=== RUN   TestWSSReplicaFencingRevocationAndShutdown
+--- PASS: TestWSSReplicaFencingRevocationAndShutdown (7.28s)
+=== RUN   TestWSSGuardsAndCapabilities
+=== RUN   TestWSSGuardsAndCapabilities/query_credential
+=== RUN   TestWSSGuardsAndCapabilities/browser_origin
+=== RUN   TestWSSGuardsAndCapabilities/developer_cookie
+=== RUN   TestWSSGuardsAndCapabilities/admin_audience
+=== RUN   TestWSSGuardsAndCapabilities/unknown_token
+=== RUN   TestWSSGuardsAndCapabilities/wrong_host
+--- PASS: TestWSSGuardsAndCapabilities (3.14s)
+    --- PASS: TestWSSGuardsAndCapabilities/query_credential (0.02s)
+    --- PASS: TestWSSGuardsAndCapabilities/browser_origin (0.00s)
+    --- PASS: TestWSSGuardsAndCapabilities/developer_cookie (0.00s)
+    --- PASS: TestWSSGuardsAndCapabilities/admin_audience (0.00s)
+    --- PASS: TestWSSGuardsAndCapabilities/unknown_token (0.00s)
+    --- PASS: TestWSSGuardsAndCapabilities/wrong_host (0.00s)
+=== RUN   TestGoAgentClientSession
+--- PASS: TestGoAgentClientSession (3.06s)
+=== RUN   TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend
+=== RUN   TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend/text_message
+=== RUN   TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend/malformed_protobuf
+--- PASS: TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend (5.16s)
+    --- PASS: TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend/text_message (0.02s)
+    --- PASS: TestWSSRejectsNonbinaryCorruptionAndUnavailableBackend/malformed_protobuf (0.02s)
+=== RUN   TestPolicyWSSCrossReplicaAndLargeDownload
+--- PASS: TestPolicyWSSCrossReplicaAndLargeDownload (8.06s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	38.621s

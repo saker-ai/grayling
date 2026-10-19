@@ -1,0 +1,14 @@
+=== RUN   TestInstanceNamingScopePagination
+--- PASS: TestInstanceNamingScopePagination (3.22s)
+=== RUN   TestInstanceNamingWorkerWaitsForInFlightCallback
+--- PASS: TestInstanceNamingWorkerWaitsForInFlightCallback (3.04s)
+=== RUN   TestInstanceNamingWorkerRestoresConfirmedProjectionAfterRestart
+2026/10/16 12:28:08 INFO  snapshot loaded
+2026/10/16 12:28:13 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:28:13 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+2026/10/16 12:28:13 INFO  snapshot loaded
+2026/10/16 12:28:17 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:28:17 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestInstanceNamingWorkerRestoresConfirmedProjectionAfterRestart (12.87s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	20.207s

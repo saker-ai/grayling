@@ -1,0 +1,6 @@
+=== RUN   TestActivationRefreshReplicaReplayAndNewApplied
+--- PASS: TestActivationRefreshReplicaReplayAndNewApplied (5.95s)
+=== RUN   TestActivationRefreshRollbackAndAuthorityGuards
+--- PASS: TestActivationRefreshRollbackAndAuthorityGuards (6.20s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	13.275s

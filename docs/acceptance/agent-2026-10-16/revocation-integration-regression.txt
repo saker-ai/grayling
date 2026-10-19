@@ -1,0 +1,163 @@
+=== RUN   TestActivationAtomicReplicaReplayPinnedViewAndSource
+--- PASS: TestActivationAtomicReplicaReplayPinnedViewAndSource (4.12s)
+=== RUN   TestActivationRefusesHistoricalPreparedCapacityAndUnpreparedSource
+--- PASS: TestActivationRefusesHistoricalPreparedCapacityAndUnpreparedSource (8.25s)
+=== RUN   TestActivationWriteRollbackDeadlineAndSignerTrust
+--- PASS: TestActivationWriteRollbackDeadlineAndSignerTrust (7.39s)
+=== RUN   TestActivationSourceWSSExactDownloadAndOtherInstanceDenied
+--- PASS: TestActivationSourceWSSExactDownloadAndOtherInstanceDenied (6.76s)
+=== RUN   TestActivationV8MigrationSourceIntentAndPermission
+--- PASS: TestActivationV8MigrationSourceIntentAndPermission (6.47s)
+=== RUN   TestAppliedReplicaImmutableReceiptStatusAndNoActive
+--- PASS: TestAppliedReplicaImmutableReceiptStatusAndNoActive (9.02s)
+=== RUN   TestAppliedVersionsIdentityAndOutcomeRace
+--- PASS: TestAppliedVersionsIdentityAndOutcomeRace (4.43s)
+=== RUN   TestAppliedWriteRollbackDeadlineAndNegativeReadiness
+--- PASS: TestAppliedWriteRollbackDeadlineAndNegativeReadiness (8.14s)
+=== RUN   TestAppliedV9MigrationPreservesActivationAndUnknownFields
+--- PASS: TestAppliedV9MigrationPreservesActivationAndUnknownFields (7.05s)
+=== RUN   TestAppliedExpiredAuthorizationKeepsDiagnosticFact
+--- PASS: TestAppliedExpiredAuthorizationKeepsDiagnosticFact (6.17s)
+=== RUN   TestAppliedUint64CountersFailClosed
+--- PASS: TestAppliedUint64CountersFailClosed (4.74s)
+=== RUN   TestAppliedOldLeaseCrossScopeAndActiveReplayBarriers
+--- PASS: TestAppliedOldLeaseCrossScopeAndActiveReplayBarriers (4.44s)
+=== RUN   TestAppliedWSSActivateReplicaRecoveryAndReceipt
+--- PASS: TestAppliedWSSActivateReplicaRecoveryAndReceipt (10.96s)
+=== RUN   TestAppliedWSSCapabilityNegativeAndDeadline
+--- PASS: TestAppliedWSSCapabilityNegativeAndDeadline (8.21s)
+=== RUN   TestAppliedStatusPaginationPinsCatalogAndPartialSources
+--- PASS: TestAppliedStatusPaginationPinsCatalogAndPartialSources (4.18s)
+=== RUN   TestBundleAuthorizationDeadlineAndReplay
+--- PASS: TestBundleAuthorizationDeadlineAndReplay (4.80s)
+=== RUN   TestBundleAuthorizationExpiresBeforeCommitRollsBack
+--- PASS: TestBundleAuthorizationExpiresBeforeCommitRollsBack (7.84s)
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_kind
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_key
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_revision
+=== RUN   TestBundleWSSHTTPSExactReadFailoverAndFencing/extended_authorization
+--- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing (4.11s)
+    --- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_kind (0.00s)
+    --- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_key (0.00s)
+    --- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing/wrong_revision (0.01s)
+    --- PASS: TestBundleWSSHTTPSExactReadFailoverAndFencing/extended_authorization (0.01s)
+=== RUN   TestBundleReadRequiresConfigPermissionBeforeExistence
+--- PASS: TestBundleReadRequiresConfigPermissionBeforeExistence (4.49s)
+=== RUN   TestBundleHTTPApprovalPublicationAndReplay
+2026/10/16 15:35:51 INFO  snapshot loaded
+2026/10/16 15:35:56 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 15:35:56 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+gorm 2026/10/16 15:35:57 /home/vipas/workspace/saker-ai/grayling/internal/platform/gormstore.go:613 ERROR: injected publication audit failure (SQLSTATE P0001)
+[GORM generated test fixture state SQL omitted]
+gorm 2026/10/16 15:35:58 /home/vipas/workspace/saker-ai/grayling/internal/platform/gormstore.go:613 ERROR: injected request audit failure (SQLSTATE P0001)
+[GORM generated test fixture state SQL omitted]
+--- PASS: TestBundleHTTPApprovalPublicationAndReplay (10.65s)
+=== RUN   TestBundleHTTPRoutesDisabledWithoutSigner
+2026/10/16 15:36:01 INFO  snapshot loaded
+2026/10/16 15:36:06 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 15:36:06 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestBundleHTTPRoutesDisabledWithoutSigner (10.23s)
+=== RUN   TestBundlePairConcurrentReplicaDedupAndCAS
+--- PASS: TestBundlePairConcurrentReplicaDedupAndCAS (3.90s)
+=== RUN   TestBundlePairSecondWriteFailureRollsBackEverything
+--- PASS: TestBundlePairSecondWriteFailureRollsBackEverything (3.58s)
+=== RUN   TestBundlePairInvalidDependencyAndEpochLeaveNoState
+--- PASS: TestBundlePairInvalidDependencyAndEpochLeaveNoState (3.75s)
+=== RUN   TestBundlePairUsesMinimumPublisherLifetime
+--- PASS: TestBundlePairUsesMinimumPublisherLifetime (3.61s)
+=== RUN   TestBundleRefreshReplicaDedupCASAndAuthorizationCeiling
+--- PASS: TestBundleRefreshReplicaDedupCASAndAuthorizationCeiling (4.74s)
+=== RUN   TestBundleRefreshVerifiesSourceAndSignerRoots
+--- PASS: TestBundleRefreshVerifiesSourceAndSignerRoots (3.90s)
+=== RUN   TestBundleRefreshWSSAdvancesCacheWithoutRenewingOldView
+--- PASS: TestBundleRefreshWSSAdvancesCacheWithoutRenewingOldView (4.92s)
+=== RUN   TestBundleRefreshFailureLeavesNoNewArtifactOrOperation
+--- PASS: TestBundleRefreshFailureLeavesNoNewArtifactOrOperation (5.13s)
+=== RUN   TestDiscoveryWSSRealNamingCrossReplicaAndImmutableDownload
+2026/10/16 15:36:47 INFO  snapshot loaded
+2026/10/16 15:36:51 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 15:36:51 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestDiscoveryWSSRealNamingCrossReplicaAndImmutableDownload (10.98s)
+=== RUN   TestDiscoveryCapabilityRequiresPublisherAndPermission
+--- PASS: TestDiscoveryCapabilityRequiresPublisherAndPermission (5.46s)
+=== RUN   TestDiscoveryWSSRefreshesStableEmptySet
+--- PASS: TestDiscoveryWSSRefreshesStableEmptySet (5.82s)
+=== RUN   TestPreparationRejectedConcurrentMutualExclusionAndReadiness
+--- PASS: TestPreparationRejectedConcurrentMutualExclusionAndReadiness (3.73s)
+=== RUN   TestPreparationGateAtomicReplicaReplayExpiryAndAbort
+--- PASS: TestPreparationGateAtomicReplicaReplayExpiryAndAbort (7.61s)
+=== RUN   TestPreparationGateFailureUpperBoundAndEveryZone
+=== RUN   TestPreparationGateFailureUpperBoundAndEveryZone/0
+=== RUN   TestPreparationGateFailureUpperBoundAndEveryZone/4999
+=== RUN   TestPreparationGateFailureUpperBoundAndEveryZone/5000
+--- PASS: TestPreparationGateFailureUpperBoundAndEveryZone (15.65s)
+    --- PASS: TestPreparationGateFailureUpperBoundAndEveryZone/0 (3.73s)
+    --- PASS: TestPreparationGateFailureUpperBoundAndEveryZone/4999 (4.36s)
+    --- PASS: TestPreparationGateFailureUpperBoundAndEveryZone/5000 (3.50s)
+=== RUN   TestPreparationGateRollbackAndAuthorizationExpiry
+--- PASS: TestPreparationGateRollbackAndAuthorizationExpiry (4.01s)
+=== RUN   TestPreparationPositiveNegativeRaceAndBootTakeover
+--- PASS: TestPreparationPositiveNegativeRaceAndBootTakeover (5.42s)
+=== RUN   TestPreparationV7MigrationPreservesPositiveEvidence
+--- PASS: TestPreparationV7MigrationPreservesPositiveEvidence (4.12s)
+=== RUN   TestPreparationGateEveryCarriedBuild
+--- PASS: TestPreparationGateEveryCarriedBuild (3.48s)
+=== RUN   TestPreparationWSSNegativeOutcomeCapabilityAndGate
+--- PASS: TestPreparationWSSNegativeOutcomeCapabilityAndGate (9.82s)
+=== RUN   TestPreparedDirectedIntentReplicaDedupAndTargetReplacement
+--- PASS: TestPreparedDirectedIntentReplicaDedupAndTargetReplacement (3.96s)
+=== RUN   TestPreparedLeaseRotationReadinessAndOldConnectionFenced
+--- PASS: TestPreparedLeaseRotationReadinessAndOldConnectionFenced (4.51s)
+=== RUN   TestPreparedEvidenceInsertFailureRollsBackRevision
+--- PASS: TestPreparedEvidenceInsertFailureRollsBackRevision (4.63s)
+=== RUN   TestPreparedIdentityTimeAndExpiryBarriers
+--- PASS: TestPreparedIdentityTimeAndExpiryBarriers (4.20s)
+=== RUN   TestPreparedQueueRollbackAndReleaseAbortFence
+--- PASS: TestPreparedQueueRollbackAndReleaseAbortFence (5.03s)
+=== RUN   TestPreparedRequiresExplicitReportPermissionAndV6Migration
+--- PASS: TestPreparedRequiresExplicitReportPermissionAndV6Migration (3.76s)
+=== RUN   TestPreparedWSSReplicaRedeliveryDownloadAndReceipt
+--- PASS: TestPreparedWSSReplicaRedeliveryDownloadAndReceipt (11.44s)
+=== RUN   TestPreparedWSSCapabilityRequiresTrustAndExplicitOptIn
+--- PASS: TestPreparedWSSCapabilityRequiresTrustAndExplicitOptIn (5.86s)
+=== RUN   TestPreparedWSSDeadlineRollsBackEvidence
+--- PASS: TestPreparedWSSDeadlineRollsBackEvidence (6.51s)
+=== RUN   TestPolicyWSSCrossReplicaAndLargeDownload
+--- PASS: TestPolicyWSSCrossReplicaAndLargeDownload (8.34s)
+=== RUN   TestPolicyPublicationCASDedupAndReplicaRead
+--- PASS: TestPolicyPublicationCASDedupAndReplicaRead (3.40s)
+=== RUN   TestPolicyRevisionUsesFullUint64
+--- PASS: TestPolicyRevisionUsesFullUint64 (3.68s)
+=== RUN   TestRevocationAtomicCatalogReplicaReplayAndAuthority
+--- PASS: TestRevocationAtomicCatalogReplicaReplayAndAuthority (3.83s)
+=== RUN   TestRevocationWSSSignedDenialCancelsRuntimeAndReconnects
+--- PASS: TestRevocationWSSSignedDenialCancelsRuntimeAndReconnects (9.75s)
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_resources
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_resource_heads
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_admin_audit
+=== RUN   TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_admin_operations
+--- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt (16.75s)
+    --- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_resources (4.68s)
+    --- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_resource_heads (4.27s)
+    --- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_admin_audit (3.66s)
+    --- PASS: TestRevocationSuppressedWritesRollbackCatalogAndReceipt/agent_admin_operations (4.14s)
+=== RUN   TestRevocationDeliveryProofRefreshPreservesExpiredDenials
+--- PASS: TestRevocationDeliveryProofRefreshPreservesExpiredDenials (5.05s)
+=== RUN   TestRuntimeWSSActualInstallationAndAppliedReceipt
+=== RUN   TestRuntimeWSSActualInstallationAndAppliedReceipt/wrong_command
+=== RUN   TestRuntimeWSSActualInstallationAndAppliedReceipt/wrong_artifact
+=== RUN   TestRuntimeWSSActualInstallationAndAppliedReceipt/wrong_bundle
+=== RUN   TestRuntimeWSSActualInstallationAndAppliedReceipt/expired_command
+--- PASS: TestRuntimeWSSActualInstallationAndAppliedReceipt (6.04s)
+    --- PASS: TestRuntimeWSSActualInstallationAndAppliedReceipt/wrong_command (0.03s)
+    --- PASS: TestRuntimeWSSActualInstallationAndAppliedReceipt/wrong_artifact (0.03s)
+    --- PASS: TestRuntimeWSSActualInstallationAndAppliedReceipt/wrong_bundle (0.03s)
+    --- PASS: TestRuntimeWSSActualInstallationAndAppliedReceipt/expired_command (0.00s)
+=== RUN   TestRuntimeWSSFailedBuilderDoesNotConsumeOutcome
+--- PASS: TestRuntimeWSSFailedBuilderDoesNotConsumeOutcome (5.80s)
+=== RUN   TestRuntimeWSSInstalledViewSurvivesReportConnectionLoss
+--- PASS: TestRuntimeWSSInstalledViewSurvivesReportConnectionLoss (8.01s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	373.841s

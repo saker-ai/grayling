@@ -1,0 +1,5 @@
+python3 scripts/license_audit.py check
+license inventory matches: 286 Go modules, 23 npm packages
+python3 scripts/license_audit.py release-check
+license inventory matches: 286 Go modules, 23 npm packages
+sh scripts/check_agent_generated.sh

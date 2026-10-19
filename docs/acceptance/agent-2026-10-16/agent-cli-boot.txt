@@ -1,0 +1,4 @@
+=== RUN   TestAgentBinarySigningTrustAndRevocationProof
+--- PASS: TestAgentBinarySigningTrustAndRevocationProof (49.60s)
+PASS
+ok  	github.com/saker-ai/grayling/test/boot	49.614s

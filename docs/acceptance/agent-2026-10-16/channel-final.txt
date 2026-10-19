@@ -1,0 +1,6 @@
+GOWORK=off go test -race -count=1 ./api/agent/v1 ./internal/agent ./pkg/agent
+ok  	github.com/saker-ai/grayling/api/agent/v1	1.062s
+ok  	github.com/saker-ai/grayling/internal/agent	1.062s
+ok  	github.com/saker-ai/grayling/pkg/agent	1.027s
+GOWORK=off go test -tags=integration -race -count=1 -timeout=5m ./test/agent -run 'TestSession|TestWSS|TestGoAgent'
+ok  	github.com/saker-ai/grayling/test/agent	27.294s

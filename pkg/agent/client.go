@@ -62,7 +62,7 @@ type Options struct {
 
 func (o Options) normalized() (Options, error) {
 	u, err := url.Parse(o.URL)
-	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "wss" && !(o.AllowInsecure && u.Scheme == "ws")) {
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Scheme != "wss" && !(o.AllowInsecure && u.Scheme == "ws")) {
 		return o, errors.New("agent: expected WSS origin or connect URL without credentials, query or fragment")
 	}
 	if u.Path == "" || u.Path == "/" {
@@ -194,6 +194,9 @@ func Dial(ctx context.Context, options Options) (*Client, error) {
 			return nil, ErrProtocol
 		}
 	}
+	if !clockWithinBudget(w.ServerUnixMs) {
+		return nil, ErrProtocol
+	}
 	limits := w.Limits
 	if limits == nil || limits.MaxFrameBytes == 0 || limits.MaxFrameBytes > agentv1.MaxFrameBytes || limits.HeartbeatIntervalMs == 0 || limits.HeartbeatTimeoutMs <= limits.HeartbeatIntervalMs {
 		return nil, ErrProtocol
@@ -256,7 +259,7 @@ func (c *Client) outgoing(ctx context.Context, e *agentv1.Envelope) (*agentv1.En
 	e.ConnectionEpoch = c.welcome.ConnectionEpoch
 	e.MessageId = uuid.New().String()
 	e.ReplyTo = ""
-	if deadline, ok := ctx.Deadline(); ok {
+	if deadline, ok := ctx.Deadline(); ok && (e.DeadlineUnixMs == 0 || deadline.UnixMilli() < e.DeadlineUnixMs) {
 		e.DeadlineUnixMs = deadline.UnixMilli()
 	}
 	return e, nil
@@ -347,7 +350,17 @@ func (c *Client) call(ctx context.Context, e *agentv1.Envelope, heartbeat bool) 
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-c.done:
-		return nil, c.Err()
+		// A correlated NACK/result already received before transport closure wins
+		// over a generic disconnect. Otherwise a fenced request can lose its cause.
+		select {
+		case response := <-reply:
+			if e := response.GetError(); e != nil {
+				return nil, &RemoteError{Detail: e}
+			}
+			return response, nil
+		default:
+			return nil, c.Err()
+		}
 	}
 }
 
@@ -431,7 +444,7 @@ func (c *Client) heartbeatLoop(ctx context.Context) {
 			c.stop(err)
 			return
 		}
-		if response.GetHeartbeatAck() == nil || response.GetHeartbeatAck().Nonce != nonce {
+		if response.GetHeartbeatAck() == nil || response.GetHeartbeatAck().Nonce != nonce || !clockWithinBudget(response.GetHeartbeatAck().ServerUnixMs) {
 			c.stop(ErrProtocol)
 			return
 		}

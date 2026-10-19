@@ -52,39 +52,48 @@ func envFlag(name string) bool {
 
 func main() {
 	var (
-		listenAddr            = flag.String("addr", "127.0.0.1:8688", "Grayling HTTP listen address")
-		dataFile              = flag.String("data", filepath.Join("data", "grayling-store.json"), "platform store file ('' = memory-only; ignored when -pg or -sqlite is set)")
-		pgDSN                 = flag.String("pg", "", "PostgreSQL DSN for the production platform store (e.g. postgres://grayling:secret@127.0.0.1:5432/grayling); overrides -data")
-		sqlitePath            = flag.String("sqlite", "", "pure-Go SQLite database path for the platform store; overrides -data")
-		gonacosRoot           = flag.String("gonacos-root", "", "gonacos contract root (repo with api/openapi/upstream); empty disables 501-stub registration")
-		gonacosData           = flag.String("gonacos-data", "", "gonacos embedded-redis dump dir (default <data dir>/gonacos)")
-		gonacosAddr           = flag.String("gonacos-addr", "127.0.0.1:18848", "gonacos HTTP bind — KEEP LOOPBACK/PRIVATE (§9)")
-		gonacosGRPC           = flag.String("gonacos-grpc-addr", "127.0.0.1:19848", "gonacos gRPC bind — KEEP LOOPBACK/PRIVATE (§9)")
-		nacosURL              = flag.String("nacos-url", "", "external Nacos 3 HTTP origin; empty uses embedded gonacos")
-		openAIUpstreamURL     = flag.String("openai-upstream-url", "", "OpenAI-compatible upstream base URL ending in /v1; enables POST /v1/chat/completions")
-		openAIWorkspace       = flag.String("openai-workspace", "", "fixed workspace for OpenAI-compatible chat")
-		openAIEnvironment     = flag.String("openai-environment", "", "fixed environment for OpenAI-compatible chat")
-		openAIFlagKey         = flag.String("openai-flag-key", "", "published JSON flag governing OpenAI-compatible chat (default: openai-chat)")
-		nativeConfigAuth      = flag.Bool("nacos-native-auth", false, "enable SDK-token-scoped native Nacos config reads; HTTP exposes only SDK login")
-		redisAddr             = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
-		authSecret            = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
-		authSecretFile        = flag.String("auth-secret-file", "", "owner-only file containing the gonacos HMAC/auth secret")
-		rolloutIv             = flag.Duration("rollout-interval", 30*time.Second, "auto-advance engine tick interval for staged release plans (0 disables automation; manual plan operations stay available)")
-		rolloutLease          = flag.Duration("rollout-lease-duration", 0, "PostgreSQL rollout leader lease (0 = max(3 x rollout-interval, 30s); set longer than worst expected decision pass)")
-		reconcileIv           = flag.Duration("reconcile-interval", 30*time.Second, "publish reconciliation tick interval: re-verifies the gonacos substrate against the platform store and idempotently republishes drift (0 disables); PostgreSQL control changes sync separately every 500ms")
-		requestsPerSec        = flag.Float64("requests-per-second", 0, "per-token request rate limit on sdk/collect endpoints (0 = default 200)")
-		evaluationSampleRate  = flag.Float64("evaluation-sample-rate", 0, "fraction [0,1] of safe feature-flag evaluation events to write as structured logs")
-		bootstrapName         = flag.String("bootstrap-owner-name", "bootstrap-owner", "display name of the auto-created global owner token")
-		devAutoLogin          = flag.Bool("dev-autologin", envFlag("GRAYLING_DEV_AUTOLOGIN"), "local development mode: sign every console visitor in as the global owner without a password (NEVER enable this where the console is reachable by others)")
-		printVersion          = flag.Bool("version", false, "print version and exit")
-		recoveryPoint         = flag.String("recovery-point", "", "checkpoint to verify before opening the API after a restore")
-		writePoint            = flag.String("write-recovery-point", "", "write a checkpoint from quiesced PostgreSQL and gonacos state, then exit")
-		verifyPoint           = flag.String("verify-recovery-point", "", "verify restored components against a checkpoint, then exit without opening listeners")
-		rotationKeyFile       = flag.String("rotate-hmac-key-file", "", "offline HMAC rotation key file (requires a verified backup and two owner tokens)")
-		rotationOperatorFile  = flag.String("rotation-operator-token-file", "", "owner token file for offline HMAC rotation")
-		rotationApproverFile  = flag.String("rotation-approver-token-file", "", "distinct owner token file approving offline HMAC rotation")
-		rotationBackupPoint   = flag.String("rotation-backup-point", "", "checkpoint from the completed joint backup, verified before rotation")
-		rotationProvisionFile = flag.String("provision-rotation-approver-file", "", "offline issue a second global owner token into a new owner-only file")
+		agentEnabled           = flag.Bool("agent", false, "enable experimental Agent WSS (requires -pg, -tls-cert/-tls-key, explicit Agent hosts and connection limit)")
+		agentHosts             = flag.String("agent-hosts", "", "comma-separated exact Agent listener Host values, including ports when used")
+		agentSigningKeyID      = flag.String("agent-signing-key-id", "", "explicit Agent Ed25519 signing key ID; requires independent trust roots")
+		agentSigningKeyFile    = flag.String("agent-signing-key-file", "", "owner-only PKCS8 Ed25519 private key PEM file (0400 or 0600)")
+		agentTrustRootsFile    = flag.String("agent-trust-roots-file", "", "independent versioned JSON Agent verification roots (up to 32)")
+		agentRevocationRefresh = flag.Bool("agent-revocation-refresh", false, "maintain cumulative revocation delivery proofs; requires Agent signing key and trust roots")
+		agentMaxConnections    = flag.Int("agent-max-connections", 0, "explicit per-node Agent WSS connection limit (1-100000)")
+		tlsCertificate         = flag.String("tls-cert", "", "listener TLS certificate PEM chain; requires -tls-key")
+		tlsKey                 = flag.String("tls-key", "", "listener TLS private key PEM; requires -tls-cert")
+		listenAddr             = flag.String("addr", "127.0.0.1:8688", "Grayling HTTP listen address")
+		dataFile               = flag.String("data", filepath.Join("data", "grayling-store.json"), "platform store file ('' = memory-only; ignored when -pg or -sqlite is set)")
+		pgDSN                  = flag.String("pg", "", "PostgreSQL DSN for the production platform store (e.g. postgres://grayling:secret@127.0.0.1:5432/grayling); overrides -data")
+		sqlitePath             = flag.String("sqlite", "", "pure-Go SQLite database path for the platform store; overrides -data")
+		gonacosRoot            = flag.String("gonacos-root", "", "gonacos contract root (repo with api/openapi/upstream); empty disables 501-stub registration")
+		gonacosData            = flag.String("gonacos-data", "", "gonacos embedded-redis dump dir (default <data dir>/gonacos)")
+		gonacosAddr            = flag.String("gonacos-addr", "127.0.0.1:18848", "gonacos HTTP bind — KEEP LOOPBACK/PRIVATE (§9)")
+		gonacosGRPC            = flag.String("gonacos-grpc-addr", "127.0.0.1:19848", "gonacos gRPC bind — KEEP LOOPBACK/PRIVATE (§9)")
+		nacosURL               = flag.String("nacos-url", "", "external Nacos 3 HTTP origin; empty uses embedded gonacos")
+		openAIUpstreamURL      = flag.String("openai-upstream-url", "", "OpenAI-compatible upstream base URL ending in /v1; enables POST /v1/chat/completions")
+		openAIWorkspace        = flag.String("openai-workspace", "", "fixed workspace for OpenAI-compatible chat")
+		openAIEnvironment      = flag.String("openai-environment", "", "fixed environment for OpenAI-compatible chat")
+		openAIFlagKey          = flag.String("openai-flag-key", "", "published JSON flag governing OpenAI-compatible chat (default: openai-chat)")
+		nativeConfigAuth       = flag.Bool("nacos-native-auth", false, "enable SDK-token-scoped native Nacos config reads; HTTP exposes only SDK login")
+		redisAddr              = flag.String("redis", "", "external Redis for gonacos cluster mode (default: embedded miniredis)")
+		authSecret             = flag.String("auth-secret", "", "HMAC secret for gonacos tokens + store pseudonymization seed material (random per boot when empty — set it for restarts with cluster mode)")
+		authSecretFile         = flag.String("auth-secret-file", "", "owner-only file containing the gonacos HMAC/auth secret")
+		rolloutIv              = flag.Duration("rollout-interval", 30*time.Second, "auto-advance engine tick interval for staged release plans (0 disables automation; manual plan operations stay available)")
+		rolloutLease           = flag.Duration("rollout-lease-duration", 0, "PostgreSQL rollout leader lease (0 = max(3 x rollout-interval, 30s); set longer than worst expected decision pass)")
+		reconcileIv            = flag.Duration("reconcile-interval", 30*time.Second, "publish reconciliation tick interval: re-verifies the gonacos substrate against the platform store and idempotently republishes drift (0 disables); PostgreSQL control changes sync separately every 500ms")
+		requestsPerSec         = flag.Float64("requests-per-second", 0, "per-token request rate limit on sdk/collect endpoints (0 = default 200)")
+		evaluationSampleRate   = flag.Float64("evaluation-sample-rate", 0, "fraction [0,1] of safe feature-flag evaluation events to write as structured logs")
+		bootstrapName          = flag.String("bootstrap-owner-name", "bootstrap-owner", "display name of the auto-created global owner token")
+		devAutoLogin           = flag.Bool("dev-autologin", envFlag("GRAYLING_DEV_AUTOLOGIN"), "local development mode: sign every console visitor in as the global owner without a password (NEVER enable this where the console is reachable by others)")
+		printVersion           = flag.Bool("version", false, "print version and exit")
+		recoveryPoint          = flag.String("recovery-point", "", "checkpoint to verify before opening the API after a restore")
+		writePoint             = flag.String("write-recovery-point", "", "write a checkpoint from quiesced PostgreSQL and gonacos state, then exit")
+		verifyPoint            = flag.String("verify-recovery-point", "", "verify restored components against a checkpoint, then exit without opening listeners")
+		rotationKeyFile        = flag.String("rotate-hmac-key-file", "", "offline HMAC rotation key file (requires a verified backup and two owner tokens)")
+		rotationOperatorFile   = flag.String("rotation-operator-token-file", "", "owner token file for offline HMAC rotation")
+		rotationApproverFile   = flag.String("rotation-approver-token-file", "", "distinct owner token file approving offline HMAC rotation")
+		rotationBackupPoint    = flag.String("rotation-backup-point", "", "checkpoint from the completed joint backup, verified before rotation")
+		rotationProvisionFile  = flag.String("provision-rotation-approver-file", "", "offline issue a second global owner token into a new owner-only file")
 	)
 	flag.Parse()
 	if *pgDSN != "" && *sqlitePath != "" {
@@ -100,6 +109,9 @@ func main() {
 		log.Fatal("external Nacos is incompatible with embedded native auth, Redis, recovery checkpoints, and offline key rotation")
 	}
 
+	if (*agentEnabled || *agentHosts != "" || *agentMaxConnections != 0 || *agentSigningKeyID != "" || *agentSigningKeyFile != "" || *agentTrustRootsFile != "" || *agentRevocationRefresh || *tlsCertificate != "" || *tlsKey != "") && (*writePoint != "" || *verifyPoint != "" || *rotationKeyFile != "" || *rotationProvisionFile != "") {
+		log.Fatal("Agent/listener flags cannot be used with offline recovery or key rotation commands")
+	}
 	logger := log.New(os.Stderr, "grayling ", log.LstdFlags|log.Lmsgprefix)
 	if *printVersion {
 		fmt.Println("grayling dev (schema v1)")
@@ -162,12 +174,28 @@ func main() {
 		logger.Printf("WARNING: native Nacos bound to non-loopback addresses %s / %s — TLS termination and network policy MUST be verified", *gonacosAddr, *gonacosGRPC)
 	}
 	if *writePoint == "" && *verifyPoint == "" && *rotationKeyFile == "" && *rotationProvisionFile == "" {
+
+		tlsConfig, err := listenerTLS(*agentEnabled, *tlsCertificate, *tlsKey)
+		if err != nil {
+			logger.Fatal(err)
+		}
+		material, err := loadAgentSigning(*agentEnabled, *agentSigningKeyID, *agentSigningKeyFile, *agentTrustRootsFile, *agentRevocationRefresh, time.Now())
+		if err != nil {
+			logger.Fatal(err)
+		}
+		var allowedAgentHosts []string
+		if *agentHosts != "" {
+			allowedAgentHosts = strings.Split(*agentHosts, ",")
+		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		appCtx, appCancel := context.WithCancel(context.Background())
 		defer appCancel()
 		app, err := graylingapp.Start(appCtx, graylingapp.Options{
 			DataFile: *dataFile, SQLitePath: *sqlitePath, PostgresDSN: *pgDSN,
+			AgentEnabled: *agentEnabled, AgentAllowedHosts: allowedAgentHosts, AgentMaxConnections: *agentMaxConnections,
+			AgentSigningKeyID: material.KeyID, AgentSigningKey: material.Key,
+			AgentReleaseVerifier: material.Verifier, AgentRevocationRefresh: *agentRevocationRefresh,
 			NacosURL: *nacosURL, NacosUsername: os.Getenv("GRAYLING_NACOS_USERNAME"),
 			NacosPassword: os.Getenv("GRAYLING_NACOS_PASSWORD"), NacosToken: os.Getenv("GRAYLING_NACOS_TOKEN"),
 			OpenAIUpstreamURL: *openAIUpstreamURL,
@@ -193,11 +221,21 @@ func main() {
 			logger.Printf("Nacos substrate: external %s", *nacosURL)
 		}
 		logBootstrapToken(logger, app.BootstrapOwnerToken())
-		httpSrv := &http.Server{Addr: *listenAddr, Handler: app.Handler(), ReadHeaderTimeout: 10 * time.Second}
+		httpSrv := &http.Server{Addr: *listenAddr, Handler: app.Handler(), ReadHeaderTimeout: 10 * time.Second, TLSConfig: tlsConfig}
 		serveErr := make(chan error, 1)
 		go func() {
-			logger.Printf("grayling API + console listening on http://%s", *listenAddr)
-			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			scheme := "http"
+			if tlsConfig != nil {
+				scheme = "https"
+			}
+			logger.Printf("grayling API + console listening on %s://%s", scheme, *listenAddr)
+			var serveError error
+			if tlsConfig != nil {
+				serveError = httpSrv.ListenAndServeTLS("", "")
+			} else {
+				serveError = httpSrv.ListenAndServe()
+			}
+			if err := serveError; err != nil && !errors.Is(err, http.ErrServerClosed) {
 				serveErr <- err
 			}
 		}()
@@ -215,7 +253,9 @@ func main() {
 		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 			logger.Printf("HTTP shutdown: %v", err)
 		}
-		if err := app.Close(shutdownCtx); err != nil {
+		appCloseCtx, appCloseCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer appCloseCancel()
+		if err := app.Close(appCloseCtx); err != nil {
 			logger.Printf("Grayling shutdown: %v", err)
 		}
 		return

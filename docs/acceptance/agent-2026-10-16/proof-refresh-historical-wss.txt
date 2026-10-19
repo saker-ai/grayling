@@ -1,0 +1,4 @@
+=== RUN   TestRevocationProofWSSRefreshPreservesInstalledSource
+--- PASS: TestRevocationProofWSSRefreshPreservesInstalledSource (7.81s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	8.892s

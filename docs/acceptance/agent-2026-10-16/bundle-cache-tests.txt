@@ -1,0 +1,17 @@
+=== RUN   TestBundleCacheCrashHelper
+    bundle_cache_crash_test.go:15: subprocess helper
+--- SKIP: TestBundleCacheCrashHelper (0.00s)
+=== RUN   TestBundleCacheCommittedWALKeepsWatermarkAfterProcessExit
+--- PASS: TestBundleCacheCommittedWALKeepsWatermarkAfterProcessExit (1.12s)
+=== RUN   TestBundleCacheRestartFloorsAndArtifactFreshness
+--- PASS: TestBundleCacheRestartFloorsAndArtifactFreshness (0.07s)
+=== RUN   TestBundleCachePolicyJoinAndLiveGuards
+--- PASS: TestBundleCachePolicyJoinAndLiveGuards (0.13s)
+=== RUN   TestBundleCacheIndependentSealAndTargetBinding
+--- PASS: TestBundleCacheIndependentSealAndTargetBinding (0.06s)
+=== RUN   TestBundleCacheTrustRotationAndClockRollback
+--- PASS: TestBundleCacheTrustRotationAndClockRollback (0.03s)
+=== RUN   TestBundleCacheSuppressedWriteCannotPublishCandidate
+--- PASS: TestBundleCacheSuppressedWriteCannotPublishCandidate (0.06s)
+PASS
+ok  	github.com/saker-ai/grayling/pkg/agent	2.526s

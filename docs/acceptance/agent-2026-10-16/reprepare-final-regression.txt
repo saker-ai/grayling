@@ -1,0 +1,50 @@
+=== RUN   TestPreparationRejectedConcurrentMutualExclusionAndReadiness
+--- PASS: TestPreparationRejectedConcurrentMutualExclusionAndReadiness (4.84s)
+=== RUN   TestPreparationGateAtomicReplicaReplayExpiryAndAbort
+--- PASS: TestPreparationGateAtomicReplicaReplayExpiryAndAbort (7.23s)
+=== RUN   TestPreparationGateFailureUpperBoundAndEveryZone
+=== RUN   TestPreparationGateFailureUpperBoundAndEveryZone/0
+=== RUN   TestPreparationGateFailureUpperBoundAndEveryZone/4999
+=== RUN   TestPreparationGateFailureUpperBoundAndEveryZone/5000
+--- PASS: TestPreparationGateFailureUpperBoundAndEveryZone (15.59s)
+    --- PASS: TestPreparationGateFailureUpperBoundAndEveryZone/0 (4.28s)
+    --- PASS: TestPreparationGateFailureUpperBoundAndEveryZone/4999 (3.59s)
+    --- PASS: TestPreparationGateFailureUpperBoundAndEveryZone/5000 (4.18s)
+=== RUN   TestPreparationGateRollbackAndAuthorizationExpiry
+--- PASS: TestPreparationGateRollbackAndAuthorizationExpiry (4.55s)
+=== RUN   TestPreparationPositiveNegativeRaceAndBootTakeover
+--- PASS: TestPreparationPositiveNegativeRaceAndBootTakeover (4.11s)
+=== RUN   TestPreparationV7MigrationPreservesPositiveEvidence
+--- PASS: TestPreparationV7MigrationPreservesPositiveEvidence (3.85s)
+=== RUN   TestPreparationGateEveryCarriedBuild
+--- PASS: TestPreparationGateEveryCarriedBuild (4.54s)
+=== RUN   TestPreparationWSSNegativeOutcomeCapabilityAndGate
+--- PASS: TestPreparationWSSNegativeOutcomeCapabilityAndGate (8.02s)
+=== RUN   TestPreparedDirectedIntentReplicaDedupAndTargetReplacement
+--- PASS: TestPreparedDirectedIntentReplicaDedupAndTargetReplacement (4.06s)
+=== RUN   TestPreparedLeaseRotationReadinessAndOldConnectionFenced
+--- PASS: TestPreparedLeaseRotationReadinessAndOldConnectionFenced (3.78s)
+=== RUN   TestPreparedEvidenceInsertFailureRollsBackRevision
+--- PASS: TestPreparedEvidenceInsertFailureRollsBackRevision (4.34s)
+=== RUN   TestPreparedIdentityTimeAndExpiryBarriers
+--- PASS: TestPreparedIdentityTimeAndExpiryBarriers (5.89s)
+=== RUN   TestPreparedQueueRollbackAndReleaseAbortFence
+--- PASS: TestPreparedQueueRollbackAndReleaseAbortFence (4.17s)
+=== RUN   TestPreparedRequiresExplicitReportPermissionAndV6Migration
+--- PASS: TestPreparedRequiresExplicitReportPermissionAndV6Migration (4.86s)
+=== RUN   TestPreparedWSSReplicaRedeliveryDownloadAndReceipt
+--- PASS: TestPreparedWSSReplicaRedeliveryDownloadAndReceipt (11.06s)
+=== RUN   TestPreparedWSSCapabilityRequiresTrustAndExplicitOptIn
+--- PASS: TestPreparedWSSCapabilityRequiresTrustAndExplicitOptIn (6.12s)
+=== RUN   TestPreparedWSSDeadlineRollsBackEvidence
+--- PASS: TestPreparedWSSDeadlineRollsBackEvidence (6.02s)
+=== RUN   TestPreparedEvidenceIndependentOfCommandAndLeaseDeadline
+--- PASS: TestPreparedEvidenceIndependentOfCommandAndLeaseDeadline (3.62s)
+=== RUN   TestReprepareAfterInitialWindowAndExpiredCommand
+--- PASS: TestReprepareAfterInitialWindowAndExpiredCommand (6.72s)
+=== RUN   TestReprepareExpiredFirstReportAndApprovalRollback
+--- PASS: TestReprepareExpiredFirstReportAndApprovalRollback (4.74s)
+=== RUN   TestReprepareWSSNegativeThenNewPositiveAndActivation
+--- PASS: TestReprepareWSSNegativeThenNewPositiveAndActivation (12.79s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	132.027s

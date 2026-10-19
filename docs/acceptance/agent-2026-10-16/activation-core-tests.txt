@@ -1,0 +1,4 @@
+GOWORK=off go test -race -count=1 ./pkg/agent -run '^TestActivation'
+ok  	github.com/saker-ai/grayling/pkg/agent	1.208s
+GOWORK=off go test -tags=integration -race -count=1 -timeout=4m ./test/agent -run '^TestActivation'
+ok  	github.com/saker-ai/grayling/test/agent	23.474s

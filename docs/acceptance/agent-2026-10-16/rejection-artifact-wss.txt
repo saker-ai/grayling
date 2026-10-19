@@ -1,0 +1,6 @@
+=== RUN   TestAppliedWSSActivateReplicaRecoveryAndReceipt
+--- PASS: TestAppliedWSSActivateReplicaRecoveryAndReceipt (10.48s)
+=== RUN   TestAppliedWSSCapabilityNegativeAndDeadline
+--- PASS: TestAppliedWSSCapabilityNegativeAndDeadline (8.35s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	19.899s

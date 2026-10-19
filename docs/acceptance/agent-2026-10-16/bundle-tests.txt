@@ -1,0 +1,58 @@
+=== RUN   TestBundleSignedDependenciesAndImmutableDocument
+=== RUN   TestBundleSignedDependenciesAndImmutableDocument/other_bundle
+=== RUN   TestBundleSignedDependenciesAndImmutableDocument/other_revision
+=== RUN   TestBundleSignedDependenciesAndImmutableDocument/other_epoch
+=== RUN   TestBundleSignedDependenciesAndImmutableDocument/other_key
+--- PASS: TestBundleSignedDependenciesAndImmutableDocument (0.03s)
+    --- PASS: TestBundleSignedDependenciesAndImmutableDocument/other_bundle (0.00s)
+    --- PASS: TestBundleSignedDependenciesAndImmutableDocument/other_revision (0.00s)
+    --- PASS: TestBundleSignedDependenciesAndImmutableDocument/other_epoch (0.00s)
+    --- PASS: TestBundleSignedDependenciesAndImmutableDocument/other_key (0.00s)
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/wrong_purpose
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/empty_builds
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/duplicate_build
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/unknown_default
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/implicit_fallback
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/unmapped_target
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/missing_resources
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/duplicate_resource
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/unknown_protocol
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/unknown_build_protocol
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/invalid_resource_digest
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/zero_image_digest
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/missing_route_flag
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/unknown_output
+=== RUN   TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/extra_output
+--- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates (0.06s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/wrong_purpose (0.00s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/empty_builds (0.00s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/duplicate_build (0.00s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/unknown_default (0.00s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/implicit_fallback (0.00s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/unmapped_target (0.00s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/missing_resources (0.00s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/duplicate_resource (0.00s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/unknown_protocol (0.00s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/unknown_build_protocol (0.00s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/invalid_resource_digest (0.00s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/zero_image_digest (0.00s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/missing_route_flag (0.01s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/unknown_output (0.01s)
+    --- PASS: TestBundleSchemaAndRoutingMapRejectIncompleteCandidates/extra_output (0.01s)
+=== RUN   TestBundleCanonicalBytesScopeAndAuthorizationExpiry
+=== RUN   TestBundleCanonicalBytesScopeAndAuthorizationExpiry/noncanonical_whitespace
+=== RUN   TestBundleCanonicalBytesScopeAndAuthorizationExpiry/unknown_field
+=== RUN   TestBundleCanonicalBytesScopeAndAuthorizationExpiry/authorization_extension
+=== RUN   TestBundleCanonicalBytesScopeAndAuthorizationExpiry/cross_epoch_policy
+=== RUN   TestBundleCanonicalBytesScopeAndAuthorizationExpiry/foreign_scope
+=== RUN   TestBundleCanonicalBytesScopeAndAuthorizationExpiry/foreign_bundle
+--- PASS: TestBundleCanonicalBytesScopeAndAuthorizationExpiry (0.02s)
+    --- PASS: TestBundleCanonicalBytesScopeAndAuthorizationExpiry/noncanonical_whitespace (0.00s)
+    --- PASS: TestBundleCanonicalBytesScopeAndAuthorizationExpiry/unknown_field (0.00s)
+    --- PASS: TestBundleCanonicalBytesScopeAndAuthorizationExpiry/authorization_extension (0.00s)
+    --- PASS: TestBundleCanonicalBytesScopeAndAuthorizationExpiry/cross_epoch_policy (0.00s)
+    --- PASS: TestBundleCanonicalBytesScopeAndAuthorizationExpiry/foreign_scope (0.00s)
+    --- PASS: TestBundleCanonicalBytesScopeAndAuthorizationExpiry/foreign_bundle (0.00s)
+PASS
+ok  	github.com/saker-ai/grayling/pkg/agent	1.164s

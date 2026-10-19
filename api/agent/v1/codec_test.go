@@ -136,3 +136,34 @@ func FuzzDecode(f *testing.F) {
 		}
 	})
 }
+
+func TestPreWelcomeError(t *testing.T) {
+	e := &agentv1.Envelope{ProtocolMajor: 1, MessageId: "error-1", Payload: &agentv1.Envelope_Error{Error: &agentv1.Error{Code: agentv1.ErrorCode_ERROR_CODE_UNSUPPORTED_MESSAGE, Reason: "hello rejected"}}}
+	b, err := agentv1.Encode(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentv1.Decode(b); err != nil {
+		t.Fatal(err)
+	}
+	e.ConnectionEpoch = 1
+	if _, err := agentv1.Encode(e); err == nil {
+		t.Fatal("partially assigned error session accepted")
+	}
+}
+
+func TestPrepareTargetRevisionFullUint64(t *testing.T) {
+	frame := hello()
+	frame.SessionId = "session"
+	frame.ConnectionEpoch = 1
+	frame.OperationId = "prepare"
+	frame.Payload = &agentv1.Envelope_Prepare{Prepare: &agentv1.Prepare{TargetRevision: ^uint64(0)}}
+	body, err := agentv1.Encode(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := agentv1.Decode(body)
+	if err != nil || decoded.GetPrepare().TargetRevision != ^uint64(0) {
+		t.Fatal("target revision lost precision", decoded, err)
+	}
+}

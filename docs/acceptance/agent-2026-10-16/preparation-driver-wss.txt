@@ -1,0 +1,8 @@
+=== RUN   TestPreparationDriverOwnedResourcesReconnectAndActualRuntime
+--- PASS: TestPreparationDriverOwnedResourcesReconnectAndActualRuntime (7.97s)
+=== RUN   TestPreparationDriverFailuresNeverReportPrepared
+--- PASS: TestPreparationDriverFailuresNeverReportPrepared (5.76s)
+=== RUN   TestPreparationDriverExpiryClosesCandidateWithoutActivation
+--- PASS: TestPreparationDriverExpiryClosesCandidateWithoutActivation (8.36s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	23.170s

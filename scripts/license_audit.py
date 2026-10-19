@@ -38,6 +38,12 @@ def license_type(data):
         return "Apache-2.0"
     if "permission is hereby granted, free of charge" in s:
         return "MIT"
+    compact = " ".join(s.split())
+    if ("permission to use, copy, modify, and distribute this software" in compact
+            and "with or without fee is hereby granted" in compact
+            and "copyright notice and this permission notice appear in all copies" in compact
+            and "the author disclaims all warranties" in compact):
+        return "ISC"
     if "redistribution and use in source and binary forms" in s:
         return "BSD-3-Clause" if "neither the name" in s or "neither the copyright" in s else "BSD-2-Clause"
     return "REVIEW"

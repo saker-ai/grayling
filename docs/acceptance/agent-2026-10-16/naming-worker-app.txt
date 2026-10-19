@@ -1,0 +1,21 @@
+=== RUN   TestAgentAdminHTTPProvisionConnectRevokeAndRBAC
+2026/10/16 12:27:14 INFO  snapshot loaded
+2026/10/16 12:27:19 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:27:19 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+    admin_http_test.go:227: connected credential revocation observed after 1.842997625s
+--- PASS: TestAgentAdminHTTPProvisionConnectRevokeAndRBAC (10.53s)
+=== RUN   TestAgentAppTLSLifecycleAndRestart
+2026/10/16 12:27:25 INFO  snapshot loaded
+2026/10/16 12:27:29 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:27:29 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+2026/10/16 12:27:30 INFO  snapshot loaded
+2026/10/16 12:27:35 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:27:35 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestAgentAppTLSLifecycleAndRestart (13.42s)
+=== RUN   TestAgentAppDisabledKeepsRouteUnavailable
+2026/10/16 12:27:35 INFO  snapshot loaded
+2026/10/16 12:27:40 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 12:27:40 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+--- PASS: TestAgentAppDisabledKeepsRouteUnavailable (4.43s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	29.479s

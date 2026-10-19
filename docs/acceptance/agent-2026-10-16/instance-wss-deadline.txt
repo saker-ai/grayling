@@ -1,0 +1,4 @@
+=== RUN   TestInstanceWSSDeadlineCancelsBlockedMutation
+--- PASS: TestInstanceWSSDeadlineCancelsBlockedMutation (3.57s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	4.635s

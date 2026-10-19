@@ -1,0 +1,4 @@
+=== RUN   TestPreparedStoredTimingCannotBeLaundered
+--- PASS: TestPreparedStoredTimingCannotBeLaundered (4.57s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	5.654s

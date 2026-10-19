@@ -1,0 +1,18 @@
+=== RUN   TestAgentAdminHTTPProvisionConnectRevokeAndRBAC
+2026/10/16 11:50:16 INFO  snapshot loaded
+2026/10/16 11:50:21 INFO  admin user "nacos" bootstrapped with default password — change it after first login
+2026/10/16 11:50:21 app: contract build from root "." failed (no openapi files found in "api/openapi/upstream"); 501 stubs for unimplemented endpoints will not be registered
+    admin_http_test.go:183: connected credential revocation observed after 1.987335861s
+--- PASS: TestAgentAdminHTTPProvisionConnectRevokeAndRBAC (10.78s)
+=== RUN   TestAgentManagedCredentialConcurrentDedupAndAudit
+--- PASS: TestAgentManagedCredentialConcurrentDedupAndAudit (3.37s)
+=== RUN   TestAgentManagedScopeLimitCASAndReplay
+--- PASS: TestAgentManagedScopeLimitCASAndReplay (3.10s)
+=== RUN   TestAgentAdminAuditFailureRollsBackAllMutations
+--- PASS: TestAgentAdminAuditFailureRollsBackAllMutations (3.31s)
+=== RUN   TestAgentManagementMigratesV2WithoutResettingSessions
+--- PASS: TestAgentManagementMigratesV2WithoutResettingSessions (3.51s)
+=== RUN   TestAgentManagementMetadataAndAuditPagination
+--- PASS: TestAgentManagementMetadataAndAuditPagination (3.43s)
+PASS
+ok  	github.com/saker-ai/grayling/test/agent	28.587s
