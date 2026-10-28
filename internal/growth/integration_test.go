@@ -110,6 +110,10 @@ func TestReaderWithRealAPIHandler(t *testing.T) {
 	if p.Window.Recomputable || p.Decision.Verdict != "hold" || p.EvidenceVersion == "" || p.PrimaryMetricRef.DefinitionHash != def.Hash || p.Diagnostics == nil {
 		t.Fatalf("lost real server semantics: %+v", p)
 	}
+	monitor, err := reader.Monitor(context.Background(), growth.MonitorManifest{WorkspaceID: ws.ID, EnvironmentID: env.ID, ExperimentID: exp.ID, Epoch: exp.Epoch, RegistrationVersion: p.RegistrationVersion, PrimaryMetric: query.Metrics[0], Guardrails: []growth.MetricRef{query.Metrics[1]}})
+	if err != nil || monitor.Status != growth.Hold || monitor.ServerVerdict != "hold" || monitor.PublicationAuthorized || monitor.EvidenceVersion != p.EvidenceVersion || len(monitor.Blockers) == 0 {
+		t.Fatalf("real handler monitor HOLD: %+v, %v", monitor, err)
+	}
 	provenance := growth.Provenance{Source: "local test planning inputs", SuppliedBy: "fixture owner", SuppliedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 	proposal := growth.Proposal{
 		SchemaVersion: growth.ProposalSchemaVersion, ID: "proposal1", Version: 1, GoalID: "activation", WorkspaceID: ws.ID, EnvironmentID: env.ID,

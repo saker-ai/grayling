@@ -643,6 +643,33 @@ func testRealHandler(t *testing.T, binary string) {
 	if got.EvidenceStatus != growth.Hold || got.Review.State != growth.ProposalNeedsData || len(got.Review.Blockers) == 0 || writes.Load() != 0 || strings.Contains(out.String()+stderr.String(), viewer.Secret) {
 		t.Fatalf("real handler result %+v", got)
 	}
+	manifest := growth.MonitorManifest{WorkspaceID: ws.ID, EnvironmentID: env.ID, ExperimentID: exp.ID, Epoch: exp.Epoch, RegistrationVersion: report.RegistrationVersion, PrimaryMetric: q.Metrics[0], Guardrails: []growth.MetricRef{q.Metrics[1]}}
+	b, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(t.TempDir(), "monitor.json")
+	if err := os.WriteFile(manifestPath, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.CommandContext(t.Context(), binary, "monitor", "--manifest", manifestPath, "--base-url", srv.URL, "--workspace", ws.ID, "--environment", env.ID)
+	cmd.Env = append(os.Environ(), "GRAYLING_GROWTH_TOKEN="+viewer.Secret)
+	out.Reset()
+	stderr.Reset()
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	err = cmd.Run()
+	ee, ok = err.(*exec.ExitError)
+	if !ok || ee.ExitCode() != 3 {
+		t.Fatalf("real handler monitor exit %v: %s %s", err, &out, &stderr)
+	}
+	var summary growth.MonitorSummary
+	if err := json.Unmarshal(out.Bytes(), &summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.Status != growth.Hold || summary.ServerVerdict != "hold" || summary.PublicationAuthorized || summary.EvidenceVersion != report.EvidenceVersion || len(summary.Blockers) == 0 || writes.Load() != 0 || strings.Contains(out.String()+stderr.String(), viewer.Secret) {
+		t.Fatalf("real handler monitor %+v", summary)
+	}
+
 }
 
 // Explicit zero is intentional: omission must never silently become a zero threshold.

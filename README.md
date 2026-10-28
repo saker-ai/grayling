@@ -36,6 +36,14 @@ The separate bounded operator input supplies the expected fingerprint, decision,
 reviewer, explicit timestamp and rationale. Exported records contain operator-supplied
 review content and are not authenticated authorization. See
 [review command usage](docs/growth-copilot.md#review-record-commands).
+The one-shot [`monitor --manifest monitor.json` command](docs/growth-copilot.md#read-only-monitor-command)
+reads the actual linked experiment with explicit epoch, registration and exact
+primary/guardrail metric pins; an exact report evidenceVersion pin is optional.
+It exports observed report provenance and bounded blocker/remediation codes,
+keeping server verdicts separate from READY/HOLD/NEEDS_DATA. READY never
+authorizes publication, and all requests remain GET-only. Local fixtures establish
+conservative HOLD; durable monitoring, rollout-history linkage and model generation
+remain future work.
 Real Saker instrumentation, pilot evidence and durable workflows remain outstanding.
 
 ![Grayling experiment and staged rollout console](docs/acceptance/web-2026-10-08/23-rollout-plan.png)
