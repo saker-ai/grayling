@@ -49,7 +49,10 @@ pins the original proposal and links a caller-attested experiment through the
 existing monitor. Records separate proposal baselines from observed report
 provenance, preserve HOLD/NEEDS_DATA and server verdicts, and retain explicit
 recorder, timestamp and bounded follow-ups. They prove neither execution nor a
-business win; publication remains unauthorized. No CLI or persistence is added.
+business win; publication remains unauthorized. The GET-only
+[`record-learning --proposal FILE --manifest FILE --learning-input FILE` command](docs/growth-copilot.md#record-learning-command)
+exports one record using separately supplied operator inputs and the pinned proposal
+fingerprint. No persistence is added.
 Real Saker instrumentation, pilot evidence and durable workflows remain outstanding.
 
 ![Grayling experiment and staged rollout console](docs/acceptance/web-2026-10-08/23-rollout-plan.png)
