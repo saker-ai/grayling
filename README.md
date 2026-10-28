@@ -13,7 +13,13 @@ inputs and attestations do not establish statistical adequacy or real instrument
 Build with `make build` (or `make build-go`), supply an explicit trusted API origin,
 workspace/environment IDs and a bearer token environment variable. See the
 [setup, command usage, exit codes and trust boundaries](docs/growth-copilot.md#read-only-review-command)
-and [proposal JSON example](docs/growth-copilot.md#proposal-contract).
+and [proposal JSON example](docs/growth-copilot.md#proposal-contract). The optional pure
+[`CompileCreateRequest` library](docs/growth-copilot.md#optional-create-request-compiler)
+prepares two-variant fixed-split create JSON from evidence-ready proposals and
+separate trusted owner/statistical/guardrail settings. It preserves exact metric
+references and keeps proposal/evidence metadata separate. It adds no CLI
+submission or platform writes; human approval, targeting/binding checks and
+existing Grayling validation remain required.
 
 ![Grayling experiment and staged rollout console](docs/acceptance/web-2026-10-08/23-rollout-plan.png)
 

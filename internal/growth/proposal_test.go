@@ -248,6 +248,14 @@ func TestProposalPreservesReaderHealth(t *testing.T) {
 			if got := ReviewProposal(p, envelope); got.State != tt.state {
 				t.Fatalf("got %+v, want %s", got, tt.state)
 			}
+			prepared, err := CompileCreateRequest(p, envelope, preparationFixture(p))
+			if tt.state == ProposalReadyForReview {
+				if err != nil || prepared == nil {
+					t.Fatalf("Reader-ready compilation: %v", err)
+				}
+			} else if err == nil || prepared != nil {
+				t.Fatal("compiler accepted unhealthy Reader evidence")
+			}
 		})
 	}
 }
