@@ -23,8 +23,11 @@ const usage = `Usage: grayling-growth-agent review --proposal FILE --base-url OR
        grayling-growth-agent prepare --proposal FILE --settings FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent monitor --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent record-learning --proposal FILE --manifest FILE --learning-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+       grayling-growth-agent search-learning --workspace ID --environment ID --text LITERAL --record FILE [--record FILE ...]
        grayling-growth-agent fingerprint --proposal FILE
        grayling-growth-agent record-review --proposal FILE --review-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+search-learning is offline: explicit local records only, no credentials or evidence refresh.
+A valid search exits 0, including empty results and HOLD/NEEDS_DATA matches.
 Read-only review/preparation; credentials come only from the named environment variable
 (default GRAYLING_GROWTH_TOKEN). Timeout bounds the entire read (0 < timeout <= 30s).
 prepare exports request and separate provenance metadata; it never submits.
@@ -54,6 +57,9 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 		fmt.Fprint(out, usage)
 		return 0
+	}
+	if len(args) > 0 && args[0] == "search-learning" {
+		return runSearchLearning(args[1:], out, diagnostics)
 	}
 	if len(args) > 0 && args[0] == "record-learning" {
 		return runRecordLearning(ctx, args[1:], out, diagnostics)
