@@ -813,7 +813,7 @@ invalid local input/configuration; exit 1 indicates an evidence failure or
 timeout; signal cancellation exits 130. These failures emit no record and fixed,
 secret-safe diagnostics. Both businessWinEstablished and publicationAuthorized
 remain false, regardless of the server verdict. Records are caller attestations,
-without authenticated audit storage, persistence/search, model integration,
+without authenticated audit storage, persistence, model integration,
 experiment submission or real Saker pilot/business acceptance.
 
 `cmd/grayling-growth-agent/learning_test.go` builds and invokes the actual binary
@@ -821,3 +821,60 @@ against local HTTP fixtures for healthy/blocked/missing evidence, strict files,
 stale pins, local and server conflicts, access denial, timeout, both signals,
 injection and zero non-GET requests. These fixtures establish local command
 behavior only. All existing CI jobs and documented gates remain required.
+
+## Offline search-learning command
+
+Search explicitly supplied exported `growth.learning.v1` records without a
+server, credentials, evidence refresh or an index:
+
+```sh
+./bin/grayling-growth-agent search-learning \
+  --workspace ws1 --environment env1 --text 'first task' \
+  --record learning-record.json --record earlier-learning-record.json
+```
+
+All three scope/text flags are required. `--record` is repeatable; directories,
+symlinks, FIFOs, devices and other nonregular inputs are rejected. There is no
+recursive discovery, stdin input, glob expansion by the command, credential
+option or network destination. Shell expansion remains the caller's responsibility.
+Limits are 64 supplied files, 128 KiB per file and 4 MiB total actual input bytes
+(including whitespace and repeated files). Text is a nonblank UTF-8 substring of
+at most 4096 bytes, matched case-sensitively against `originalHypothesis` or any
+`followups` entry. No regular expressions, semantic matching or text execution
+are performed. Proposal baseline text and recorder identifiers are not searched.
+
+Every file is strictly decoded and validated before any output, including files
+outside the selected scope. Unknown and duplicate members (including escaped
+aliases), trailing JSON, invalid UTF-8, unsupported schemas, invalid identities,
+versions, text bounds and linked/observed scope, experiment, epoch, metric-role,
+registration, evidence-pin or source-path conflicts fail the whole request.
+`businessWinEstablished`, either `publicationAuthorized` field, and inconsistent
+missing-evidence snapshots are rejected. Monitor's fixed status/blocker pairs
+and missing-window explanations are checked structurally; no statistical or
+health decision is recomputed. Baseline experiment references stay separate from
+the linked run and must carry valid experiment/epoch/evidence/source references.
+A missing report is valid only as `NEEDS_DATA` with the missing-evidence blocker
+and empty observed provenance; a requested manifest pin remains a caller claim.
+
+Success returns a single `growth.learning-search.v1` JSON object containing
+`workspaceId`, `environmentId` and `matches`. Matches preserve complete record
+snapshots, including the proposal fingerprint, baseline references, linked
+experiment, observed evidence version/window/watermark, HOLD/NEEDS_DATA, recorder,
+time and inert follow-ups. Other scopes and input file paths are never included.
+Results sort lexicographically by canonical record JSON bytes, independent of
+input order; byte-identical canonical records collapse to one match. No matches
+returns `matches: []`. Exit 0 means the search completed, including when results
+are HOLD/NEEDS_DATA; input/configuration errors return 2 with fixed diagnostics
+and no JSON, and output failures return 1. Output is fully prepared before writing.
+
+The pure `growth.SearchLearning` contract and bounded `DecodeLearningRecord`
+reuse the existing `LearningRecord` schema. Contract and actual-binary tests
+cover literal matching, scope isolation, deterministic ordering/deduplication,
+provenance conflicts, missing evidence, strict JSON, file/byte limits, nonregular
+files and inert injection text. These are caller-attested local artifacts:
+structural consistency does not authenticate a recorder, verify the proposal
+fingerprint against an absent proposal, establish freshness or causality, prove
+execution, or authorize publication. Search provides neither authenticated audit
+storage nor the full learning journal, durable orchestration, model integration,
+real Saker pilot or complete issue acceptance. Existing PostgreSQL and all other
+CI jobs remain required; no database, public API, SDK or browser surface is added.

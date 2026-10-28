@@ -44,6 +44,15 @@ keeping server verdicts separate from READY/HOLD/NEEDS_DATA. READY never
 authorizes publication, and all requests remain GET-only. Local fixtures establish
 conservative HOLD; durable monitoring, rollout-history linkage and model generation
 remain future work.
+
+The offline [`search-learning` command](docs/growth-copilot.md#offline-search-learning-command)
+searches literal hypothesis/follow-up text in explicitly supplied exported learning
+records within a required workspace/environment. It validates all bounded regular
+files before output, preserves evidence-linked HOLD/NEEDS_DATA snapshots, and
+rejects authorization claims. Results are caller-attested local artifacts; search
+does not refresh evidence, access credentials/network, write an index or provide
+authenticated journal storage or real pilot acceptance.
+
 The read-only [`Reader.RecordLearning` library](docs/growth-copilot.md#read-only-learning-records)
 pins the original proposal and links a caller-attested experiment through the
 existing monitor. Records separate proposal baselines from observed report
