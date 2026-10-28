@@ -12,19 +12,19 @@ import (
 // JSON and Reader evidence. AllocationMode must explicitly be fixed-split.
 // AnalysisWindowHours is an observation window, never attribution duration.
 type PreparationInputs struct {
-	AllocationMode      string
-	IntegrationOwner    string
-	Alpha               float64
-	Power               float64
-	AnalysisWindowHours int64
-	Guardrails          []GuardrailPreparation
+	AllocationMode      string                 `json:"allocationMode"`
+	IntegrationOwner    string                 `json:"integrationOwner"`
+	Alpha               float64                `json:"alpha"`
+	Power               float64                `json:"power"`
+	AnalysisWindowHours int64                  `json:"analysisWindowHours"`
+	Guardrails          []GuardrailPreparation `json:"guardrails"`
 }
 
 type GuardrailPreparation struct {
-	Ref MetricRef
+	Ref MetricRef `json:"ref"`
 	// A pointer distinguishes an explicitly supplied zero threshold from omission.
-	MaxRelativeRegression *float64
-	MinSample             int64
+	MaxRelativeRegression *float64 `json:"maxRelativeRegression"`
+	MinSample             int64    `json:"minSample"`
 }
 
 // CreateRequest is a create-API allowlist compatible with platform.Experiment.
