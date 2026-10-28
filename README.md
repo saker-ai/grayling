@@ -23,6 +23,15 @@ references and keeps proposal/evidence metadata separate. It adds no CLI
 submission or platform writes; human approval, targeting/binding checks and
 existing Grayling validation remain required.
 
+The pure [`RecordReview` library contract](docs/growth-copilot.md#pure-human-review-records)
+pins the complete proposal with a deterministic SHA-256 fingerprint and accepts
+separate caller-supplied reviewer, timestamp, rationale and approve/reject/request_changes
+decisions. Stale content is rejected; approval requires existing evidence readiness,
+while rejection/changes retain blockers. Records are caller-attested artifacts,
+not authenticated authorization, durable audit storage or permission to submit/publish.
+CLI behavior is unchanged; real Saker instrumentation, pilot evidence and durable
+workflows remain outstanding.
+
 ![Grayling experiment and staged rollout console](docs/acceptance/web-2026-10-08/23-rollout-plan.png)
 
 ## What it includes
