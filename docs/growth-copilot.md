@@ -756,7 +756,7 @@ explicit. `continue`, `ship` and `rollback` retain their server meaning; READY o
 `publicationAuthorized` are always false. Existing RBAC, human approval, binding
 and rollout gates remain mandatory.
 
-This milestone adds no CLI/export command, persistence/search, authenticated audit
+The library and export command add no persistence/search, authenticated audit
 storage, model integration, public API, SDK or database changes. Table-driven local
 HTTP fixtures cover healthy verdicts, health/window failures, missing evidence,
 stale fingerprints, malformed operator inputs, scope/metric/registration/epoch
@@ -765,3 +765,59 @@ zero HTTP writes. The in-memory real-handler fixture preserves HOLD; these are
 library behavior checks, not real Saker instrumentation, pilot or business-win
 validation. The documented build, short tests, vet, core race, boot/E2E/smoke,
 frontend and static gates remain required and unchanged.
+
+
+## Record-learning command
+
+Export a single caller-attested LearningRecord with independently supplied files:
+
+```sh
+./bin/grayling-growth-agent record-learning \
+  --proposal proposal.json --manifest monitor.json --learning-input learning.json \
+  --base-url https://grayling.example --workspace ws1 --environment env1 \
+  --token-env GRAYLING_GROWTH_TOKEN --timeout 10s > learning-record.json
+```
+
+`proposal.json` uses the existing strict proposal contract; `monitor.json` uses
+[the monitor manifest](#read-only-monitor-command). The operator-owned
+`learning.json` must be a regular UTF-8 JSON file of at most 128 KiB:
+
+```json
+{
+  "expectedProposalFingerprint": "sha256:<64 lowercase hex digits pinned when reviewed>",
+  "recorder": "growth-owner",
+  "recordedAt": "2026-10-28T03:00:00Z",
+  "followups": ["Review the next complete observation window with the owner."]
+}
+```
+
+Replace the fingerprint placeholder with the previously pinned value from
+`fingerprint --proposal proposal.json`. Never refresh the expected fingerprint
+merely to bypass a stale-input failure. The command passes the supplied pin
+unchanged to `Reader.RecordLearning`; it never replaces it with a fresh value.
+All 20 bounded follow-ups supported by the library fit within this file limit.
+Unknown members, duplicate members (including escaped aliases), trailing JSON,
+invalid UTF-8, nonregular files, invalid operator fields, stale fingerprints and
+local scope/metric conflicts are rejected before HTTP access. The existing
+proposal and manifest bounds and strict decoding also apply.
+
+Trusted origin, scope, credential environment-variable selection, GET-only
+transport, redirect restrictions, total timeout (default 10s, maximum 30s), and
+SIGINT/SIGTERM cancellation follow the existing commands. Proposal baselines are
+retained separately from the actual linked experiment; only that linked run is
+read. Caller follow-ups and hypotheses remain inert text, never instructions.
+
+Exit 0 exports exactly one record for READY. Exit 3 also exports exactly one
+record, preserving HOLD or NEEDS_DATA and observed provenance. Exit 2 indicates
+invalid local input/configuration; exit 1 indicates an evidence failure or
+timeout; signal cancellation exits 130. These failures emit no record and fixed,
+secret-safe diagnostics. Both businessWinEstablished and publicationAuthorized
+remain false, regardless of the server verdict. Records are caller attestations,
+without authenticated audit storage, persistence/search, model integration,
+experiment submission or real Saker pilot/business acceptance.
+
+`cmd/grayling-growth-agent/learning_test.go` builds and invokes the actual binary
+against local HTTP fixtures for healthy/blocked/missing evidence, strict files,
+stale pins, local and server conflicts, access denial, timeout, both signals,
+injection and zero non-GET requests. These fixtures establish local command
+behavior only. All existing CI jobs and documented gates remain required.
