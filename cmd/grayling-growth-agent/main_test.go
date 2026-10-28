@@ -81,16 +81,26 @@ func TestReviewCommand(t *testing.T) {
 	for _, command := range []string{"review", "prepare"} {
 		t.Run(command, func(t *testing.T) { testCommand(t, binary, command) })
 	}
+	for _, decision := range []growth.ReviewDecision{growth.ReviewApprove, growth.ReviewReject, growth.ReviewRequestChanges} {
+		t.Run("record-review/"+string(decision), func(t *testing.T) { testCommand(t, binary, "record-review", decision) })
+	}
+	t.Run("fingerprint", func(t *testing.T) { testFingerprint(t, binary) })
 	t.Run("real handler HOLD", func(t *testing.T) { testRealHandler(t, binary) })
 }
 
-func testCommand(t *testing.T, binary, command string) {
-	names := []string{"fifo", "directory", "invalid flag", "workspace scope", "duplicate JSON", "secret variant", "READY", "HOLD", "unhealthy", "NEEDS_DATA", "draft", "implementation", "malformed", "oversized", "envelope", "approval", "scope", "source", "invalid id", "unpinned", "duplicate", "metric mismatch", "epoch mismatch", "version mismatch", "report scope", "denied", "redirect", "bad response", "timeout", "signal", "invalid config", "missing credential"}
+func testCommand(t *testing.T, binary, command string, decisions ...growth.ReviewDecision) {
+	names := []string{"fifo", "directory", "invalid flag", "workspace scope", "duplicate JSON", "secret variant", "READY", "HOLD", "unhealthy", "NEEDS_DATA", "draft", "implementation", "malformed", "oversized", "envelope", "approval", "scope", "source", "invalid id", "unpinned", "duplicate", "metric mismatch", "epoch mismatch", "version mismatch", "report scope", "denied", "transport", "redirect", "bad response", "timeout", "signal", "invalid config", "missing credential"}
 	if command == "prepare" {
 		names = append(names, "settings missing", "settings fifo", "settings directory", "settings oversized", "settings null", "settings array", "settings malformed", "settings trailing", "settings duplicate", "settings escaped duplicate", "settings unknown", "settings nested unknown", "settings nested duplicate", "settings authorization", "settings evidence", "settings omitted threshold", "settings bandit", "settings missing alpha", "unsupported method", "multi-arm")
 	}
+	if command == "record-review" {
+		names = append(names, "input missing", "input fifo", "input directory", "input oversized", "input null", "input array", "input malformed", "input invalid utf8", "input trailing", "input duplicate", "input escaped duplicate", "input unknown", "input authorization", "input evidence", "input nested", "input timestamp omitted", "input timestamp invalid", "input decision invalid", "input reviewer omitted", "input rationale omitted", "input rationale long", "input stale", "input unchanged version stale")
+	}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
+			if command == "record-review" && name == "secret variant" {
+				return // Records intentionally retain operator/proposal content.
+			}
 			p := fixtureProposal(t)
 			report := growth.Report{ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, AnalysisMethod: p.AnalysisPlan.Method, ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue", Reasons: []string{secret}}}
 			report.Diagnostics = &growth.Diagnostics{ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
@@ -122,6 +132,15 @@ func testCommand(t *testing.T, binary, command string) {
 				}
 				if name == "redirect" {
 					http.Redirect(w, r, "/"+secret, 302)
+					return
+				}
+				if name == "transport" {
+					conn, _, err := w.(http.Hijacker).Hijack()
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					conn.Close()
 					return
 				}
 				if name == "bad response" {
@@ -261,7 +280,7 @@ func testCommand(t *testing.T, binary, command string) {
 			case "version mismatch":
 				report.EvidenceVersion = p.PrimaryMetric.Ref.DefinitionHash
 				want = 1
-			case "metric mismatch", "report scope", "denied", "redirect", "bad response":
+			case "metric mismatch", "report scope", "denied", "transport", "redirect", "bad response":
 				want = 1
 			case "timeout":
 				extra = []string{"--timeout", "50ms"}
@@ -348,6 +367,81 @@ func testCommand(t *testing.T, binary, command string) {
 				}
 				extra = append(extra, "--settings", settingsPath)
 			}
+			if command == "record-review" {
+				fp, err := growth.ProposalFingerprint(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				in := growth.ReviewInputs{ExpectedProposalFingerprint: fp, Decision: decisions[0], Reviewer: "operator", ReviewedAt: time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC), Rationale: "Reviewed pinned proposal."}
+				data, err := json.Marshal(in)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rawInput := string(data)
+				path := filepath.Join(t.TempDir(), "review.json")
+				if strings.HasPrefix(name, "input ") {
+					want, noNetwork = 2, true
+					switch name {
+					case "input missing":
+						path = ""
+					case "input fifo":
+						if err := syscall.Mkfifo(path, 0600); err != nil {
+							t.Fatal(err)
+						}
+					case "input directory":
+						path = t.TempDir()
+					case "input oversized":
+						rawInput = strings.Repeat(" ", maxReviewInputBytes+1)
+					case "input null":
+						rawInput = "null"
+					case "input array":
+						rawInput = "[]"
+					case "input malformed":
+						rawInput = `{"reviewer":"` + secret
+					case "input invalid utf8":
+						rawInput = strings.Replace(rawInput, "operator", string([]byte{0xff}), 1)
+					case "input trailing":
+						rawInput += `{}`
+					case "input duplicate":
+						rawInput = strings.Replace(rawInput, `"reviewer":"operator"`, `"reviewer":"operator","reviewer":"operator"`, 1)
+					case "input escaped duplicate":
+						rawInput = strings.Replace(rawInput, `"reviewer":"operator"`, `"reviewer":"operator","\u0072eviewer":"operator"`, 1)
+					case "input unknown":
+						rawInput = strings.Replace(rawInput, `{`, `{"secret":"`+secret+`",`, 1)
+					case "input authorization":
+						rawInput = strings.Replace(rawInput, `{`, `{"approved":true,`, 1)
+					case "input evidence":
+						rawInput = strings.Replace(rawInput, `{`, `{"evidence":{"status":"READY"},`, 1)
+					case "input nested":
+						rawInput = strings.Replace(rawInput, `"reviewer":"operator"`, `"reviewer":{"authorization":true}`, 1)
+					case "input timestamp omitted":
+						rawInput = strings.Replace(rawInput, `"reviewedAt":"2026-10-28T12:00:00Z",`, ``, 1)
+					case "input timestamp invalid":
+						rawInput = strings.Replace(rawInput, `2026-10-28T12:00:00Z`, secret, 1)
+					case "input decision invalid":
+						rawInput = strings.Replace(rawInput, `"decision":"`+string(in.Decision)+`"`, `"decision":"`+secret+`"`, 1)
+					case "input reviewer omitted":
+						rawInput = strings.Replace(rawInput, `"reviewer":"operator",`, ``, 1)
+					case "input rationale omitted":
+						rawInput = strings.Replace(rawInput, `"rationale":"Reviewed pinned proposal."`, `"rationale":""`, 1)
+					case "input rationale long":
+						rawInput = strings.Replace(rawInput, `Reviewed pinned proposal.`, strings.Repeat("x", growth.MaxReviewRationaleBytes+1), 1)
+					case "input stale":
+						rawInput = strings.Replace(rawInput, fp, "sha256:"+strings.Repeat("0", 64), 1)
+					case "input unchanged version stale":
+						p.Rationale += " modified"
+					}
+				}
+				if name != "input missing" && name != "input fifo" && name != "input directory" {
+					if err := os.WriteFile(path, []byte(rawInput), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				extra = append(extra, "--review-input", path)
+				if want == 3 && in.Decision != growth.ReviewApprove {
+					want = 0
+				}
+			}
 			if name == "signal" {
 				path := filepath.Join(t.TempDir(), "proposal.json")
 				b, err := json.Marshal(p)
@@ -390,7 +484,23 @@ func testCommand(t *testing.T, binary, command string) {
 			if code != want {
 				t.Fatalf("exit %d want %d: %s %s", code, want, out, stderr)
 			}
-			if command == "prepare" {
+			if command == "record-review" {
+				if want == 0 {
+					var got growth.ReviewRecord
+					if err := json.Unmarshal([]byte(out), &got, json.RejectUnknownMembers(true)); err != nil {
+						t.Fatal(err)
+					}
+					fp, err := growth.ProposalFingerprint(p)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got.SchemaVersion != growth.ReviewRecordSchemaVersion || got.ProposalFingerprint != fp || got.Decision != decisions[0] || got.Reviewer != "operator" || got.Rationale != "Reviewed pinned proposal." || got.ReviewedAt.Format(time.RFC3339) != "2026-10-28T12:00:00Z" || got.Readiness.State != state || (state != growth.ProposalReadyForReview) != (len(got.Readiness.Blockers) > 0) || stderr != "" {
+						t.Fatalf("record %+v stderr %q", got, stderr)
+					}
+				} else if out != "" || stderr == "" || len(stderr) > 256 {
+					t.Fatalf("failure output %q %q", out, stderr)
+				}
+			} else if command == "prepare" {
 				if want == 0 {
 					var got growth.PreparedExperiment
 					if err := json.Unmarshal([]byte(out), &got, json.RejectUnknownMembers(true)); err != nil {
@@ -423,6 +533,9 @@ func testCommand(t *testing.T, binary, command string) {
 				}
 			} else if out != "" || stderr == "" {
 				t.Fatalf("failure output %q %q", out, stderr)
+			}
+			if command == "record-review" && name == "READY" && calls.Load() != 3 {
+				t.Fatalf("expected fresh reads of two pinned metrics and report; got %d", calls.Load())
 			}
 			if writes.Load() != 0 || (noNetwork && calls.Load() != 0) {
 				t.Fatalf("requests %d writes %d", calls.Load(), writes.Load())

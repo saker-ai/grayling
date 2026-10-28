@@ -1,4 +1,4 @@
-// grayling-growth-agent exposes optional read-only proposal review and preparation.
+// grayling-growth-agent exposes optional read-only Growth Copilot commands.
 package main
 
 import (
@@ -21,11 +21,14 @@ import (
 
 const usage = `Usage: grayling-growth-agent review --proposal FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent prepare --proposal FILE --settings FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+       grayling-growth-agent fingerprint --proposal FILE
+       grayling-growth-agent record-review --proposal FILE --review-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
 Read-only review/preparation; credentials come only from the named environment variable
 (default GRAYLING_GROWTH_TOKEN). Timeout bounds the entire read (0 < timeout <= 30s).
 prepare exports request and separate provenance metadata; it never submits.
 Exit codes: 0 ready_for_review/exported; 3 readiness blockers; 2 input/configuration error;
-1 execution/evidence failure; 130 canceled by signal. No approval or submission.
+1 execution/evidence failure; 130 canceled by signal. No submission or platform approval.
+record-review exports caller-attested operator content, not authenticated authorization.
 `
 
 type result struct {
@@ -49,10 +52,12 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 		fmt.Fprint(out, usage)
 		return 0
 	}
-	if len(args) == 0 || (args[0] != "review" && args[0] != "prepare") {
+	if len(args) == 0 || (args[0] != "review" && args[0] != "prepare" && args[0] != "fingerprint" && args[0] != "record-review") {
 		return fail(2, "invalid command; use --help")
 	}
 	prepare := args[0] == "prepare"
+	fingerprintOnly := args[0] == "fingerprint"
+	recordReview := args[0] == "record-review"
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	// flag errors may include caller-supplied values. Never echo them.
 	fs.SetOutput(io.Discard)
@@ -60,6 +65,34 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	var settingsFile string
 	if prepare {
 		fs.StringVar(&settingsFile, "settings", "", "operator preparation settings file")
+	}
+	var reviewFile string
+	if recordReview {
+		fs.StringVar(&reviewFile, "review-input", "", "operator review input file")
+	}
+	if fingerprintOnly {
+		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				fmt.Fprint(out, usage)
+				return 0
+			}
+			return fail(2, "invalid flags; use --help")
+		}
+		if fs.NArg() != 0 || *file == "" {
+			return fail(2, "invalid configuration")
+		}
+		p, err := readProposal(*file)
+		if err != nil {
+			return fail(2, err.Error())
+		}
+		fp, err := growth.ProposalFingerprint(*p)
+		if err != nil {
+			return fail(2, "invalid proposal fingerprint input")
+		}
+		if _, err := fmt.Fprintln(out, fp); err != nil {
+			return fail(1, "output failed")
+		}
+		return 0
 	}
 	base := fs.String("base-url", "", "trusted API origin")
 	workspace := fs.String("workspace", "", "trusted workspace ID")
@@ -89,20 +122,24 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 		return fail(2, "invalid configuration")
 	}
 	defer reader.Close()
-	// Nonblocking open plus regular-file check excludes pipes/devices and keeps
-	// proposal input bounded without leaving a blocked input goroutine behind.
-	f, err := os.OpenFile(*file, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	p, err := readProposal(*file)
 	if err != nil {
-		return fail(2, "cannot read proposal file")
+		return fail(2, err.Error())
 	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() > growth.MaxProposalBytes {
-		return fail(2, "invalid proposal file")
-	}
-	p, err := growth.DecodeProposal(f)
-	if err != nil {
-		return fail(2, "invalid proposal JSON")
+	var reviewInputs *growth.ReviewInputs
+	if recordReview {
+		reviewInputs, err = readReviewInputs(reviewFile)
+		if err != nil {
+			return fail(2, "invalid review input file or JSON")
+		}
+		// Reuse the pure contract to validate all operator fields and the pinned
+		// fingerprint before network access. Readiness is evaluated again with
+		// freshly read evidence below; no replacement fingerprint is supplied.
+		_, err = growth.RecordReview(*p, nil, *reviewInputs)
+		var problem *growth.ReviewError
+		if err != nil && !(errors.As(err, &problem) && problem.Field == "proposal" && problem.Code == "not_ready_for_review") {
+			return fail(2, "invalid or stale review input")
+		}
 	}
 	if p.WorkspaceID != *workspace || p.EnvironmentID != *environment {
 		return fail(2, "proposal configuration scope mismatch")
@@ -133,6 +170,23 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 			message = "evidence scope or version mismatch"
 		}
 		return fail(1, message)
+	}
+	if recordReview {
+		record, err := growth.RecordReview(*p, envelope, *reviewInputs)
+		if err != nil {
+			var problem *growth.ReviewError
+			if errors.As(err, &problem) && problem.Field == "proposal" && problem.Code == "not_ready_for_review" {
+				return fail(3, "review blocked: proposal not ready for review")
+			}
+			return fail(2, "invalid or stale review input")
+		}
+		if err := json.MarshalWrite(out, record); err != nil {
+			return fail(1, "output failed")
+		}
+		if _, err := fmt.Fprintln(out); err != nil {
+			return fail(1, "output failed")
+		}
+		return 0
 	}
 	review := growth.ReviewProposal(*p, envelope)
 	if prepare {
@@ -201,4 +255,23 @@ func proposalQuery(p growth.Proposal) (growth.Query, error) {
 		q.Experiments = append(q.Experiments, growth.ExperimentRef{ID: e.ExperimentID, Epoch: e.Epoch, EvidenceVersion: e.EvidenceVersion})
 	}
 	return q, nil
+}
+
+// Nonblocking open and regular-file checks exclude pipes/devices. DecodeProposal
+// also bounds the actual read, including files which grow after Stat.
+func readProposal(path string) (*growth.Proposal, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, errors.New("cannot read proposal file")
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() > growth.MaxProposalBytes {
+		return nil, errors.New("invalid proposal file")
+	}
+	p, err := growth.DecodeProposal(f)
+	if err != nil {
+		return nil, errors.New("invalid proposal JSON")
+	}
+	return p, nil
 }

@@ -526,8 +526,8 @@ availability. The fingerprint covers the proposal, not the complete Reader envel
 **Records are caller-attested review artifacts, not authenticated authorization,
 durable audit storage, or permission to submit/publish.** The caller remains
 responsible for authenticating the reviewer and retaining the reviewed proposal,
-evidence and record. This milestone adds no CLI changes, platform writes, model
-calls, submission, publication or durable workflow. Existing Grayling RBAC,
+evidence and record. The review-record commands below expose this contract without platform writes,
+model calls, submission, publication or durable workflow. Existing Grayling RBAC,
 approval, binding and rollout gates remain mandatory. Real Saker instrumentation,
 pilot evidence and full issue acceptance remain outstanding.
 
@@ -538,3 +538,83 @@ input immutability and deterministic replay. Existing real-handler integration
 coverage shows local HOLD cannot produce an acceptance record, while rejection
 and requested changes preserve blockers with zero HTTP writes. These fixtures
 are local validation only; no new database or browser surface is introduced.
+
+## Review-record commands
+
+Fingerprint the exact proposal the operator reviewed, offline:
+
+```sh
+./bin/grayling-growth-agent fingerprint --proposal proposal.json
+```
+
+Stdout is one `sha256:<lowercase hex>` line. This command accepts only
+`--proposal`, requires no credentials or API configuration and performs no network
+access. It reuses `ProposalFingerprint`; incomplete drafts can be fingerprinted
+without becoming ready. Proposal input is a regular UTF-8 JSON file of at most
+64 KiB, with the same strict decoder as `review` and `prepare`.
+
+Keep a separate operator-owned `review.json`, never extracted from model/proposal
+prose, with exactly these five members:
+
+```json
+{
+  "expectedProposalFingerprint": "sha256:REPLACE_WITH_THE_REVIEWED_PROPOSAL_FINGERPRINT",
+  "decision": "request_changes",
+  "reviewer": "growth-owner",
+  "reviewedAt": "2026-10-28T12:00:00Z",
+  "rationale": "Please resolve the recorded readiness blockers before approval."
+}
+```
+
+The fingerprint placeholder is intentionally invalid: replace it with the saved
+fingerprint of the reviewed snapshot. Never automatically recompute or refresh
+the expected fingerprint when exporting a decision; proposal edits require a new
+human review. Reviewer, timestamp, decision and rationale have no defaults.
+The pure review contract's identifier, timestamp and rationale limits apply.
+
+```sh
+./bin/grayling-growth-agent record-review \
+  --proposal proposal.json --review-input review.json \
+  --base-url https://grayling.example.com \
+  --workspace ws1 --environment env1 \
+  --token-env GRAYLING_GROWTH_TOKEN --timeout 10s > review-record.json
+```
+
+Review input must be a regular UTF-8 JSON file of at most **16 KiB**.
+Before network access, the command rejects missing/nonregular/oversized files,
+null/array roots, invalid UTF-8, malformed or trailing JSON, unknown members,
+duplicate members (including escaped aliases), embedded authorization/evidence,
+invalid review fields and stale fingerprints. Proposal members are also strictly
+allowlisted at every depth. A rationale is literal operator content, never an
+instruction to bypass readiness or authorization.
+
+`record-review` reuses `Reader.Read` and `RecordReview`. It reads exact pinned
+metric/report evidence with existing trusted origin, workspace/environment,
+environment-variable credentials, GET allowlist, total timeout (default 10s,
+maximum 30s) and signal cancellation. It never replaces the supplied expected
+fingerprint. `approve` requires `ready_for_review`; `reject` and `request_changes`
+export records for successfully read HOLD/NEEDS_DATA evidence while retaining
+readiness state and blockers. Transport, access denial and response scope/version
+mismatches fail for every decision and emit no record.
+
+Success emits exactly one `ReviewRecord` JSON object and exits 0, including
+blocked rejections/changes. Exit 3 means blocked approval; 2 means invalid input
+or configuration; 1 means evidence/execution failure; 130 means signal cancellation.
+Failures emit no record on stdout and only fixed bounded secret-safe diagnostics
+on stderr. Check exit status before consuming redirected output.
+
+**Exported records contain operator-supplied review content. They are
+caller-attested artifacts, not authenticated authorization, durable audit storage,
+or permission to submit or publish.** Review content and proposal evidence pins
+are deliberately preserved in the artifact; treat exported files accordingly.
+Existing `review` and `prepare` behavior and all Grayling approval, binding and
+rollout gates remain required.
+
+Actual-binary local HTTP fixtures cover all three decisions, stale fingerprints,
+malformed/unknown/duplicate/trailing and embedded authorization/evidence inputs,
+blocked approvals, HOLD/NEEDS_DATA blocker retention, scope/version mismatch,
+denied access, timeouts, cancellation and zero non-GET requests. Offline binary
+fixtures cover fingerprint output, incomplete drafts and strict bounded input.
+These establish command behavior only. No real Saker instrumentation, pilot
+evidence, model generation, durable orchestration or full acceptance is claimed;
+no new database, browser or SDK surface or CI job changes are introduced.

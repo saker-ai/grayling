@@ -29,8 +29,14 @@ separate caller-supplied reviewer, timestamp, rationale and approve/reject/reque
 decisions. Stale content is rejected; approval requires existing evidence readiness,
 while rejection/changes retain blockers. Records are caller-attested artifacts,
 not authenticated authorization, durable audit storage or permission to submit/publish.
-CLI behavior is unchanged; real Saker instrumentation, pilot evidence and durable
-workflows remain outstanding.
+The offline `fingerprint --proposal FILE` command prints the proposal fingerprint;
+`record-review --proposal FILE --review-input review.json` re-reads pinned evidence
+with the same trusted connection flags as `review` and exports one record.
+The separate bounded operator input supplies the expected fingerprint, decision,
+reviewer, explicit timestamp and rationale. Exported records contain operator-supplied
+review content and are not authenticated authorization. See
+[review command usage](docs/growth-copilot.md#review-record-commands).
+Real Saker instrumentation, pilot evidence and durable workflows remain outstanding.
 
 ![Grayling experiment and staged rollout console](docs/acceptance/web-2026-10-08/23-rollout-plan.png)
 
