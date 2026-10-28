@@ -45,8 +45,8 @@ Use actual IDs. The proposal JSON example below is synthetic; substitute real,
 exact references and pinned report evidence/window values from trusted evidence.
 The command accepts one regular proposal file of at most 64 KiB; stdin, FIFOs,
 devices, unknown JSON members, embedded envelopes and approval/state fields are
-rejected. All flags follow `review`; `--help` documents usage. There is no config
-file or implicit workspace/environment selection. `--token-env` defaults to
+rejected. All flags follow `review`; `--help` documents usage. There is no implicit workspace/environment selection. `prepare` additionally
+requires a separate operator settings file; `review` does not accept `--settings`. `--token-env` defaults to
 `GRAYLING_GROWTH_TOKEN`; it names a variable, never carries the token itself.
 
 Treat the base URL, workspace/environment flags and credential selection as
@@ -325,11 +325,85 @@ uses complete planning claims and confirms that local HOLD evidence returns
 No storage, HTTP writes, experiment draft submission, second validator, model
 integration, production deployment or additional DB/browser surface is added.
 
+## Read-only prepare command
+
+`prepare` reuses `Reader.Read`, `ReviewProposal` and `CompileCreateRequest`.
+It re-reads the proposal's exact pinned evidence using the same scope,
+credential, origin, GET allowlist and total timeout as `review`:
+
+```sh
+./bin/grayling-growth-agent prepare \
+  --proposal proposal.json --settings preparation.json \
+  --base-url https://grayling.example.com \
+  --workspace ws1 --environment env1 \
+  --token-env GRAYLING_GROWTH_TOKEN --timeout 10s > prepared.json
+```
+
+Keep `preparation.json` under operator control, separate from model/proposal
+JSON. It is a regular UTF-8 JSON file of at most **16 KiB**. Missing files,
+FIFOs/devices/directories, null/array roots, malformed/trailing JSON, unknown
+members at every depth and duplicate members (including escaped aliases) are
+rejected before network access. Authorization, approval, state and embedded
+evidence members are outside the allowlist and are rejected. Credentials still
+come only from the named environment variable. No settings are inferred from
+proposal prose or supplied as statistical defaults.
+
+Example explicit settings for the synthetic proposal below:
+
+```json
+{
+  "allocationMode": "fixed-split",
+  "integrationOwner": "onboarding team",
+  "alpha": 0.05,
+  "power": 0.8,
+  "analysisWindowHours": 48,
+  "guardrails": [{
+    "ref": {
+      "key": "retention", "version": 1,
+      "definitionHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "maxRelativeRegression": 0,
+    "minSample": 100
+  }]
+}
+```
+
+These are illustrative planning inputs, not recommended statistical thresholds.
+The compiler requires explicit positive alpha/power in (0,1), observation hours,
+owner and exact ordered guardrail references with minimum samples. An explicit
+zero regression threshold is valid; omission is rejected. Unsupported allocation,
+analysis methods and variant counts are rejected by the existing compiler, with
+no second statistical/platform validator. Semantic settings checks run after the
+evidence read and readiness review.
+
+On success stdout contains one `PreparedExperiment` JSON object with `request`
+and `metadata` siblings. Only `request` is the existing experiment-create DTO;
+`metadata` contains proposal ID/version, evidence pins, audience planning claims
+and attribution hours. Preserve both for human review. The command never submits
+an experiment, approves it, binds it or changes rollout state.
+
+Exit 0 means export succeeded; 3 means proposal/evidence readiness blockers; 2
+means invalid inputs, settings or unsupported compiler configuration; 1 means
+execution/evidence failure (including access denial or timeout); 130 means signal
+cancellation. Failures emit no draft on stdout and only bounded fixed or
+compiler-owned field/code diagnostics on stderr. A shell redirection may create
+an empty file on failure; check the exit code before consuming it. Review output
+and exit behavior are unchanged.
+
+Actual-binary local HTTP fixtures cover successful export, explicit zero,
+malformed/duplicate/unknown/trailing and nonregular settings, embedded authorization
+and evidence, missing statistical settings/thresholds, unsupported configurations,
+HOLD/NEEDS_DATA, pinned scope/version mismatches, denied credentials, deadlines,
+signal cancellation, secret-safe diagnostics and zero non-GET requests. These
+fixtures establish local command behavior only; they do not validate real Saker
+instrumentation or pilot/business outcomes. Existing Grayling validation, RBAC,
+approval, targeting/binding and rollout gates remain required.
+
 ## Optional create-request compiler
 
 `growth.CompileCreateRequest(proposal, envelope, preparation)` is a pure library
-function. It is not wired to the review CLI, has no submission transport and
-performs no platform writes. Supply the envelope separately from trusted
+function, exposed by the read-only `prepare` command below. It has no submission
+transport and performs no platform writes. Supply the envelope separately from trusted
 `Reader.Read` caller code; never decode evidence or preparation settings from
 model output. `ReviewProposal` must return `ready_for_review` before compilation.
 HOLD, NEEDS_DATA, missing implementation claims and scope/version/hash/window

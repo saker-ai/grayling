@@ -35,7 +35,7 @@ func fixtureProposal(t *testing.T) growth.Proposal {
 	return *p
 }
 
-func invoke(t *testing.T, binary, base string, p growth.Proposal, raw string, extra ...string) (int, string, string) {
+func invokeCommand(t *testing.T, binary, base, command string, p growth.Proposal, raw string, extra ...string) (int, string, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "proposal.json")
 	b, err := json.Marshal(p)
@@ -48,7 +48,7 @@ func invoke(t *testing.T, binary, base string, p growth.Proposal, raw string, ex
 	if err := os.WriteFile(path, b, 0600); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"review", "--proposal", path, "--base-url", base, "--workspace", "ws1", "--environment", "env1"}
+	args := []string{command, "--proposal", path, "--base-url", base, "--workspace", "ws1", "--environment", "env1"}
 	args = append(args, extra...)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
@@ -78,7 +78,18 @@ func TestReviewCommand(t *testing.T) {
 	if b, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %s: %v", b, err)
 	}
-	for _, name := range []string{"fifo", "directory", "invalid flag", "workspace scope", "duplicate JSON", "secret variant", "READY", "HOLD", "NEEDS_DATA", "draft", "implementation", "malformed", "oversized", "envelope", "approval", "scope", "source", "invalid id", "unpinned", "duplicate", "metric mismatch", "epoch mismatch", "version mismatch", "report scope", "denied", "redirect", "bad response", "timeout", "signal", "invalid config", "missing credential"} {
+	for _, command := range []string{"review", "prepare"} {
+		t.Run(command, func(t *testing.T) { testCommand(t, binary, command) })
+	}
+	t.Run("real handler HOLD", func(t *testing.T) { testRealHandler(t, binary) })
+}
+
+func testCommand(t *testing.T, binary, command string) {
+	names := []string{"fifo", "directory", "invalid flag", "workspace scope", "duplicate JSON", "secret variant", "READY", "HOLD", "unhealthy", "NEEDS_DATA", "draft", "implementation", "malformed", "oversized", "envelope", "approval", "scope", "source", "invalid id", "unpinned", "duplicate", "metric mismatch", "epoch mismatch", "version mismatch", "report scope", "denied", "redirect", "bad response", "timeout", "signal", "invalid config", "missing credential"}
+	if command == "prepare" {
+		names = append(names, "settings missing", "settings fifo", "settings directory", "settings oversized", "settings null", "settings array", "settings malformed", "settings trailing", "settings duplicate", "settings escaped duplicate", "settings unknown", "settings nested unknown", "settings nested duplicate", "settings authorization", "settings evidence", "settings omitted threshold", "settings bandit", "settings missing alpha", "unsupported method", "multi-arm")
+	}
+	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
 			report := growth.Report{ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, AnalysisMethod: p.AnalysisPlan.Method, ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue", Reasons: []string{secret}}}
@@ -186,8 +197,12 @@ func TestReviewCommand(t *testing.T) {
 				p.Implementation = nil
 				want = 3
 				state = growth.ProposalNeedsImplementation
-			case "HOLD":
-				report.Decision.Verdict = "hold"
+			case "HOLD", "unhealthy":
+				if name == "HOLD" {
+					report.Decision.Verdict = "hold"
+				} else {
+					report.Healthy = false
+				}
 				want = 3
 				status = growth.Hold
 				state = growth.ProposalNeedsData
@@ -255,11 +270,83 @@ func TestReviewCommand(t *testing.T) {
 				extra = []string{"--base-url", srv.URL + "/?" + secret}
 				want = 2
 				noNetwork = true
+			case "unsupported method":
+				p.AnalysisPlan.Method = "bayesian"
+				report.AnalysisMethod = "bayesian"
+				want = 2
+			case "multi-arm":
+				p.Variants[0].AllocationPercent = 40
+				p.Variants[1].AllocationPercent = 40
+				p.Variants = append(p.Variants, growth.ProposalVariant{Key: "third", AllocationPercent: 20})
+				p.Implementation = append(p.Implementation, growth.Attestation{Kind: "variant", Variant: "third", Complete: true, AttestedBy: "developer", Source: "fixture"})
+				want = 2
 			case "missing credential":
 				extra = []string{"--token-env", "GRAYLING_GROWTH_TEST_ABSENT"}
 				t.Setenv("GRAYLING_GROWTH_TEST_ABSENT", "")
 				want = 2
 				noNetwork = true
+			}
+			if command == "prepare" {
+				settingsPath := writeSettings(t, p)
+				if strings.HasPrefix(name, "settings ") {
+					want = 2
+					noNetwork = true
+					data, err := os.ReadFile(settingsPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					rawSettings := string(data)
+					switch name {
+					case "settings missing":
+						settingsPath = ""
+					case "settings fifo":
+						settingsPath = filepath.Join(t.TempDir(), "settings.pipe")
+						if err := syscall.Mkfifo(settingsPath, 0600); err != nil {
+							t.Fatal(err)
+						}
+					case "settings directory":
+						settingsPath = t.TempDir()
+					case "settings oversized":
+						rawSettings = strings.Repeat(" ", maxSettingsBytes+1)
+					case "settings null":
+						rawSettings = "null"
+					case "settings array":
+						rawSettings = "[]"
+					case "settings malformed":
+						rawSettings = `{"integrationOwner":"` + secret
+					case "settings trailing":
+						rawSettings += `{}`
+					case "settings duplicate":
+						rawSettings = strings.Replace(rawSettings, `"alpha":0.05`, `"alpha":0.05,"alpha":0.05`, 1)
+					case "settings escaped duplicate":
+						rawSettings = strings.Replace(rawSettings, `"alpha":0.05`, `"alpha":0.05,"\u0061lpha":0.05`, 1)
+					case "settings unknown":
+						rawSettings = strings.Replace(rawSettings, `{`, `{"secret":"`+secret+`",`, 1)
+					case "settings nested unknown":
+						rawSettings = strings.Replace(rawSettings, `"ref":{`, `"ref":{"approved":true,`, 1)
+					case "settings nested duplicate":
+						rawSettings = strings.Replace(rawSettings, `"version":1`, `"version":1,"version":1`, 1)
+					case "settings authorization":
+						rawSettings = strings.Replace(rawSettings, `{`, `{"approved":true,`, 1)
+					case "settings evidence":
+						rawSettings = strings.Replace(rawSettings, `{`, `{"evidence":{"status":"READY"},`, 1)
+					case "settings omitted threshold":
+						rawSettings = strings.Replace(rawSettings, `"maxRelativeRegression":0,`, ``, 1)
+						noNetwork = false
+					case "settings bandit":
+						rawSettings = strings.Replace(rawSettings, `fixed-split`, `bandit`, 1)
+						noNetwork = false
+					case "settings missing alpha":
+						rawSettings = strings.Replace(rawSettings, `"alpha":0.05,`, ``, 1)
+						noNetwork = false
+					}
+					if name != "settings missing" && name != "settings fifo" && name != "settings directory" {
+						if err := os.WriteFile(settingsPath, []byte(rawSettings), 0600); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				extra = append(extra, "--settings", settingsPath)
 			}
 			if name == "signal" {
 				path := filepath.Join(t.TempDir(), "proposal.json")
@@ -272,11 +359,13 @@ func TestReviewCommand(t *testing.T) {
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
-				cmd := exec.CommandContext(ctx, binary, "review", "--proposal", path, "--base-url", srv.URL, "--workspace", "ws1", "--environment", "env1")
+				args := []string{command, "--proposal", path, "--base-url", srv.URL, "--workspace", "ws1", "--environment", "env1"}
+				args = append(args, extra...)
+				cmd := exec.CommandContext(ctx, binary, args...)
 				cmd.Env = append(os.Environ(), "GRAYLING_GROWTH_TOKEN="+secret)
-				var output bytes.Buffer
+				var output, signalDiagnostics bytes.Buffer
 				cmd.Stdout = &output
-				cmd.Stderr = &output
+				cmd.Stderr = &signalDiagnostics
 				if err := cmd.Start(); err != nil {
 					t.Fatal(err)
 				}
@@ -292,16 +381,33 @@ func TestReviewCommand(t *testing.T) {
 				}
 				err = cmd.Wait()
 				ee, ok := err.(*exec.ExitError)
-				if !ok || ee.ExitCode() != 130 || writes.Load() != 0 || strings.Contains(output.String(), secret) {
-					t.Fatalf("signal: %v %s", err, output.String())
+				if !ok || ee.ExitCode() != 130 || writes.Load() != 0 || output.Len() != 0 || signalDiagnostics.Len() == 0 || signalDiagnostics.Len() > 256 || strings.Contains(signalDiagnostics.String(), secret) {
+					t.Fatalf("signal: %v stdout=%q stderr=%q", err, output.String(), signalDiagnostics.String())
 				}
 				return
 			}
-			code, out, stderr := invoke(t, binary, srv.URL, p, raw, extra...)
+			code, out, stderr := invokeCommand(t, binary, srv.URL, command, p, raw, extra...)
 			if code != want {
 				t.Fatalf("exit %d want %d: %s %s", code, want, out, stderr)
 			}
-			if want == 0 || want == 3 {
+			if command == "prepare" {
+				if want == 0 {
+					var got growth.PreparedExperiment
+					if err := json.Unmarshal([]byte(out), &got, json.RejectUnknownMembers(true)); err != nil {
+						t.Fatal(err)
+					}
+					request, metadata := got.Request, got.Metadata
+					if request.WorkspaceID != p.WorkspaceID || request.EnvironmentID != p.EnvironmentID || request.FlagKey != p.FlagKey || request.PrimaryMetricRef != p.PrimaryMetric.Ref ||
+						request.Alpha != 0.05 || request.Power != 0.8 || request.AnalysisWindow != int64(48*time.Hour) || request.MinRuntime != p.SamplePlan.MinRuntimeHours*int64(time.Hour) ||
+						len(request.Guardrails) != 1 || request.Guardrails[0].MaxRelativeRegression != 0 || request.Guardrails[0].MetricRef != p.Guardrails[0].Ref || request.Guardrails[0].MinSample != 100 ||
+						metadata.ProposalID != p.ID || metadata.ProposalVersion != p.Version || metadata.Audience != p.Audience || metadata.AttributionWindowHours != p.AnalysisPlan.AttributionWindowHours ||
+						len(metadata.EvidencePins) != 1 || metadata.EvidencePins[0].EvidenceVersion != p.EvidenceRefs[0].EvidenceVersion || stderr != "" {
+						t.Fatalf("prepared result %+v: %s", got, stderr)
+					}
+				} else if out != "" || stderr == "" || len(stderr) > 256 {
+					t.Fatalf("failure output %q %q", out, stderr)
+				}
+			} else if want == 0 || want == 3 {
 				var got result
 				if err := json.Unmarshal([]byte(out), &got); err != nil {
 					t.Fatal(err)
@@ -323,7 +429,6 @@ func TestReviewCommand(t *testing.T) {
 			}
 		})
 	}
-	t.Run("real handler HOLD", func(t *testing.T) { testRealHandler(t, binary) })
 }
 
 func testRealHandler(t *testing.T, binary string) {
@@ -425,4 +530,23 @@ func testRealHandler(t *testing.T, binary string) {
 	if got.EvidenceStatus != growth.Hold || got.Review.State != growth.ProposalNeedsData || len(got.Review.Blockers) == 0 || writes.Load() != 0 || strings.Contains(out.String()+stderr.String(), viewer.Secret) {
 		t.Fatalf("real handler result %+v", got)
 	}
+}
+
+// Explicit zero is intentional: omission must never silently become a zero threshold.
+func writeSettings(t *testing.T, p growth.Proposal) string {
+	t.Helper()
+	zero := 0.0
+	in := growth.PreparationInputs{AllocationMode: "fixed-split", IntegrationOwner: "fixture team", Alpha: 0.05, Power: 0.8, AnalysisWindowHours: 48}
+	for _, guard := range p.Guardrails {
+		in.Guardrails = append(in.Guardrails, growth.GuardrailPreparation{Ref: guard.Ref, MaxRelativeRegression: &zero, MinSample: 100})
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

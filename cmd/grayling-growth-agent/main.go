@@ -1,4 +1,4 @@
-// grayling-growth-agent exposes the optional read-only proposal review contract.
+// grayling-growth-agent exposes optional read-only proposal review and preparation.
 package main
 
 import (
@@ -20,9 +20,11 @@ import (
 )
 
 const usage = `Usage: grayling-growth-agent review --proposal FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
-Read-only review; credentials come only from the named environment variable
+       grayling-growth-agent prepare --proposal FILE --settings FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+Read-only review/preparation; credentials come only from the named environment variable
 (default GRAYLING_GROWTH_TOKEN). Timeout bounds the entire read (0 < timeout <= 30s).
-Exit codes: 0 ready_for_review; 3 readiness blockers; 2 input/configuration error;
+prepare exports request and separate provenance metadata; it never submits.
+Exit codes: 0 ready_for_review/exported; 3 readiness blockers; 2 input/configuration error;
 1 execution/evidence failure; 130 canceled by signal. No approval or submission.
 `
 
@@ -47,13 +49,18 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 		fmt.Fprint(out, usage)
 		return 0
 	}
-	if len(args) == 0 || args[0] != "review" {
+	if len(args) == 0 || (args[0] != "review" && args[0] != "prepare") {
 		return fail(2, "invalid command; use --help")
 	}
-	fs := flag.NewFlagSet("review", flag.ContinueOnError)
+	prepare := args[0] == "prepare"
+	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	// flag errors may include caller-supplied values. Never echo them.
 	fs.SetOutput(io.Discard)
 	file := fs.String("proposal", "", "proposal file")
+	var settingsFile string
+	if prepare {
+		fs.StringVar(&settingsFile, "settings", "", "operator preparation settings file")
+	}
 	base := fs.String("base-url", "", "trusted API origin")
 	workspace := fs.String("workspace", "", "trusted workspace ID")
 	environment := fs.String("environment", "", "trusted environment ID")
@@ -68,6 +75,14 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	}
 	if fs.NArg() != 0 || *file == "" || *timeout <= 0 || *timeout > 30*time.Second || !envName.MatchString(*tokenEnv) {
 		return fail(2, "invalid configuration")
+	}
+	var err error
+	var settings *growth.PreparationInputs
+	if prepare {
+		settings, err = readSettings(settingsFile)
+		if err != nil {
+			return fail(2, "invalid preparation settings file or JSON")
+		}
 	}
 	reader, err := growth.NewReader(growth.Config{BaseURL: *base, WorkspaceID: *workspace, EnvironmentID: *environment, BearerToken: os.Getenv(*tokenEnv), Timeout: *timeout})
 	if err != nil {
@@ -101,7 +116,7 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	envelope, err := reader.Read(ctx, q)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
-			return fail(130, "review canceled")
+			return fail(130, args[0]+" canceled")
 		}
 		if errors.Is(err, growth.ErrConfig) {
 			return fail(2, "invalid proposal references")
@@ -120,6 +135,27 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 		return fail(1, message)
 	}
 	review := growth.ReviewProposal(*p, envelope)
+	if prepare {
+		if review.State != growth.ProposalReadyForReview {
+			return fail(3, "preparation blocked: proposal not ready for review")
+		}
+		prepared, err := growth.CompileCreateRequest(*p, envelope, *settings)
+		if err != nil {
+			// Compiler errors contain only bounded compiler-owned fields/codes.
+			var problem *growth.PreparationError
+			if errors.As(err, &problem) {
+				return fail(2, problem.Error())
+			}
+			return fail(1, "preparation failed")
+		}
+		if err := json.MarshalWrite(out, prepared); err != nil {
+			return fail(1, "output failed")
+		}
+		if _, err := fmt.Fprintln(out); err != nil {
+			return fail(1, "output failed")
+		}
+		return 0
+	}
 	// The library names missing variant attestations by caller-supplied key.
 	// Use array positions here so even field paths cannot echo proposal secrets.
 	for i := range review.Blockers {
