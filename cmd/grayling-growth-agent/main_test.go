@@ -1,0 +1,428 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json/v2"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/saker-ai/grayling/internal/api"
+	"github.com/saker-ai/grayling/internal/growth"
+	"github.com/saker-ai/grayling/internal/platform"
+)
+
+const secret = "command-secret-must-never-appear"
+
+func fixtureProposal(t *testing.T) growth.Proposal {
+	t.Helper()
+	b, err := os.ReadFile("testdata/proposal.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := growth.DecodeProposal(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return *p
+}
+
+func invoke(t *testing.T, binary, base string, p growth.Proposal, raw string, extra ...string) (int, string, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "proposal.json")
+	b, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw != "" {
+		b = []byte(raw)
+	}
+	if err := os.WriteFile(path, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"review", "--proposal", path, "--base-url", base, "--workspace", "ws1", "--environment", "env1"}
+	args = append(args, extra...)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Env = append(os.Environ(), "GRAYLING_GROWTH_TOKEN="+secret)
+	var out, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	err = cmd.Run()
+	code := 0
+	if err != nil {
+		ee, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatal(err)
+		}
+		code = ee.ExitCode()
+	}
+	if strings.Contains(out.String()+stderr.String(), secret) {
+		t.Fatal("credential leaked")
+	}
+	return code, out.String(), stderr.String()
+}
+
+func TestReviewCommand(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "grayling-growth-agent")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, ".")
+	build.Env = append(os.Environ(), "GOWORK=off")
+	if b, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %s: %v", b, err)
+	}
+	for _, name := range []string{"fifo", "directory", "invalid flag", "workspace scope", "duplicate JSON", "secret variant", "READY", "HOLD", "NEEDS_DATA", "draft", "implementation", "malformed", "oversized", "envelope", "approval", "scope", "source", "invalid id", "unpinned", "duplicate", "metric mismatch", "epoch mismatch", "version mismatch", "report scope", "denied", "redirect", "bad response", "timeout", "signal", "invalid config", "missing credential"} {
+		t.Run(name, func(t *testing.T) {
+			p := fixtureProposal(t)
+			report := growth.Report{ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, AnalysisMethod: p.AnalysisPlan.Method, ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue", Reasons: []string{secret}}}
+			report.Diagnostics = &growth.Diagnostics{ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
+			count, value := int64(100), 0.2
+			for _, v := range p.Variants {
+				report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
+			}
+			var calls, writes atomic.Int32
+			started := make(chan struct{}, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.Method != http.MethodGet {
+					writes.Add(1)
+				}
+				if r.Header.Get("Authorization") != "Bearer "+secret {
+					t.Error("missing credential")
+				}
+				if name == "timeout" || name == "signal" {
+					select {
+					case started <- struct{}{}:
+					default:
+					}
+					<-r.Context().Done()
+					return
+				}
+				if name == "denied" {
+					http.Error(w, secret, 403)
+					return
+				}
+				if name == "redirect" {
+					http.Redirect(w, r, "/"+secret, 302)
+					return
+				}
+				if name == "bad response" {
+					w.Write([]byte(secret))
+					return
+				}
+				if strings.Contains(r.URL.Path, "/metrics/") {
+					key := "activation"
+					if strings.Contains(r.URL.Path, "retention") {
+						key = "retention"
+					}
+					version := int64(1)
+					if name == "metric mismatch" {
+						version = 2
+					}
+					if !strings.HasSuffix(r.URL.Path, "/versions/1") {
+						t.Error("lost metric version")
+					}
+					json.MarshalWrite(w, growth.Metric{WorkspaceID: "ws1", Key: key, Version: version, Hash: p.PrimaryMetric.Ref.DefinitionHash})
+					return
+				}
+				if r.URL.RequestURI() != "/api/v1/admin/experiments/exp1/report/export?format=json" {
+					t.Errorf("unexpected path %s", r.URL.RequestURI())
+				}
+				if name == "NEEDS_DATA" {
+					w.WriteHeader(404)
+					return
+				}
+				workspace := "ws1"
+				if name == "report scope" {
+					workspace = "other"
+				}
+				json.MarshalWrite(w, struct {
+					WorkspaceID   string        `json:"workspaceId"`
+					EnvironmentID string        `json:"environmentId"`
+					Report        growth.Report `json:"report"`
+				}{workspace, "env1", report})
+			}))
+			defer srv.Close()
+			raw := ""
+			extra := []string{}
+			want := 0
+			status := growth.Ready
+			state := growth.ProposalReadyForReview
+			noNetwork := false
+			switch name {
+			case "fifo":
+				path := filepath.Join(t.TempDir(), "input.pipe")
+				if err := syscall.Mkfifo(path, 0600); err != nil {
+					t.Fatal(err)
+				}
+				extra = []string{"--proposal", path}
+				want = 2
+				noNetwork = true
+			case "directory":
+				extra = []string{"--proposal", t.TempDir()}
+				want = 2
+				noNetwork = true
+			case "invalid flag":
+				extra = []string{"--timeout", secret}
+				want = 2
+				noNetwork = true
+			case "workspace scope":
+				p.WorkspaceID = "other"
+				want = 2
+				noNetwork = true
+			case "duplicate JSON":
+				raw = `{"workspaceId":"ws1","workspaceId":"ws1"}`
+				want = 2
+				noNetwork = true
+			case "secret variant":
+				p.Variants[0].Key = secret
+				p.Implementation = nil
+				want = 3
+				state = growth.ProposalNeedsImplementation
+			case "HOLD":
+				report.Decision.Verdict = "hold"
+				want = 3
+				status = growth.Hold
+				state = growth.ProposalNeedsData
+			case "NEEDS_DATA":
+				want = 3
+				status = growth.NeedsData
+				state = growth.ProposalNeedsData
+			case "draft":
+				p.Hypothesis = ""
+				want = 3
+				state = growth.ProposalDraft
+			case "implementation":
+				p.Implementation = nil
+				want = 3
+				state = growth.ProposalNeedsImplementation
+			case "malformed":
+				raw = `{"secret":"` + secret
+				want = 2
+				noNetwork = true
+			case "oversized":
+				raw = strings.Repeat(" ", growth.MaxProposalBytes+1)
+				want = 2
+				noNetwork = true
+			case "envelope":
+				raw = `{"evidence":{"status":"READY"}}`
+				want = 2
+				noNetwork = true
+			case "approval":
+				raw = `{"state":"approved"}`
+				want = 2
+				noNetwork = true
+			case "scope":
+				p.EnvironmentID = "other"
+				want = 2
+				noNetwork = true
+			case "source":
+				p.PrimaryMetric.SourcePath = "https://attacker/" + secret
+				want = 2
+				noNetwork = true
+			case "invalid id":
+				p.EvidenceRefs[0].ExperimentID = "../secret"
+				p.EvidenceRefs[0].SourcePath = "/api/v1/admin/experiments/../secret/report/export?format=json"
+				want = 2
+				noNetwork = true
+			case "unpinned":
+				p.EvidenceRefs[0].EvidenceVersion = ""
+				want = 2
+				noNetwork = true
+			case "duplicate":
+				p.Guardrails = append(p.Guardrails, p.PrimaryMetric)
+				want = 2
+				noNetwork = true
+			case "epoch mismatch":
+				report.Epoch = 2
+				want = 1
+			case "version mismatch":
+				report.EvidenceVersion = p.PrimaryMetric.Ref.DefinitionHash
+				want = 1
+			case "metric mismatch", "report scope", "denied", "redirect", "bad response":
+				want = 1
+			case "timeout":
+				extra = []string{"--timeout", "50ms"}
+				want = 1
+			case "invalid config":
+				extra = []string{"--base-url", srv.URL + "/?" + secret}
+				want = 2
+				noNetwork = true
+			case "missing credential":
+				extra = []string{"--token-env", "GRAYLING_GROWTH_TEST_ABSENT"}
+				t.Setenv("GRAYLING_GROWTH_TEST_ABSENT", "")
+				want = 2
+				noNetwork = true
+			}
+			if name == "signal" {
+				path := filepath.Join(t.TempDir(), "proposal.json")
+				b, err := json.Marshal(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, b, 0600); err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, binary, "review", "--proposal", path, "--base-url", srv.URL, "--workspace", "ws1", "--environment", "env1")
+				cmd.Env = append(os.Environ(), "GRAYLING_GROWTH_TOKEN="+secret)
+				var output bytes.Buffer
+				cmd.Stdout = &output
+				cmd.Stderr = &output
+				if err := cmd.Start(); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case <-started:
+				case <-ctx.Done():
+					cmd.Wait()
+					t.Fatal("request did not start")
+				}
+				if err := cmd.Process.Signal(os.Interrupt); err != nil {
+					cmd.Wait()
+					t.Fatal(err)
+				}
+				err = cmd.Wait()
+				ee, ok := err.(*exec.ExitError)
+				if !ok || ee.ExitCode() != 130 || writes.Load() != 0 || strings.Contains(output.String(), secret) {
+					t.Fatalf("signal: %v %s", err, output.String())
+				}
+				return
+			}
+			code, out, stderr := invoke(t, binary, srv.URL, p, raw, extra...)
+			if code != want {
+				t.Fatalf("exit %d want %d: %s %s", code, want, out, stderr)
+			}
+			if want == 0 || want == 3 {
+				var got result
+				if err := json.Unmarshal([]byte(out), &got); err != nil {
+					t.Fatal(err)
+				}
+				if got.EvidenceStatus != status || got.Review.State != state {
+					t.Fatalf("result %+v", got)
+				}
+				if (want == 3) != (len(got.Review.Blockers) > 0) {
+					t.Fatalf("blockers %+v", got)
+				}
+				if stderr != "" {
+					t.Fatal(stderr)
+				}
+			} else if out != "" || stderr == "" {
+				t.Fatalf("failure output %q %q", out, stderr)
+			}
+			if writes.Load() != 0 || (noNetwork && calls.Load() != 0) {
+				t.Fatalf("requests %d writes %d", calls.Load(), writes.Load())
+			}
+		})
+	}
+	t.Run("real handler HOLD", func(t *testing.T) { testRealHandler(t, binary) })
+}
+
+func testRealHandler(t *testing.T, binary string) {
+	store, err := platform.NewStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := store.CreateWorkspace("growth", "Growth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := store.CreateEnvironment(ws.ID, "test", "Test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := store.CreateMetricDefinition(&platform.MetricDefinition{
+		WorkspaceID: ws.ID, Key: "activation", DisplayName: "Activation", Owner: "growth", Source: "collect", EventKeys: []string{"complete"}, DedupUnit: "user", AttributionWindow: 24 * time.Hour,
+		Spec: platform.MetricSpec{Type: "proportion", Direction: "increase"}, CreatedBy: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err = store.PublishMetricDefinition(ws.ID, platform.MetricRef{Key: def.Key, Version: def.Version}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardrail, err := store.CreateMetricDefinition(&platform.MetricDefinition{
+		WorkspaceID: ws.ID, Key: "retention", DisplayName: "Retention", Owner: "growth", Source: "collect", EventKeys: []string{"return"}, DedupUnit: "user", AttributionWindow: 24 * time.Hour,
+		Spec: platform.MetricSpec{Type: "proportion", Direction: "increase"}, CreatedBy: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardrail, err = store.PublishMetricDefinition(ws.ID, platform.MetricRef{Key: guardrail.Key, Version: guardrail.Version}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := store.CreateExperiment(&platform.Experiment{
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "onboarding", Unit: "user_id", Epoch: 1, ExposureMode: "onRender", ExposureTrigger: "after fixture display", IntegrationOwner: "test", AnalysisMethod: "two-proportion-z",
+		Variants: []string{"control", "treatment"}, Proportions: map[string]float64{"control": 50, "treatment": 50},
+		PrimaryMetricRef: &platform.MetricRef{Key: def.Key, Version: def.Version, DefinitionHash: def.Hash},
+		Guardrails:       []platform.GuardrailSpec{{MetricRef: &platform.MetricRef{Key: guardrail.Key, Version: guardrail.Version, DefinitionHash: guardrail.Hash}, MaxRelativeRegression: 0.05, MinSample: 10}},
+		Alpha:            0.05, AnalysisWindow: 24 * time.Hour, MinSamplePerArm: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer, err := store.CreateToken(platform.TokenAdmin, "growth-viewer", platform.RoleViewer, ws.ID, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := api.NewServer(store, nil, api.Options{}).Handler()
+	var writes atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writes.Add(1)
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	reader, err := growth.NewReader(growth.Config{BaseURL: srv.URL, WorkspaceID: ws.ID, EnvironmentID: env.ID, BearerToken: viewer.Secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	q := growth.Query{Metrics: []growth.MetricRef{{Key: def.Key, Version: def.Version, DefinitionHash: def.Hash}, {Key: guardrail.Key, Version: guardrail.Version, DefinitionHash: guardrail.Hash}}, Experiments: []growth.ExperimentRef{{ID: exp.ID, Epoch: exp.Epoch}}}
+	envelope, err := reader.Read(t.Context(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := fixtureProposal(t)
+	p.WorkspaceID, p.EnvironmentID = ws.ID, env.ID
+	p.PrimaryMetric = growth.ProposalMetric{Ref: q.Metrics[0], SourcePath: envelope.Metrics[0].SourcePath}
+	p.Guardrails = []growth.ProposalMetric{{Ref: q.Metrics[1], SourcePath: envelope.Metrics[1].SourcePath}}
+	report := envelope.Evidence[0].Report
+	p.EvidenceRefs = []growth.ProposalEvidenceRef{{SourcePath: envelope.Evidence[0].SourcePath, ExperimentID: exp.ID, Epoch: exp.Epoch, EvidenceVersion: report.EvidenceVersion, Window: report.Window}}
+	path := filepath.Join(t.TempDir(), "proposal.json")
+	b, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(t.Context(), binary, "review", "--proposal", path, "--base-url", srv.URL, "--workspace", ws.ID, "--environment", env.ID)
+	cmd.Env = append(os.Environ(), "GRAYLING_GROWTH_TOKEN="+viewer.Secret)
+	var out, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	err = cmd.Run()
+	ee, ok := err.(*exec.ExitError)
+	if !ok || ee.ExitCode() != 3 {
+		t.Fatalf("real handler exit %v: %s %s", err, out.String(), stderr.String())
+	}
+	var got result
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.EvidenceStatus != growth.Hold || got.Review.State != growth.ProposalNeedsData || len(got.Review.Blockers) == 0 || writes.Load() != 0 || strings.Contains(out.String()+stderr.String(), viewer.Secret) {
+		t.Fatalf("real handler result %+v", got)
+	}
+}

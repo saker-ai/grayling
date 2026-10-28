@@ -1,16 +1,19 @@
 # Grayling
 
-[简体中文](README.zh-CN.md) · [API reference](docs/api.md) · [OpenAPI](openapi.yaml) · [Contributing](CONTRIBUTING.md) · [Growth Copilot evidence and proposal library](docs/growth-copilot.md)
+[简体中文](README.zh-CN.md) · [API reference](docs/api.md) · [OpenAPI](openapi.yaml) · [Contributing](CONTRIBUTING.md) · [Growth Copilot read-only command and contracts](docs/growth-copilot.md)
 
 Grayling is a self-hosted platform for feature flags, gradual rollouts, and A/B experiments. It also versions and gates AI resources such as prompts, skills, and agent specifications. The control plane, web console, and HTTP API can run as a standalone service or inside another Go service. This repository is named **Grayling**; the application and Go package remain **Grayling**.
 
-The optional, unwired `internal/growth` library reads aggregate evidence and validates
+The optional `bin/grayling-growth-agent review` command and `internal/growth` library read aggregate evidence and validate
 versioned proposal JSON for human review. Missing/mismatched/HOLD evidence and
 missing implementation attestations block readiness. For example, a complete
 proposal paired with local HOLD evidence returns `needs_data`, even if its text
 asks for approval. Readiness never approves or submits an experiment; sample-plan
 inputs and attestations do not establish statistical adequacy or real instrumentation.
-See the [contract, limits and JSON example](docs/growth-copilot.md#proposal-contract).
+Build with `make build` (or `make build-go`), supply an explicit trusted API origin,
+workspace/environment IDs and a bearer token environment variable. See the
+[setup, command usage, exit codes and trust boundaries](docs/growth-copilot.md#read-only-review-command)
+and [proposal JSON example](docs/growth-copilot.md#proposal-contract).
 
 ![Grayling experiment and staged rollout console](docs/acceptance/web-2026-10-08/23-rollout-plan.png)
 

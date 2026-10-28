@@ -22,6 +22,7 @@ all: vet test build
 build: frontend
 	$(GO) build ./...
 	$(GO) build -o bin/grayling ./cmd/grayling
+	$(GO) build -o bin/grayling-growth-agent ./cmd/grayling-growth-agent
 	$(GO) build -o bin/grayling-proxy ./cmd/grayling-proxy
 	$(GO) build -o bin/grayling-native-proxy ./cmd/grayling-native-proxy
 	$(GO) build -o bin/nacos-native-grpc-probe ./cmd/nacos-native-grpc-probe
@@ -227,6 +228,7 @@ ensure-static: test-static
 build-go: ensure-static
 	$(GO) build ./...
 	$(GO) build -o bin/grayling ./cmd/grayling
+	$(GO) build -o bin/grayling-growth-agent ./cmd/grayling-growth-agent
 	$(GO) build -o bin/grayling-proxy ./cmd/grayling-proxy
 	$(GO) build -o bin/grayling-native-proxy ./cmd/grayling-native-proxy
 	$(GO) build -o bin/nacos-native-grpc-probe ./cmd/nacos-native-grpc-probe

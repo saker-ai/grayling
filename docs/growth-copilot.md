@@ -1,9 +1,10 @@
 # Growth Copilot: evidence and proposal contracts
 
 Part of [#20](https://github.com/saker-ai/grayling/issues/20). `internal/growth`
-is an optional, unwired Go library. No process, public route, SDK behavior,
-persistence, browser UI, model call or production write is added. Disabling or
-never importing it leaves the existing platform unchanged.
+is an optional Go library exposed by `cmd/grayling-growth-agent`, an independent
+read-only command. No public route, SDK behavior, persistence, browser UI, model
+call or production write is added. Never running the command leaves the
+existing platform unchanged.
 
 ## Reuse and missing capabilities
 
@@ -19,6 +20,93 @@ never importing it leaves the existing platform unchanged.
 | Proposal contract | `DecodeProposal` / `ReviewProposal` in `internal/growth` | Strict, bounded planning JSON and evidence-based completeness for human review; no generation, review UI, approval or submission. |
 | Hypotheses, model generation, proposal review UI, experiment submission | Requires later work | No growth API or model integration; no experiment draft submission. |
 | Durable orchestration, recovery, learning journal, business acceptance | Requires later design and evidence | No task storage/retries, restart recovery, model budget, review UI or real customer acceptance claim. |
+
+## Read-only review command
+
+From the repository root, install Go 1.27+ (the exact minimum is pinned in
+`go.mod`), make, Node.js 26+ and pnpm 10. `make build` builds the frontend and
+`bin/grayling-growth-agent`; `make build-go` builds the binaries using the existing
+embedded assets. No database or browser setup is added by this command.
+
+Obtain a bearer credential through your existing admin provisioning flow with
+only the existing scoped viewer/report-read permissions needed for these GETs.
+Supply it through the environment, never a flag or proposal member. For example,
+with `GRAYLING_GROWTH_TOKEN` already populated by your secret manager:
+
+```sh
+./bin/grayling-growth-agent review \
+  --proposal proposal.json \
+  --base-url https://grayling.example.com \
+  --workspace ws1 --environment env1 \
+  --token-env GRAYLING_GROWTH_TOKEN --timeout 10s
+```
+
+Use actual IDs. The proposal JSON example below is synthetic; substitute real,
+exact references and pinned report evidence/window values from trusted evidence.
+The command accepts one regular proposal file of at most 64 KiB; stdin, FIFOs,
+devices, unknown JSON members, embedded envelopes and approval/state fields are
+rejected. All flags follow `review`; `--help` documents usage. There is no config
+file or implicit workspace/environment selection. `--token-env` defaults to
+`GRAYLING_GROWTH_TOKEN`; it names a variable, never carries the token itself.
+
+Treat the base URL, workspace/environment flags and credential selection as
+trusted operator configuration, outside model/proposal control. The origin must
+have no credentials, query, fragment or path other than `/`. Use HTTPS remotely;
+HTTP is supported for local fixtures. The reader uses the host's proxy settings
+and rejects redirects. Existing RBAC remains the authorization boundary: CLI
+scope checks do not narrow a broader token at the server. Metrics are workspace
+scoped; report environment is checked on the response before evidence is used.
+
+Before network access the command rejects proposal/configuration scope mismatch,
+noncanonical source paths, invalid/duplicate references and missing report
+version pins. URLs are built exclusively by `Reader.Read` from validated IDs,
+metric versions and hashes; proposal source paths are equality assertions, never
+request destinations. No “latest” fallback or report pin update is performed.
+Remote response scope/version mismatches fail the read without partial output.
+Window differences remain actionable review blockers. Structurally incomplete
+planning fields and missing implementation claims also remain review blockers.
+
+The total sequential evidence read has a default 10-second deadline, adjustable
+only to a positive duration at most 30 seconds. Each response is bounded to the
+reader default 2 MiB after decompression; no retries occur. SIGINT/SIGTERM cancel
+active requests. Proposal files must be regular, size-bounded files; the read
+deadline covers HTTP execution. The command closes idle connections on exit.
+
+Successful evidence reads print one JSON object to stdout, for example:
+
+```json
+{"evidenceStatus":"READY","review":{"state":"ready_for_review","blockers":[]}}
+```
+
+HOLD/NEEDS_DATA and field/code blockers come from `Reader.Read` and
+`ReviewProposal`. CLI missing-variant blocker fields use
+`implementation.variants[index]` rather than echoing the variant key. Output
+contains no proposal prose, server reason text, raw evidence envelope, URL,
+credential, approval or submission state. Errors use fixed stderr messages and
+leave stdout empty (except an output-stream failure may leave partial JSON).
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | Evidence read completed and proposal is `ready_for_review`; human review still required. Also used for help. |
+| 3 | Read completed with readiness blockers: `draft`, `needs_data` or `needs_implementation`, including evidence HOLD/NEEDS_DATA. |
+| 2 | Invalid command/flags/configuration, missing credential, unreadable/nonregular/oversized/malformed proposal, proposal scope mismatch or invalid references; no evidence request occurs. |
+| 1 | Execution failure: denied access, transport/deadline, invalid response, response scope/version mismatch or output failure. No approval or partial evidence is returned. |
+| 130 | Signal cancellation (SIGINT or SIGTERM). |
+
+This command only reviews supplied planning claims. It neither authenticates
+implementation attestations nor generates proposals, calls models, approves,
+submits, persists, writes to the platform or instruments Saker. A READY local
+fixture proves command behavior only; it does not establish statistical adequacy,
+real pilot acceptance or business impact. Existing experiment preparation,
+approval, binding and rollout gates remain required for future execution.
+
+`cmd/grayling-growth-agent/main_test.go` builds and invokes the actual binary
+against local HTTP fixtures covering READY, HOLD, NEEDS_DATA, draft/implementation
+blockers, malformed/oversized/injected input, scope/version mismatches, denied
+access, redirects, deadlines, signal cancellation, secret-safe output and zero
+non-GET requests. A real API-handler case with scoped viewer credentials confirms
+that a local report conservatively remains HOLD/needs_data. These checks run with
+the existing short/core race gates; no live API or paid service is contacted.
 
 ## Library contract
 
@@ -98,7 +186,7 @@ outcomes or validates a Saker activation experiment.
 The mandatory repository build, short tests, vet and whitespace checks still
 apply, along with the Go quality workflow's core race and binary boot/E2E/smoke
 gates. Existing CI is unchanged. No additional database/browser acceptance is
-required for this unwired slice. Full issue #20 acceptance (including real Saker
+required for this read-only slice. Full issue #20 acceptance (including real Saker
 metric mapping, business variants/instrumentation, pilot evidence, proposal
 review, durable orchestration and business outcomes) remains outstanding.
 
