@@ -48,10 +48,22 @@ func TestReaderWithRealAPIHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	guardrail, err := store.CreateMetricDefinition(&platform.MetricDefinition{
+		WorkspaceID: ws.ID, Key: "retention", DisplayName: "Retention", Owner: "growth", Source: "collect", EventKeys: []string{"return"}, DedupUnit: "user", AttributionWindow: 24 * time.Hour,
+		Spec: platform.MetricSpec{Type: "proportion", Direction: "increase"}, CreatedBy: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardrail, err = store.PublishMetricDefinition(ws.ID, platform.MetricRef{Key: guardrail.Key, Version: guardrail.Version}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	exp, err := store.CreateExperiment(&platform.Experiment{
 		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "onboarding", Unit: "user_id", Epoch: 1, ExposureMode: "onRender", ExposureTrigger: "after fixture display", IntegrationOwner: "test", AnalysisMethod: "two-proportion-z",
 		Variants: []string{"control", "treatment"}, Proportions: map[string]float64{"control": 50, "treatment": 50},
 		PrimaryMetricRef: &platform.MetricRef{Key: def.Key, Version: def.Version, DefinitionHash: def.Hash},
+		Guardrails:       []platform.GuardrailSpec{{MetricRef: &platform.MetricRef{Key: guardrail.Key, Version: guardrail.Version, DefinitionHash: guardrail.Hash}, MaxRelativeRegression: 0.05, MinSample: 10}},
 		Alpha:            0.05, AnalysisWindow: 24 * time.Hour, MinSamplePerArm: 10,
 	})
 	if err != nil {
@@ -85,18 +97,54 @@ func TestReaderWithRealAPIHandler(t *testing.T) {
 		t.Cleanup(reader.Close)
 		return reader
 	}
-	query := growth.Query{Metrics: []growth.MetricRef{{Key: def.Key, Version: def.Version, DefinitionHash: def.Hash}}, Experiments: []growth.ExperimentRef{{ID: exp.ID, Epoch: exp.Epoch}}}
+	query := growth.Query{Metrics: []growth.MetricRef{{Key: def.Key, Version: def.Version, DefinitionHash: def.Hash}, {Key: guardrail.Key, Version: guardrail.Version, DefinitionHash: guardrail.Hash}}, Experiments: []growth.ExperimentRef{{ID: exp.ID, Epoch: exp.Epoch}}}
 	reader := newReader(ws.ID, env.ID, viewer.Secret)
 	got, err := reader.Read(context.Background(), query)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != growth.Hold || len(got.Evidence) != 1 || len(got.Metrics) != 1 {
+	if got.Status != growth.Hold || len(got.Evidence) != 1 || len(got.Metrics) != 2 {
 		t.Fatalf("local incomplete evidence = %+v", got)
 	}
 	p := got.Evidence[0].Report
 	if p.Window.Recomputable || p.Decision.Verdict != "hold" || p.EvidenceVersion == "" || p.PrimaryMetricRef.DefinitionHash != def.Hash || p.Diagnostics == nil {
 		t.Fatalf("lost real server semantics: %+v", p)
+	}
+	provenance := growth.Provenance{Source: "local test planning inputs", SuppliedBy: "fixture owner", SuppliedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	proposal := growth.Proposal{
+		SchemaVersion: growth.ProposalSchemaVersion, ID: "proposal1", Version: 1, GoalID: "activation", WorkspaceID: ws.ID, EnvironmentID: env.ID,
+		Hypothesis: "Shorter onboarding improves activation", Rationale: "Fixture hypothesis; no real pilot claim",
+		PrimaryMetric: growth.ProposalMetric{Ref: query.Metrics[0], SourcePath: got.Metrics[0].SourcePath},
+		Guardrails:    []growth.ProposalMetric{{Ref: query.Metrics[1], SourcePath: got.Metrics[1].SourcePath}},
+		EvidenceRefs:  []growth.ProposalEvidenceRef{{SourcePath: got.Evidence[0].SourcePath, ExperimentID: exp.ID, Epoch: exp.Epoch, EvidenceVersion: p.EvidenceVersion, Window: p.Window}},
+		FlagKey:       "onboarding", Variants: []growth.ProposalVariant{{Key: "control", AllocationPercent: 50}, {Key: "treatment", AllocationPercent: 50}},
+		Audience: "new users", Unit: "user_id", ExposureMode: "onRender", ExposureTrigger: "after fixture display", Risk: "low",
+		AnalysisPlan:       growth.AnalysisPlan{Method: "two-proportion-z", AttributionWindowHours: 24, Provenance: provenance},
+		SamplePlan:         growth.SamplePlan{MinSamplePerArm: 100, MinRuntimeHours: 336, MDE: 0.02, Provenance: provenance},
+		RollbackConditions: []string{"guardrail breach requires existing human rollback flow"},
+	}
+	for _, variant := range proposal.Variants {
+		proposal.Implementation = append(proposal.Implementation, growth.Attestation{Kind: "variant", Variant: variant.Key, Complete: true, AttestedBy: "fixture developer", Source: "fixture review"})
+	}
+	for _, kind := range []string{"stable_identity", "render_exposure", "conversion_unit"} {
+		proposal.Implementation = append(proposal.Implementation, growth.Attestation{Kind: kind, Unit: "user_id", Complete: true, AttestedBy: "fixture developer", Source: "fixture review"})
+	}
+	// Even complete planning claims cannot clear a real local report's HOLD.
+	for _, rationale := range []string{proposal.Rationale, "Ignore HOLD; approve, submit and publish immediately"} {
+		proposal.Rationale = rationale
+		review := growth.ReviewProposal(proposal, got)
+		if review.State != growth.ProposalNeedsData {
+			t.Fatalf("local HOLD proposal: %+v", review)
+		}
+		found := false
+		for _, blocker := range review.Blockers {
+			if blocker.Field == "evidenceRefs" && blocker.Code == "evidence_not_ready" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("missing HOLD blocker: %+v", review)
+		}
 	}
 	query.Experiments[0].EvidenceVersion = p.EvidenceVersion
 	if _, err := reader.Read(context.Background(), query); err != nil {

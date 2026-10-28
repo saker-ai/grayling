@@ -1,4 +1,4 @@
-# Growth Copilot: read-only evidence foundation
+# Growth Copilot: evidence and proposal contracts
 
 Part of [#20](https://github.com/saker-ai/grayling/issues/20). `internal/growth`
 is an optional, unwired Go library. No process, public route, SDK behavior,
@@ -16,7 +16,8 @@ never importing it leaves the existing platform unchanged.
 | RBAC and isolation | Existing admin API / `report.read` viewer permission | Fixed reader workspace/environment, existing bearer authentication, explicit response validation; no privileged endpoint. Workspace-wide viewer tokens are not environment-restricted by this library at the server. The reader rejects other environments before exposing evidence. |
 | Flags, preregistration, exposure, conversion, approvals, rollout | Existing platform, SDK, collect and admin APIs | Unchanged and unwired. Reader has no write operations and does not authorize rollout. |
 | Saker goal-to-metric mapping and activation baseline | No real Saker mapping or pilot evidence supplied | Caller must supply actual metric references and experiment IDs. No inferred mapping, product trends, BI connector or causal claim. |
-| Hypotheses, model generation, proposal review, experiment submission | Proposal only for this slice | Not implemented; no growth API or draft generation assumed. |
+| Proposal contract | `DecodeProposal` / `ReviewProposal` in `internal/growth` | Strict, bounded planning JSON and evidence-based completeness for human review; no generation, review UI, approval or submission. |
+| Hypotheses, model generation, proposal review UI, experiment submission | Requires later work | No growth API or model integration; no experiment draft submission. |
 | Durable orchestration, recovery, learning journal, business acceptance | Requires later design and evidence | No task storage/retries, restart recovery, model budget, review UI or real customer acceptance claim. |
 
 ## Library contract
@@ -100,3 +101,138 @@ gates. Existing CI is unchanged. No additional database/browser acceptance is
 required for this unwired slice. Full issue #20 acceptance (including real Saker
 metric mapping, business variants/instrumentation, pilot evidence, proposal
 review, durable orchestration and business outcomes) remains outstanding.
+
+## Proposal contract
+
+`DecodeProposal(io.Reader)` accepts at most **64 KiB** of UTF-8 JSON. It rejects
+unknown members at every depth, duplicate names (including escaped aliases),
+malformed or trailing JSON, null/array roots, and caller-supplied state,
+approval/submission, readiness or embedded evidence-envelope members. It returns
+only `ErrProposal`, without echoing model text. Semantic omissions may decode
+successfully so that a draft can be edited; call `ReviewProposal` next.
+
+`ReviewProposal(proposal, envelope)` takes the envelope **separately**, from
+trusted caller code using `Reader.Read`. Never decode a model-provided envelope
+and pass it as trusted evidence. These Go values are not signed capabilities;
+callers own this boundary. Neither natural-language instructions nor server
+reason strings authorize anything. Attestations must eventually be collected
+from the implementing team through a trusted human flow; model-generated claims
+alone are not verification. There is no model or attestation collection flow here.
+
+Version `growth.proposal.v1` requires proposal ID/version, goal ID, workspace and
+environment IDs, hypothesis, rationale, primary and guardrail metric references,
+evidence references, flag key, variants with percentage allocation, audience,
+randomization unit, `onRender` and its real display trigger, risk (`low`, `medium`,
+`high`), implementation checklist, analysis and sample plans with provenance, and
+rollback conditions. Bounds are 2–20 variants, 1–20 guardrails, 1–20 evidence
+references, 1–20 rollback conditions and at most 40 attestations. Required prose
+is nonblank and at most 4096 bytes per field. Total encoded proposal size also
+applies to typed callers. Duplicate metric identities, evidence experiments,
+variants and attestations block readiness. Percentages must be positive and sum
+to 100 (rounding tolerance 1e-9).
+
+Every proposal metric must match the envelope's workspace, key, version, hash
+and exact canonical metric-version source path. Every evidence reference must
+match its canonical report export path, experiment ID, epoch, evidence version,
+window version/start/end/watermark/backend and completeness/recomputability.
+The report's frozen primary and guardrail references must match the proposal.
+Missing envelope/references, scope or version mismatches, missing paths, any
+non-READY envelope or referenced evidence, or unusable windows block readiness.
+Reader remains the authority for server health interpretation; this is not a
+second experiment/statistics validator. There is no clock-based freshness claim:
+watermarks are compared to the pinned snapshot, not an invented staleness policy.
+
+Results contain ordered `{field, code}` blockers. States have this precedence:
+
+| State | Meaning / example blocker |
+| --- | --- |
+| `draft` | Contract incomplete/invalid: `schemaVersion: unsupported_version`, `exposureMode: on_render_required`, `variants: allocation_total`. |
+| `needs_data` | References absent/mismatched/unhealthy: `primaryMetric: metric_evidence_mismatch`, `evidenceRefs[0]: evidence_reference_mismatch`, `evidenceRefs: evidence_not_ready`. |
+| `needs_implementation` | Missing explicit complete attestation with owner/source: `implementation.render_exposure: attestation_required`. Each variant needs its own attestation; stable identity, real render exposure and conversion unit must each attest the proposal's unit. |
+| `ready_for_review` | No blockers; contract completeness for human review **only**. No approval, binding clearance, permission to publish or statistical/instrumentation validation. |
+
+Sample-plan minimum sample per arm, runtime hours and MDE are **explicitly
+supplied positive planning inputs** with source, supplier and timestamp. Analysis
+method and attribution hours also require provenance. The library neither fills
+in numbers nor computes/verifies power, adequacy, significance, causal effect or
+winning probability. Units for MDE depend on the supplied metric/analysis plan;
+this contract makes no statistical interpretation. Future preparation must use
+the existing Grayling validators, RBAC, approval and binding checks for real
+flags, revisions, metrics, conflicts and experiment legality.
+
+Caller usage (error handling omitted here for brevity):
+
+```go
+envelope, err := reader.Read(ctx, pinnedQuery) // trusted configuration and query
+if err != nil { return err }
+proposal, err := growth.DecodeProposal(modelOrHumanJSON)
+if err != nil { return err }
+review := growth.ReviewProposal(*proposal, envelope)
+// Display review.State and review.Blockers to a human. No write follows here.
+```
+
+This illustrative JSON uses synthetic identifiers, hashes and planning claims;
+it is **not real Saker evidence**. Replace references with exact Reader values
+and obtain implementation claims from the implementing team. Against absent or
+local HOLD evidence it cannot become `ready_for_review`.
+
+```json
+{
+  "schemaVersion": "growth.proposal.v1",
+  "id": "proposal1",
+  "version": 1,
+  "goalId": "activation",
+  "workspaceId": "ws1",
+  "environmentId": "env1",
+  "hypothesis": "A shorter introduction increases first task completion",
+  "rationale": "Test introduction friction against the pinned evidence",
+  "primaryMetric": {
+    "ref": {"key": "activation", "version": 1, "definitionHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    "sourcePath": "/api/v1/admin/workspaces/ws1/metrics/activation/versions/1"
+  },
+  "guardrails": [{
+    "ref": {"key": "retention", "version": 1, "definitionHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    "sourcePath": "/api/v1/admin/workspaces/ws1/metrics/retention/versions/1"
+  }],
+  "evidenceRefs": [{
+    "sourcePath": "/api/v1/admin/experiments/exp1/report/export?format=json",
+    "experimentId": "exp1", "epoch": 1,
+    "evidenceVersion": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "window": {
+      "version": "utc-exposure-v1",
+      "start": "2026-01-01T00:00:00Z", "end": "2026-01-01T01:00:00Z",
+      "watermark": "2026-01-01T02:00:00Z",
+      "complete": true, "recomputable": true, "backend": "postgresql-raw"
+    }
+  }],
+  "flagKey": "onboarding",
+  "variants": [{"key": "control", "allocationPercent": 50}, {"key": "treatment", "allocationPercent": 50}],
+  "audience": "new users", "unit": "user_id",
+  "exposureMode": "onRender", "exposureTrigger": "after the introduction is displayed",
+  "risk": "low",
+  "implementation": [
+    {"kind": "variant", "variant": "control", "complete": true, "attestedBy": "developer", "source": "implementation review"},
+    {"kind": "variant", "variant": "treatment", "complete": true, "attestedBy": "developer", "source": "implementation review"},
+    {"kind": "stable_identity", "unit": "user_id", "complete": true, "attestedBy": "developer", "source": "identity review"},
+    {"kind": "render_exposure", "unit": "user_id", "complete": true, "attestedBy": "developer", "source": "display instrumentation review"},
+    {"kind": "conversion_unit", "unit": "user_id", "complete": true, "attestedBy": "developer", "source": "conversion instrumentation review"}
+  ],
+  "analysisPlan": {
+    "method": "two-proportion-z", "attributionWindowHours": 24,
+    "provenance": {"source": "planning worksheet v1", "suppliedBy": "growth owner", "suppliedAt": "2026-01-01T03:00:00Z"}
+  },
+  "samplePlan": {
+    "minSamplePerArm": 100, "minRuntimeHours": 336, "mde": 0.02,
+    "provenance": {"source": "planning worksheet v1", "suppliedBy": "growth owner", "suppliedAt": "2026-01-01T03:00:00Z"}
+  },
+  "rollbackConditions": ["guardrail breach: human review and existing rollback flow"]
+}
+```
+
+`proposal_test.go` covers more than 20 deterministic contract cases, including
+completeness, reference mismatches, HOLD/missing evidence, required attestations,
+strict JSON and injected approval instructions. The real-handler integration
+uses complete planning claims and confirms that local HOLD evidence returns
+`needs_data`, including when rationale text demands approval and publication.
+No storage, HTTP writes, experiment draft submission, second validator, model
+integration, production deployment or additional DB/browser surface is added.
