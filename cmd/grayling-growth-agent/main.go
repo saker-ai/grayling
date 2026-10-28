@@ -21,11 +21,13 @@ import (
 
 const usage = `Usage: grayling-growth-agent review --proposal FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent prepare --proposal FILE --settings FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+       grayling-growth-agent monitor --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent fingerprint --proposal FILE
        grayling-growth-agent record-review --proposal FILE --review-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
 Read-only review/preparation; credentials come only from the named environment variable
 (default GRAYLING_GROWTH_TOKEN). Timeout bounds the entire read (0 < timeout <= 30s).
 prepare exports request and separate provenance metadata; it never submits.
+monitor exports linked experiment evidence; READY never authorizes publication.
 Exit codes: 0 ready_for_review/exported; 3 readiness blockers; 2 input/configuration error;
 1 execution/evidence failure; 130 canceled by signal. No submission or platform approval.
 record-review exports caller-attested operator content, not authenticated authorization.
@@ -51,6 +53,9 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 		fmt.Fprint(out, usage)
 		return 0
+	}
+	if len(args) > 0 && args[0] == "monitor" {
+		return runMonitor(ctx, args[1:], out, diagnostics)
 	}
 	if len(args) == 0 || (args[0] != "review" && args[0] != "prepare" && args[0] != "fingerprint" && args[0] != "record-review") {
 		return fail(2, "invalid command; use --help")

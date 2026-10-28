@@ -618,3 +618,102 @@ fixtures cover fingerprint output, incomplete drafts and strict bounded input.
 These establish command behavior only. No real Saker instrumentation, pilot
 evidence, model generation, durable orchestration or full acceptance is claimed;
 no new database, browser or SDK surface or CI job changes are introduced.
+
+## Read-only monitor command
+
+`monitor` observes the **actual linked experiment**, independently of proposal
+baseline evidence. Supply a separate operator-owned manifest and the same trusted
+origin, scope flags and environment credential as `review`:
+
+```sh
+./bin/grayling-growth-agent monitor --manifest monitor.json \
+  --base-url https://grayling.example.com --workspace ws1 --environment env1 \
+  --token-env GRAYLING_GROWTH_TOKEN --timeout 10s
+```
+
+Synthetic `monitor.json` (replace every ID and hash with trusted actual values):
+
+```json
+{
+  "workspaceId": "ws1",
+  "environmentId": "env1",
+  "experimentId": "exp1",
+  "epoch": 1,
+  "registrationVersion": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "primaryMetric": {
+    "key": "activation", "version": 1,
+    "definitionHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "guardrails": [{
+    "key": "retention", "version": 1,
+    "definitionHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  }]
+}
+```
+
+The manifest is a regular UTF-8 JSON file of at most 16 KiB. Unknown members,
+trailing JSON, duplicate members (including escaped aliases), invalid references,
+duplicate metric keys/roles and more than 16 guardrails fail before any HTTP
+request. Use an empty guardrail list only for an experiment with no guardrails.
+Workspace/environment must exactly match the trusted CLI flags. Registration is
+a required SHA-256 pin; experiment epoch and primary/guardrail key/version/hash
+are required and checked exactly against the report. Guardrail order is immaterial;
+missing, additional, duplicate or swapped roles fail without a summary.
+An optional `evidenceVersion` SHA-256 member pins one exact report snapshot.
+Omitting it observes the current report, without changing the other pins.
+
+`Reader.Monitor` reuses `Reader.Read`: only exact metric-version and experiment
+report-export GETs, scoped credentials, bounded responses, no redirects, retries
+or HTTP writes. The CLI retains the total positive timeout (default 10 seconds,
+maximum 30 seconds), SIGINT/SIGTERM cancellation and fixed stderr diagnostics.
+No proposal text, report health/reason/error prose or guardrail details are
+exported or interpreted as instructions or causes.
+
+Each successful read exports one `MonitorSummary`: scope, experiment/epoch,
+exact metric references, observed evidenceVersion, canonical report source path,
+generation time, registration version, analysis method and window/watermark.
+The window omits its free-form issues. Unknown analysis methods/verdicts are
+represented by empty strings and fixed blockers rather than arbitrary server text.
+When a report is missing, observed report metadata remains empty/zero; no evidence
+version, timestamp, method or verdict is invented. Missing evidence gives
+`NEEDS_DATA`; otherwise blockers give `HOLD`. Error responses and scope/version,
+registration or metric-role mismatches produce no partial stdout summary.
+
+`serverVerdict` preserves `continue`, `ship`, `rollback` or `hold` separately from
+`status` (`READY`/`HOLD`/`NEEDS_DATA`). Healthy `continue`, `ship` and `rollback`
+can all be `READY`; a server `hold` stays `HOLD`. **READY means evidence can be
+inspected and never authorizes publication.** `publicationAuthorized` is always
+false. Existing RBAC, human approval, binding and rollout gates remain mandatory.
+Exit codes: 0 READY; 3 HOLD/NEEDS_DATA; 2 invalid manifest/configuration;
+1 evidence execution failure; 130 signal cancellation.
+
+Blockers are deduplicated in deterministic check order, bounded by the checks
+below. Codes and remediation actions are implementation-owned:
+
+| Blocker | Remediation |
+| --- | --- |
+| `evidence_missing` | `restore_evidence_access` |
+| `verdict_invalid`, `server_hold`, `health_review_required` | `review_diagnostics` |
+| `analysis_method_invalid` | `review_registration` |
+| `generation_time_missing`, `diagnostics_missing`, `diagnostics_metadata_invalid` | `refresh_report` |
+| `window_metadata_invalid` | `review_window` |
+| `window_incomplete` | `wait_for_complete_window` |
+| `window_not_recomputable` | `restore_recomputable_evidence` |
+| `watermark_late` | `wait_for_watermark` |
+| `aggregates_missing` | `restore_aggregate_evidence` |
+
+Unhealthy flags, calculation errors, issue presence or guardrail breaches request
+a generic diagnostics review; the command does not infer SRM, contamination,
+retention maturity or any other cause from free-form server text. Window
+completeness/recomputability, watermark, metadata and aggregate presence use
+structured fields. Both report and embedded diagnostics windows are checked.
+
+Deterministic contract tests and more than 20 actual-binary HTTP cases cover
+healthy verdicts, health/injection text, missing evidence, window failures,
+strict manifests, registration/metric-role/epoch/scope/version conflicts,
+authorization, timeout/cancellation and zero non-GET requests. The real-handler
+library and actual-binary fixtures establish conservative local HOLD. These
+fixtures prove local command behavior only, not real Saker instrumentation,
+statistical/business acceptance or a successful pilot. Durable monitoring,
+rollout-history linkage, model generation and real Saker acceptance remain future
+work; no persistence, database schema, SDK, browser or CI behavior changes.
