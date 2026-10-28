@@ -145,6 +145,23 @@ func TestReaderWithRealAPIHandler(t *testing.T) {
 		if !found {
 			t.Fatalf("missing HOLD blocker: %+v", review)
 		}
+		fp, err := growth.ProposalFingerprint(proposal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		input := growth.ReviewInputs{ExpectedProposalFingerprint: fp, Decision: growth.ReviewApprove, Reviewer: "fixture-owner", ReviewedAt: provenance.SuppliedAt, Rationale: "Explicit local fixture review"}
+		record, err := growth.RecordReview(proposal, got, input)
+		var reviewErr *growth.ReviewError
+		if record != nil || !errors.As(err, &reviewErr) || reviewErr.Field != "proposal" || reviewErr.Code != "not_ready_for_review" {
+			t.Fatalf("real HOLD accepted: %+v, %v", record, err)
+		}
+		for _, decision := range []growth.ReviewDecision{growth.ReviewReject, growth.ReviewRequestChanges} {
+			input.Decision = decision
+			record, err := growth.RecordReview(proposal, got, input)
+			if err != nil || record == nil || record.Readiness.State != growth.ProposalNeedsData || len(record.Readiness.Blockers) == 0 || record.EvidencePins[0].EvidenceVersion != p.EvidenceVersion {
+				t.Fatalf("lost real HOLD review: %+v, %v", record, err)
+			}
+		}
 	}
 	query.Experiments[0].EvidenceVersion = p.EvidenceVersion
 	if _, err := reader.Read(context.Background(), query); err != nil {

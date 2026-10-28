@@ -17,7 +17,7 @@ existing platform unchanged.
 | RBAC and isolation | Existing admin API / `report.read` viewer permission | Fixed reader workspace/environment, existing bearer authentication, explicit response validation; no privileged endpoint. Workspace-wide viewer tokens are not environment-restricted by this library at the server. The reader rejects other environments before exposing evidence. |
 | Flags, preregistration, exposure, conversion, approvals, rollout | Existing platform, SDK, collect and admin APIs | Unchanged and unwired. Reader has no write operations and does not authorize rollout. |
 | Saker goal-to-metric mapping and activation baseline | No real Saker mapping or pilot evidence supplied | Caller must supply actual metric references and experiment IDs. No inferred mapping, product trends, BI connector or causal claim. |
-| Proposal contract | `DecodeProposal` / `ReviewProposal` in `internal/growth` | Strict, bounded planning JSON and evidence-based completeness for human review; no generation, review UI, approval or submission. |
+| Proposal contract | `DecodeProposal` / `ReviewProposal` in `internal/growth` | Strict, bounded planning JSON and evidence-based completeness for human review; no generation, review UI or submission. Pure caller-attested review records are available separately. |
 | Hypotheses, model generation, proposal review UI, experiment submission | Requires later work | No growth API or model integration; no experiment draft submission. |
 | Durable orchestration, recovery, learning journal, business acceptance | Requires later design and evidence | No task storage/retries, restart recovery, model budget, review UI or real customer acceptance claim. |
 
@@ -469,3 +469,72 @@ These are local compatibility checks, not real Saker evidence or production
 validation. Human review and explicit submission authorization, Grayling approval
 and binding checks, real instrumentation, durable orchestration and pilot/business
 acceptance remain outstanding. No existing CI jobs or platform gates are changed.
+
+
+## Pure human-review records
+
+`ProposalFingerprint(proposal)` returns `sha256:<lowercase hex>` over the complete
+serialized proposal, including planning prose, implementation claims, nested
+windows, metric references and array order. JSON uses deterministic encoding and
+RFC 8785 canonical formatting with integer rounding disabled, so int64 versions
+above 2^53 retain their exact value. Serialized null/empty distinctions remain significant.
+It rejects invalid UTF-8, nonfinite values and proposals over 64 KiB. Fingerprinting
+an incomplete draft does not make it ready. Any content change requires a new
+fingerprint even when the proposal version was not incremented.
+
+`RecordReview(proposal, envelope, ReviewInputs)` is a pure library contract in
+`internal/growth/review.go`. Supply the envelope separately from trusted
+`Reader.Read` code and the review inputs separately from proposal/model data:
+
+```go
+fp, err := growth.ProposalFingerprint(proposal) // pin what the human reviewed
+if err != nil { return err }
+record, err := growth.RecordReview(proposal, envelope, growth.ReviewInputs{
+    ExpectedProposalFingerprint: fp,
+    Decision: growth.ReviewApprove,
+    Reviewer: "growth-owner",
+    ReviewedAt: reviewedAt, // explicit caller-supplied time.Time
+    Rationale: "Reviewed this pinned proposal and implementation claims.",
+})
+```
+
+Retain the fingerprint from the reviewed snapshot; recomputing it after edits
+would lose the stale-review protection. Decisions are exactly `approve`, `reject`
+and `request_changes`. Reviewer and proposal/scope IDs use the existing bounded
+identifier syntax (1–128 ASCII letters/digits/underscore/dot/hyphen, starting with
+letter/digit/underscore; neither `.` nor `..`). Proposal version must be positive
+and schema supported. Review time must be explicit, nonzero and within JSON's
+UTC year range 1–9999; records normalize it to UTC. Rationale requires nonblank
+valid UTF-8 of at most 4096 bytes and excludes controls other than newline/tab.
+No identity, time, decision or rationale is inferred from proposal prose.
+
+Approval requires the existing `ReviewProposal` result to be `ready_for_review`
+against the separately supplied evidence. Missing/HOLD evidence, scope or evidence
+pin mismatches and incomplete implementation claims block approval. Rejection and
+requested changes remain recordable for those proposals, preserving readiness
+state and blockers. Invalid inputs or stale fingerprints return a nil record and
+fixed `ReviewError` field/code values, without caller text or a partial artifact.
+
+The record preserves schema, proposal ID/version, workspace/environment, complete
+proposal fingerprint, primary/guardrail metric pins, report evidence pins, reviewer,
+UTC review time, rationale, decision and readiness blockers. Nested slices are
+defensive copies; identical inputs replay deterministically without reading a
+clock or writing state. Evidence pins are proposal claims checked by readiness;
+a blocked rejection/changes record does not certify those claims or evidence
+availability. The fingerprint covers the proposal, not the complete Reader envelope.
+
+**Records are caller-attested review artifacts, not authenticated authorization,
+durable audit storage, or permission to submit/publish.** The caller remains
+responsible for authenticating the reviewer and retaining the reviewed proposal,
+evidence and record. This milestone adds no CLI changes, platform writes, model
+calls, submission, publication or durable workflow. Existing Grayling RBAC,
+approval, binding and rollout gates remain mandatory. Real Saker instrumentation,
+pilot evidence and full issue acceptance remain outstanding.
+
+Contract tests cover full-proposal fingerprint coverage, large integer versions,
+stale content under an unchanged version, malformed review inputs, missing/HOLD
+and mismatched evidence, incomplete implementation, injected approval prose,
+input immutability and deterministic replay. Existing real-handler integration
+coverage shows local HOLD cannot produce an acceptance record, while rejection
+and requested changes preserve blockers with zero HTTP writes. These fixtures
+are local validation only; no new database or browser surface is introduced.
