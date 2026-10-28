@@ -717,3 +717,51 @@ fixtures prove local command behavior only, not real Saker instrumentation,
 statistical/business acceptance or a successful pilot. Durable monitoring,
 rollout-history linkage, model generation and real Saker acceptance remain future
 work; no persistence, database schema, SDK, browser or CI behavior changes.
+
+## Read-only learning records
+
+`Reader.RecordLearning(ctx, proposal, monitorManifest, LearningInputs)` returns a
+`growth.learning.v1` library artifact. Supply an explicit
+`ExpectedProposalFingerprint` from `ProposalFingerprint`, `Recorder` identifier,
+`RecordedAt` timestamp and 1–20 nonblank `Followups` (each at most 4096 UTF-8
+bytes; control characters other than newline/tab are rejected). Timestamps are
+normalized to UTC without reading a clock. Identical inputs and report snapshots
+produce identical records; nested slices are detached from caller inputs.
+
+Before any HTTP request, the library checks the proposal schema, identity and
+positive version, required hypothesis, complete proposal fingerprint, reader and
+manifest workspace/environment, and exact primary/guardrail metric-role agreement.
+Changing proposal content at the same version invalidates the expected fingerprint.
+The manifest supplies the actual experiment ID, epoch, registration version and
+optional evidence-version pin. `Reader.Monitor` performs the existing read and
+report-pin, health and window checks; learning adds no statistical decision logic.
+Authorization, transport, cancellation and report-pin failures return no record.
+
+The record retains proposal identity/fingerprint and the original hypothesis,
+`proposalBaselineReferences` separately from `linkedExperiment`, and the
+`observation` monitor status, fixed blocker/remediation codes, server verdict,
+observed evidenceVersion, registration version, source path, generation time and
+window/watermark. Baselines are copied proposal claims and are not fetched as the
+linked run. When a report is missing, observed report metadata stays empty,
+including the source path; requested pins remain only in `linkedExperiment`.
+A present report can still retain observed metadata with NEEDS_DATA when a metric
+is missing. Server reason/issue prose is never exported in the observation.
+
+The experiment link, original hypothesis, baseline references, recorder, timestamp
+and follow-ups are **caller attestations**. They do not prove the proposal was
+executed, that an action occurred, or that the recorder is authenticated. Treat
+retained caller text as inert untrusted content. HOLD and NEEDS_DATA remain
+explicit. `continue`, `ship` and `rollback` retain their server meaning; READY or
+`ship` does not establish business superiority. `businessWinEstablished` and
+`publicationAuthorized` are always false. Existing RBAC, human approval, binding
+and rollout gates remain mandatory.
+
+This milestone adds no CLI/export command, persistence/search, authenticated audit
+storage, model integration, public API, SDK or database changes. Table-driven local
+HTTP fixtures cover healthy verdicts, health/window failures, missing evidence,
+stale fingerprints, malformed operator inputs, scope/metric/registration/epoch
+conflicts, injection, cancellation, deterministic replay, nested immutability and
+zero HTTP writes. The in-memory real-handler fixture preserves HOLD; these are
+library behavior checks, not real Saker instrumentation, pilot or business-win
+validation. The documented build, short tests, vet, core race, boot/E2E/smoke,
+frontend and static gates remain required and unchanged.
