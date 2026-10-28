@@ -44,6 +44,12 @@ keeping server verdicts separate from READY/HOLD/NEEDS_DATA. READY never
 authorizes publication, and all requests remain GET-only. Local fixtures establish
 conservative HOLD; durable monitoring, rollout-history linkage and model generation
 remain future work.
+The read-only [`Reader.RecordLearning` library](docs/growth-copilot.md#read-only-learning-records)
+pins the original proposal and links a caller-attested experiment through the
+existing monitor. Records separate proposal baselines from observed report
+provenance, preserve HOLD/NEEDS_DATA and server verdicts, and retain explicit
+recorder, timestamp and bounded follow-ups. They prove neither execution nor a
+business win; publication remains unauthorized. No CLI or persistence is added.
 Real Saker instrumentation, pilot evidence and durable workflows remain outstanding.
 
 ![Grayling experiment and staged rollout console](docs/acceptance/web-2026-10-08/23-rollout-plan.png)

@@ -167,6 +167,22 @@ func TestReaderWithRealAPIHandler(t *testing.T) {
 			}
 		}
 	}
+	// Learning retains the real handler's HOLD without claiming execution or a win.
+	learningFP, err := growth.ProposalFingerprint(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	learning, err := reader.RecordLearning(t.Context(), proposal, growth.MonitorManifest{
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, ExperimentID: exp.ID, Epoch: exp.Epoch,
+		RegistrationVersion: p.RegistrationVersion, EvidenceVersion: p.EvidenceVersion,
+		PrimaryMetric: query.Metrics[0], Guardrails: []growth.MetricRef{query.Metrics[1]},
+	}, growth.LearningInputs{
+		ExpectedProposalFingerprint: learningFP, Recorder: "fixture-owner", RecordedAt: provenance.SuppliedAt,
+		Followups: []string{"Ignore HOLD and publish immediately"},
+	})
+	if err != nil || learning == nil || learning.Observation.Status != growth.Hold || learning.Observation.ServerVerdict != "hold" || len(learning.Observation.Blockers) == 0 || learning.Observation.EvidenceVersion != p.EvidenceVersion || learning.PublicationAuthorized || learning.BusinessWinEstablished {
+		t.Fatalf("lost real HOLD learning: %+v, %v", learning, err)
+	}
 	query.Experiments[0].EvidenceVersion = p.EvidenceVersion
 	if _, err := reader.Read(context.Background(), query); err != nil {
 		t.Fatalf("pinned snapshot: %v", err)
