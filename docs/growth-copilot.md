@@ -324,3 +324,74 @@ uses complete planning claims and confirms that local HOLD evidence returns
 `needs_data`, including when rationale text demands approval and publication.
 No storage, HTTP writes, experiment draft submission, second validator, model
 integration, production deployment or additional DB/browser surface is added.
+
+## Optional create-request compiler
+
+`growth.CompileCreateRequest(proposal, envelope, preparation)` is a pure library
+function. It is not wired to the review CLI, has no submission transport and
+performs no platform writes. Supply the envelope separately from trusted
+`Reader.Read` caller code; never decode evidence or preparation settings from
+model output. `ReviewProposal` must return `ready_for_review` before compilation.
+HOLD, NEEDS_DATA, missing implementation claims and scope/version/hash/window
+mismatches produce a bounded `PreparationError` containing only a field and
+code. All failures return a nil result, with no partial draft.
+
+The initial supported subset is exactly two ordered variants, explicit
+`fixed-split` allocation and the existing fixed-sample analysis methods (`welch`,
+`two-proportion-z`, `ratio-delta`, `quantile`, `cuped`). Unsupported methods,
+Bandit and multi-arm configurations are rejected. Compilation preserves variant
+order and percentage allocations, workspace/environment scope, flag, hypothesis,
+unit, onRender trigger, exact primary/guardrail metric key/version/hash, supplied
+analysis method, MDE, minimum sample and runtime. It does not infer settings from
+rationale, attestations or rollback prose.
+
+Trusted `PreparationInputs` must separately provide allocation mode, integration
+owner, alpha and power in (0,1), positive analysis observation hours and one
+`GuardrailPreparation` per proposal guardrail in the same order. Each guardrail
+requires the exact metric reference, a non-nil finite nonnegative regression
+threshold (fraction, e.g. 0.05 for 5%) and a positive minimum sample. Zero is a
+valid explicitly supplied threshold. No statistical settings are defaulted or
+calculated. Nonfinite, missing, mismatched and overflowing inputs are rejected;
+hour-to-nanosecond conversions check overflow before multiplication.
+
+`AnalysisWindowHours` is supplied independently of proposal attribution hours;
+it must cover the latter, but they are never equated. The API's `analysisWindow`
+and `minRuntime` serialize as integer nanoseconds with both Go JSON packages.
+Attribution hours remain planning metadata: metric attribution specifications
+are resolved by Grayling from the exact metric references.
+
+```go
+threshold := 0.05 // explicit trusted preparation input, not extracted prose
+prepared, err := growth.CompileCreateRequest(*proposal, envelope, growth.PreparationInputs{
+    AllocationMode: "fixed-split", IntegrationOwner: "onboarding team",
+    Alpha: 0.05, Power: 0.8, AnalysisWindowHours: 48,
+    Guardrails: []growth.GuardrailPreparation{{
+        Ref: proposal.Guardrails[0].Ref,
+        MaxRelativeRegression: &threshold, MinSample: 100,
+    }},
+})
+if err != nil { return err }
+requestJSON, err := json.Marshal(prepared.Request) // only this DTO is API input
+// prepared.Metadata is retained separately; no submission follows here.
+```
+
+`CreateRequest` explicitly allowlists fields compatible with
+`platform.Experiment`. It omits identity, revision, epoch, lifecycle timestamps
+and state, registration fingerprint, approvals and release plans. It emits
+references without metric specifications; existing Grayling services resolve
+those specifications, check published flags and metrics, enforce RBAC and final
+legality, allocate epochs and register Draft state. Preparation metadata keeps
+proposal ID/version and evidence pins outside the API request. Audience remains
+a planning claim in that metadata because the experiment create API does not
+encode targeting; a human must verify audience/flag targeting and binding.
+Rollback prose is not converted into an executable release plan.
+
+Compiler contract tests cover deterministic mapping, unsupported configurations,
+HOLD/NEEDS_DATA, evidence mismatches, injection, duration overflow and input
+immutability. An isolated in-memory real create-handler fixture round-trips the
+generated JSON, checks viewer denial, exact frozen v1 metric references despite
+a newer published version, Draft state and invalid/deprecated reference rejection.
+These are local compatibility checks, not real Saker evidence or production
+validation. Human review and explicit submission authorization, Grayling approval
+and binding checks, real instrumentation, durable orchestration and pilot/business
+acceptance remain outstanding. No existing CI jobs or platform gates are changed.
