@@ -2,6 +2,9 @@ package growth
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"strings"
 	"testing"
@@ -168,5 +171,100 @@ func TestGoalFingerprints(t *testing.T) {
 	again, _ := GoalFingerprint(*decoded)
 	if again != gf {
 		t.Fatal("serialization changed fingerprint")
+	}
+}
+
+func TestProposalGoalPin(t *testing.T) {
+	g, p := goalFixture()
+	legacy, err := ProposalFingerprint(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := stringMustJSON(t, p)
+	if strings.Contains(raw, `"goalPin"`) {
+		t.Fatal("absent pin serialized")
+	}
+	// Freeze pre-pin serialization independently of the new optional field.
+	var members map[string]jsontext.Value
+	if json.Unmarshal([]byte(raw), &members) != nil {
+		t.Fatal("fixture")
+	}
+	delete(members, "goalPin")
+	data, _ := json.Marshal(members, json.Deterministic(true))
+	value := jsontext.Value(data)
+	if value.Canonicalize(jsontext.CanonicalizeRawInts(false)) != nil {
+		t.Fatal("canonicalization")
+	}
+	sum := sha256.Sum256(value)
+	if legacy != "sha256:"+hex.EncodeToString(sum[:]) {
+		t.Fatal("legacy fingerprint changed")
+	}
+	gf, _ := GoalFingerprint(g)
+	p.GoalPin = &GoalPin{Version: g.Version, Fingerprint: gf}
+	decoded, err := DecodeProposal(strings.NewReader(stringMustJSON(t, p)))
+	if err != nil || *decoded.GoalPin != *p.GoalPin {
+		t.Fatalf("exact pin round trip: %v", err)
+	}
+	if got, err := VerifyGoal(g, p, "ws1", "env1"); err != nil || got.PublicationAuthorized {
+		t.Fatalf("matching: %v", err)
+	}
+	for _, change := range []func(*GrowthGoal){func(g *GrowthGoal) { g.Version++ }, func(g *GrowthGoal) { g.Objective += " edit" }} {
+		changed := g
+		change(&changed)
+		if got, err := VerifyGoal(changed, p, "ws1", "env1"); err == nil || got != nil {
+			t.Fatal("changed goal accepted")
+		}
+	}
+	_, evidence := proposalFixture()
+	in := reviewInputs(t, p, ReviewApprove)
+	record, err := RecordReview(p, evidence, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := ProposalFingerprint(p)
+	for _, pin := range []GoalPin{{g.Version + 1, gf}, {g.Version, hashB}} {
+		p.GoalPin = &pin
+		if got, err := VerifyGoal(g, p, "ws1", "env1"); err == nil || got != nil {
+			t.Fatal("mismatched pin verified")
+		}
+		after, _ := ProposalFingerprint(p)
+		if before == after {
+			t.Fatal("pin not fingerprinted")
+		}
+		if r, err := RecordReview(p, evidence, in); err == nil || r != nil {
+			t.Fatal("stale approval accepted")
+		}
+		if _, err := VerifyPreparationReview(p, *record, "ws1", "env1"); err == nil {
+			t.Fatal("stale approval preparation accepted")
+		}
+	}
+	p.GoalPin = &GoalPin{Version: 0, Fingerprint: gf}
+	if ReviewProposal(p, evidence).State != ProposalDraft {
+		t.Fatal("invalid pin ready")
+	}
+	if got, err := VerifyGoal(g, p, "ws1", "env1"); err == nil || got != nil {
+		t.Fatal("invalid pin verified")
+	}
+}
+
+func TestDecodeProposalGoalPin(t *testing.T) {
+	_, p := goalFixture()
+	raw := stringMustJSON(t, p)
+	for _, pin := range []string{
+		`null`, `{}`, `[]`, `true`, `{"version":1}`, `{"fingerprint":"` + hashA + `"}`,
+		`{"version":0,"fingerprint":"` + hashA + `"}`,
+		`{"version":-1,"fingerprint":"` + hashA + `"}`,
+		`{"version":1.5,"fingerprint":"` + hashA + `"}`,
+		`{"version":9223372036854775808,"fingerprint":"` + hashA + `"}`,
+		`{"version":1,"fingerprint":"` + strings.ToUpper(hashA) + `"}`,
+		`{"version":1,"fingerprint":"sha256:abc"}`,
+		`{"version":1,"fingerprint":"` + hashA + `","execute":true}`,
+		`{"version":1,"ver\u0073ion":2,"fingerprint":"` + hashA + `"}`,
+	} {
+		t.Run(pin, func(t *testing.T) {
+			if got, err := DecodeProposal(strings.NewReader(`{"goalPin":` + pin + `,` + raw[1:])); err == nil || got != nil {
+				t.Fatal("malformed pin accepted")
+			}
+		})
 	}
 }

@@ -31,7 +31,7 @@ const usage = `Usage: grayling-growth-agent review --proposal FILE [--goal FILE]
        grayling-growth-agent search-learning --workspace ID --environment ID --text LITERAL --record FILE [--record FILE ...]
        grayling-growth-agent fingerprint --proposal FILE
        grayling-growth-agent record-review --proposal FILE [--goal FILE] --review-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
-Optional --goal checks caller-attested linkage before evidence reads; it never grants approval.
+--goal is required for pinned proposals; it checks caller-attested consistency before evidence reads, never approval.
 verify-goal is offline: caller-attested consistency only; no baseline, readiness or approval proof.
 verify-review is offline: artifact consistency only; no historical readiness proof or authorization.
 verify-learning is offline: local consistency only; no authorship, execution, freshness or causality proof.
@@ -176,6 +176,9 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 			goalSpecified = true
 		}
 	})
+	if p.GoalPin != nil && !goalSpecified {
+		return fail(2, "goal file required for pinned proposal")
+	}
 	if goalSpecified {
 		goal, err := readGoal(*goalFile)
 		if err != nil {
