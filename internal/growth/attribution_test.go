@@ -71,16 +71,22 @@ func TestReaderAttributionWire(t *testing.T) {
 		invalid     bool
 	}{
 		{"missing", "", 0, false},
+		{"null", "null", 0, false},
 		{"zero", "0", 0, false},
 		{"negative", "-1", -1, false},
 		{"sub-hour", "1800000000000", int64(30 * time.Minute), false},
 		{"max", "9223372036854775807", math.MaxInt64, false},
+		{"min", "-9223372036854775808", math.MinInt64, false},
+		{"underflow", "-9223372036854775809", 0, true},
+		{"boolean", "true", 0, true},
+		{"exponent", "1e3", 0, true},
 		{"overflow", "9223372036854775808", 0, true},
 		{"string", `"24h"`, 0, true},
 		{"fraction", "0.5", 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, r, q := fixture()
+			r.PrimaryAttributionWindow = tc.duration
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				if req.Method != http.MethodGet {
 					t.Error("write attempted")
@@ -108,7 +114,11 @@ func TestReaderAttributionWire(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || e.Status != Ready || e.Metrics[0].AttributionWindow != tc.duration {
+			want := Hold
+			if tc.duration > 0 {
+				want = Ready
+			}
+			if err != nil || e.Status != want || e.Metrics[0].AttributionWindow != tc.duration {
 				t.Fatalf("historical evidence changed: %+v %v", e, err)
 			}
 		})

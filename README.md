@@ -53,6 +53,19 @@ authorizes publication, and all requests remain GET-only. Local fixtures establi
 conservative HOLD; durable monitoring and model generation
 remain future work.
 
+Report evidence requires a positive `primaryAttributionWindow` in exact int64
+nanoseconds matching the pinned primary catalog definition. Missing/null,
+nonpositive or mismatched durations HOLD; missing evidence remains NEEDS_DATA.
+The fixed `primary_attribution_invalid` / `review_metric_definitions` blocker
+survives monitoring and learning export, offline verification and search.
+Approval and both preparation paths inherit the HOLD, even with an older approval.
+Historical published/deprecated definitions allow exact sub-hour matches;
+new proposals retain their whole-hour schema. Offline learning checks preserve
+recorded blockers without reconstructing historical catalog evidence.
+See [behavior and limits](docs/growth-copilot.md#primary-report-attribution-consistency).
+Local tests do not establish real Saker pilot outcomes, durable orchestration
+or model integration; full #20 acceptance remains open.
+
 Read-only rollout observation is available through
 `grayling-growth-agent rollout --manifest FILE --base-url ORIGIN --workspace ID --environment ID`.
 The strict manifest pins workspace/environment, experiment ID, epoch and registration

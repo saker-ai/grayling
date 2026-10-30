@@ -32,11 +32,13 @@ func TestMonitorBinary(t *testing.T) {
 	names = append(names, aggregateCaseNames()...)
 	names = append(names, diagnosticsTimeCases...)
 	names = append(names, watermarkCases...)
+	names = append(names, primaryAttributionCases...)
+	names = append(names, primaryAttributionBoundaryCases...)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
 			m := growth.MonitorManifest{WorkspaceID: "ws1", EnvironmentID: "env1", ExperimentID: "exp1", Epoch: 1, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, PrimaryMetric: p.PrimaryMetric.Ref, Guardrails: []growth.MetricRef{p.Guardrails[0].Ref}}
-			report := growth.Report{ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, RegistrationVersion: m.RegistrationVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, AnalysisMethod: "two-proportion-z", ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue"}}
+			report := growth.Report{PrimaryAttributionWindow: int64(24 * time.Hour), ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, RegistrationVersion: m.RegistrationVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, AnalysisMethod: "two-proportion-z", ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue"}}
 			if strings.HasPrefix(name, "report method ") {
 				report.AnalysisMethod = strings.TrimPrefix(name, "report method ")
 			}
@@ -64,6 +66,12 @@ func TestMonitorBinary(t *testing.T) {
 			}
 			if applyAggregateCase(name, &report) {
 				code, status, want = 3, growth.Hold, "aggregates_missing"
+			}
+			if invalidPrimaryAttributionCase(name) {
+				code, status, want = 3, growth.Hold, "primary_attribution_invalid"
+			}
+			if malformedPrimaryAttributionCase(name) {
+				code = 1
 			}
 			if invalidExposureCase(name) {
 				code, status, want = 3, growth.Hold, "exposure_mode_invalid"
@@ -334,7 +342,7 @@ func TestMonitorBinary(t *testing.T) {
 			if got.Status != status || got.PublicationAuthorized {
 				t.Fatalf("summary %+v", got)
 			}
-			checkWatermarkBlockers(t, name, got)
+			checkPrimaryAttributionBlockers(t, name, got)
 			checkDiagnosticsTimeBlockers(t, name, got)
 			if want != "" {
 				found := false

@@ -545,9 +545,8 @@ also block readiness. Sub-hour or fractional-hour primary definitions cannot be
 represented by this proposal schema and must be revised through human review,
 never rounded. Guardrails may use sub-hour or longer durations; preparation's
 analysis window must cover each exact duration. Invalid wire types or numbers
-outside int64 fail evidence decoding. Historical monitoring and learning retain
-their existing health/lifecycle rules and do not apply new-proposal attribution
-gates. Grayling still resolves exact metric references and authoritatively
+outside int64 fail evidence decoding. Historical monitoring and learning use the exact report/catalog comparison
+below; they do not require whole-hour durations. Grayling still resolves exact metric references and authoritatively
 validates experiment creation. These checks neither prove statistical adequacy
 nor authenticate human attestations; approval, binding and publishing gates remain.
 Local fixtures establish no real Saker instrumentation or pilot outcomes.
@@ -811,7 +810,7 @@ below. Codes and remediation actions are implementation-owned:
 | Blocker | Remediation |
 | --- | --- |
 | `evidence_missing` | `restore_evidence_access` |
-| `metric_lifecycle_invalid` | `review_metric_definitions` |
+| `metric_lifecycle_invalid`, `primary_attribution_invalid` | `review_metric_definitions` |
 | `verdict_invalid`, `server_hold`, `health_review_required` | `review_diagnostics` |
 | `analysis_method_invalid` | `review_registration` |
 | `exposure_mode_invalid` | `review_registration` |
@@ -1518,3 +1517,37 @@ validation passed GORM/report/quota race tests, the full Agent integration race
 suite (229.415 seconds under the unchanged five-minute timeout), and PostgreSQL
 E2E (4.372 seconds). The cleanup trap removed the container. No gate, assertion
 or timeout was weakened; these results establish local software behavior only.
+
+## Primary report attribution consistency
+
+The report allowlist includes `primaryAttributionWindow` as exact int64
+nanoseconds. Before report evidence can be `READY`, it must be positive and
+equal to `attributionWindow` from the catalog definition with the report's exact
+primary metric key, version and definition hash. Reader and monitor share this
+comparison. Omitted, null, zero, negative or mismatched durations give `HOLD`,
+including a one-nanosecond difference. No rounding, floating-point conversion or
+substitution from a guardrail/current metric version is allowed. Exact positive
+sub-hour durations and int64 maximum values remain valid historical evidence
+for published or deprecated frozen definitions, subject to all other health gates.
+Malformed numeric types, fractions, exponent notation and values outside int64
+fail response decoding with no partial artifact. Missing metric/report evidence
+continues to give `NEEDS_DATA`.
+
+Monitor exports the fixed `primary_attribution_invalid` /
+`review_metric_definitions` blocker. Proposal review inherits evidence HOLD,
+approval fails, and rejection/request-changes retain readiness blockers. Both
+preparation paths require fresh ready evidence, including preparation with an
+older approval. The existing new-proposal schema still requires whole-hour
+attribution claims; historical sub-hour acceptance does not change that schema.
+
+Learning export, offline verification and search preserve the recorded HOLD and
+fixed remediation. Offline artifacts do not contain the historical catalog
+snapshot needed to reconstruct this comparison; offline verification checks local
+consistency and never establishes catalog validity, freshness, real instrumentation
+or a business win. Library and actual-binary regressions exercise wire boundaries,
+review/preparation, learning round trips and zero non-GET requests. Real report
+handler compatibility tests retain the server's duration and conservative HOLD.
+These local fixtures establish software behavior only. Public APIs, statistics,
+persistence and publication behavior remain unchanged. Durable orchestration,
+model integration and real Saker pilot evidence remain required for full #20
+acceptance.

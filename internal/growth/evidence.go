@@ -175,6 +175,9 @@ type Report struct {
 	Diagnostics         *Diagnostics `json:"diagnostics"`
 	PerVariant          []Variant    `json:"perVariant"`
 	Decision            Decision     `json:"decision"`
+
+	// PrimaryAttributionWindow is the server analysis duration in exact nanoseconds.
+	PrimaryAttributionWindow int64 `json:"primaryAttributionWindow"`
 }
 
 type Evidence struct {
@@ -341,7 +344,7 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 			return nil, ErrMismatch
 		}
 		status := Ready
-		if len(e.Metrics) != len(q.Metrics) || !historicalMetricsValid(e.Metrics) {
+		if len(e.Metrics) != len(q.Metrics) || !historicalMetricsValid(e.Metrics) || !primaryAttributionValid(*p, e.Metrics) {
 			status = Hold
 		}
 		if len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
@@ -364,6 +367,21 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 		return nil, err
 	}
 	return e, nil
+}
+
+// Compare only the exact frozen primary definition, never another metric or
+// rounded hours. Absent/null wire durations decode to zero and cannot be READY.
+func primaryAttributionValid(p Report, metrics []Metric) bool {
+	if p.PrimaryMetricRef == nil || p.PrimaryAttributionWindow <= 0 {
+		return false
+	}
+	ref := *p.PrimaryMetricRef
+	for _, m := range metrics {
+		if m.Key == ref.Key && m.Version == ref.Version && m.Hash == ref.DefinitionHash {
+			return m.AttributionWindow > 0 && p.PrimaryAttributionWindow == m.AttributionWindow
+		}
+	}
+	return false
 }
 
 // Historical observation permits deprecated frozen definitions, unlike new proposals.
