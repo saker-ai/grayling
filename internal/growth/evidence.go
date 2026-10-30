@@ -142,7 +142,14 @@ type Decision struct {
 	} `json:"guardrailBreaches,omitempty"`
 }
 
+// DiagnosticVariant retains only the supplied aggregate delivery gap.
+// Variant labels, identities and other flow statistics are deliberately omitted.
+type DiagnosticVariant struct {
+	Unexposed *int64 `json:"unexposed"`
+}
+
 type Diagnostics struct {
+	PerVariant []DiagnosticVariant `json:"perVariant,omitempty"`
 	// Optional server SRM results retain presence and only explicit health.
 	AssignmentSRM SRM `json:"assignmentSrm,omitzero"`
 	ExposureSRM   SRM `json:"exposureSrm,omitzero"`
@@ -160,9 +167,20 @@ type Diagnostics struct {
 
 // diagnosticsCountsValid trusts only explicit zero counts, independently of
 // summary health, issue prose or verdict. No statistical inference is performed.
-func diagnosticsCountsValid(d *Diagnostics) bool {
-	return d != nil && d.CrossVariantUnits != nil && *d.CrossVariantUnits == 0 &&
-		d.AssignmentMismatch != nil && *d.AssignmentMismatch == 0
+func diagnosticsCountsValid(d *Diagnostics, reportMode string) bool {
+	if d == nil || d.CrossVariantUnits == nil || *d.CrossVariantUnits != 0 ||
+		d.AssignmentMismatch == nil || *d.AssignmentMismatch != 0 {
+		return false
+	}
+	// Validate supplied onRender evidence only; omitted coverage is not inferred.
+	if reportMode == "onRender" {
+		for _, entry := range d.PerVariant {
+			if entry.Unexposed == nil || *entry.Unexposed != 0 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 type Variant struct {
@@ -478,7 +496,7 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 		if len(e.Metrics) != len(q.Metrics) || !historicalMetricsValid(e.Metrics) || !primaryAttributionValid(*p, e.Metrics) {
 			status = Hold
 		}
-		if !diagnosticsCountsValid(p.Diagnostics) || !journeysValid(*p) || !guardrailsValid(*p) || !srmValid(*p) || !diagnosticsSRMValid(p.Diagnostics) || len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
+		if !diagnosticsCountsValid(p.Diagnostics, p.ExposureMode) || !journeysValid(*p) || !guardrailsValid(*p) || !srmValid(*p) || !diagnosticsSRMValid(p.Diagnostics) || len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
 			p.PrimaryMetricRef == nil || p.Diagnostics == nil || !fingerprint.MatchString(p.RegistrationVersion) || !knownAnalysisMethod(p.AnalysisMethod) || !knownExposureMode(p.ExposureMode) ||
 			!usableVariants(p.PerVariant) || !knownVerdict(p.Decision.Verdict) || p.Decision.Verdict == "hold" {
 			status = Hold

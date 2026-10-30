@@ -173,6 +173,9 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string, populated bool) {
 				ExposureSRM *struct {
 					Healthy bool `json:"healthy"`
 				} `json:"exposureSrm"`
+				PerVariant []struct {
+					Unexposed int64 `json:"unexposed"`
+				} `json:"perVariant"`
 				ExposureMode       string `json:"exposureMode"`
 				CrossVariantUnits  int64  `json:"crossVariantUnits"`
 				AssignmentMismatch int64  `json:"assignmentMismatch"`
@@ -204,6 +207,21 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string, populated bool) {
 		if d.ExposureMode != mode || p.Diagnostics == nil || p.Diagnostics.ExposureMode != mode || p.Diagnostics.CrossVariantUnits == nil || p.Diagnostics.AssignmentMismatch == nil || *p.Diagnostics.CrossVariantUnits != d.CrossVariantUnits || *p.Diagnostics.AssignmentMismatch != d.AssignmentMismatch {
 			t.Fatal("lost real diagnostic counts")
 		}
+		if len(d.PerVariant) != len(p.Diagnostics.PerVariant) {
+			t.Fatal("lost diagnostic perVariant population")
+		}
+		var totalUnexposed int64
+		for i, entry := range d.PerVariant {
+			projected := p.Diagnostics.PerVariant[i].Unexposed
+			if projected == nil || *projected != entry.Unexposed {
+				t.Fatal("lost real unexposed count")
+			}
+			totalUnexposed += entry.Unexposed
+		}
+		if populated && mode == "onRender" && totalUnexposed != 80 {
+			t.Fatalf("skewed delivery unexposed = %d, want 80", totalUnexposed)
+		}
+
 		for _, check := range []struct {
 			raw *struct {
 				Healthy bool `json:"healthy"`

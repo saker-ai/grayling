@@ -36,9 +36,11 @@ func TestReviewedPrepareBinary(t *testing.T) {
 	names = append(names, guardrailsCases...)
 	names = append(names, journeysCases...)
 	names = append(names, countsCases...)
+	names = append(names, unexposedCases...)
 	names = append(names, diagnosticsSRMCases...)
 	names = append(names, journeysMalformedCases...)
 	names = append(names, countsMalformedCases...)
+	names = append(names, unexposedMalformedCases...)
 	names = append(names, diagnosticsSRMMalformedCases...)
 	names = append(names, attributionCases...)
 	for _, name := range append(names, append(invalidReportMetadataCases, []string{"breach rollback", "breach continue", "breach ship", "rollback", "ship", "approve", "settings", "unhealthy", "missing evidence", "stale", "forged pin", "roles", "workspace", "reject", "request_changes", "null", "malformed", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing", "oversized", "boundary", "fifo", "directory", "symlink", "empty path", "missing file"}...)...) {
@@ -93,13 +95,13 @@ func TestReviewedPrepareBinary(t *testing.T) {
 					want, diag = 2, "growth: preparation analysisWindowHours: shorter_than_attribution\n"
 				}
 			}
-			if strings.HasPrefix(name, "diagnostic-srm ") || strings.HasPrefix(name, "srm ") || strings.HasPrefix(name, "checks ") || strings.HasPrefix(name, "journeys ") || strings.HasPrefix(name, "counts ") {
+			if strings.HasPrefix(name, "diagnostic-srm ") || strings.HasPrefix(name, "srm ") || strings.HasPrefix(name, "checks ") || strings.HasPrefix(name, "journeys ") || strings.HasPrefix(name, "unexposed ") || strings.HasPrefix(name, "counts ") {
 				want, diag = 0, ""
-				if invalidDiagnosticsSRMCase(name) || invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) {
+				if invalidDiagnosticsSRMCase(name) || invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) || invalidUnexposedCase(name) {
 					want, diag = 3, "preparation blocked: proposal not ready for review\n"
 				}
 			}
-			if malformedDiagnosticsSRMCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) {
+			if malformedDiagnosticsSRMCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) || malformedUnexposedCase(name) {
 				want, diag = 1, "evidence execution failed\n"
 			}
 			if strings.HasPrefix(name, "primary attribution ") {
@@ -215,6 +217,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 				applyGuardrailsCase(name, &report)
 				applyJourneysCase(name, &report)
 				applyCountsCase(name, &report)
+				applyUnexposedCase(name, &report)
 				applyDiagnosticsSRMCase(name, &report)
 				if strings.HasPrefix(name, "breach ") {
 					setGuardrailBreach(&report, strings.TrimPrefix(name, "breach "))

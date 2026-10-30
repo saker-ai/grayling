@@ -12,7 +12,7 @@ existing platform unchanged.
 | --- | --- | --- |
 | Exact metric definition | `GET /api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}` | Reuse workspace-scoped viewer access; check workspace, key, version and hash. Metrics are workspace-level, with no environment field; report scope supplies the environment boundary. |
 | Aggregate experiment evidence | `GET /api/v1/admin/experiments/{id}/report/export?format=json` | Reuse scoped report snapshot, generation time, epoch, evidence version, frozen primary/guardrail references, analysis window, watermark, recomputability, health, primary calculation errors, issues and decision. |
-| Diagnostics | Already embedded in report export | Reuse embedded experiment/epoch, matching allowlisted exposureMode, generation time, window, issues and exact nullable crossVariantUnits/assignmentMismatch counts. No separate diagnostics request or independently timed snapshot. |
+| Diagnostics | Already embedded in report export | Reuse embedded experiment/epoch, matching allowlisted exposureMode, generation time, window, issues and exact nullable crossVariantUnits/assignmentMismatch and supplied perVariant unexposed counts. No separate diagnostics request or independently timed snapshot. |
 | Rollout observation | `GET /api/v1/admin/experiments/{id}` with embedded `releasePlan` | Pin workspace/environment, experiment, epoch and registration version; project bounded plan state/history without sensitive prose. Missing experiment and absent plan are separate observations; neither grants publication authority or establishes a business win. |
 | Binding readiness | `GET /api/v1/admin/experiments/{id}/bind-check` between experiment GETs | Reuse the rollout identity manifest; validate nine prerequisite checks, revision consistency and unchanged surrounding snapshots. Non-atomic observation; never binding or publication authority. |
 | Statistical decisions | Existing report builder and statistics packages | Preserve server verdict and reasons with analysis method; do not calculate significance, sample sizes, uplift, or winning probabilities. Parallel sequential/Bayesian/Bandit views are deliberately omitted, never merged into the fixed-sample decision. |
@@ -1784,3 +1784,45 @@ After expanding the real-handler fixture to cover populated diagnostics and
 legacy whole-object omission, the complete growth library race suite also passed
 (129.744 seconds), followed by the growth library short tests, vet and whitespace
 checks. These recovery results establish local software behavior only.
+
+## Supplied diagnostic delivery gaps
+
+The embedded `diagnostics.perVariant` projection retains only `unexposed` as an
+exact nullable signed 64-bit integer. Variant labels, unit identities, other flow
+counts and arbitrary diagnostic fields are discarded. For `onRender` reports,
+every supplied entry must explicitly contain `unexposed: 0`. Missing/null entries
+or counts, negative counts and positive counts independently require HOLD, even
+with healthy summaries, empty issues and a server ship/continue/rollback verdict.
+Reader and Monitor share validation; Monitor emits `health_review_required` /
+`review_diagnostics` and preserves the server verdict.
+
+Omitted, null and empty lists remain compatible. This validates supplied entries
+only: omitted variant coverage is not inferred. Historical `onDecision` evidence
+retains its existing semantics and is not blocked by supplied unexposed counts.
+Wrong JSON types, fractions, exponent notation, int64 overflow and duplicate
+members reject the response without partial evidence or server-body diagnostics.
+
+Proposal review inherits HOLD, approval recording refuses it, and both ordinary
+and earlier-approval-linked preparation refuse artifacts. Learning export,
+offline verification and search preserve the blocked observation, false business
+win claims and false publication authority. Offline artifacts cannot reconstruct
+or authenticate the original diagnostic population.
+
+Library lifecycle and actual-command HTTP regressions cover mixed entries,
+missing/null/empty lists, both exposure modes, exact int64 boundaries, malformed
+input, redaction and zero non-GET requests. The existing real-handler integration
+fixture compares projected unexposed counts with server output, including its
+balanced-assignment, skewed-delivery population. These are local software checks;
+real Saker pilot evidence, model integration, durable orchestration and full #20
+acceptance remain outstanding. No platform writes, statistical calculations or
+publication authority are added. All documented gates and timeouts remain
+mandatory and unchanged.
+
+Local validation on 2026-10-30 passed all three documented gate sequences:
+build, complete short suite, Go build/vet, core race, boot/E2E/smoke, SDK,
+frontend/static, license and whitespace checks. The initial pre-build short run
+lacked frontend test dependencies; after `make build` installed them, the full
+short and race suites passed. Disposable PostgreSQL 16 checks passed for
+platform/report/API, full Agent integration race (227.471 seconds within the
+unchanged five-minute timeout), and PostgreSQL E2E (3.967 seconds). The exit trap
+removed the container. These results establish local software behavior only.
