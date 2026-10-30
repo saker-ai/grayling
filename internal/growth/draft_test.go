@@ -136,6 +136,19 @@ func TestCompileCreateRequestRejects(t *testing.T) {
 			if got != nil || !errors.As(err, &pe) || pe.Field != tt.field || pe.Code != tt.code {
 				t.Fatalf("got %+v, %v", got, err)
 			}
+			// A consistent caller-attested approval must not clear any compiler
+			// blocker, even if its claimed historical readiness was forged.
+			if fp, fpErr := ProposalFingerprint(p); fpErr == nil {
+				r := ReviewRecord{SchemaVersion: ReviewRecordSchemaVersion, ProposalID: p.ID, ProposalVersion: p.Version,
+					WorkspaceID: p.WorkspaceID, EnvironmentID: p.EnvironmentID, ProposalFingerprint: fp,
+					PrimaryMetric: p.PrimaryMetric, Guardrails: p.Guardrails, EvidencePins: p.EvidenceRefs,
+					Reviewer: "operator", ReviewedAt: time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC),
+					Decision: ReviewApprove, Rationale: "caller attestation", Readiness: ProposalReview{State: ProposalReadyForReview}}
+				reviewed, reviewedErr := CompileReviewedCreateRequest(p, r, p.WorkspaceID, p.EnvironmentID, e, in)
+				if reviewed != nil || reviewedErr == nil || reviewedErr.Error() != err.Error() {
+					t.Fatalf("review cleared/changed compiler blocker: %+v %v", reviewed, reviewedErr)
+				}
+			}
 		})
 	}
 	p, _ := proposalFixture()
