@@ -120,26 +120,10 @@ func RecordReview(p Proposal, evidence *Envelope, in ReviewInputs) (*ReviewRecor
 	if p.Version < 1 {
 		return fail("proposal.version", "positive_required")
 	}
-	switch in.Decision {
-	case ReviewApprove, ReviewReject, ReviewRequestChanges:
-	default:
-		return fail("decision", "invalid_decision")
-	}
-	if !validSegment(in.Reviewer) {
-		return fail("reviewer", "invalid_identifier")
+	if err := validateReviewInputs(in); err != nil {
+		return nil, err
 	}
 	reviewedAt := in.ReviewedAt.UTC().Round(0)
-	if in.ReviewedAt.IsZero() || reviewedAt.Year() < 1 || reviewedAt.Year() > 9999 {
-		return fail("reviewedAt", "invalid_timestamp")
-	}
-	if strings.TrimSpace(in.Rationale) == "" || len(in.Rationale) > MaxReviewRationaleBytes || !utf8.ValidString(in.Rationale) {
-		return fail("rationale", "required_or_invalid")
-	}
-	for _, r := range in.Rationale {
-		if unicode.IsControl(r) && r != '\n' && r != '\t' {
-			return fail("rationale", "required_or_invalid")
-		}
-	}
 	// Decode a fresh canonical snapshot to detach every nested slice, including
 	// window issues. This also makes returned timestamp representations replayable.
 	data, err := canonicalProposal(p)
@@ -161,4 +145,29 @@ func RecordReview(p Proposal, evidence *Envelope, in ReviewInputs) (*ReviewRecor
 		Reviewer: in.Reviewer, ReviewedAt: reviewedAt, Decision: in.Decision, Rationale: in.Rationale,
 		Readiness: readiness,
 	}, nil
+}
+
+// validateReviewInputs shares operator input rules with offline verification.
+func validateReviewInputs(in ReviewInputs) error {
+	switch in.Decision {
+	case ReviewApprove, ReviewReject, ReviewRequestChanges:
+	default:
+		return &ReviewError{Field: "decision", Code: "invalid_decision"}
+	}
+	if !validSegment(in.Reviewer) {
+		return &ReviewError{Field: "reviewer", Code: "invalid_identifier"}
+	}
+	reviewedAt := in.ReviewedAt.UTC().Round(0)
+	if in.ReviewedAt.IsZero() || reviewedAt.Year() < 1 || reviewedAt.Year() > 9999 {
+		return &ReviewError{Field: "reviewedAt", Code: "invalid_timestamp"}
+	}
+	if strings.TrimSpace(in.Rationale) == "" || len(in.Rationale) > MaxReviewRationaleBytes || !utf8.ValidString(in.Rationale) {
+		return &ReviewError{Field: "rationale", Code: "required_or_invalid"}
+	}
+	for _, r := range in.Rationale {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
+			return &ReviewError{Field: "rationale", Code: "required_or_invalid"}
+		}
+	}
+	return nil
 }

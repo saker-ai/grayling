@@ -1135,3 +1135,56 @@ binding or publication and always emits `publicationAuthorized=false`. Existing
 human authorization, binding rechecks, approval and publication gates remain
 mandatory. No submission, model integration, durable workflow, database schema,
 SDK behavior, browser flow or real Saker acceptance is added or claimed.
+
+## Offline verify-review command
+
+Verify an exported caller-attested human review against the complete original
+proposal, without credentials, network requests, persistence or authorization effects:
+
+```bash
+./bin/grayling-growth-agent verify-review \
+  --proposal proposal.json --record review-record.json \
+  --workspace ws1 --environment env1
+```
+
+The command accepts only these four explicit input flags (plus help). It does not
+accept API origins, tokens, timeouts, implicit environment scope or positional
+arguments. Proposal decoding and complete canonical SHA-256 fingerprinting reuse
+the existing contracts, preserving exact int64 versions above 2^53. Both input
+paths must open as bounded regular files; symlinks, directories, FIFOs and devices
+are rejected without waiting for a writer. The proposal limit is 64 KiB and the
+review record limit is **128 KiB**, including whitespace; actual reads enforce
+these limits even if files grow. Strict JSON rejects unknown members at every
+depth, duplicate/escaped duplicate names, invalid UTF-8, trailing JSON and null roots.
+
+`growth.VerifyReview` compares supported schemas, explicit workspace/environment,
+proposal identity/version, the recomputed complete proposal fingerprint, every
+copied primary/guardrail metric field and ordered evidence pins including all
+window fields. Matching fingerprint strings cannot excuse forged copied fields.
+Reviewer identity, review timestamp and rationale use the same rules as
+`RecordReview` (identifier, nonzero supported timestamp, nonblank valid UTF-8
+rationale at most 4096 bytes, no controls except newline/tab). Text stays inert.
+
+Supported decisions are `approve`, `reject` and `request_changes`. Recorded
+readiness must be `draft`, `needs_data`, `needs_implementation` or
+`ready_for_review`. Approval requires recorded `ready_for_review` with zero
+blockers. All ready records have zero blockers; blocked states retain 1–256
+blockers, each with a nonblank valid UTF-8 field and code of at most 256 bytes
+(no controls except newline/tab). Rejection/request_changes and incomplete
+proposals remain valid historical artifacts when these structural rules and
+copied pins agree. The verifier does not reconstruct an evidence envelope or
+rerun historical readiness checks.
+
+Success emits one prose-free deterministic `growth.review-verification.v1` JSON
+line with scope, proposal identity/version/fingerprint, `decision`,
+`recordedReadiness` and `publicationAuthorized=false`. It omits reviewer rationale
+and proposal prose. Exit status is **0** for consistent artifacts (including
+negative decisions or recorded blockers), **2** for invalid/mismatched input,
+and **1** for output failure. Errors use fixed diagnostics and no artifact output.
+
+Consistency of caller-supplied artifacts does not authenticate reviewers,
+reconstruct historical evidence, prove historical readiness, authorize submission
+or publication, or establish real Saker pilot outcomes. Model integration and
+durable orchestration remain outstanding. Contract and credential-free actual
+binary tests cover stale/forged artifacts, strict input boundaries, inert
+injection text and deterministic output; these are local fixture checks only.
