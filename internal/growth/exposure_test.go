@@ -38,6 +38,9 @@ func TestHistoricalExposureModes(t *testing.T) {
 			if err := json.Unmarshal(data, &wire); err != nil {
 				t.Fatal(err)
 			}
+			if tc.valid {
+				wire["diagnostics"].(map[string]any)["exposureMode"] = tc.mode
+			}
 			if tc.omitted {
 				delete(wire, "exposureMode")
 			} else {
@@ -104,7 +107,7 @@ func TestHistoricalExposureModes(t *testing.T) {
 			if err != nil || summary.Status != want || summary.PublicationAuthorized || slices.Contains(summary.Blockers, blocker) == tc.valid {
 				t.Fatalf("monitor: %+v %v", summary, err)
 			}
-			if !tc.valid && !reflect.DeepEqual(summary.Blockers, []MonitorBlocker{blocker}) {
+			if !tc.valid && !reflect.DeepEqual(summary.Blockers, []MonitorBlocker{blocker, {"diagnostics_metadata_invalid", "refresh_report"}}) {
 				t.Fatal(summary.Blockers)
 			}
 			fp, err := ProposalFingerprint(p)

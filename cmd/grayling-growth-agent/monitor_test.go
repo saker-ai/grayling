@@ -30,6 +30,7 @@ func TestMonitorBinary(t *testing.T) {
 	names = append(names, validReportMethodCases...)
 	names = append(names, metricLifecycleCases...)
 	names = append(names, exposureCases...)
+	names = append(names, diagnosticsExposureCases...)
 	names = append(names, aggregateCaseNames()...)
 	names = append(names, diagnosticsTimeCases...)
 	names = append(names, watermarkCases...)
@@ -59,7 +60,7 @@ func TestMonitorBinary(t *testing.T) {
 			for _, v := range p.Variants {
 				report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
 			}
-			report.Diagnostics = &growth.Diagnostics{CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
+			report.Diagnostics = &growth.Diagnostics{ExposureMode: "onRender", CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 			want, code, status := "", 0, growth.Ready
 			raw := ""
 			noNetwork := false
@@ -97,6 +98,12 @@ func TestMonitorBinary(t *testing.T) {
 			}
 			if invalidExposureCase(name) {
 				code, status, want = 3, growth.Hold, "exposure_mode_invalid"
+			}
+			if invalidDiagnosticsExposureCase(name) {
+				code, status, want = 3, growth.Hold, "diagnostics_metadata_invalid"
+			}
+			if malformedDiagnosticsExposureCase(name) {
+				code = 1
 			}
 			switch name {
 			case "breach rollback", "breach continue", "breach ship":
@@ -287,6 +294,9 @@ func TestMonitorBinary(t *testing.T) {
 					ws = "other"
 				}
 				// Preserve deliberate duplicate members so the reader must reject them.
+				if writeMalformedDiagnosticsExposure(w, name) {
+					return
+				}
 				json.MarshalWrite(w, map[string]any{"workspaceId": ws, "environmentId": "env1", "report": exposureReportWire(name, report)}, jsontext.AllowDuplicateNames(true))
 			}))
 			defer srv.Close()
@@ -371,6 +381,7 @@ func TestMonitorBinary(t *testing.T) {
 			checkCountsBlockers(t, name, got)
 			checkPrimaryAttributionBlockers(t, name, got)
 			checkDiagnosticsTimeBlockers(t, name, got)
+			checkDiagnosticsExposureBlockers(t, name, got)
 			if want != "" {
 				found := false
 				for _, b := range got.Blockers {

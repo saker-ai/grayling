@@ -29,6 +29,7 @@ func TestRecordLearningBinary(t *testing.T) {
 	names := []string{"breach rollback", "breach continue", "breach ship", "continue", "ship", "rollback", "hold", "unhealthy", "health injection", "reason injection", "window injection", "incomplete", "not recomputable", "late watermark", "diagnostics missing", "diagnostics mismatch", "aggregate missing", "generation missing", "method invalid", "missing report", "missing metric", "registration mismatch", "primary role mismatch", "guardrail missing", "guardrail duplicate", "epoch mismatch", "evidence mismatch", "scope mismatch", "denied", "unauthorized", "malformed", "unknown member", "duplicate JSON", "trailing JSON", "null", "oversized", "invalid epoch", "duplicate metric", "manifest scope", "directory", "fifo", "timeout", "signal", "unpinned", "pinned", "stale fingerprint", "invalid recorder", "missing time", "empty followups", "too many followups", "long followup", "twenty followups", "operator injection", "local metric conflict", "local guard conflict", "proposal scope", "proposal unknown", "proposal duplicate", "proposal trailing", "learning unknown", "learning duplicate", "learning escaped duplicate", "learning trailing", "learning null", "learning malformed", "learning UTF8", "learning oversized", "learning directory", "learning fifo", "sigterm"}
 	names = append(names, metricLifecycleCases...)
 	names = append(names, exposureCases...)
+	names = append(names, diagnosticsExposureCases...)
 	names = append(names, aggregateCaseNames()...)
 	names = append(names, diagnosticsTimeCases...)
 	names = append(names, watermarkCases...)
@@ -57,7 +58,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			for _, v := range p.Variants {
 				report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
 			}
-			report.Diagnostics = &growth.Diagnostics{CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
+			report.Diagnostics = &growth.Diagnostics{ExposureMode: "onRender", CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 			fp, err := growth.ProposalFingerprint(p)
 			if err != nil {
 				t.Fatal(err)
@@ -101,6 +102,12 @@ func TestRecordLearningBinary(t *testing.T) {
 			}
 			if invalidExposureCase(name) {
 				code, status, want = 3, growth.Hold, "exposure_mode_invalid"
+			}
+			if invalidDiagnosticsExposureCase(name) {
+				code, status, want = 3, growth.Hold, "diagnostics_metadata_invalid"
+			}
+			if malformedDiagnosticsExposureCase(name) {
+				code = 1
 			}
 			switch name {
 			case "breach rollback", "breach continue", "breach ship":
@@ -347,6 +354,9 @@ func TestRecordLearningBinary(t *testing.T) {
 					ws = "other"
 				}
 				// Preserve deliberate duplicate members so the reader must reject them.
+				if writeMalformedDiagnosticsExposure(w, name) {
+					return
+				}
 				json.MarshalWrite(w, map[string]any{"workspaceId": ws, "environmentId": "env1", "report": exposureReportWire(name, report)}, jsontext.AllowDuplicateNames(true))
 			}))
 			defer srv.Close()
@@ -452,7 +462,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &record); err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasPrefix(name, "srm ") || strings.HasPrefix(name, "checks ") || strings.HasPrefix(name, "journeys ") || strings.HasPrefix(name, "counts ") || strings.HasPrefix(name, "primary attribution ") || isWatermarkCase(name) || isDiagnosticsTimeCase(name) || strings.HasPrefix(name, "exposure ") || isAggregateCase(name) {
+			if strings.HasPrefix(name, "srm ") || strings.HasPrefix(name, "checks ") || strings.HasPrefix(name, "journeys ") || strings.HasPrefix(name, "counts ") || strings.HasPrefix(name, "primary attribution ") || isWatermarkCase(name) || isDiagnosticsTimeCase(name) || strings.HasPrefix(name, "exposure ") || isDiagnosticsExposureCase(name) || isAggregateCase(name) {
 				recordPath := writeJSON("record.json", record, "")
 				before := calls.Load()
 				for _, args := range [][]string{
@@ -535,6 +545,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			checkCountsBlockers(t, name, record.Observation)
 			checkPrimaryAttributionBlockers(t, name, record.Observation)
 			checkDiagnosticsTimeBlockers(t, name, record.Observation)
+			checkDiagnosticsExposureBlockers(t, name, record.Observation)
 			if want != "" {
 				found := false
 				for _, b := range got.Blockers {

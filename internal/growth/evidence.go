@@ -143,6 +143,8 @@ type Decision struct {
 }
 
 type Diagnostics struct {
+	// ExposureMode must be recognized and match the report; unknown text is redacted.
+	ExposureMode string `json:"exposureMode"`
 	// Counts preserve exact server aggregates. Missing and null require review.
 	CrossVariantUnits  *int64    `json:"crossVariantUnits"`
 	AssignmentMismatch *int64    `json:"assignmentMismatch"`
@@ -469,8 +471,11 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 			!usableVariants(p.PerVariant) || !knownVerdict(p.Decision.Verdict) || p.Decision.Verdict == "hold" {
 			status = Hold
 		}
-		if d := p.Diagnostics; d != nil && (len(d.Issues) != 0 || d.GeneratedAt.IsZero() || !d.GeneratedAt.Equal(p.GeneratedAt) || !usableWindow(d.Window) || !validWindowMetadata(d.Window, p.GeneratedAt) || !sameWindow(d.Window, p.Window)) {
+		if d := p.Diagnostics; d != nil && (!diagnosticsExposureValid(d, p.ExposureMode) || len(d.Issues) != 0 || d.GeneratedAt.IsZero() || !d.GeneratedAt.Equal(p.GeneratedAt) || !usableWindow(d.Window) || !validWindowMetadata(d.Window, p.GeneratedAt) || !sameWindow(d.Window, p.Window)) {
 			status = Hold
+		}
+		if d := p.Diagnostics; d != nil && !knownExposureMode(d.ExposureMode) {
+			d.ExposureMode = ""
 		}
 		e.Evidence = append(e.Evidence, Evidence{SourcePath: path, Status: status, Report: *p})
 		if status == Hold {
@@ -538,6 +543,11 @@ func knownAnalysisMethod(method string) bool {
 // require onRender; observation must not apply that creation restriction.
 func knownExposureMode(mode string) bool {
 	return mode == "onDecision" || mode == "onRender"
+}
+
+// Diagnostics must explicitly identify the same recognized exposure semantics.
+func diagnosticsExposureValid(d *Diagnostics, reportMode string) bool {
+	return d != nil && knownExposureMode(d.ExposureMode) && d.ExposureMode == reportMode
 }
 
 func knownVerdict(v string) bool {
