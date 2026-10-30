@@ -48,7 +48,7 @@ func TestPreparedRequestWithCreateHandler(t *testing.T) {
 		}
 		ref := MetricRef{Key: key, Version: def.Version, DefinitionHash: def.Hash}
 		path := "/api/v1/admin/workspaces/" + ws.ID + "/metrics/" + key + "/versions/" + strconv.FormatInt(def.Version, 10)
-		e.Metrics[i] = Metric{Status: "published", WorkspaceID: ws.ID, Key: key, Version: def.Version, Hash: def.Hash, SourcePath: path}
+		e.Metrics[i] = Metric{AttributionWindow: int64(24 * time.Hour), Status: "published", WorkspaceID: ws.ID, Key: key, Version: def.Version, Hash: def.Hash, SourcePath: path}
 		if i == 0 {
 			p.PrimaryMetric = ProposalMetric{Ref: ref, SourcePath: path}
 			e.Evidence[0].Report.PrimaryMetricRef = &ref
@@ -148,5 +148,92 @@ func TestPreparedRequestWithCreateHandler(t *testing.T) {
 		if rec.Code != http.StatusConflict {
 			t.Fatalf("deprecated %s: %d %s", ref.Key, rec.Code, rec.Body)
 		}
+	}
+}
+
+// Real catalog GETs retain exact durations, including sub-hour definitions.
+// The report envelope is synthetic; this makes no claim about real data health.
+func TestAttributionWithLocalMetricAPI(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		primary, guard time.Duration
+		hours          int64
+		ready          bool
+	}{
+		{"matching", 24 * time.Hour, 24 * time.Hour, 48, true},
+		{"mismatched", 48 * time.Hour, 24 * time.Hour, 48, false},
+		{"sub-hour", 30 * time.Minute, 24 * time.Hour, 48, false},
+		{"longer guardrail blocked", 24 * time.Hour, 72 * time.Hour, 48, false},
+		{"longer guardrail covered", 24 * time.Hour, 72 * time.Hour, 72, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, err := platform.NewStore("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			ws, err := store.CreateWorkspace("attr", "Attribution")
+			if err != nil {
+				t.Fatal(err)
+			}
+			env, err := store.CreateEnvironment(ws.ID, "test", "Test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, e := proposalFixture()
+			p.WorkspaceID, p.EnvironmentID = ws.ID, env.ID
+			e.WorkspaceID, e.EnvironmentID = ws.ID, env.ID
+			refs := []MetricRef{}
+			for i, duration := range []time.Duration{tc.primary, tc.guard} {
+				key := []string{"activation", "retention"}[i]
+				def, err := store.CreateMetricDefinition(&platform.MetricDefinition{WorkspaceID: ws.ID, Key: key, DisplayName: key, Owner: "fixture", Source: "collect", EventKeys: []string{key}, DedupUnit: "user", AttributionWindow: duration, Spec: platform.MetricSpec{Type: "proportion", Direction: "increase"}, CreatedBy: "fixture"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				def, err = store.PublishMetricDefinition(ws.ID, platform.MetricRef{Key: key, Version: def.Version}, "fixture")
+				if err != nil {
+					t.Fatal(err)
+				}
+				refs = append(refs, MetricRef{Key: key, Version: def.Version, DefinitionHash: def.Hash})
+			}
+			viewer, err := store.CreateToken(platform.TokenAdmin, "viewer", platform.RoleViewer, ws.ID, "", "fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := api.NewServer(store, nil, api.Options{}).Handler()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Error("unexpected write")
+					w.WriteHeader(405)
+					return
+				}
+				handler.ServeHTTP(w, r)
+			}))
+			defer srv.Close()
+			reader, err := NewReader(Config{BaseURL: srv.URL, WorkspaceID: ws.ID, EnvironmentID: env.ID, BearerToken: viewer.Secret})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reader.Close()
+			catalog, err := reader.Read(t.Context(), Query{Metrics: refs})
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.Metrics = catalog.Metrics
+			for i, d := range []time.Duration{tc.primary, tc.guard} {
+				if e.Metrics[i].AttributionWindow != int64(d) {
+					t.Fatal(e.Metrics[i])
+				}
+			}
+			p.PrimaryMetric = ProposalMetric{Ref: refs[0], SourcePath: e.Metrics[0].SourcePath}
+			p.Guardrails = []ProposalMetric{{Ref: refs[1], SourcePath: e.Metrics[1].SourcePath}}
+			e.Evidence[0].Report.PrimaryMetricRef = &refs[0]
+			e.Evidence[0].Report.GuardrailMetricRefs = refs[1:]
+			in := preparationFixture(p)
+			in.AnalysisWindowHours = tc.hours
+			got, err := CompileCreateRequest(p, e, in)
+			if (err == nil) != tc.ready || (got != nil) != tc.ready {
+				t.Fatalf("%+v %v", got, err)
+			}
+		})
 	}
 }

@@ -114,7 +114,7 @@ func TestCompileCreateRequestRejects(t *testing.T) {
 		{"runtime overflow", func(p *Proposal, _ *Envelope, _ *PreparationInputs) { p.SamplePlan.MinRuntimeHours = math.MaxInt64 }, "samplePlan.minRuntimeHours", "invalid_duration"},
 		{"attribution overflow", func(p *Proposal, _ *Envelope, _ *PreparationInputs) {
 			p.AnalysisPlan.AttributionWindowHours = math.MaxInt64
-		}, "analysisPlan.attributionWindowHours", "invalid_duration"},
+		}, "proposal", "not_ready_for_review"},
 		{"window shorter", func(_ *Proposal, _ *Envelope, in *PreparationInputs) { in.AnalysisWindowHours = 1 }, "analysisWindowHours", "shorter_than_attribution"},
 		{"guard missing", func(_ *Proposal, _ *Envelope, in *PreparationInputs) { in.Guardrails = nil }, "guardrails", "reference_mismatch"},
 		{"guard pin", func(_ *Proposal, _ *Envelope, in *PreparationInputs) { in.Guardrails[0].Ref.Version++ }, "guardrails[0].ref", "reference_mismatch"},
@@ -196,6 +196,7 @@ func TestCompileInjectionAndDurationBoundary(t *testing.T) {
 	in.AnalysisWindowHours = maxHours
 	p.SamplePlan.MinRuntimeHours = maxHours
 	p.AnalysisPlan.AttributionWindowHours = maxHours
+	e.Metrics[0].AttributionWindow = maxHours * int64(time.Hour)
 	got, err := CompileCreateRequest(p, e, in)
 	if err != nil {
 		t.Fatal(err)

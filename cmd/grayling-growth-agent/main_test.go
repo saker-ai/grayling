@@ -97,6 +97,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 		names = append(names, "input missing", "input fifo", "input directory", "input oversized", "input null", "input array", "input malformed", "input invalid utf8", "input trailing", "input duplicate", "input escaped duplicate", "input unknown", "input authorization", "input evidence", "input nested", "input timestamp omitted", "input timestamp invalid", "input decision invalid", "input reviewer omitted", "input rationale omitted", "input rationale long", "input stale", "input unchanged version stale")
 	}
 	names = append(names, metricLifecycleCases...)
+	names = append(names, attributionCases...)
 	names = append(names, invalidReportMetadataCases...)
 	names = append(names, validReportMethodCases...)
 	for _, name := range names {
@@ -105,6 +106,9 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 				return // Records intentionally retain operator/proposal content.
 			}
 			p := fixtureProposal(t)
+			if name == "attribution overflow" {
+				p.AnalysisPlan.AttributionWindowHours = 9223372036854775807
+			}
 			report := growth.Report{ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, AnalysisMethod: p.AnalysisPlan.Method, ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue", Reasons: []string{secret}}}
 			report.Diagnostics = &growth.Diagnostics{ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 			count, value := int64(100), 0.2
@@ -196,6 +200,18 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 				}
 				if lifecycleStatus(name) == "absent" {
 					status = growth.NeedsData
+				}
+			}
+			if strings.HasPrefix(name, "attribution ") && name != "attribution match" {
+				if name == "attribution longer guardrail" {
+					if command == "prepare" {
+						want = 2
+					}
+				} else {
+					want, state = 3, growth.ProposalNeedsData
+					if name == "attribution overflow" {
+						state = growth.ProposalDraft
+					}
 				}
 			}
 			switch name {

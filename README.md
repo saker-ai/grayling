@@ -178,6 +178,16 @@ Published flag and segment documents are immutable; a manifest identifies the ac
 - Use HTTPS for a console or management API reachable beyond loopback. Keep embedded gonacos listeners private and protect production auth secrets. See the [threat model](docs/threat-model.md).
 - Native Nacos SDK access to embedded gonacos has its own compatibility and network constraints; see the [client matrix](docs/Nacos原生客户端.md). Validate capacity and joint backup/restore with your deployment topology before production use.
 
+Growth Copilot validates new proposal attribution hours against the exact pinned
+primary metric catalog duration (integer nanoseconds), with overflow checks and
+no rounding. Missing, invalid or mismatched durations block review readiness,
+approval and preparation. Preparation must cover every primary and guardrail
+attribution duration; guardrails may differ. Sub-hour primary definitions cannot
+be represented by the current whole-hour proposal schema. Historical monitoring
+semantics, GET-only transport, human review and authoritative server validation
+remain in place. Local regression fixtures do not establish real Saker pilot
+outcomes or statistical adequacy. See [Growth Copilot](docs/growth-copilot.md).
+
 ## Development and tests
 
 ```bash

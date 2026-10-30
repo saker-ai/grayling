@@ -110,6 +110,8 @@ type Query struct {
 // server fields (including free-form metric descriptions and identities) never
 // pass through to the envelope. Server issue/reason strings remain untrusted data.
 type Metric struct {
+	// AttributionWindow preserves catalog nanoseconds without rounding to hours.
+	AttributionWindow int64 `json:"attributionWindow"`
 	// Status is projected from the catalog; unknown values are redacted on read.
 	Status      string `json:"status"`
 	WorkspaceID string `json:"workspaceId"`
