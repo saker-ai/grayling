@@ -30,6 +30,7 @@ func TestRecordLearningBinary(t *testing.T) {
 	names = append(names, exposureCases...)
 	names = append(names, aggregateCaseNames()...)
 	names = append(names, diagnosticsTimeCases...)
+	names = append(names, watermarkCases...)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
@@ -58,6 +59,9 @@ func TestRecordLearningBinary(t *testing.T) {
 				case "absent":
 					code, status, want = 3, growth.NeedsData, "evidence_missing"
 				}
+			}
+			if applyWatermarkCase(name, &report) {
+				code, status, want = 3, growth.Hold, "window_metadata_invalid"
 			}
 			if applyDiagnosticsTimeCase(name, &report) {
 				code, status, want = 3, growth.Hold, "diagnostics_metadata_invalid"
@@ -417,7 +421,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &record); err != nil {
 				t.Fatal(err)
 			}
-			if isDiagnosticsTimeCase(name) || strings.HasPrefix(name, "exposure ") || isAggregateCase(name) {
+			if isWatermarkCase(name) || isDiagnosticsTimeCase(name) || strings.HasPrefix(name, "exposure ") || isAggregateCase(name) {
 				recordPath := writeJSON("record.json", record, "")
 				before := calls.Load()
 				for _, args := range [][]string{
@@ -439,6 +443,32 @@ func TestRecordLearningBinary(t *testing.T) {
 						var verification growth.LearningVerification
 						if err := json.Unmarshal(output, &verification); err != nil || verification.ObservationStatus != status || verification.PublicationAuthorized || verification.BusinessWinEstablished {
 							t.Fatalf("verify lost status: %v %s", err, output)
+						}
+					}
+				}
+				// A copied report watermark cannot become READY by removing blockers.
+				if invalidWatermarkCase(name) && name != "watermark diagnostics only future" {
+					for _, unrelatedHold := range []bool{false, true} {
+						forged := record
+						forged.Observation.Status = growth.Ready
+						forged.Observation.Blockers = []growth.MonitorBlocker{}
+						if unrelatedHold {
+							forged.Observation.Status = growth.Hold
+							forged.Observation.Blockers = []growth.MonitorBlocker{{Code: "health_review_required", Remediation: "review_diagnostics"}}
+						}
+						forgedPath := writeJSON("forged.json", forged, "")
+						for _, args := range [][]string{
+							{"verify-learning", "--proposal", proposalPath, "--record", forgedPath, "--workspace", "ws1", "--environment", "env1"},
+							{"search-learning", "--record", forgedPath, "--workspace", "ws1", "--environment", "env1", "--text", "review next observation"},
+						} {
+							cmd := exec.CommandContext(ctx, binary, args...)
+							var stdout, stderr bytes.Buffer
+							cmd.Stdout, cmd.Stderr = &stdout, &stderr
+							err := cmd.Run()
+							exit, ok := err.(*exec.ExitError)
+							if !ok || exit.ExitCode() != 2 || stdout.Len() != 0 || stderr.Len() == 0 {
+								t.Fatalf("forged observation: %v %s %s", err, &stdout, &stderr)
+							}
 						}
 					}
 				}
@@ -468,6 +498,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			if got.Status != status || got.PublicationAuthorized {
 				t.Fatalf("summary %+v", got)
 			}
+			checkWatermarkBlockers(t, name, record.Observation)
 			checkDiagnosticsTimeBlockers(t, name, record.Observation)
 			if want != "" {
 				found := false

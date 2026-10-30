@@ -1472,3 +1472,49 @@ full Agent integration race suite (258.275 seconds within the unchanged
 five-minute timeout), and PostgreSQL E2E (4.306 seconds). The cleanup trap removed
 the container. No gate, assertion or timeout was weakened; these results establish
 local software consistency only.
+
+### Watermark generation bound
+
+The report window and embedded diagnostics window must each have
+`watermark <= report.generatedAt`. Comparisons use instants at nanosecond
+precision; equality and equivalent positive/negative timezone offsets remain
+valid. This is an internal consistency check, independent of the local clock:
+there is no freshness limit. Existing missing-time, window order, completeness,
+recomputability and matching-diagnostics requirements still apply.
+
+A watermark after generation produces evidence HOLD and the existing fixed
+`window_metadata_invalid` / `review_window` monitor blocker. A diagnostic window
+that differs from the report also retains `diagnostics_metadata_invalid` /
+`refresh_report`. Review inherits HOLD, approval is refused, and ordinary and
+review-linked preparation refuse the evidence without partial artifacts.
+Rejection and request-changes records retain readiness blockers.
+
+Learning export, offline verification and search preserve properly blocked HOLD
+records. Offline validation rejects a copied report window with a future
+watermark unless its observation retains `window_metadata_invalid` /
+`review_window`; READY or unrelated HOLD blockers cannot conceal it. Embedded
+diagnostic windows are not copied into learning observations, so their fixed
+blockers remain the historical observation of that check.
+
+Library and actual CLI process regressions cover future seconds/nanoseconds,
+report-only and diagnostics-only contradictions, equality, earlier watermarks,
+equivalent offsets, negative reviews, both preparation paths, monitoring,
+learning round trips and forged offline records, with zero non-GET requests.
+Existing real-handler compatibility fixtures remain in use. All documented
+mandatory gates, the full Agent integration suite and existing timeouts remain
+required. Local fixtures establish software behavior only; real Saker
+instrumentation, pilot acceptance, model generation and durable orchestration
+remain outside this slice.
+
+Local validation for slice 26 on 2026-10-30 passed all three supplied gate
+commands: `make build`, the complete short suite, `go build ./...`,
+`go vet ./...`, the full core race suite, boot/E2E/smoke, SDK tests (25 Python,
+23 TypeScript plus typechecking), locked frontend installation/tests/build,
+static consistency, license inventory, all five license-audit unit tests and
+`git diff --check`. The pre-change short run lacked frontend dependencies;
+after the locked build installed them, the complete short and race suites
+passed, including existing real-handler fixtures. Disposable PostgreSQL 16
+validation passed GORM/report/quota race tests, the full Agent integration race
+suite (229.415 seconds under the unchanged five-minute timeout), and PostgreSQL
+E2E (4.372 seconds). The cleanup trap removed the container. No gate, assertion
+or timeout was weakened; these results establish local software behavior only.
