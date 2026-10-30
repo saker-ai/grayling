@@ -141,7 +141,7 @@ func (r *Reader) Monitor(ctx context.Context, m MonitorManifest) (*MonitorSummar
 		add("health_review_required", "review_diagnostics")
 	}
 	checkWindow := func(w Window) {
-		if w.Version == "" || w.Start.IsZero() || !w.End.After(w.Start) || w.Watermark.IsZero() {
+		if !validWindowMetadata(w, p.GeneratedAt) {
 			add("window_metadata_invalid", "review_window")
 		}
 		if !w.Complete {

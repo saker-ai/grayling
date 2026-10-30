@@ -344,12 +344,12 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 		if len(e.Metrics) != len(q.Metrics) || !historicalMetricsValid(e.Metrics) {
 			status = Hold
 		}
-		if len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || p.GeneratedAt.IsZero() ||
+		if len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
 			p.PrimaryMetricRef == nil || p.Diagnostics == nil || !fingerprint.MatchString(p.RegistrationVersion) || !knownAnalysisMethod(p.AnalysisMethod) || !knownExposureMode(p.ExposureMode) ||
 			!usableVariants(p.PerVariant) || !knownVerdict(p.Decision.Verdict) || p.Decision.Verdict == "hold" {
 			status = Hold
 		}
-		if d := p.Diagnostics; d != nil && (len(d.Issues) != 0 || d.GeneratedAt.IsZero() || !d.GeneratedAt.Equal(p.GeneratedAt) || !usableWindow(d.Window) || !sameWindow(d.Window, p.Window)) {
+		if d := p.Diagnostics; d != nil && (len(d.Issues) != 0 || d.GeneratedAt.IsZero() || !d.GeneratedAt.Equal(p.GeneratedAt) || !usableWindow(d.Window) || !validWindowMetadata(d.Window, p.GeneratedAt) || !sameWindow(d.Window, p.Window)) {
 			status = Hold
 		}
 		e.Evidence = append(e.Evidence, Evidence{SourcePath: path, Status: status, Report: *p})
@@ -374,6 +374,13 @@ func historicalMetricsValid(metrics []Metric) bool {
 		}
 	}
 	return true
+}
+
+// Window consistency is relative to the report, independent of the local clock.
+// Missing generation time is handled separately by each caller.
+func validWindowMetadata(w Window, generatedAt time.Time) bool {
+	return w.Version != "" && !w.Start.IsZero() && w.End.After(w.Start) && !w.Watermark.IsZero() &&
+		(generatedAt.IsZero() || !w.Watermark.After(generatedAt))
 }
 
 func usableWindow(w Window) bool {

@@ -144,7 +144,7 @@ func validateLearningRecord(r LearningRecord) error {
 		if o.GeneratedAt.IsZero() && !seen["generation_time_missing"] {
 			return ErrLearning
 		}
-		if (w.Version == "" || w.Start.IsZero() || !w.End.After(w.Start) || w.Watermark.IsZero()) && !seen["window_metadata_invalid"] {
+		if !validWindowMetadata(w, o.GeneratedAt) && !seen["window_metadata_invalid"] {
 			return ErrLearning
 		}
 		if (!w.Complete && !seen["window_incomplete"]) || (!w.Recomputable && !seen["window_not_recomputable"]) || (w.Watermark.Before(w.End) && !seen["watermark_late"]) {

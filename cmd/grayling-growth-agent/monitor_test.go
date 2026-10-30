@@ -31,6 +31,7 @@ func TestMonitorBinary(t *testing.T) {
 	names = append(names, exposureCases...)
 	names = append(names, aggregateCaseNames()...)
 	names = append(names, diagnosticsTimeCases...)
+	names = append(names, watermarkCases...)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
@@ -54,6 +55,9 @@ func TestMonitorBinary(t *testing.T) {
 				case "absent":
 					code, status, want = 3, growth.NeedsData, "evidence_missing"
 				}
+			}
+			if applyWatermarkCase(name, &report) {
+				code, status, want = 3, growth.Hold, "window_metadata_invalid"
 			}
 			if applyDiagnosticsTimeCase(name, &report) {
 				code, status, want = 3, growth.Hold, "diagnostics_metadata_invalid"
@@ -330,6 +334,7 @@ func TestMonitorBinary(t *testing.T) {
 			if got.Status != status || got.PublicationAuthorized {
 				t.Fatalf("summary %+v", got)
 			}
+			checkWatermarkBlockers(t, name, got)
 			checkDiagnosticsTimeBlockers(t, name, got)
 			if want != "" {
 				found := false
