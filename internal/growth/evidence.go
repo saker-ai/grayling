@@ -225,7 +225,45 @@ func guardrailsValid(p Report) bool {
 	return true
 }
 
+// JourneySection retains only supplied maturity evidence. Labels, definitions,
+// population statistics and arbitrary exclusion keys never cross this boundary.
+type JourneySection struct {
+	Arms []JourneyArm `json:"arms"`
+}
+
+type JourneyArm struct {
+	Immature *int64            `json:"immature"`
+	Excluded JourneyExclusions `json:"excluded,omitzero"`
+}
+
+type JourneyExclusions struct {
+	ImmatureCohort         *int64 `json:"immature_cohort,omitempty"`
+	AttributionWindowShort *int64 `json:"attribution_window_short,omitempty"`
+}
+
+// Validate supplied sections only; do not infer coverage, cohort maturity from
+// clocks, or retention/statistical results. A single supplied arm is usable.
+func journeysValid(p Report) bool {
+	for _, section := range p.Journeys {
+		if len(section.Arms) == 0 {
+			return false
+		}
+		for _, arm := range section.Arms {
+			if arm.Immature == nil || *arm.Immature != 0 {
+				return false
+			}
+			for _, count := range []*int64{arm.Excluded.ImmatureCohort, arm.Excluded.AttributionWindowShort} {
+				if count != nil && *count != 0 {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
 type Report struct {
+	Journeys            []JourneySection `json:"journeys,omitempty"`
 	Guardrails          []GuardrailCheck `json:"guardrails,omitempty"`
 	SRM                 SRM              `json:"srm,omitzero"`
 	ExperimentID        string           `json:"experimentId"`
@@ -416,7 +454,7 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 		if len(e.Metrics) != len(q.Metrics) || !historicalMetricsValid(e.Metrics) || !primaryAttributionValid(*p, e.Metrics) {
 			status = Hold
 		}
-		if !guardrailsValid(*p) || !srmValid(*p) || len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
+		if !journeysValid(*p) || !guardrailsValid(*p) || !srmValid(*p) || len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
 			p.PrimaryMetricRef == nil || p.Diagnostics == nil || !fingerprint.MatchString(p.RegistrationVersion) || !knownAnalysisMethod(p.AnalysisMethod) || !knownExposureMode(p.ExposureMode) ||
 			!usableVariants(p.PerVariant) || !knownVerdict(p.Decision.Verdict) || p.Decision.Verdict == "hold" {
 			status = Hold

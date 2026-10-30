@@ -57,7 +57,7 @@ func applyGuardrailsCase(name string, report *growth.Report) {
 }
 func guardrailsReportWire(name string, report growth.Report) any {
 	if !strings.HasPrefix(name, "checks ") {
-		return diagnosticsTimeReportWire(name, report)
+		return journeysReportWire(name, report)
 	}
 	data, err := json.Marshal(report)
 	if err != nil {

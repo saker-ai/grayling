@@ -1611,3 +1611,47 @@ These local fixtures establish software behavior only. Public APIs, statistics,
 persistence and publication behavior remain unchanged. Durable orchestration,
 model integration and real Saker pilot evidence remain required for full #20
 acceptance.
+
+## Supplied journey maturity evidence (slice 30)
+
+The read-only report projection retains `journeys[].arms[].immature` and only
+`excluded.immature_cohort` / `excluded.attribution_window_short`. It discards
+metric labels, journey definitions, variant labels, numerator/denominator
+statistics and arbitrary exclusion keys. Counts remain exact int64 values;
+wrong JSON types, duplicate members and overflow fail the read without a partial
+artifact or server-body diagnostics.
+
+Reading and monitoring share the maturity check. Every supplied section needs
+at least one arm; every supplied arm needs an explicit non-null `immature: 0`.
+Positive or negative immature counts, or nonzero counts under either fixed
+exclusion key, force HOLD even with `healthy: true` and a server verdict of
+ship, continue or rollback. Omitted/null/empty journey lists remain compatible
+with non-journey reports. This checks supplied evidence only: it does not infer
+missing journey/arm coverage, calculate retention, or recompute statistics.
+
+Review inherits HOLD, approval fails, and both ordinary preparation and
+preparation linked to an earlier approval reject the evidence. Monitoring keeps
+`health_review_required` / `review_diagnostics`, the original server verdict,
+and `publicationAuthorized: false`. Learning export, verification and search
+retain the blocked observation; offline verification cannot reconstruct or
+authenticate journey evidence from the server.
+
+Library and actual-binary HTTP fixtures cover missing/null/empty sections and
+arms, missing/null/positive/negative immature counts, both fixed exclusions,
+mixed arms/sections, healthy zero controls, malformed JSON, secret-safe output,
+and zero non-GET requests across review, approval, both preparation paths,
+monitoring and learning. These are local software checks, not real Saker pilot
+acceptance. The documented build, short, vet, race, process/E2E, SDK,
+frontend/static, license and all three disposable PostgreSQL gates remain
+mandatory and unchanged. No schema, public API, model service, platform write,
+publication authority or real pilot acceptance is included. Model integration,
+durable orchestration and full issue acceptance remain outstanding.
+
+Local validation for slice 30 on 2026-10-30 passed the supplied build, short,
+Go build/vet, core race, boot/E2E/smoke, SDK, frontend/static, license-audit and
+whitespace checks. After `make build` installed the missing frontend test
+dependencies, the full short suite passed. Disposable PostgreSQL 16 validation
+passed platform/report/API race tests, the full Agent integration race suite
+(221.585 seconds, original five-minute timeout), and PostgreSQL E2E (4.930
+seconds). The cleanup trap removed the container. No gate, assertion or timeout
+was weakened; these results establish local software behavior only.
