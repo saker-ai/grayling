@@ -19,8 +19,8 @@ import (
 	"github.com/saker-ai/grayling/internal/growth"
 )
 
-const usage = `Usage: grayling-growth-agent review --proposal FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
-       grayling-growth-agent prepare --proposal FILE --settings FILE [--review-record FILE] --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+const usage = `Usage: grayling-growth-agent review --proposal FILE [--goal FILE] --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+       grayling-growth-agent prepare --proposal FILE [--goal FILE] --settings FILE [--review-record FILE] --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent bind-check --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent rollout --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent monitor --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
@@ -30,7 +30,8 @@ const usage = `Usage: grayling-growth-agent review --proposal FILE --base-url OR
        grayling-growth-agent verify-learning --proposal FILE --record FILE --workspace ID --environment ID
        grayling-growth-agent search-learning --workspace ID --environment ID --text LITERAL --record FILE [--record FILE ...]
        grayling-growth-agent fingerprint --proposal FILE
-       grayling-growth-agent record-review --proposal FILE --review-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+       grayling-growth-agent record-review --proposal FILE [--goal FILE] --review-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+Optional --goal checks caller-attested linkage before evidence reads; it never grants approval.
 verify-goal is offline: caller-attested consistency only; no baseline, readiness or approval proof.
 verify-review is offline: artifact consistency only; no historical readiness proof or authorization.
 verify-learning is offline: local consistency only; no authorship, execution, freshness or causality proof.
@@ -136,6 +137,7 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 		}
 		return 0
 	}
+	goalFile := fs.String("goal", "", "optional caller-attested goal file")
 	base := fs.String("base-url", "", "trusted API origin")
 	workspace := fs.String("workspace", "", "trusted workspace ID")
 	environment := fs.String("environment", "", "trusted environment ID")
@@ -167,6 +169,21 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	p, err := readProposal(*file)
 	if err != nil {
 		return fail(2, err.Error())
+	}
+	goalSpecified := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "goal" {
+			goalSpecified = true
+		}
+	})
+	if goalSpecified {
+		goal, err := readGoal(*goalFile)
+		if err != nil {
+			return fail(2, "invalid goal file or JSON")
+		}
+		if _, err := growth.VerifyGoal(*goal, *p, *workspace, *environment); err != nil {
+			return fail(2, "invalid or inconsistent goal artifacts")
+		}
 	}
 	var approval *growth.ReviewRecord
 	if prepare {
