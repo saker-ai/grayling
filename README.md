@@ -101,7 +101,11 @@ observation that never authorizes binding or publication; output always includes
 The offline [`verify-review` command](docs/growth-copilot.md#offline-verify-review-command)
 checks an exported human review against its proposal and explicit scope:
 `grayling-growth-agent verify-review --proposal proposal.json --record review-record.json --workspace ws1 --environment env1`.
-It accepts regular local files only (proposal 64 KiB, review 128 KiB), strictly
+Optional `--goal goal.json` checks goal linkage with the explicit operator scope
+before reading the review record; it is required for proposals containing `goalPin`.
+Omitting it preserves legacy unpinned behavior; explicit empty paths fail.
+Pinned goal versions and content fingerprints must match exactly, including versions above 2^53.
+It accepts regular local files only (goal/proposal 64 KiB, review 128 KiB), strictly
 checks JSON and copied metric/evidence pins, and emits deterministic JSON with
 `publicationAuthorized=false`. Exit codes are 0 for consistency, 2 for invalid
 input, and 1 for output failure. It uses no credentials, network or persistence

@@ -26,7 +26,7 @@ const usage = `Usage: grayling-growth-agent review --proposal FILE [--goal FILE]
        grayling-growth-agent monitor --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent record-learning --proposal FILE [--goal FILE] --manifest FILE --learning-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent verify-goal --goal FILE --proposal FILE --workspace ID --environment ID
-       grayling-growth-agent verify-review --proposal FILE --record FILE --workspace ID --environment ID
+       grayling-growth-agent verify-review --proposal FILE [--goal FILE] --record FILE --workspace ID --environment ID
        grayling-growth-agent verify-learning --proposal FILE [--goal FILE] --record FILE --workspace ID --environment ID
        grayling-growth-agent search-learning --workspace ID --environment ID --text LITERAL --record FILE [--record FILE ...]
        grayling-growth-agent fingerprint --proposal FILE
