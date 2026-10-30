@@ -6,6 +6,44 @@ read-only command. No public route, SDK behavior, persistence, browser UI, model
 call or production write is added. Never running the command leaves the
 existing platform unchanged.
 
+## Rejected collection attempts
+
+The evidence allowlist now projects `report.diagnostics.rejectedByReason` using
+only the fixed rejection codes from `internal/platform/collection_diagnostics.go`:
+`invalid_event`, `unknown_experiment`, `stale_epoch`, `assignment_mismatch`,
+`missing_exposure`, `missing_unit`, `invalid_exposure_token`,
+`expired_exposure_token`, `late_event` and `future_event`.
+Counts retain exact nullable int64 values. Unknown keys never leave the reader;
+only `unknownRejectionReasons: true` signals their presence. The projection is
+bounded to these ten codes, including when serialized by library callers.
+
+Omitted, null and empty maps remain compatible because the server omits absent
+counters. Every supplied known count must be explicitly zero. Nonzero (including
+negative), null counts or unknown keys require HOLD, independently of summary
+health and server verdict. Reader and Monitor share this validation; monitoring
+uses `health_review_required` / `review_diagnostics` and preserves the server
+verdict. Malformed values, overflow and duplicate JSON members reject the entire
+response with no partial output, including malformed counts under unknown keys.
+`duplicateEvents` remains separate: idempotent duplicate attempts alone do not
+imply unhealthy collection, and `duplicate_event` is not a rejection code.
+
+These durable counters cover the **experiment epoch**, not the report window.
+HOLD requests investigation of rejected collection attempts; it does not establish
+window-specific statistical bias or recalculate a statistical conclusion. Review
+blocks approval, both preparation paths require fresh usable evidence, and
+monitoring and learning round trips retain the investigation blocker. Local
+library, actual-binary HTTP and real API-handler regressions check this behavior,
+redaction and zero non-GET requests. These fixtures establish software behavior
+only; model orchestration and real Saker pilot acceptance remain outside this
+slice. All existing mandatory gates and their timeouts below remain unchanged.
+
+Local validation on 2026-10-30 passed build, the complete short suite (rerun after
+correcting real-handler fixture ordering), build/vet, core race, boot/E2E/smoke,
+SDK, frontend/static, license and whitespace checks. Disposable PostgreSQL 16
+platform/report/API race, full Agent integration race (227.087 seconds within
+the unchanged five-minute timeout), and PostgreSQL E2E (3.667 seconds) passed.
+The exit trap removed the container. These are local software checks only.
+
 ## Reuse and missing capabilities
 
 | Capability | Existing surface | This slice / remaining boundary |

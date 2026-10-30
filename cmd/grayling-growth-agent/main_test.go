@@ -108,10 +108,12 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 	names = append(names, guardrailsCases...)
 	names = append(names, journeysCases...)
 	names = append(names, countsCases...)
+	names = append(names, rejectionsCases...)
 	names = append(names, unexposedCases...)
 	names = append(names, diagnosticsSRMCases...)
 	names = append(names, journeysMalformedCases...)
 	names = append(names, countsMalformedCases...)
+	names = append(names, rejectionsMalformedCases...)
 	names = append(names, unexposedMalformedCases...)
 	names = append(names, diagnosticsSRMMalformedCases...)
 	names = append(names, attributionCases...)
@@ -131,6 +133,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			applyGuardrailsCase(name, &report)
 			applyJourneysCase(name, &report)
 			applyCountsCase(name, &report)
+			applyRejectionsCase(name, &report)
 			applyUnexposedCase(name, &report)
 			applyDiagnosticsSRMCase(name, &report)
 			report.Diagnostics = &growth.Diagnostics{ExposureMode: "onRender", CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
@@ -247,10 +250,10 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			if name == "primary attribution deprecated" {
 				want, state = 3, growth.ProposalNeedsData
 			}
-			if invalidDiagnosticsSRMCase(name) || invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) || invalidUnexposedCase(name) {
+			if invalidDiagnosticsSRMCase(name) || invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) || invalidRejectionsCase(name) || invalidUnexposedCase(name) {
 				want, status, state = 3, growth.Hold, growth.ProposalNeedsData
 			}
-			if malformedDiagnosticsSRMCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) || malformedUnexposedCase(name) {
+			if malformedDiagnosticsSRMCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) || malformedRejectionsCase(name) || malformedUnexposedCase(name) {
 				want = 1
 			}
 			if invalidPrimaryAttributionCase(name) {
@@ -847,6 +850,59 @@ func testRealHandler(t *testing.T, binary string) {
 			}
 		}
 	}
+	// Persisted collector outcomes flow through the real report-export handler.
+	// Only fixture setup writes to the store; the reader and binary stay GET-only.
+	for _, code := range []string{"duplicate_event", "invalid_event", "unknown_experiment", "stale_epoch", "assignment_mismatch", "missing_exposure", "missing_unit", "invalid_exposure_token", "expired_exposure_token", "late_event", "future_event"} {
+		status := "rejected"
+		if code == "duplicate_event" {
+			status = "duplicate"
+		}
+		if err := store.RecordCollectionOutcomes(ws.ID, env.ID, []platform.CollectionOutcome{{ExperimentID: exp.ID, Status: status, Code: code}}); err != nil {
+			t.Fatal(err)
+		}
+		fresh, err := reader.Read(t.Context(), q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := fresh.Evidence[0].Report.Diagnostics
+		if d == nil || d.UnknownRejectionReasons {
+			t.Fatalf("real rejection projection: %+v", d)
+		}
+		if code == "duplicate_event" {
+			if len(d.RejectedByReason) != 0 {
+				t.Fatal("idempotent duplicate became rejection")
+			}
+		} else {
+			if d.RejectedByReason[code] == nil || *d.RejectedByReason[code] != 1 || fresh.Status != growth.Hold {
+				t.Fatalf("lost real counter %s: %+v", code, d)
+			}
+		}
+		if _, ok := d.RejectedByReason["duplicate_event"]; ok {
+			t.Fatal("duplicate reason exported")
+		}
+		cmd = exec.CommandContext(t.Context(), binary, "monitor", "--manifest", manifestPath, "--base-url", srv.URL, "--workspace", ws.ID, "--environment", env.ID)
+		cmd.Env = append(os.Environ(), "GRAYLING_GROWTH_TOKEN="+viewer.Secret)
+		out.Reset()
+		stderr.Reset()
+		cmd.Stdout, cmd.Stderr = &out, &stderr
+		err = cmd.Run()
+		ee, ok = err.(*exec.ExitError)
+		if !ok || ee.ExitCode() != 3 || json.Unmarshal(out.Bytes(), &summary) != nil || summary.ServerVerdict != fresh.Evidence[0].Report.Decision.Verdict || summary.PublicationAuthorized {
+			t.Fatalf("real counter monitor: %v %s %s", err, &out, &stderr)
+		}
+		if code != "duplicate_event" {
+			found := false
+			for _, b := range summary.Blockers {
+				if b.Code == "health_review_required" && b.Remediation == "review_diagnostics" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("missing counter investigation: %+v", summary)
+			}
+		}
+	}
+
 	if writes.Load() != 0 {
 		t.Fatal("lifecycle observation sent a write")
 	}
