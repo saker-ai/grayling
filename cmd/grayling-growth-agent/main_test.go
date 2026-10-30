@@ -108,9 +108,11 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 	names = append(names, guardrailsCases...)
 	names = append(names, journeysCases...)
 	names = append(names, countsCases...)
+	names = append(names, unexposedCases...)
 	names = append(names, diagnosticsSRMCases...)
 	names = append(names, journeysMalformedCases...)
 	names = append(names, countsMalformedCases...)
+	names = append(names, unexposedMalformedCases...)
 	names = append(names, diagnosticsSRMMalformedCases...)
 	names = append(names, attributionCases...)
 	names = append(names, invalidReportMetadataCases...)
@@ -129,6 +131,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			applyGuardrailsCase(name, &report)
 			applyJourneysCase(name, &report)
 			applyCountsCase(name, &report)
+			applyUnexposedCase(name, &report)
 			applyDiagnosticsSRMCase(name, &report)
 			report.Diagnostics = &growth.Diagnostics{ExposureMode: "onRender", CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 			count, value := int64(100), 0.2
@@ -244,10 +247,10 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			if name == "primary attribution deprecated" {
 				want, state = 3, growth.ProposalNeedsData
 			}
-			if invalidDiagnosticsSRMCase(name) || invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) {
+			if invalidDiagnosticsSRMCase(name) || invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) || invalidUnexposedCase(name) {
 				want, status, state = 3, growth.Hold, growth.ProposalNeedsData
 			}
-			if malformedDiagnosticsSRMCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) {
+			if malformedDiagnosticsSRMCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) || malformedUnexposedCase(name) {
 				want = 1
 			}
 			if invalidPrimaryAttributionCase(name) {

@@ -38,11 +38,13 @@ func TestRecordLearningBinary(t *testing.T) {
 	names = append(names, guardrailsCases...)
 	names = append(names, journeysCases...)
 	names = append(names, countsCases...)
+	names = append(names, unexposedCases...)
 	names = append(names, diagnosticsSRMCases...)
 	names = append(names, srmMalformedCases...)
 	names = append(names, guardrailsMalformedCases...)
 	names = append(names, journeysMalformedCases...)
 	names = append(names, countsMalformedCases...)
+	names = append(names, unexposedMalformedCases...)
 	names = append(names, diagnosticsSRMMalformedCases...)
 	names = append(names, primaryAttributionBoundaryCases...)
 	for _, name := range names {
@@ -56,6 +58,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			applyGuardrailsCase(name, &report)
 			applyJourneysCase(name, &report)
 			applyCountsCase(name, &report)
+			applyUnexposedCase(name, &report)
 			applyDiagnosticsSRMCase(name, &report)
 			count, value := int64(100), 0.2
 			for _, v := range p.Variants {
@@ -88,13 +91,13 @@ func TestRecordLearningBinary(t *testing.T) {
 			if applyAggregateCase(name, &report) {
 				code, status, want = 3, growth.Hold, "aggregates_missing"
 			}
-			if invalidDiagnosticsSRMCase(name) || invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) {
+			if invalidDiagnosticsSRMCase(name) || invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) || invalidUnexposedCase(name) {
 				code, status, want = 3, growth.Hold, "srm_review_required"
-				if invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) {
+				if invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) || invalidUnexposedCase(name) {
 					want = "health_review_required"
 				}
 			}
-			if malformedSRMCase(name) || malformedGuardrailsCase(name) || malformedDiagnosticsSRMCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) {
+			if malformedSRMCase(name) || malformedGuardrailsCase(name) || malformedDiagnosticsSRMCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) || malformedUnexposedCase(name) {
 				code = 1
 			}
 			if invalidPrimaryAttributionCase(name) {
@@ -465,7 +468,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &record); err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasPrefix(name, "diagnostic-srm ") || strings.HasPrefix(name, "srm ") || strings.HasPrefix(name, "checks ") || strings.HasPrefix(name, "journeys ") || strings.HasPrefix(name, "counts ") || strings.HasPrefix(name, "primary attribution ") || isWatermarkCase(name) || isDiagnosticsTimeCase(name) || strings.HasPrefix(name, "exposure ") || isDiagnosticsExposureCase(name) || isAggregateCase(name) {
+			if strings.HasPrefix(name, "diagnostic-srm ") || strings.HasPrefix(name, "srm ") || strings.HasPrefix(name, "checks ") || strings.HasPrefix(name, "journeys ") || strings.HasPrefix(name, "unexposed ") || strings.HasPrefix(name, "counts ") || strings.HasPrefix(name, "primary attribution ") || isWatermarkCase(name) || isDiagnosticsTimeCase(name) || strings.HasPrefix(name, "exposure ") || isDiagnosticsExposureCase(name) || isAggregateCase(name) {
 				recordPath := writeJSON("record.json", record, "")
 				before := calls.Load()
 				for _, args := range [][]string{
@@ -546,6 +549,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			checkGuardrailsBlockers(t, name, record.Observation)
 			checkJourneysBlockers(t, name, record.Observation)
 			checkCountsBlockers(t, name, record.Observation)
+			checkUnexposedBlockers(t, name, record.Observation)
 			checkDiagnosticsSRMBlockers(t, name, record.Observation)
 			checkPrimaryAttributionBlockers(t, name, record.Observation)
 			checkDiagnosticsTimeBlockers(t, name, record.Observation)

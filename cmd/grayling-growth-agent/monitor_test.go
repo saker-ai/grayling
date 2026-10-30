@@ -39,11 +39,13 @@ func TestMonitorBinary(t *testing.T) {
 	names = append(names, guardrailsCases...)
 	names = append(names, journeysCases...)
 	names = append(names, countsCases...)
+	names = append(names, unexposedCases...)
 	names = append(names, diagnosticsSRMCases...)
 	names = append(names, srmMalformedCases...)
 	names = append(names, guardrailsMalformedCases...)
 	names = append(names, journeysMalformedCases...)
 	names = append(names, countsMalformedCases...)
+	names = append(names, unexposedMalformedCases...)
 	names = append(names, diagnosticsSRMMalformedCases...)
 	names = append(names, primaryAttributionBoundaryCases...)
 	for _, name := range names {
@@ -55,6 +57,7 @@ func TestMonitorBinary(t *testing.T) {
 			applyGuardrailsCase(name, &report)
 			applyJourneysCase(name, &report)
 			applyCountsCase(name, &report)
+			applyUnexposedCase(name, &report)
 			applyDiagnosticsSRMCase(name, &report)
 			if strings.HasPrefix(name, "report method ") {
 				report.AnalysisMethod = strings.TrimPrefix(name, "report method ")
@@ -84,13 +87,13 @@ func TestMonitorBinary(t *testing.T) {
 			if applyAggregateCase(name, &report) {
 				code, status, want = 3, growth.Hold, "aggregates_missing"
 			}
-			if invalidDiagnosticsSRMCase(name) || invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) {
+			if invalidDiagnosticsSRMCase(name) || invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) || invalidUnexposedCase(name) {
 				code, status, want = 3, growth.Hold, "srm_review_required"
-				if invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) {
+				if invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) || invalidUnexposedCase(name) {
 					want = "health_review_required"
 				}
 			}
-			if malformedSRMCase(name) || malformedGuardrailsCase(name) || malformedDiagnosticsSRMCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) {
+			if malformedSRMCase(name) || malformedGuardrailsCase(name) || malformedDiagnosticsSRMCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) || malformedUnexposedCase(name) {
 				code = 1
 			}
 			if invalidPrimaryAttributionCase(name) {
@@ -382,6 +385,7 @@ func TestMonitorBinary(t *testing.T) {
 			checkGuardrailsBlockers(t, name, got)
 			checkJourneysBlockers(t, name, got)
 			checkCountsBlockers(t, name, got)
+			checkUnexposedBlockers(t, name, got)
 			checkDiagnosticsSRMBlockers(t, name, got)
 			checkPrimaryAttributionBlockers(t, name, got)
 			checkDiagnosticsTimeBlockers(t, name, got)
