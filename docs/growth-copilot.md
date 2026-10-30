@@ -2124,3 +2124,44 @@ and PostgreSQL E2E suites passed; the trap removed the container. The initial
 pre-build short run lacked frontend test dependencies; after `make build`
 installed them, the full short suite passed. These results establish local
 software behavior only.
+
+## Review export consumer compatibility
+
+`RecordReview` validates the completed artifact with the same validator used by
+`DecodeReviewRecord` and `VerifyReview`, including the 128 KiB serialized JSON
+limit. Non-ready records retain every blocker in order: at most 256 blockers,
+with nonblank, valid UTF-8 field/code text of at most 256 bytes and no disallowed
+control characters (newline and tab remain allowed). Variant-derived blocker
+fields are subject to these same constraints. Invalid or oversized records return
+nil and fixed `ReviewError{Field: "record", Code: "too_large_or_invalid"}`;
+blockers are never shortened or discarded to make an export fit.
+
+`record-review` buffers JSON and its trailing newline before writing. The whole
+file must fit 128 KiB, with JSON escaping included. Invalid completed artifacts
+or oversized output exit 2 with `invalid or stale review input` and empty stdout.
+Writer errors and short writes exit 1 with `output failed`; an I/O failure may
+already have written bytes. The nil-evidence operator-input preflight defers
+record-size/blocker validation to the completed fresh-evidence review, since
+missing-evidence blockers can disappear after a successful read.
+
+Approval still requires `ready_for_review` (blocked approval exits 3).
+Reject/request_changes can record draft, NEEDS_DATA/HOLD and implementation
+blockers when the complete artifact satisfies consumer bounds. Fingerprints,
+exact metric/evidence copies, goal pins and readiness precedence remain unchanged.
+Library and actual-binary fixtures cover invalid blockers, count/text boundaries,
+escaped serialization, empty failure stdout and export/decode/verify round trips.
+Exact output-byte boundaries and short writes use injected writer tests.
+These establish local artifact consistency only: authenticated approval,
+persistence, model integration, platform writes, full #20 acceptance and real
+Saker pilot evidence remain outstanding. All original gates/timeouts still apply.
+
+Local validation on 2026-10-31 passed all three supplied mandatory gate sequences
+with unchanged assertions/timeouts: `make build`, full short Go suite, build/vet,
+full core race, boot/E2E/smoke, SDK tests (Python 25 and TypeScript 23 plus
+typecheck), frozen pnpm installation, frontend tests/build/static, license
+inventory and its five unit tests, and whitespace checks. Core race included
+growth library 265.255 seconds and CLI 352.586 seconds. Disposable PostgreSQL 16
+platform/report/API race checks passed, full Agent integration race passed in
+225.695 seconds within the original five-minute timeout, and PostgreSQL E2E
+passed in 4.370 seconds. The exit trap removed the container. Focused export
+regressions also passed. These are local software checks only.

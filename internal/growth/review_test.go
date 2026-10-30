@@ -125,6 +125,7 @@ func TestRecordReviewReadiness(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p, e := proposalFixture()
+			p.GoalPin = &GoalPin{Version: 1<<53 + 1, Fingerprint: hashA}
 			tt.change(&p, &e)
 			for _, decision := range []ReviewDecision{ReviewApprove, ReviewReject, ReviewRequestChanges} {
 				in := reviewInputs(t, p, decision)
@@ -145,6 +146,7 @@ func TestRecordReviewReadiness(t *testing.T) {
 				if got.ProposalID != p.ID || got.ProposalVersion != p.Version || got.WorkspaceID != p.WorkspaceID || got.EnvironmentID != p.EnvironmentID || got.ProposalFingerprint != in.ExpectedProposalFingerprint || got.SchemaVersion != ReviewRecordSchemaVersion || !reflect.DeepEqual(got.EvidencePins, p.EvidenceRefs) || !reflect.DeepEqual(got.PrimaryMetric, p.PrimaryMetric) || !reflect.DeepEqual(got.Guardrails, p.Guardrails) {
 					t.Fatal("lost proposal pins")
 				}
+				assertReviewExportRoundTrip(t, p, got)
 				again, err := RecordReview(p, e, in)
 				if err != nil || !reflect.DeepEqual(got, again) {
 					t.Fatal("non deterministic replay")
