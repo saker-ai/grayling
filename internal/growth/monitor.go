@@ -104,6 +104,9 @@ func (r *Reader) Monitor(ctx context.Context, m MonitorManifest) (*MonitorSummar
 		s.Blockers = append(s.Blockers, MonitorBlocker{code, action})
 		s.Status = Hold
 	}
+	if !historicalMetricsValid(e.Metrics) {
+		add("metric_lifecycle_invalid", "review_metric_definitions")
+	}
 	if len(e.MissingPaths) > 0 {
 		add("evidence_missing", "restore_evidence_access")
 	}

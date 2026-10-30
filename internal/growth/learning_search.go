@@ -95,6 +95,7 @@ func validateLearningRecord(r LearningRecord) error {
 	// These are the fixed code/remediation pairs exported by Monitor, not prose
 	// supplied by a report or an executable instruction.
 	blockers := map[string]string{
+		"metric_lifecycle_invalid":     "review_metric_definitions",
 		"evidence_missing":             "restore_evidence_access",
 		"verdict_invalid":              "review_diagnostics",
 		"analysis_method_invalid":      "review_registration",

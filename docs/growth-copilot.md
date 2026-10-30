@@ -797,6 +797,7 @@ below. Codes and remediation actions are implementation-owned:
 | Blocker | Remediation |
 | --- | --- |
 | `evidence_missing` | `restore_evidence_access` |
+| `metric_lifecycle_invalid` | `review_metric_definitions` |
 | `verdict_invalid`, `server_hold`, `health_review_required` | `review_diagnostics` |
 | `analysis_method_invalid` | `review_registration` |
 | `generation_time_missing`, `diagnostics_missing`, `diagnostics_metadata_invalid` | `refresh_report` |
@@ -1290,3 +1291,56 @@ or publication, or establish real Saker pilot outcomes. Model integration and
 durable orchestration remain outstanding. Contract and credential-free actual
 binary tests cover stale/forged artifacts, strict input boundaries, inert
 injection text and deterministic output; these are local fixture checks only.
+
+## Metric lifecycle validation
+
+The internal allowlisted metric DTO now preserves the catalog `status` for
+`draft`, `published` and `deprecated`. Missing or unrecognized status is exported
+as an empty value; unknown server text is never echoed. No catalog schema,
+public API or SDK contract changes are introduced.
+
+New proposals require **published primary and guardrail definitions**, in
+addition to the existing scope, exact version/hash, source path, report and
+implementation checks. A matching definition with draft, deprecated, missing
+or unknown lifecycle produces the fixed field/code blocker
+`primaryMetric` (or `guardrails[i]`) / `metric_not_published` and `needs_data`.
+An absent definition retains `metric_evidence_mismatch` and missing-evidence
+handling. Approval records are refused. Rejection and request-changes records
+retain these blockers. Both plain and review-linked preparation recheck fresh
+evidence and fail without partial artifacts, including when a historical
+approval exists. Published definitions remain eligible for the other checks;
+publication alone does not establish proposal readiness.
+
+Historical report observation uses a different rule: published and deprecated
+frozen definitions remain valid evidence when their exact references match.
+Deprecation cannot by itself clear or add a report health HOLD. Draft, missing
+or unknown lifecycle evidence cannot become READY; invalid lifecycle yields
+HOLD with `metric_lifecycle_invalid` / `review_metric_definitions` in monitoring
+and learning, while absent definitions retain NEEDS_DATA / `evidence_missing`.
+Learning verification and search accept this fixed blocker without clearing it.
+Server verdicts and existing health checks remain authoritative; no observation
+or review artifact authorizes publication or establishes a business win.
+
+Library and actual-binary fixtures cover both metric roles, published controls,
+negative review decisions, preparation with historical approvals, deprecated
+historical monitoring/learning, missing lifecycle members, unknown text and
+zero write requests. The real in-memory catalog/API fixture exercises
+`draft → published → deprecated`, stable definition hashes, new-version
+projection and frozen references. Its actual report remains conservatively
+HOLD; synthetic healthy fixtures demonstrate software behavior only. Lifecycle
+can change after any read: the existing create API must still revalidate it.
+These local checks do not establish real Saker instrumentation, pilot outcomes,
+model generation, durable orchestration or full issue acceptance.
+
+Local validation for this lifecycle slice on 2026-10-30 passed `make build`,
+the documented short Go suite, `go vet ./...`, the full core race suite,
+boot/E2E/smoke, `make sdk-test` (25 Python and 23 TypeScript tests plus
+TypeScript typechecking), locked frontend installation/tests, `make check-static`,
+`make license-check` and `git diff --check`. The initial short run preceded
+frontend dependency installation and fixture updates; the completed short and
+race runs passed after those updates. No gate, assertion or timeout was weakened.
+All three PostgreSQL gates also passed against one disposable, loopback-only
+PostgreSQL 16 server: the GORM/report/quota race suite, the full race-enabled
+Agent integration suite (222.576 seconds under the unchanged five-minute
+timeout), and PostgreSQL E2E (4.173 seconds). The container was removed by the
+cleanup trap. These results establish local fixture behavior only.

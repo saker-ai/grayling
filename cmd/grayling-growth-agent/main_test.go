@@ -96,6 +96,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 	if command == "record-review" {
 		names = append(names, "input missing", "input fifo", "input directory", "input oversized", "input null", "input array", "input malformed", "input invalid utf8", "input trailing", "input duplicate", "input escaped duplicate", "input unknown", "input authorization", "input evidence", "input nested", "input timestamp omitted", "input timestamp invalid", "input decision invalid", "input reviewer omitted", "input rationale omitted", "input rationale long", "input stale", "input unchanged version stale")
 	}
+	names = append(names, metricLifecycleCases...)
 	names = append(names, invalidReportMetadataCases...)
 	names = append(names, validReportMethodCases...)
 	for _, name := range names {
@@ -161,7 +162,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 					if !strings.HasSuffix(r.URL.Path, "/versions/1") {
 						t.Error("lost metric version")
 					}
-					json.MarshalWrite(w, growth.Metric{WorkspaceID: "ws1", Key: key, Version: version, Hash: p.PrimaryMetric.Ref.DefinitionHash})
+					writeLifecycleMetric(w, name, growth.Metric{WorkspaceID: "ws1", Key: key, Version: version, Hash: p.PrimaryMetric.Ref.DefinitionHash})
 					return
 				}
 				if r.URL.RequestURI() != "/api/v1/admin/experiments/exp1/report/export?format=json" {
@@ -188,6 +189,15 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			status := growth.Ready
 			state := growth.ProposalReadyForReview
 			noNetwork := false
+			if strings.HasPrefix(name, "lifecycle ") && lifecycleStatus(name) != "published" {
+				want, state = 3, growth.ProposalNeedsData
+				if lifecycleStatus(name) != "deprecated" {
+					status = growth.Hold
+				}
+				if lifecycleStatus(name) == "absent" {
+					status = growth.NeedsData
+				}
+			}
 			switch name {
 			case "fifo":
 				path := filepath.Join(t.TempDir(), "input.pipe")
@@ -500,7 +510,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			if code != want {
 				t.Fatalf("exit %d want %d: %s %s", code, want, out, stderr)
 			}
-			if strings.HasPrefix(name, "breach ") || strings.HasPrefix(name, "metadata ") {
+			if strings.HasPrefix(name, "breach ") || strings.HasPrefix(name, "metadata ") || strings.HasPrefix(name, "lifecycle ") {
 				if strings.Contains(out+stderr, secret) {
 					t.Fatal("breach prose leaked")
 				}
@@ -512,6 +522,18 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 					if stderr != diagnostic {
 						t.Fatalf("diagnostic %q", stderr)
 					}
+				}
+			}
+			if strings.HasPrefix(name, "lifecycle ") && lifecycleStatus(name) != "published" && (command == "review" || (command == "record-review" && want == 0)) {
+				field, blocker := "primaryMetric", "metric_not_published"
+				if strings.Contains(name, "retention") {
+					field = "guardrails[0]"
+				}
+				if lifecycleStatus(name) == "absent" {
+					blocker = "metric_evidence_mismatch"
+				}
+				if !strings.Contains(out, `"field":"`+field+`","code":"`+blocker+`"`) {
+					t.Fatalf("missing lifecycle blocker: %s", out)
 				}
 			}
 			if command == "record-review" {
@@ -698,6 +720,71 @@ func testRealHandler(t *testing.T, binary string) {
 	}
 	if summary.Status != growth.Hold || summary.ServerVerdict != "hold" || summary.PublicationAuthorized || summary.EvidenceVersion != report.EvidenceVersion || len(summary.Blockers) == 0 || writes.Load() != 0 || strings.Contains(out.String()+stderr.String(), viewer.Secret) {
 		t.Fatalf("real handler monitor %+v", summary)
+	}
+
+	// Real catalog transitions retain the definition hash. Only fixture setup
+	// mutates the in-memory store; every reader and binary request remains GET-only.
+	for i, metric := range q.Metrics {
+		ref := platform.MetricRef{Key: metric.Key, Version: metric.Version, DefinitionHash: metric.DefinitionHash}
+		if _, err := store.DeprecateMetricDefinition(ws.ID, ref); err != nil {
+			t.Fatal(err)
+		}
+		fresh, err := reader.Read(t.Context(), q)
+		if err != nil || fresh.Metrics[i].Status != "deprecated" || fresh.Metrics[i].Hash != metric.DefinitionHash || fresh.Evidence[0].Report.PrimaryMetricRef.DefinitionHash != q.Metrics[0].DefinitionHash {
+			t.Fatalf("deprecated projection: %+v %v", fresh, err)
+		}
+		// The report remains its original local HOLD; deprecation is an additional
+		// proposal blocker, not a reason to discard frozen historical evidence.
+		cmd = exec.CommandContext(t.Context(), binary, "review", "--proposal", path, "--base-url", srv.URL, "--workspace", ws.ID, "--environment", env.ID)
+		cmd.Env = append(os.Environ(), "GRAYLING_GROWTH_TOKEN="+viewer.Secret)
+		out.Reset()
+		stderr.Reset()
+		cmd.Stdout, cmd.Stderr = &out, &stderr
+		err = cmd.Run()
+		ee, ok = err.(*exec.ExitError)
+		if !ok || ee.ExitCode() != 3 || stderr.Len() != 0 {
+			t.Fatalf("deprecated review: %v %s %s", err, &out, &stderr)
+		}
+		var blocked result
+		if json.Unmarshal(out.Bytes(), &blocked) != nil {
+			t.Fatal("invalid review output")
+		}
+		field := "primaryMetric"
+		if i == 1 {
+			field = "guardrails[0]"
+		}
+		found := false
+		for _, b := range blocked.Review.Blockers {
+			if b.Field == field && b.Code == "metric_not_published" {
+				found = true
+			}
+		}
+		if !found || blocked.Review.State != growth.ProposalNeedsData {
+			t.Fatalf("lost real lifecycle blocker: %+v", blocked)
+		}
+		draft, err := store.CreateMetricDefinition(&platform.MetricDefinition{WorkspaceID: ws.ID, Key: metric.Key, DisplayName: metric.Key, Owner: "fixture", Source: "collect", EventKeys: []string{metric.Key}, DedupUnit: "user", AttributionWindow: 24 * time.Hour, Spec: platform.MetricSpec{Type: "proportion", Direction: "increase"}, CreatedBy: "fixture"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		newRef := platform.MetricRef{Key: draft.Key, Version: draft.Version}
+		for _, status := range []string{"draft", "published", "deprecated"} {
+			switch status {
+			case "published":
+				_, err = store.PublishMetricDefinition(ws.ID, newRef, "fixture")
+			case "deprecated":
+				_, err = store.DeprecateMetricDefinition(ws.ID, newRef)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			projection, err := reader.Read(t.Context(), growth.Query{Metrics: []growth.MetricRef{{Key: draft.Key, Version: draft.Version, DefinitionHash: draft.Hash}}})
+			if err != nil || len(projection.Metrics) != 1 || projection.Metrics[0].Status != status || projection.Metrics[0].Hash != draft.Hash {
+				t.Fatalf("real catalog %s: %+v %v", status, projection, err)
+			}
+		}
+	}
+	if writes.Load() != 0 {
+		t.Fatal("lifecycle observation sent a write")
 	}
 
 }
