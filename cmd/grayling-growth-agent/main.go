@@ -25,11 +25,13 @@ const usage = `Usage: grayling-growth-agent review --proposal FILE --base-url OR
        grayling-growth-agent rollout --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent monitor --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent record-learning --proposal FILE --manifest FILE --learning-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+       grayling-growth-agent verify-goal --goal FILE --proposal FILE --workspace ID --environment ID
        grayling-growth-agent verify-review --proposal FILE --record FILE --workspace ID --environment ID
        grayling-growth-agent verify-learning --proposal FILE --record FILE --workspace ID --environment ID
        grayling-growth-agent search-learning --workspace ID --environment ID --text LITERAL --record FILE [--record FILE ...]
        grayling-growth-agent fingerprint --proposal FILE
        grayling-growth-agent record-review --proposal FILE --review-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+verify-goal is offline: caller-attested consistency only; no baseline, readiness or approval proof.
 verify-review is offline: artifact consistency only; no historical readiness proof or authorization.
 verify-learning is offline: local consistency only; no authorship, execution, freshness or causality proof.
 A consistent verification exits 0, including HOLD/NEEDS_DATA; publication and business win remain false.
@@ -66,6 +68,9 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 		fmt.Fprint(out, usage)
 		return 0
+	}
+	if len(args) > 0 && args[0] == "verify-goal" {
+		return runVerifyGoal(args[1:], out, diagnostics)
 	}
 	if len(args) > 0 && args[0] == "verify-review" {
 		return runVerifyReview(args[1:], out, diagnostics)
