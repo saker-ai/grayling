@@ -23,7 +23,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 	if b, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, b)
 	}
-	for _, name := range append(invalidReportMetadataCases, []string{"breach rollback", "breach continue", "breach ship", "rollback", "ship", "approve", "settings", "unhealthy", "missing evidence", "stale", "forged pin", "roles", "workspace", "reject", "request_changes", "null", "malformed", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing", "oversized", "boundary", "fifo", "directory", "symlink", "empty path", "missing file"}...) {
+	for _, name := range append(append([]string{}, metricLifecycleCases...), append(invalidReportMetadataCases, []string{"breach rollback", "breach continue", "breach ship", "rollback", "ship", "approve", "settings", "unhealthy", "missing evidence", "stale", "forged pin", "roles", "workspace", "reject", "request_changes", "null", "malformed", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing", "oversized", "boundary", "fifo", "directory", "symlink", "empty path", "missing file"}...)...) {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
 			// Caller-attested fixture, deliberately without reconstructed historical
@@ -56,6 +56,12 @@ func TestReviewedPrepareBinary(t *testing.T) {
 				r.Decision = growth.ReviewRequestChanges
 			default:
 				diag = "invalid review record file or JSON\n"
+			}
+			if strings.HasPrefix(name, "lifecycle ") {
+				want, diag = 3, "preparation blocked: proposal not ready for review\n"
+				if lifecycleStatus(name) == "published" {
+					want, diag = 0, ""
+				}
 			}
 			if strings.HasPrefix(name, "metadata ") {
 				want, diag = 3, "preparation blocked: proposal not ready for review\n"
@@ -124,7 +130,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 					if strings.Contains(req.URL.Path, "retention") {
 						key = "retention"
 					}
-					json.MarshalWrite(w, growth.Metric{WorkspaceID: "ws1", Key: key, Version: 1, Hash: p.PrimaryMetric.Ref.DefinitionHash})
+					writeLifecycleMetric(w, name, growth.Metric{WorkspaceID: "ws1", Key: key, Version: 1, Hash: p.PrimaryMetric.Ref.DefinitionHash})
 					return
 				}
 				if name == "missing evidence" {

@@ -258,6 +258,9 @@ func ReviewProposal(p Proposal, evidence *Envelope) ProposalReview {
 			for _, got := range evidence.Metrics {
 				if got.WorkspaceID == p.WorkspaceID && got.Key == m.Ref.Key && got.Version == m.Ref.Version && got.Hash == m.Ref.DefinitionHash && got.SourcePath == m.SourcePath && m.SourcePath == path {
 					matched = true
+					if got.Status != "published" {
+						add(field, "metric_not_published", "data")
+					}
 				}
 			}
 		}

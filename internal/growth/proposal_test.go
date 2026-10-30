@@ -16,7 +16,7 @@ func proposalFixture() (Proposal, *Envelope) {
 	m, r, _ := fixture()
 	m.SourcePath = "/api/v1/admin/workspaces/ws1/metrics/activation/versions/1"
 	g := MetricRef{Key: "retention", Version: 1, DefinitionHash: hashA}
-	gm := Metric{WorkspaceID: "ws1", Key: g.Key, Version: 1, Hash: hashA, SourcePath: "/api/v1/admin/workspaces/ws1/metrics/retention/versions/1"}
+	gm := Metric{Status: "published", WorkspaceID: "ws1", Key: g.Key, Version: 1, Hash: hashA, SourcePath: "/api/v1/admin/workspaces/ws1/metrics/retention/versions/1"}
 	r.GuardrailMetricRefs = []MetricRef{g}
 	path := "/api/v1/admin/experiments/exp1/report/export?format=json"
 	e := &Envelope{WorkspaceID: "ws1", EnvironmentID: "env1", Status: Ready, Metrics: []Metric{m, gm}, Evidence: []Evidence{{SourcePath: path, Status: Ready, Report: r}}}

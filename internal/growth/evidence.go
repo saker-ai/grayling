@@ -110,6 +110,8 @@ type Query struct {
 // server fields (including free-form metric descriptions and identities) never
 // pass through to the envelope. Server issue/reason strings remain untrusted data.
 type Metric struct {
+	// Status is projected from the catalog; unknown values are redacted on read.
+	Status      string `json:"status"`
 	WorkspaceID string `json:"workspaceId"`
 	Key         string `json:"key"`
 	Version     int64  `json:"version"`
@@ -286,6 +288,11 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 		if got.WorkspaceID != r.workspace || got.Key != m.Key || got.Version != m.Version || got.Hash != m.DefinitionHash {
 			return nil, ErrMismatch
 		}
+		switch got.Status {
+		case "draft", "published", "deprecated":
+		default:
+			got.Status = ""
+		}
 		got.SourcePath = path
 		e.Metrics = append(e.Metrics, *got)
 	}
@@ -332,6 +339,9 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 			return nil, ErrMismatch
 		}
 		status := Ready
+		if len(e.Metrics) != len(q.Metrics) || !historicalMetricsValid(e.Metrics) {
+			status = Hold
+		}
 		if len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || p.GeneratedAt.IsZero() ||
 			p.PrimaryMetricRef == nil || p.Diagnostics == nil || !fingerprint.MatchString(p.RegistrationVersion) || !knownAnalysisMethod(p.AnalysisMethod) ||
 			!usableVariants(p.PerVariant) || !knownVerdict(p.Decision.Verdict) || p.Decision.Verdict == "hold" {
@@ -352,6 +362,16 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 		return nil, err
 	}
 	return e, nil
+}
+
+// Historical observation permits deprecated frozen definitions, unlike new proposals.
+func historicalMetricsValid(metrics []Metric) bool {
+	for _, m := range metrics {
+		if m.Status != "published" && m.Status != "deprecated" {
+			return false
+		}
+	}
+	return true
 }
 
 func usableWindow(w Window) bool {

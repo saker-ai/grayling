@@ -48,7 +48,7 @@ func TestPreparedRequestWithCreateHandler(t *testing.T) {
 		}
 		ref := MetricRef{Key: key, Version: def.Version, DefinitionHash: def.Hash}
 		path := "/api/v1/admin/workspaces/" + ws.ID + "/metrics/" + key + "/versions/" + strconv.FormatInt(def.Version, 10)
-		e.Metrics[i] = Metric{WorkspaceID: ws.ID, Key: key, Version: def.Version, Hash: def.Hash, SourcePath: path}
+		e.Metrics[i] = Metric{Status: "published", WorkspaceID: ws.ID, Key: key, Version: def.Version, Hash: def.Hash, SourcePath: path}
 		if i == 0 {
 			p.PrimaryMetric = ProposalMetric{Ref: ref, SourcePath: path}
 			e.Evidence[0].Report.PrimaryMetricRef = &ref
@@ -140,11 +140,13 @@ func TestPreparedRequestWithCreateHandler(t *testing.T) {
 			}
 		})
 	}
-	if _, err = store.DeprecateMetricDefinition(ws.ID, primary); err != nil {
-		t.Fatal(err)
-	}
-	rec = post(prepared.Request, owner.Secret)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("deprecated: %d %s", rec.Code, rec.Body)
+	for _, ref := range []platform.MetricRef{guard, primary} {
+		if _, err = store.DeprecateMetricDefinition(ws.ID, ref); err != nil {
+			t.Fatal(err)
+		}
+		rec = post(prepared.Request, owner.Secret)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("deprecated %s: %d %s", ref.Key, rec.Code, rec.Body)
+		}
 	}
 }

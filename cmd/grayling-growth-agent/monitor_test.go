@@ -27,6 +27,7 @@ func TestMonitorBinary(t *testing.T) {
 	}
 	names := []string{"breach rollback", "breach continue", "breach ship", "continue", "ship", "rollback", "hold", "unhealthy", "health injection", "reason injection", "window injection", "incomplete", "not recomputable", "late watermark", "diagnostics missing", "diagnostics mismatch", "aggregate missing", "generation missing", "method invalid", "missing report", "missing metric", "registration mismatch", "primary role mismatch", "guardrail missing", "guardrail duplicate", "epoch mismatch", "evidence mismatch", "scope mismatch", "denied", "unauthorized", "malformed", "unknown member", "duplicate JSON", "trailing JSON", "null", "oversized", "invalid epoch", "duplicate metric", "manifest scope", "directory", "fifo", "timeout", "signal", "unpinned", "pinned"}
 	names = append(names, validReportMethodCases...)
+	names = append(names, metricLifecycleCases...)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
@@ -43,6 +44,14 @@ func TestMonitorBinary(t *testing.T) {
 			want, code, status := "", 0, growth.Ready
 			raw := ""
 			noNetwork := false
+			if strings.HasPrefix(name, "lifecycle ") {
+				switch lifecycleStatus(name) {
+				case "draft", "missing", "unknown":
+					code, status, want = 3, growth.Hold, "metric_lifecycle_invalid"
+				case "absent":
+					code, status, want = 3, growth.NeedsData, "evidence_missing"
+				}
+			}
 			switch name {
 			case "breach rollback", "breach continue", "breach ship":
 				setGuardrailBreach(&report, strings.TrimPrefix(name, "breach "))
@@ -217,7 +226,7 @@ func TestMonitorBinary(t *testing.T) {
 					if strings.Contains(r.URL.Path, "retention") {
 						key = "retention"
 					}
-					json.MarshalWrite(w, growth.Metric{WorkspaceID: "ws1", Key: key, Version: 1, Hash: m.PrimaryMetric.DefinitionHash})
+					writeLifecycleMetric(w, name, growth.Metric{WorkspaceID: "ws1", Key: key, Version: 1, Hash: m.PrimaryMetric.DefinitionHash})
 					return
 				}
 				if r.URL.RequestURI() != "/api/v1/admin/experiments/exp1/report/export?format=json" {
