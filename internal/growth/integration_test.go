@@ -18,6 +18,12 @@ import (
 // This exercises the real authorization, metric serialization and report
 // builder over HTTP, without a database service, write route or AI provider.
 func TestReaderWithRealAPIHandler(t *testing.T) {
+	for _, mode := range []string{"onDecision", "onRender"} {
+		t.Run(mode, func(t *testing.T) { testReaderWithRealAPIHandler(t, mode) })
+	}
+}
+
+func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 	store, err := platform.NewStore("")
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +67,7 @@ func TestReaderWithRealAPIHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	exp, err := store.CreateExperiment(&platform.Experiment{
-		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "onboarding", Unit: "user_id", Epoch: 1, ExposureMode: "onRender", ExposureTrigger: "after fixture display", IntegrationOwner: "test", AnalysisMethod: "two-proportion-z",
+		WorkspaceID: ws.ID, EnvironmentID: env.ID, FlagKey: "onboarding", Unit: "user_id", Epoch: 1, ExposureMode: mode, ExposureTrigger: "after fixture display", IntegrationOwner: "test", AnalysisMethod: "two-proportion-z",
 		Variants: []string{"control", "treatment"}, Proportions: map[string]float64{"control": 50, "treatment": 50},
 		PrimaryMetricRef: &platform.MetricRef{Key: def.Key, Version: def.Version, DefinitionHash: def.Hash},
 		Guardrails:       []platform.GuardrailSpec{{MetricRef: &platform.MetricRef{Key: guardrail.Key, Version: guardrail.Version, DefinitionHash: guardrail.Hash}, MaxRelativeRegression: 0.05, MinSample: 10}},
@@ -108,12 +114,37 @@ func TestReaderWithRealAPIHandler(t *testing.T) {
 		t.Fatalf("local incomplete evidence = %+v", got)
 	}
 	p := got.Evidence[0].Report
-	if p.Window.Recomputable || p.Decision.Verdict != "hold" || p.EvidenceVersion == "" || p.PrimaryMetricRef.DefinitionHash != def.Hash || p.Diagnostics == nil {
+	if mode == "onDecision" {
+		// This empty historical fixture has no render diagnostics. It must HOLD
+		// for its existing data gaps, without an exposure-mode blocker.
+		if p.ExposureMode != mode || p.Decision.Verdict != "hold" || p.EvidenceVersion == "" || p.PrimaryMetricRef.DefinitionHash != def.Hash {
+			t.Fatalf("lost historical server semantics: %+v", p)
+		}
+		observed, err := reader.Monitor(t.Context(), growth.MonitorManifest{WorkspaceID: ws.ID, EnvironmentID: env.ID, ExperimentID: exp.ID, Epoch: exp.Epoch, RegistrationVersion: p.RegistrationVersion, PrimaryMetric: query.Metrics[0], Guardrails: []growth.MetricRef{query.Metrics[1]}})
+		if err != nil || observed.Status != growth.Hold || observed.PublicationAuthorized || len(observed.Blockers) == 0 {
+			t.Fatalf("historical report: %+v %v", observed, err)
+		}
+		for _, b := range observed.Blockers {
+			if b.Code == "exposure_mode_invalid" {
+				t.Fatal("supported historical mode rejected")
+			}
+		}
+		if writes.Load() != 0 {
+			t.Fatal("historical observation sent a write")
+		}
+		return
+	}
+	if p.ExposureMode != mode || p.Window.Recomputable || p.Decision.Verdict != "hold" || p.EvidenceVersion == "" || p.PrimaryMetricRef.DefinitionHash != def.Hash || p.Diagnostics == nil {
 		t.Fatalf("lost real server semantics: %+v", p)
 	}
 	monitor, err := reader.Monitor(context.Background(), growth.MonitorManifest{WorkspaceID: ws.ID, EnvironmentID: env.ID, ExperimentID: exp.ID, Epoch: exp.Epoch, RegistrationVersion: p.RegistrationVersion, PrimaryMetric: query.Metrics[0], Guardrails: []growth.MetricRef{query.Metrics[1]}})
 	if err != nil || monitor.Status != growth.Hold || monitor.ServerVerdict != "hold" || monitor.PublicationAuthorized || monitor.EvidenceVersion != p.EvidenceVersion || len(monitor.Blockers) == 0 {
 		t.Fatalf("real handler monitor HOLD: %+v, %v", monitor, err)
+	}
+	for _, b := range monitor.Blockers {
+		if b.Code == "exposure_mode_invalid" {
+			t.Fatal("supported real report exposure rejected", mode)
+		}
 	}
 	rm := growth.RolloutManifest{WorkspaceID: ws.ID, EnvironmentID: env.ID, ExperimentID: exp.ID, Epoch: exp.Epoch, RegistrationVersion: exp.RegistrationVersion}
 	// The same viewer can observe binding prerequisites without any mutation.

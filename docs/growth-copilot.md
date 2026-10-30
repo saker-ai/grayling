@@ -814,6 +814,7 @@ below. Codes and remediation actions are implementation-owned:
 | `metric_lifecycle_invalid` | `review_metric_definitions` |
 | `verdict_invalid`, `server_hold`, `health_review_required` | `review_diagnostics` |
 | `analysis_method_invalid` | `review_registration` |
+| `exposure_mode_invalid` | `review_registration` |
 | `generation_time_missing`, `diagnostics_missing`, `diagnostics_metadata_invalid` | `refresh_report` |
 | `window_metadata_invalid` | `review_window` |
 | `window_incomplete` | `wait_for_complete_window` |
@@ -1358,3 +1359,29 @@ PostgreSQL 16 server: the GORM/report/quota race suite, the full race-enabled
 Agent integration suite (222.576 seconds under the unchanged five-minute
 timeout), and PostgreSQL E2E (4.173 seconds). The container was removed by the
 cleanup trap. These results establish local fixture behavior only.
+
+
+### Historical report exposure modes
+
+Report evidence recognizes exactly `onDecision` and `onRender`. An omitted,
+empty, unknown, differently cased or whitespace-padded `exposureMode` produces
+HOLD even when all other evidence is healthy. Monitoring exports only the fixed
+`exposure_mode_invalid` / `review_registration` blocker; unknown server text is
+never copied into diagnostics or learning records. Learning recording, offline
+verification and search retain that HOLD and blocker.
+
+Proposal review inherits evidence HOLD: approval is refused, while rejection
+and requests for changes retain the readiness blockers. Both ordinary and
+review-linked preparation refuse invalid evidence without partial artifacts.
+A supported historical `onDecision` baseline remains usable for review and
+preparation of a new `onRender` proposal; new proposals still require real
+render exposure and the existing implementation attestations.
+
+Library and actual CLI process regressions cover omitted/empty/unknown/injection
+values, both supported modes, negative reviews, preparation refusal, learning
+export/verification/search round trips and zero non-GET requests. The existing
+local real report-handler fixture covers both supported modes; incomplete local
+reports still HOLD for their existing health/window reasons. These fixtures
+establish software compatibility only, not real Saker instrumentation, pilot
+outcomes, model generation, durable orchestration or full issue acceptance.
+No public API, persistence, SDK, model integration or publication behavior changes.

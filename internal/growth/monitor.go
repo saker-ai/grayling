@@ -131,6 +131,9 @@ func (r *Reader) Monitor(ctx context.Context, m MonitorManifest) (*MonitorSummar
 	} else {
 		add("analysis_method_invalid", "review_registration")
 	}
+	if !knownExposureMode(p.ExposureMode) {
+		add("exposure_mode_invalid", "review_registration")
+	}
 	if p.GeneratedAt.IsZero() {
 		add("generation_time_missing", "refresh_report")
 	}
