@@ -123,10 +123,9 @@ func (r *Reader) Monitor(ctx context.Context, m MonitorManifest) (*MonitorSummar
 	} else {
 		add("verdict_invalid", "review_diagnostics")
 	}
-	switch p.AnalysisMethod {
-	case "two-proportion-z", "welch", "ratio-delta", "quantile", "cuped", "bandit-beta-bernoulli":
+	if knownAnalysisMethod(p.AnalysisMethod) {
 		s.AnalysisMethod = p.AnalysisMethod
-	default:
+	} else {
 		add("analysis_method_invalid", "review_registration")
 	}
 	if p.GeneratedAt.IsZero() {

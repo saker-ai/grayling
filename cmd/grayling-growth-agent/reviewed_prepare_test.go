@@ -23,7 +23,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 	if b, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, b)
 	}
-	for _, name := range []string{"breach rollback", "breach continue", "breach ship", "rollback", "ship", "approve", "settings", "unhealthy", "missing evidence", "stale", "forged pin", "roles", "workspace", "reject", "request_changes", "null", "malformed", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing", "oversized", "boundary", "fifo", "directory", "symlink", "empty path", "missing file"} {
+	for _, name := range append(invalidReportMetadataCases, []string{"breach rollback", "breach continue", "breach ship", "rollback", "ship", "approve", "settings", "unhealthy", "missing evidence", "stale", "forged pin", "roles", "workspace", "reject", "request_changes", "null", "malformed", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing", "oversized", "boundary", "fifo", "directory", "symlink", "empty path", "missing file"}...) {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
 			// Caller-attested fixture, deliberately without reconstructed historical
@@ -56,6 +56,9 @@ func TestReviewedPrepareBinary(t *testing.T) {
 				r.Decision = growth.ReviewRequestChanges
 			default:
 				diag = "invalid review record file or JSON\n"
+			}
+			if strings.HasPrefix(name, "metadata ") {
+				want, diag = 3, "preparation blocked: proposal not ready for review\n"
 			}
 			b, err := json.Marshal(r)
 			if err != nil {
@@ -134,6 +137,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 				} else if name == "rollback" || name == "ship" {
 					report.Decision.Verdict = name
 				}
+				invalidateReportMetadata(name, &report)
 				report.Diagnostics = &growth.Diagnostics{ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 				count, value := int64(100), 0.2
 				for _, v := range p.Variants {

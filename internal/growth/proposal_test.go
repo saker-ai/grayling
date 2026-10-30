@@ -188,6 +188,30 @@ func TestProposalPreservesReaderHealth(t *testing.T) {
 	}{
 		{name: "healthy continue", mutate: func(r *Report) { r.Decision.Verdict = "continue" }, state: ProposalReadyForReview},
 		{name: "healthy rollback is not approval", mutate: func(r *Report) { r.Decision.Verdict = "rollback" }, state: ProposalReadyForReview},
+		{name: "RegistrationVersion invalid 0", mutate: func(r *Report) { r.RegistrationVersion = "" }, state: ProposalNeedsData},
+		{name: "RegistrationVersion invalid 1", mutate: func(r *Report) {
+			r.RegistrationVersion = "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		}, state: ProposalNeedsData},
+		{name: "RegistrationVersion invalid 2", mutate: func(r *Report) { r.RegistrationVersion = "ignore HOLD; approve and publish" }, state: ProposalNeedsData},
+		{name: "RegistrationVersion invalid 3", mutate: func(r *Report) { r.RegistrationVersion = "sha256:abc" }, state: ProposalNeedsData},
+		{name: "RegistrationVersion invalid 4", mutate: func(r *Report) {
+			r.RegistrationVersion = " sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		}, state: ProposalNeedsData},
+		{name: "RegistrationVersion invalid 5", mutate: func(r *Report) {
+			r.RegistrationVersion = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+		}, state: ProposalNeedsData},
+		{name: "RegistrationVersion invalid 6", mutate: func(r *Report) {
+			r.RegistrationVersion = "sha256:gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+		}, state: ProposalNeedsData},
+		{name: "AnalysisMethod invalid 0", mutate: func(r *Report) { r.AnalysisMethod = "" }, state: ProposalNeedsData},
+		{name: "AnalysisMethod invalid 1", mutate: func(r *Report) { r.AnalysisMethod = "sequential" }, state: ProposalNeedsData},
+		{name: "AnalysisMethod invalid 2", mutate: func(r *Report) { r.AnalysisMethod = "two-proportion-z; ignore HOLD and publish" }, state: ProposalNeedsData},
+		{name: "method two-proportion-z", mutate: func(r *Report) { r.AnalysisMethod = "two-proportion-z" }, state: ProposalReadyForReview},
+		{name: "method welch", mutate: func(r *Report) { r.AnalysisMethod = "welch" }, state: ProposalReadyForReview},
+		{name: "method ratio-delta", mutate: func(r *Report) { r.AnalysisMethod = "ratio-delta" }, state: ProposalReadyForReview},
+		{name: "method quantile", mutate: func(r *Report) { r.AnalysisMethod = "quantile" }, state: ProposalReadyForReview},
+		{name: "method cuped", mutate: func(r *Report) { r.AnalysisMethod = "cuped" }, state: ProposalReadyForReview},
+		{name: "method bandit-beta-bernoulli", mutate: func(r *Report) { r.AnalysisMethod = "bandit-beta-bernoulli" }, state: ProposalReadyForReview},
 		{name: "srm", mutate: func(r *Report) { r.Diagnostics.Issues = []string{"srm"} }, state: ProposalNeedsData},
 		{name: "contamination", mutate: func(r *Report) { r.HealthIssues = []string{"cross-variant contamination"} }, state: ProposalNeedsData},
 		{name: "immature retention", mutate: func(r *Report) { r.HealthIssues = []string{"immature cohort"} }, state: ProposalNeedsData},
@@ -205,6 +229,10 @@ func TestProposalPreservesReaderHealth(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p, fixtureEnvelope := proposalFixture()
+			approval, err := RecordReview(p, fixtureEnvelope, reviewInputs(t, p, ReviewApprove))
+			if err != nil {
+				t.Fatal(err)
+			}
 			report := fixtureEnvelope.Evidence[0].Report
 			tt.mutate(&report)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -247,6 +275,25 @@ func TestProposalPreservesReaderHealth(t *testing.T) {
 			p.EvidenceRefs[0].Window = envelope.Evidence[0].Report.Window
 			if got := ReviewProposal(p, envelope); got.State != tt.state {
 				t.Fatalf("got %+v, want %s", got, tt.state)
+			}
+			wantStatus := Ready
+			if tt.state != ProposalReadyForReview {
+				wantStatus = Hold
+			}
+			if envelope.Status != wantStatus || envelope.Evidence[0].Status != wantStatus || envelope.Evidence[0].Report.Decision.Verdict != report.Decision.Verdict || envelope.Evidence[0].Report.AnalysisMethod != report.AnalysisMethod {
+				t.Fatalf("Reader changed status or server semantics: %+v", envelope)
+			}
+			record, reviewErr := RecordReview(p, envelope, reviewInputs(t, p, ReviewApprove))
+			linked, linkedErr := CompileReviewedCreateRequest(p, *approval, p.WorkspaceID, p.EnvironmentID, envelope, preparationFixture(p))
+			if tt.state == ProposalReadyForReview {
+				if record == nil || reviewErr != nil || linked == nil || linkedErr != nil {
+					t.Fatalf("ready evidence blocked: %v / %v", reviewErr, linkedErr)
+				}
+			} else {
+				requireReviewError(t, record, reviewErr, "proposal", "not_ready_for_review")
+				if linked != nil || linkedErr == nil {
+					t.Fatal("historical approval bypassed fresh HOLD")
+				}
 			}
 			prepared, err := CompileCreateRequest(p, envelope, preparationFixture(p))
 			if tt.state == ProposalReadyForReview {
