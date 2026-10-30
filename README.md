@@ -127,6 +127,13 @@ rejects authorization claims. Results are caller-attested local artifacts; searc
 does not refresh evidence, access credentials/network, write an index or provide
 authenticated journal storage or real pilot acceptance.
 
+Learning exports validate hypothesis text and baseline identity/path/epoch/hash before
+HTTP, using the offline reader rules without requiring proposal readiness. Completed
+records must pass consumer validation and fit 128 KiB of serialized JSON; CLI output
+includes its newline within that limit. Invalid exports return no record or stdout.
+Healthy, HOLD and NEEDS_DATA exports round-trip through decode, verification and
+search; these checks establish local consistency only.
+
 The read-only [`Reader.RecordLearning` library](docs/growth-copilot.md#read-only-learning-records)
 pins the original proposal and links a caller-attested experiment through the
 existing monitor. Records separate proposal baselines from observed report

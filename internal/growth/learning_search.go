@@ -153,7 +153,13 @@ func validateLearningRecord(r LearningRecord) error {
 			return ErrLearning
 		}
 	}
-	for _, b := range r.ProposalBaselineReferences {
+	return validateLearningBaselines(r.ProposalBaselineReferences)
+}
+
+// Baselines are copied claims; validate their local identity without requiring
+// proposal readiness or comparing them to the linked experiment.
+func validateLearningBaselines(refs []ProposalEvidenceRef) error {
+	for _, b := range refs {
 		if !validSegment(b.ExperimentID) || b.Epoch < 1 || !fingerprint.MatchString(b.EvidenceVersion) || b.SourcePath != reportSource(b.ExperimentID) {
 			return ErrLearning
 		}
