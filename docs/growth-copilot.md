@@ -1960,7 +1960,7 @@ credentials, input text or decoder errors. Guardrail ordering does not affect
 linkage; roles, keys, versions, definition hashes and canonical source paths
 remain exact pins.
 
-Omitting `--goal` preserves existing behavior. Supplying a matching goal does
+For unpinned proposals, omitting `--goal` preserves existing behavior. Supplying a matching goal does
 not change any output schema or export a separate verification result. Fresh
 GET-only evidence, readiness, explicit review decisions, expected proposal
 fingerprints, preparation settings and any supplied review record remain
@@ -1972,7 +1972,7 @@ retain every readiness and compiler check, and no command submits anything.
 
 Goals are caller-attested planning artifacts. Verification does not authenticate
 ownership, prove baseline facts, or establish which historical goal version the
-proposal intended: existing proposals pin only goal ID. Callers can replace both
+proposal intended when unpinned: legacy proposals pin only goal ID. Callers can replace both
 artifacts. This adds no public API, persistence, model integration, submission,
 production migration or real Saker pilot claim. Local actual-binary HTTP fixtures
 exercise matching/reordered pins, mismatches, strict files and redaction,
@@ -1980,3 +1980,38 @@ request suppression, and HOLD preservation across both preparation paths; they
 do not validate real instrumentation or business outcomes. The original build,
 short/vet/race, boot/E2E/smoke, SDK/frontend/static/license and disposable
 PostgreSQL acceptance gates remain mandatory and unchanged.
+
+
+## Optional proposal goal pins (slice 38)
+
+A proposal may include `"goalPin":{"version":9007199254740993,"fingerprint":"sha256:<64 lowercase hex digits>"}`.
+Use the exact `GoalFingerprint` of the validated caller-supplied goal, and its
+positive int64 version. JSON integers remain exact above 2^53. Missing members,
+null pins, nonpositive/overflow/fractional versions, malformed or uppercase hashes,
+unknown members and duplicate members are rejected. Direct library review marks
+invalid pin values as draft blockers; `VerifyGoal` rejects them.
+
+Absent pins are omitted from serialization, preserving legacy proposal fingerprints.
+Supplied pins participate in the full proposal fingerprint, so editing either value
+invalidates earlier review inputs and approval records even at the same proposal version.
+`VerifyGoal` checks both values against the validated goal in addition to all existing
+identity, scope and metric checks. Changing goal content at the same ID/version
+therefore fails fingerprint matching.
+
+For pinned proposals, `review`, `record-review` and `prepare` (with or without
+`--review-record`) require `--goal FILE`. Omission exits 2 with empty stdout and
+`goal file required for pinned proposal`. Missing/unreadable or invalid goal files
+use `invalid goal file or JSON`; mismatched pins use
+`invalid or inconsistent goal artifacts`. These failures precede all HTTP access.
+A matching pin preserves fresh GET-only evidence checks, HOLD/NEEDS_DATA,
+explicit review decisions and every preparation gate. Unpinned proposals keep
+their existing behavior, including optional goal verification.
+
+Pins establish caller-attested consistency only. They do not authenticate ownership,
+prove baseline truth, establish readiness or grant publication authority. Callers
+can replace both artifacts; this is no trusted history or signature mechanism.
+Library and actual-binary local fixtures cover exact integers, content/version
+mismatches, malformed pins, missing goals, legacy fingerprints, stale approvals,
+HOLD preservation and zero non-GET requests. These establish software behavior
+only; no public API, schema, model integration, platform writes or real pilot
+acceptance is added. All previously documented mandatory gates remain unchanged.

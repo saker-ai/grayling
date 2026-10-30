@@ -116,7 +116,7 @@ func GoalFingerprint(g GrowthGoal) (string, error) {
 // VerifyGoal is pure and requires operator scope supplied separately from the
 // artifacts. Success means consistency only, never readiness, approval,
 // trustworthy baseline facts, statistical adequacy, or publication authority.
-// Existing proposals pin goal ID only; no goal-version pin is inferred.
+// Unpinned proposals retain ID-only linkage; supplied pins match both values.
 func VerifyGoal(g GrowthGoal, p Proposal, workspace, environment string) (*GoalVerification, error) {
 	if !validSegment(workspace) || !validSegment(environment) || ValidateGoal(g) != nil || p.SchemaVersion != ProposalSchemaVersion || !validSegment(p.ID) || p.Version < 1 || p.GoalID != g.ID || g.WorkspaceID != workspace || p.WorkspaceID != workspace || g.EnvironmentID != environment || p.EnvironmentID != environment || !validGoalMetrics(workspace, p.PrimaryMetric, p.Guardrails) || p.PrimaryMetric != g.PrimaryMetric || len(p.Guardrails) != len(g.Guardrails) {
 		return nil, ErrGoalVerification
@@ -131,7 +131,7 @@ func VerifyGoal(g GrowthGoal, p Proposal, workspace, environment string) (*GoalV
 		}
 	}
 	gf, err := GoalFingerprint(g)
-	if err != nil {
+	if err != nil || !validGoalPin(p.GoalPin) || (p.GoalPin != nil && (p.GoalPin.Version != g.Version || p.GoalPin.Fingerprint != gf)) {
 		return nil, ErrGoalVerification
 	}
 	pf, err := ProposalFingerprint(p)

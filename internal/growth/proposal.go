@@ -1,6 +1,7 @@
 package growth
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -32,6 +33,7 @@ type Proposal struct {
 	ID                 string                `json:"id"`
 	Version            int64                 `json:"version"`
 	GoalID             string                `json:"goalId"`
+	GoalPin            *GoalPin              `json:"goalPin,omitempty"`
 	WorkspaceID        string                `json:"workspaceId"`
 	EnvironmentID      string                `json:"environmentId"`
 	Hypothesis         string                `json:"hypothesis"`
@@ -50,6 +52,16 @@ type Proposal struct {
 	AnalysisPlan       AnalysisPlan          `json:"analysisPlan"`
 	SamplePlan         SamplePlan            `json:"samplePlan"`
 	RollbackConditions []string              `json:"rollbackConditions"`
+}
+
+// GoalPin records caller-attested consistency, never ownership or authority.
+type GoalPin struct {
+	Version     int64  `json:"version"`
+	Fingerprint string `json:"fingerprint"`
+}
+
+func validGoalPin(pin *GoalPin) bool {
+	return pin == nil || (pin.Version > 0 && fingerprint.MatchString(pin.Fingerprint))
 }
 
 type ProposalMetric struct {
@@ -129,6 +141,11 @@ func DecodeProposal(r io.Reader) (*Proposal, error) {
 	if json.Unmarshal(data, &p, json.RejectUnknownMembers(true)) != nil || p == nil {
 		return nil, ErrProposal
 	}
+	// An explicit null is a supplied malformed pin, not an absent pin.
+	var members map[string]jsontext.Value
+	if json.Unmarshal(data, &members) != nil || (members["goalPin"] != nil && p.GoalPin == nil) || !validGoalPin(p.GoalPin) {
+		return nil, ErrProposal
+	}
 	return p, nil
 }
 
@@ -169,6 +186,9 @@ func ReviewProposal(p Proposal, evidence *Envelope) ProposalReview {
 		if !validSegment(f.value) {
 			add(f.name, "invalid_identifier", "draft")
 		}
+	}
+	if !validGoalPin(p.GoalPin) {
+		add("goalPin", "invalid_pin", "draft")
 	}
 	if p.Version < 1 {
 		add("version", "positive_required", "draft")

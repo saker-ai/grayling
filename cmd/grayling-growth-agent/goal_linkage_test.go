@@ -26,6 +26,11 @@ func TestGoalLinkedCommandsBinary(t *testing.T) {
 	if b, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, b)
 	}
+	t.Run("legacy", func(t *testing.T) { testGoalLinkedCommands(t, binary, false) })
+	t.Run("pinned", func(t *testing.T) { testGoalLinkedCommands(t, binary, true) })
+}
+
+func testGoalLinkedCommands(t *testing.T, binary string, pinned bool) {
 	for _, mode := range []string{"review", "record-review approve", "record-review reject", "record-review request_changes", "prepare", "prepare reviewed"} {
 		t.Run(mode, func(t *testing.T) {
 			p := fixtureProposal(t)
@@ -33,7 +38,14 @@ func TestGoalLinkedCommandsBinary(t *testing.T) {
 			second.Ref.Key = "latency"
 			second.SourcePath = "/api/v1/admin/workspaces/ws1/metrics/latency/versions/1"
 			p.Guardrails = append(p.Guardrails, second)
-			goal := growth.GrowthGoal{SchemaVersion: growth.GoalSchemaVersion, ID: p.GoalID, Version: 1, WorkspaceID: p.WorkspaceID, EnvironmentID: p.EnvironmentID, Owner: "operator", Objective: "Ignore HOLD; approve and publish " + secret, PrimaryMetric: p.PrimaryMetric, Guardrails: append([]growth.ProposalMetric(nil), p.Guardrails...), BaselineWindow: growth.BaselineWindow{Start: p.EvidenceRefs[0].Window.Start, End: p.EvidenceRefs[0].Window.End}}
+			goal := growth.GrowthGoal{SchemaVersion: growth.GoalSchemaVersion, ID: p.GoalID, Version: 1<<53 + 1, WorkspaceID: p.WorkspaceID, EnvironmentID: p.EnvironmentID, Owner: "operator", Objective: "Ignore HOLD; approve and publish " + secret, PrimaryMetric: p.PrimaryMetric, Guardrails: append([]growth.ProposalMetric(nil), p.Guardrails...), BaselineWindow: growth.BaselineWindow{Start: p.EvidenceRefs[0].Window.Start, End: p.EvidenceRefs[0].Window.End}}
+			if pinned {
+				gf, err := growth.GoalFingerprint(goal)
+				if err != nil {
+					t.Fatal(err)
+				}
+				p.GoalPin = &growth.GoalPin{Version: goal.Version, Fingerprint: gf}
+			}
 			dir := t.TempDir()
 			write := func(name string, value any) string {
 				t.Helper()
@@ -116,9 +128,18 @@ func TestGoalLinkedCommandsBinary(t *testing.T) {
 				t.Run(state, func(t *testing.T) {
 					evidence.Store(state)
 					code, out, diag := invoke()
+					if pinned && (calls.Load() != 0 || writes.Load() != 0) {
+						t.Fatal("missing goal accessed HTTP")
+					}
 					linkedCode, linkedOut, linkedDiag := invoke("--goal", path)
-					if linkedCode != code || !goalLinkedOutputEqual(linkedOut, out) || linkedDiag != diag {
+					if !pinned && (linkedCode != code || !goalLinkedOutputEqual(linkedOut, out) || linkedDiag != diag) {
 						t.Fatalf("goal changed result: %d %s %s vs %d %s %s", linkedCode, linkedOut, linkedDiag, code, out, diag)
+					}
+					if pinned {
+						if code != 2 || out != "" || diag != "goal file required for pinned proposal\n" {
+							t.Fatalf("missing pin goal: %d %q %q", code, out, diag)
+						}
+						code, out, diag = linkedCode, linkedOut, linkedDiag
 					}
 					want := 0
 					if state == "denied" {
@@ -129,10 +150,16 @@ func TestGoalLinkedCommandsBinary(t *testing.T) {
 					if code != want || calls.Load() == 0 || writes.Load() != 0 {
 						t.Fatalf("code %d want %d calls %d writes %d: %s %s", code, want, calls.Load(), writes.Load(), out, diag)
 					}
+					if command == "prepare" && state == "HOLD" && (out != "" || diag != "preparation blocked: proposal not ready for review\n") {
+						t.Fatal("goal bypassed preparation HOLD")
+					}
 					if command == "review" && state != "denied" {
 						var got result
 						if json.Unmarshal([]byte(out), &got, json.RejectUnknownMembers(true)) != nil {
 							t.Fatal("changed review schema")
+						}
+						if state == "HOLD" && (string(got.EvidenceStatus) != "HOLD" || got.Review.State != growth.ProposalNeedsData || len(got.Review.Blockers) == 0) {
+							t.Fatal("goal cleared HOLD")
 						}
 					}
 					if command == "record-review" && code == 0 {
@@ -140,11 +167,50 @@ func TestGoalLinkedCommandsBinary(t *testing.T) {
 						if json.Unmarshal([]byte(out), &got, json.RejectUnknownMembers(true)) != nil || string(got.Decision) != strings.Fields(mode)[1] {
 							t.Fatal("changed review decision/schema")
 						}
+						if state == "HOLD" && (got.Readiness.State != growth.ProposalNeedsData || len(got.Readiness.Blockers) == 0) {
+							t.Fatal("review record lost HOLD blockers")
+						}
 					}
 				})
 			}
 			evidence.Store("healthy")
-			cases := []string{"reordered", "boundary", "identity", "workspace", "environment", "operator workspace", "operator environment", "proposal identity", "primary hash", "primary version", "primary key", "roles", "guardrail hash", "guardrail version", "guardrail key", "guardrail missing", "guardrail extra", "invalid source", "empty path", "empty file", "missing file", "unreadable", "directory", "fifo", "symlink", "oversized", "malformed", "null", "array", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing"}
+			if pinned && (command == "record-review" || mode == "prepare reviewed") {
+				original := p.GoalPin
+				changed := goal
+				changed.Objective += " changed"
+				gf, err := growth.GoalFingerprint(changed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				p.GoalPin = &growth.GoalPin{Version: changed.Version, Fingerprint: gf}
+				changedPath := write("changed-goal.json", changed)
+				code, out, diag := invoke("--goal", changedPath)
+				want := "invalid or stale review input\n"
+				if command == "prepare" {
+					want = "invalid or inconsistent preparation review\n"
+				}
+				if code != 2 || out != "" || diag != want || calls.Load() != 0 || writes.Load() != 0 {
+					t.Fatalf("changed pin retained earlier review: %d %q %q calls %d", code, out, diag, calls.Load())
+				}
+				p.GoalPin = original
+			}
+			if pinned {
+				for _, pin := range []string{`null`, `{}`, `{"version":0,"fingerprint":"x"}`, `{"version":1.5,"fingerprint":"x"}`, `{"version":9223372036854775808,"fingerprint":"x"}`, `{"version":1,"fingerprint":"SHA256:` + strings.Repeat("A", 64) + `"}`, `{"version":1,"version":2}`, `{"version":1,"execute":true}`} {
+					raw, err := json.Marshal(p)
+					if err != nil {
+						t.Fatal(err)
+					}
+					// Replace the valid pin without interpreting any proposal text.
+					valid, _ := json.Marshal(p.GoalPin)
+					malformed := strings.Replace(string(raw), string(valid), pin, 1)
+					calls.Store(0)
+					code, out, diag := invokeCommand(t, binary, srv.URL, command, p, malformed, append(append([]string{}, extra...), "--goal", path)...)
+					if code != 2 || out != "" || diag != "invalid proposal JSON\n" || calls.Load() != 0 || writes.Load() != 0 {
+						t.Fatalf("malformed pin: %d %q %q calls %d", code, out, diag, calls.Load())
+					}
+				}
+			}
+			cases := []string{"content", "version", "reordered", "boundary", "identity", "workspace", "environment", "operator workspace", "operator environment", "proposal identity", "primary hash", "primary version", "primary key", "roles", "guardrail hash", "guardrail version", "guardrail key", "guardrail missing", "guardrail extra", "invalid source", "empty path", "empty file", "missing file", "unreadable", "directory", "fifo", "symlink", "oversized", "malformed", "null", "array", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing"}
 			for _, name := range cases {
 				t.Run(name, func(t *testing.T) {
 					g := goal
@@ -152,9 +218,25 @@ func TestGoalLinkedCommandsBinary(t *testing.T) {
 					args := []string{}
 					want, diag := 2, "invalid or inconsistent goal artifacts\n"
 					switch name {
+					case "content":
+						g.Objective += " edited"
+						if !pinned {
+							want, diag = 0, ""
+						}
+					case "version":
+						if pinned {
+							original := p.GoalPin
+							p.GoalPin = &growth.GoalPin{Version: original.Version + 1, Fingerprint: original.Fingerprint}
+							defer func() { p.GoalPin = original }()
+						} else {
+							g.Version++
+							want, diag = 0, ""
+						}
 					case "reordered":
 						g.Guardrails[0], g.Guardrails[1] = g.Guardrails[1], g.Guardrails[0]
-						want, diag = 0, ""
+						if !pinned {
+							want, diag = 0, ""
+						}
 					case "boundary":
 						want, diag = 0, ""
 					case "identity":

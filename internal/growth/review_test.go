@@ -57,7 +57,11 @@ func TestProposalFingerprintCompleteAndCanonical(t *testing.T) {
 		t.Run(field.Name, func(t *testing.T) {
 			changed, _ := proposalFixture()
 			value := reflect.ValueOf(&changed).Elem().Field(i)
-			value.SetZero()
+			if field.Name == "GoalPin" {
+				value.Set(reflect.ValueOf(&GoalPin{Version: 1, Fingerprint: hashA}))
+			} else {
+				value.SetZero()
+			}
 			other, err := ProposalFingerprint(changed)
 			if err != nil || other == fp {
 				t.Fatalf("field omitted from fingerprint: %s (%v)", field.Name, err)
