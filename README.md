@@ -32,7 +32,8 @@ The record remains caller-attested: it does not authenticate a reviewer, approve
 separate preparation settings, establish historical readiness or authorize submission.
 
 Optionally add [`--goal goal.json`](docs/growth-copilot.md#optional-goal-linkage-before-evidence-reads-slice-37)
-to `review`, `record-review`, or either `prepare` path. Before HTTP requests,
+to `review`, `record-review`, either `prepare` path, `record-learning`, or
+`verify-learning`. Before HTTP requests or learning verification output,
 strict goal decoding and offline verification require matching goal identity,
 explicit operator scope, primary metric and guardrail pin sets. Invalid files or
 linkage exit 2 with fixed diagnostics and empty stdout. Matching goals preserve
@@ -42,7 +43,8 @@ no approval or publication authority. Proposals may supply `goalPin` with a posi
 int64 `version` and lowercase `sha256:<64 hex>` `fingerprint`. Pinned proposals
 require `--goal` on these commands and both pin values must match the validated
 goal before HTTP access. Absent pins retain legacy fingerprints; changing a pin
-invalidates earlier review fingerprints. See [goal pins](docs/growth-copilot.md#optional-proposal-goal-pins-slice-38).
+invalidates earlier review and learning fingerprints. Explicitly empty goal paths
+are rejected. See [learning goal linkage](docs/growth-copilot.md#learning-goal-linkage-slice-39) and [goal pins](docs/growth-copilot.md#optional-proposal-goal-pins-slice-38).
 
 The pure [`RecordReview` library contract](docs/growth-copilot.md#pure-human-review-records)
 pins the complete proposal with a deterministic SHA-256 fingerprint and accepts

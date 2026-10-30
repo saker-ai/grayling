@@ -43,6 +43,7 @@ func runRecordLearning(ctx context.Context, args []string, out, diagnostics io.W
 	fail := func(code int, message string) int { fmt.Fprintln(diagnostics, message); return code }
 	fs := flag.NewFlagSet("record-learning", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	goalFile := fs.String("goal", "", "optional caller-attested goal file")
 	proposal := fs.String("proposal", "", "proposal file")
 	manifest := fs.String("manifest", "", "operator manifest")
 	input := fs.String("learning-input", "", "operator learning input")
@@ -64,6 +65,24 @@ func runRecordLearning(ctx context.Context, args []string, out, diagnostics io.W
 	p, err := readProposal(*proposal)
 	if err != nil {
 		return fail(2, "invalid proposal file or JSON")
+	}
+	goalSpecified := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "goal" {
+			goalSpecified = true
+		}
+	})
+	if p.GoalPin != nil && !goalSpecified {
+		return fail(2, "goal file required for pinned proposal")
+	}
+	if goalSpecified {
+		goal, err := readGoal(*goalFile)
+		if err != nil {
+			return fail(2, "invalid goal file or JSON")
+		}
+		if _, err := growth.VerifyGoal(*goal, *p, *workspace, *environment); err != nil {
+			return fail(2, "invalid or inconsistent goal artifacts")
+		}
 	}
 	m, err := readMonitorManifest(*manifest)
 	if err != nil {

@@ -1282,7 +1282,7 @@ Inputs are strict UTF-8 JSON: unknown or duplicate members (including escaped
 aliases), trailing values, malformed JSON and null roots are rejected. Proposal
 files are limited to 64 KiB; records to 128 KiB, including whitespace. Reads are
 bounded even if files grow, reject symlinks and require regular files; nonblocking
-opens reject FIFOs and other special files. Only the four documented flags are
+opens reject FIFOs and other special files. The documented proposal, record, goal and scope flags are
 accepted: credentials, API origins, timeouts and network configuration cannot be
 supplied. No credentials or proxy environment variables are read, no network
 requests occur, and no artifact or index is written. Hypotheses and follow-ups are
@@ -2015,3 +2015,47 @@ mismatches, malformed pins, missing goals, legacy fingerprints, stale approvals,
 HOLD preservation and zero non-GET requests. These establish software behavior
 only; no public API, schema, model integration, platform writes or real pilot
 acceptance is added. All previously documented mandatory gates remain unchanged.
+
+
+## Learning goal linkage (slice 39)
+
+`record-learning` and offline `verify-learning` accept `--goal FILE`:
+
+```sh
+./bin/grayling-growth-agent record-learning --proposal proposal.json --goal goal.json \
+  --manifest monitor.json --learning-input learning.json \
+  --base-url https://grayling.example --workspace ws1 --environment env1
+./bin/grayling-growth-agent verify-learning --proposal proposal.json --goal goal.json \
+  --record learning-record.json --workspace ws1 --environment env1
+```
+
+Pinned proposals require the goal: omission exits 2 with
+`goal file required for pinned proposal`. Unpinned proposals retain existing
+behavior when the flag is omitted and may opt into verification. Explicitly
+supplied empty paths (including `--goal=`) are checked and rejected. Both commands
+reuse `readGoal`, bounded `DecodeGoal` and `growth.VerifyGoal` with separately
+supplied operator workspace/environment before HTTP access or learning output.
+Missing, unreadable, symlink, nonregular, oversized or malformed goal files use
+`invalid goal file or JSON`; valid but inconsistent identity, scope, metric roles,
+version or complete content pins use `invalid or inconsistent goal artifacts`.
+These failures exit 2 with empty stdout and never echo paths, goal text or secrets.
+The 64 KiB limit includes whitespace; unknown/duplicate members at every depth,
+invalid UTF-8, null roots and trailing JSON are rejected. Versions remain exact
+int64 values above 2^53. Metric roles compare as sets; goal array order remains
+part of a pinned goal's complete fingerprint.
+
+Matching goals preserve the existing learning schemas and complete proposal
+fingerprints, including goal pins. Changing both goal and proposal consistently
+still invalidates earlier learning inputs and exported records. Export always
+performs fresh GET-only monitoring; READY exits 0, HOLD/NEEDS_DATA export records
+and exit 3. Offline verification preserves all three statuses and exits 0 for
+consistent records without network access. Other exit codes are unchanged.
+`publicationAuthorized` and `businessWinEstablished` remain false.
+
+This checks caller-attested consistency only, not authenticated ownership,
+historical execution, baseline truth, freshness or business causality. Actual
+binary regressions in `learning_goal_linkage_test.go` use local fixtures only.
+No public API, database schema, authenticated approvals, model integration or
+production actions are added. All original gates and timeouts remain mandatory;
+full Issue acceptance, durable orchestration and real Saker pilot evidence remain
+outstanding.
