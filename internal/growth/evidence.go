@@ -149,7 +149,11 @@ type DiagnosticVariant struct {
 }
 
 type Diagnostics struct {
-	PerVariant []DiagnosticVariant `json:"perVariant,omitempty"`
+	// RejectedByReason covers the experiment epoch, not the report window.
+	// Unknown keys are discarded and represented only by the redacted indicator.
+	RejectedByReason        map[string]*int64   `json:"rejectedByReason,omitempty"`
+	UnknownRejectionReasons bool                `json:"unknownRejectionReasons,omitempty"`
+	PerVariant              []DiagnosticVariant `json:"perVariant,omitempty"`
 	// Optional server SRM results retain presence and only explicit health.
 	AssignmentSRM SRM `json:"assignmentSrm,omitzero"`
 	ExposureSRM   SRM `json:"exposureSrm,omitzero"`
@@ -165,10 +169,72 @@ type Diagnostics struct {
 	Issues             []string  `json:"issues,omitempty"`
 }
 
+// Match the fixed rejection codes in platform/collection_diagnostics.go.
+// duplicate_event is an idempotent outcome, not a rejected collection attempt.
+func knownRejectionReason(code string) bool {
+	switch code {
+	case "invalid_event", "unknown_experiment", "stale_epoch", "assignment_mismatch",
+		"missing_exposure", "missing_unit", "invalid_exposure_token",
+		"expired_exposure_token", "late_event", "future_event":
+		return true
+	default:
+		return false
+	}
+}
+
+// Decode every supplied count as nullable int64 before redaction. This also
+// rejects malformed unknown counts, overflow and duplicate members atomically.
+func (d *Diagnostics) UnmarshalJSON(data []byte) error {
+	type wire Diagnostics
+	var got wire
+	if err := json.Unmarshal(data, &got); err != nil {
+		return err
+	}
+	// The indicator is implementation-owned, never trusted from the server.
+	got.UnknownRejectionReasons = false
+	for key := range got.RejectedByReason {
+		if !knownRejectionReason(key) {
+			delete(got.RejectedByReason, key)
+			got.UnknownRejectionReasons = true
+		}
+	}
+	*d = Diagnostics(got)
+	return nil
+}
+
+// Keep the output bounded even for Diagnostics constructed by library callers.
+func (d Diagnostics) MarshalJSON() ([]byte, error) {
+	type wire Diagnostics
+	got := wire(d)
+	got.RejectedByReason = make(map[string]*int64)
+	for key, count := range d.RejectedByReason {
+		if knownRejectionReason(key) {
+			got.RejectedByReason[key] = count
+		} else {
+			got.UnknownRejectionReasons = true
+		}
+	}
+	return json.Marshal(got)
+}
+
+// Absence is compatible with the server's omitted counters. Supplied counters
+// require explicit zero. HOLD requests investigation, not a claim of bias.
+func rejectionCountsValid(d *Diagnostics) bool {
+	if d == nil || d.UnknownRejectionReasons {
+		return false
+	}
+	for key, count := range d.RejectedByReason {
+		if !knownRejectionReason(key) || count == nil || *count != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // diagnosticsCountsValid trusts only explicit zero counts, independently of
 // summary health, issue prose or verdict. No statistical inference is performed.
 func diagnosticsCountsValid(d *Diagnostics, reportMode string) bool {
-	if d == nil || d.CrossVariantUnits == nil || *d.CrossVariantUnits != 0 ||
+	if !rejectionCountsValid(d) || d.CrossVariantUnits == nil || *d.CrossVariantUnits != 0 ||
 		d.AssignmentMismatch == nil || *d.AssignmentMismatch != 0 {
 		return false
 	}

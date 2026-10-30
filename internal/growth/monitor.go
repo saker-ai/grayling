@@ -143,6 +143,8 @@ func (r *Reader) Monitor(ctx context.Context, m MonitorManifest) (*MonitorSummar
 	if !srmValid(p) || !diagnosticsSRMValid(p.Diagnostics) {
 		add("srm_review_required", "review_diagnostics")
 	}
+	// The shared count check includes epoch-wide rejections; HOLD requests
+	// investigation and does not reinterpret the server verdict or infer bias.
 	if (p.Diagnostics != nil && !diagnosticsCountsValid(p.Diagnostics, p.ExposureMode)) || !journeysValid(p) || !guardrailsValid(p) || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) > 0 || len(p.Decision.GuardrailBreaches) > 0 {
 		add("health_review_required", "review_diagnostics")
 	}

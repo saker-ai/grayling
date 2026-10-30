@@ -48,7 +48,7 @@ func applyCountsCase(name string, report *growth.Report) {
 }
 func countsReportWire(name string, report growth.Report) any {
 	if !strings.HasPrefix(name, "counts ") {
-		return unexposedReportWire(name, report)
+		return rejectionsReportWire(name, report)
 	}
 	fields := strings.Fields(name)
 	data, err := json.Marshal(report)

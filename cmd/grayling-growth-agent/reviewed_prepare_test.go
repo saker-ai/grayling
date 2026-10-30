@@ -36,10 +36,12 @@ func TestReviewedPrepareBinary(t *testing.T) {
 	names = append(names, guardrailsCases...)
 	names = append(names, journeysCases...)
 	names = append(names, countsCases...)
+	names = append(names, rejectionsCases...)
 	names = append(names, unexposedCases...)
 	names = append(names, diagnosticsSRMCases...)
 	names = append(names, journeysMalformedCases...)
 	names = append(names, countsMalformedCases...)
+	names = append(names, rejectionsMalformedCases...)
 	names = append(names, unexposedMalformedCases...)
 	names = append(names, diagnosticsSRMMalformedCases...)
 	names = append(names, attributionCases...)
@@ -95,13 +97,13 @@ func TestReviewedPrepareBinary(t *testing.T) {
 					want, diag = 2, "growth: preparation analysisWindowHours: shorter_than_attribution\n"
 				}
 			}
-			if strings.HasPrefix(name, "diagnostic-srm ") || strings.HasPrefix(name, "srm ") || strings.HasPrefix(name, "checks ") || strings.HasPrefix(name, "journeys ") || strings.HasPrefix(name, "unexposed ") || strings.HasPrefix(name, "counts ") {
+			if strings.HasPrefix(name, "diagnostic-srm ") || strings.HasPrefix(name, "srm ") || strings.HasPrefix(name, "checks ") || strings.HasPrefix(name, "journeys ") || strings.HasPrefix(name, "unexposed ") || strings.HasPrefix(name, "counts ") || strings.HasPrefix(name, "rejections ") {
 				want, diag = 0, ""
-				if invalidDiagnosticsSRMCase(name) || invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) || invalidUnexposedCase(name) {
+				if invalidDiagnosticsSRMCase(name) || invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) || invalidRejectionsCase(name) || invalidUnexposedCase(name) {
 					want, diag = 3, "preparation blocked: proposal not ready for review\n"
 				}
 			}
-			if malformedDiagnosticsSRMCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) || malformedUnexposedCase(name) {
+			if malformedDiagnosticsSRMCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) || malformedRejectionsCase(name) || malformedUnexposedCase(name) {
 				want, diag = 1, "evidence execution failed\n"
 			}
 			if strings.HasPrefix(name, "primary attribution ") {
@@ -217,6 +219,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 				applyGuardrailsCase(name, &report)
 				applyJourneysCase(name, &report)
 				applyCountsCase(name, &report)
+				applyRejectionsCase(name, &report)
 				applyUnexposedCase(name, &report)
 				applyDiagnosticsSRMCase(name, &report)
 				if strings.HasPrefix(name, "breach ") {
