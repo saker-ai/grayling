@@ -14,6 +14,7 @@ existing platform unchanged.
 | Aggregate experiment evidence | `GET /api/v1/admin/experiments/{id}/report/export?format=json` | Reuse scoped report snapshot, generation time, epoch, evidence version, frozen primary/guardrail references, analysis window, watermark, recomputability, health, primary calculation errors, issues and decision. |
 | Diagnostics | Already embedded in report export | Reuse embedded experiment/epoch, generation time, window and issues. No separate diagnostics request or independently timed snapshot. |
 | Rollout observation | `GET /api/v1/admin/experiments/{id}` with embedded `releasePlan` | Pin workspace/environment, experiment, epoch and registration version; project bounded plan state/history without sensitive prose. Missing experiment and absent plan are separate observations; neither grants publication authority or establishes a business win. |
+| Binding readiness | `GET /api/v1/admin/experiments/{id}/bind-check` between experiment GETs | Reuse the rollout identity manifest; validate nine prerequisite checks, revision consistency and unchanged surrounding snapshots. Non-atomic observation; never binding or publication authority. |
 | Statistical decisions | Existing report builder and statistics packages | Preserve server verdict and reasons with analysis method; do not calculate significance, sample sizes, uplift, or winning probabilities. Parallel sequential/Bayesian/Bandit views are deliberately omitted, never merged into the fixed-sample decision. |
 | RBAC and isolation | Existing admin API / `report.read` viewer permission | Fixed reader workspace/environment, existing bearer authentication, explicit response validation; no privileged endpoint. Workspace-wide viewer tokens are not environment-restricted by this library at the server. The reader rejects other environments before exposing evidence. |
 | Flags, preregistration, exposure, conversion, approvals, rollout | Existing platform, SDK, collect and admin APIs | Unchanged and unwired. Reader has no write operations and does not authorize rollout. |
@@ -1082,3 +1083,47 @@ edits, mismatched copies despite matching fingerprint strings, role/scope confli
 strict input and size boundaries, inert injection text and deterministic output.
 Existing CI jobs and mandatory gates remain unchanged; no DB, SDK, public API or
 browser behavior is added.
+
+## Read-only binding readiness
+
+`Reader.BindCheck` and the optional `bind-check` command reuse the strict rollout
+operator manifest (at most 16 KiB):
+
+```json
+{"workspaceId":"ws1","environmentId":"env1","experimentId":"exp1","epoch":1,"registrationVersion":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+```
+
+Replace these synthetic pins with trusted registration values. With a scoped
+viewer credential already in `GRAYLING_GROWTH_TOKEN`, run:
+
+```sh
+./bin/grayling-growth-agent bind-check --manifest experiment.json \
+  --base-url https://grayling.example.com --workspace ws1 --environment env1
+```
+
+The command reads the experiment, calls
+`GET /api/v1/admin/experiments/{id}/bind-check`, then reads the experiment again.
+It rejects mismatched IDs, scope, epoch, registration version or registered flag
+revision, and changes to `flagRevision` or `updatedAt` across the experiment
+reads. All nine checks are required exactly once: `state`, `published_flag`,
+`draft_clear`, `registered_revision`, `fallback`, `unit`, `split`, `bandit_rule`,
+and `existing_binding`. Required booleans and nonnegative revisions must be
+present and valid; aggregate readiness must agree with the checks. A changed
+current flag revision is a `registered_revision` blocker. Unknown/duplicate
+checks or malformed evidence are execution failures, with no partial output.
+
+Output contains pinned provenance, source paths, observed timestamp/revisions,
+bounded check codes and fixed implementation-owned remediation text. Server
+`detail` prose is omitted. Missing experiment or bind-check evidence yields an
+explicit `experiment_missing` or `bind_check_missing` blocker. Exit 0 means all
+observed prerequisites passed; exit 3 means missing evidence or failed
+prerequisites. Existing codes remain: 2 invalid input/configuration, 1 access,
+execution, mismatch or malformed evidence failure, and 130 cancellation.
+Credentials, server prose and input values are never echoed in errors.
+
+This is a **non-atomic observation** (`nonAtomic=true`): surrounding reads cannot
+exclude intervening changes or changes after the final read. It never authorizes
+binding or publication and always emits `publicationAuthorized=false`. Existing
+human authorization, binding rechecks, approval and publication gates remain
+mandatory. No submission, model integration, durable workflow, database schema,
+SDK behavior, browser flow or real Saker acceptance is added or claimed.

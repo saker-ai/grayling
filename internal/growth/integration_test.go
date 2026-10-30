@@ -115,8 +115,21 @@ func TestReaderWithRealAPIHandler(t *testing.T) {
 	if err != nil || monitor.Status != growth.Hold || monitor.ServerVerdict != "hold" || monitor.PublicationAuthorized || monitor.EvidenceVersion != p.EvidenceVersion || len(monitor.Blockers) == 0 {
 		t.Fatalf("real handler monitor HOLD: %+v, %v", monitor, err)
 	}
-	// Rollout uses the real viewer-authorized experiment snapshot, never a plan GET.
 	rm := growth.RolloutManifest{WorkspaceID: ws.ID, EnvironmentID: env.ID, ExperimentID: exp.ID, Epoch: exp.Epoch, RegistrationVersion: exp.RegistrationVersion}
+	// The same viewer can observe binding prerequisites without any mutation.
+	binding, err := reader.BindCheck(t.Context(), rm)
+	if err != nil || binding == nil || binding.Ready || binding.PublicationAuthorized || !binding.NonAtomic || len(binding.Checks) != 9 || len(binding.Blockers) == 0 {
+		t.Fatalf("real binding prerequisites: %+v %v", binding, err)
+	}
+	if o, err := newReader(ws.ID, env.ID, outsider.Secret).BindCheck(t.Context(), rm); o != nil || !errors.Is(err, growth.ErrAuthorization) {
+		t.Fatalf("binding workspace isolation: %+v %v", o, err)
+	}
+	wrongBindingScope := rm
+	wrongBindingScope.EnvironmentID = otherEnv.ID
+	if o, err := newReader(ws.ID, otherEnv.ID, viewer.Secret).BindCheck(t.Context(), wrongBindingScope); o != nil || !errors.Is(err, growth.ErrMismatch) {
+		t.Fatalf("binding environment isolation: %+v %v", o, err)
+	}
+	// Rollout uses the real viewer-authorized experiment snapshot, never a plan GET.
 	for _, state := range []string{"absent", "armed", "running", "paused", "completed", "rolled_back"} {
 		var plan *platform.ReleasePlan
 		if state != "absent" {
