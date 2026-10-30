@@ -101,6 +101,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 	names = append(names, aggregateCaseNames()...)
 	names = append(names, diagnosticsTimeCases...)
 	names = append(names, watermarkCases...)
+	names = append(names, primaryAttributionCases...)
 	names = append(names, attributionCases...)
 	names = append(names, invalidReportMetadataCases...)
 	names = append(names, validReportMethodCases...)
@@ -113,7 +114,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			if name == "attribution overflow" {
 				p.AnalysisPlan.AttributionWindowHours = 9223372036854775807
 			}
-			report := growth.Report{ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, AnalysisMethod: p.AnalysisPlan.Method, ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue", Reasons: []string{secret}}}
+			report := growth.Report{PrimaryAttributionWindow: int64(24 * time.Hour), ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, AnalysisMethod: p.AnalysisPlan.Method, ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue", Reasons: []string{secret}}}
 			report.Diagnostics = &growth.Diagnostics{ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 			count, value := int64(100), 0.2
 			for _, v := range p.Variants {
@@ -213,10 +214,19 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 					}
 				} else {
 					want, state = 3, growth.ProposalNeedsData
+					if name != "attribution overflow" {
+						status = growth.Hold
+					}
 					if name == "attribution overflow" {
 						state = growth.ProposalDraft
 					}
 				}
+			}
+			if name == "primary attribution deprecated" {
+				want, state = 3, growth.ProposalNeedsData
+			}
+			if invalidPrimaryAttributionCase(name) {
+				want, status, state = 3, growth.Hold, growth.ProposalNeedsData
 			}
 			switch name {
 			case "fifo":
@@ -690,6 +700,9 @@ func testRealHandler(t *testing.T, binary string) {
 	p.PrimaryMetric = growth.ProposalMetric{Ref: q.Metrics[0], SourcePath: envelope.Metrics[0].SourcePath}
 	p.Guardrails = []growth.ProposalMetric{{Ref: q.Metrics[1], SourcePath: envelope.Metrics[1].SourcePath}}
 	report := envelope.Evidence[0].Report
+	if report.PrimaryAttributionWindow != int64(def.AttributionWindow) {
+		t.Fatal("lost real report attribution duration")
+	}
 	p.EvidenceRefs = []growth.ProposalEvidenceRef{{SourcePath: envelope.Evidence[0].SourcePath, ExperimentID: exp.ID, Epoch: exp.Epoch, EvidenceVersion: report.EvidenceVersion, Window: report.Window}}
 	path := filepath.Join(t.TempDir(), "proposal.json")
 	b, err := json.Marshal(p)

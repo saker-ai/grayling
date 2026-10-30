@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json/v2"
 	"net/http"
 	"strings"
 	"time"
@@ -67,7 +66,7 @@ func writeLifecycleMetric(w http.ResponseWriter, name string, metric growth.Metr
 			}
 		}
 	}
-	json.MarshalWrite(w, wire)
+	writePrimaryAttributionMetric(w, name, wire)
 }
 
 var attributionCases = []string{"attribution match", "attribution missing", "attribution invalid", "attribution mismatch", "attribution sub-hour", "attribution overflow", "attribution longer guardrail"}

@@ -118,6 +118,9 @@ func (r *Reader) Monitor(ctx context.Context, m MonitorManifest) (*MonitorSummar
 	if p.RegistrationVersion != m.RegistrationVersion || p.PrimaryMetricRef == nil || *p.PrimaryMetricRef != m.PrimaryMetric || !exactMonitorGuards(p.GuardrailMetricRefs, m.Guardrails) {
 		return nil, ErrMismatch
 	}
+	if !primaryAttributionValid(p, e.Metrics) {
+		add("primary_attribution_invalid", "review_metric_definitions")
+	}
 	s.EvidenceVersion, s.GeneratedAt, s.RegistrationVersion = p.EvidenceVersion, p.GeneratedAt, p.RegistrationVersion
 	s.Window = p.Window
 	s.Window.Issues = nil // untrusted free-form text is never exported

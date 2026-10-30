@@ -114,6 +114,9 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 		t.Fatalf("local incomplete evidence = %+v", got)
 	}
 	p := got.Evidence[0].Report
+	if p.PrimaryAttributionWindow != int64(def.AttributionWindow) {
+		t.Fatal("lost real report attribution window", p.PrimaryAttributionWindow)
+	}
 	if mode == "onDecision" {
 		// This empty historical fixture has no render diagnostics. It must HOLD
 		// for its existing data gaps, without an exposure-mode blocker.
@@ -125,7 +128,7 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 			t.Fatalf("historical report: %+v %v", observed, err)
 		}
 		for _, b := range observed.Blockers {
-			if b.Code == "exposure_mode_invalid" {
+			if b.Code == "exposure_mode_invalid" || b.Code == "primary_attribution_invalid" {
 				t.Fatal("supported historical mode rejected")
 			}
 		}
@@ -142,7 +145,7 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 		t.Fatalf("real handler monitor HOLD: %+v, %v", monitor, err)
 	}
 	for _, b := range monitor.Blockers {
-		if b.Code == "exposure_mode_invalid" {
+		if b.Code == "exposure_mode_invalid" || b.Code == "primary_attribution_invalid" {
 			t.Fatal("supported real report exposure rejected", mode)
 		}
 	}
