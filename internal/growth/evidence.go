@@ -333,7 +333,7 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 		}
 		status := Ready
 		if len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || p.GeneratedAt.IsZero() ||
-			p.PrimaryMetricRef == nil || p.Diagnostics == nil || p.RegistrationVersion == "" || p.AnalysisMethod == "" ||
+			p.PrimaryMetricRef == nil || p.Diagnostics == nil || !fingerprint.MatchString(p.RegistrationVersion) || !knownAnalysisMethod(p.AnalysisMethod) ||
 			!usableVariants(p.PerVariant) || !knownVerdict(p.Decision.Verdict) || p.Decision.Verdict == "hold" {
 			status = Hold
 		}
@@ -357,6 +357,17 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 func usableWindow(w Window) bool {
 	return w.Version != "" && !w.Start.IsZero() && w.End.After(w.Start) && !w.Watermark.IsZero() &&
 		!w.Watermark.Before(w.End) && w.Complete && w.Recomputable && len(w.Issues) == 0
+}
+
+// knownAnalysisMethod recognizes report observation semantics, including Bandit.
+// Draft compilation retains its separate fixed-split restrictions.
+func knownAnalysisMethod(method string) bool {
+	switch method {
+	case "two-proportion-z", "welch", "ratio-delta", "quantile", "cuped", "bandit-beta-bernoulli":
+		return true
+	default:
+		return false
+	}
 }
 
 func knownVerdict(v string) bool {

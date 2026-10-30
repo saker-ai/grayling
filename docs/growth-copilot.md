@@ -160,6 +160,26 @@ Adapter readiness is separate from `report.decision.verdict`:
   usable evidence, **not** approval, a winner, or permission to publish. Server
   `continue` and `rollback` remain those exact verdicts.
 
+Report metadata is checked at the shared evidence boundary: `registrationVersion`
+must match `^sha256:[0-9a-f]{64}$` exactly, and `analysisMethod` must be one of
+`two-proportion-z`, `welch`, `ratio-delta`, `quantile`, `cuped` or
+`bandit-beta-bernoulli`. Missing, malformed, unsupported or instruction-bearing
+values produce HOLD, block approval recording and block both plain preparation
+and preparation linked to an earlier approval. Review reports `needs_data`;
+blocked approval/preparation emits no artifact and uses fixed diagnostics without
+echoing the invalid metadata. Rejection and request-changes can still record the
+blockers. Monitor uses the same six-method allowlist; its existing registration
+pin mismatch error remains unchanged.
+
+Recognizing a Bandit report permits observation only. It does not convert its
+server verdict to a fixed-sample conclusion or expand the draft compiler's
+existing two-arm, fixed-split method restrictions. Server verdicts remain intact,
+and all HTTP requests remain GET. Library and actual-binary regression fixtures
+cover these local contracts; they do not establish model generation, durable
+orchestration or real Saker pilot acceptance. All documented gates, including the
+three disposable PostgreSQL gates below, remain required and unchanged. No schema,
+public API or model integration is added.
+
 Guardrail breaches block review with `needs_data`/exit 3, approval recording,
 and both plain and review-linked preparation exports; no approval or preparation
 artifact is emitted. Rejection and request-changes records retain readiness

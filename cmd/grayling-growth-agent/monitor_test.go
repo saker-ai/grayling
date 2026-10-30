@@ -26,11 +26,15 @@ func TestMonitorBinary(t *testing.T) {
 		t.Fatalf("build: %s %v", b, err)
 	}
 	names := []string{"breach rollback", "breach continue", "breach ship", "continue", "ship", "rollback", "hold", "unhealthy", "health injection", "reason injection", "window injection", "incomplete", "not recomputable", "late watermark", "diagnostics missing", "diagnostics mismatch", "aggregate missing", "generation missing", "method invalid", "missing report", "missing metric", "registration mismatch", "primary role mismatch", "guardrail missing", "guardrail duplicate", "epoch mismatch", "evidence mismatch", "scope mismatch", "denied", "unauthorized", "malformed", "unknown member", "duplicate JSON", "trailing JSON", "null", "oversized", "invalid epoch", "duplicate metric", "manifest scope", "directory", "fifo", "timeout", "signal", "unpinned", "pinned"}
+	names = append(names, validReportMethodCases...)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
 			m := growth.MonitorManifest{WorkspaceID: "ws1", EnvironmentID: "env1", ExperimentID: "exp1", Epoch: 1, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, PrimaryMetric: p.PrimaryMetric.Ref, Guardrails: []growth.MetricRef{p.Guardrails[0].Ref}}
 			report := growth.Report{ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, RegistrationVersion: m.RegistrationVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, AnalysisMethod: "two-proportion-z", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue"}}
+			if strings.HasPrefix(name, "report method ") {
+				report.AnalysisMethod = strings.TrimPrefix(name, "report method ")
+			}
 			count, value := int64(100), 0.2
 			for _, v := range p.Variants {
 				report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
@@ -322,7 +326,7 @@ func TestMonitorBinary(t *testing.T) {
 			if name != "missing report" && got.ServerVerdict != report.Decision.Verdict {
 				t.Fatal("changed server verdict")
 			}
-			if code == 0 && (got.ServerVerdict != report.Decision.Verdict || len(got.Blockers) != 0) {
+			if code == 0 && (got.AnalysisMethod != report.AnalysisMethod || got.ServerVerdict != report.Decision.Verdict || len(got.Blockers) != 0) {
 				t.Fatalf("changed server verdict %+v", got)
 			}
 		})
