@@ -1430,3 +1430,45 @@ suite, full Agent integration race suite (266.756 seconds within the unchanged
 five-minute timeout), and PostgreSQL E2E (4.674 seconds). The cleanup trap removed
 the container. No gate, assertion or timeout was weakened; these are local
 software checks only.
+
+### Embedded diagnostics generation time
+
+Embedded `diagnostics.generatedAt` must represent the same instant as the
+report's `generatedAt`, compared with `time.Time.Equal` at nanosecond precision.
+Earlier or later diagnostics produce HOLD, including a one-nanosecond difference.
+Different timezone offsets for the same instant remain valid. Both generation
+timestamps must still be present and nonzero; two missing times cannot become
+READY merely because they compare equal.
+
+Monitoring uses the existing `diagnostics_metadata_invalid` / `refresh_report`
+blocker for mismatched or missing diagnostic generation times and retains
+`generation_time_missing` / `refresh_report` for a missing report time. Proposal
+review inherits evidence HOLD, approval is refused, and both ordinary and
+review-linked preparation refuse the snapshot without partial artifacts.
+Rejection and requests for changes retain readiness blockers. Learning export,
+offline verification and search preserve HOLD and the same remediation.
+
+Library and actual-command regressions cover earlier/later seconds and
+nanoseconds, missing diagnostic/report/both times, and matching fractional
+instants represented in UTC and positive/negative timezone offsets. They cover
+review, approval refusal, negative reviews, both preparation paths, monitoring,
+and learning export/verification/search while asserting zero non-GET requests.
+Existing real-handler compatibility fixtures remain in use. These local fixtures
+establish software consistency only; real Saker pilot evidence, model integration,
+durable orchestration and full issue #20 acceptance remain outstanding. No public
+API, schema, SDK, browser, statistical decision or publication behavior changes.
+All documented mandatory gates and their timeouts remain unchanged.
+
+Local validation for slice 25 on 2026-10-30 passed all three supplied gate
+commands: `make build`, short tests, `go build ./...`, `go vet ./...`, the full
+core race suite, boot/E2E/smoke, SDK tests (25 Python and 23 TypeScript plus
+typechecking), locked frontend installation/tests/build, static consistency,
+license inventory, all five license-audit unit tests and `git diff --check`.
+The pre-change short run lacked frontend dependencies; after the locked build
+installed them, the complete short and race suites passed. Existing real-handler
+compatibility fixtures passed in the library and actual-command suites.
+Disposable PostgreSQL 16 validation passed the GORM/report/quota race suite,
+full Agent integration race suite (258.275 seconds within the unchanged
+five-minute timeout), and PostgreSQL E2E (4.306 seconds). The cleanup trap removed
+the container. No gate, assertion or timeout was weakened; these results establish
+local software consistency only.

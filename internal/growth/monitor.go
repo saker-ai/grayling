@@ -163,7 +163,7 @@ func (r *Reader) Monitor(ctx context.Context, m MonitorManifest) (*MonitorSummar
 	} else {
 		d := p.Diagnostics
 		checkWindow(d.Window)
-		if d.GeneratedAt.IsZero() || !sameWindow(d.Window, p.Window) {
+		if d.GeneratedAt.IsZero() || !d.GeneratedAt.Equal(p.GeneratedAt) || !sameWindow(d.Window, p.Window) {
 			add("diagnostics_metadata_invalid", "refresh_report")
 		}
 		if len(d.Issues) > 0 {

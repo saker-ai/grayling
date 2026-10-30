@@ -29,6 +29,7 @@ func TestRecordLearningBinary(t *testing.T) {
 	names = append(names, metricLifecycleCases...)
 	names = append(names, exposureCases...)
 	names = append(names, aggregateCaseNames()...)
+	names = append(names, diagnosticsTimeCases...)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
@@ -57,6 +58,9 @@ func TestRecordLearningBinary(t *testing.T) {
 				case "absent":
 					code, status, want = 3, growth.NeedsData, "evidence_missing"
 				}
+			}
+			if applyDiagnosticsTimeCase(name, &report) {
+				code, status, want = 3, growth.Hold, "diagnostics_metadata_invalid"
 			}
 			if applyAggregateCase(name, &report) {
 				code, status, want = 3, growth.Hold, "aggregates_missing"
@@ -413,7 +417,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &record); err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasPrefix(name, "exposure ") || isAggregateCase(name) {
+			if isDiagnosticsTimeCase(name) || strings.HasPrefix(name, "exposure ") || isAggregateCase(name) {
 				recordPath := writeJSON("record.json", record, "")
 				before := calls.Load()
 				for _, args := range [][]string{
@@ -464,6 +468,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			if got.Status != status || got.PublicationAuthorized {
 				t.Fatalf("summary %+v", got)
 			}
+			checkDiagnosticsTimeBlockers(t, name, record.Observation)
 			if want != "" {
 				found := false
 				for _, b := range got.Blockers {
