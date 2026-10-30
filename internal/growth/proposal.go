@@ -200,6 +200,9 @@ func ReviewProposal(p Proposal, evidence *Envelope) ProposalReview {
 	if p.AnalysisPlan.AttributionWindowHours < 1 {
 		add("analysisPlan.attributionWindowHours", "positive_required", "draft")
 	}
+	if p.AnalysisPlan.AttributionWindowHours > math.MaxInt64/int64(time.Hour) {
+		add("analysisPlan.attributionWindowHours", "invalid_duration", "draft")
+	}
 	if p.SamplePlan.MinSamplePerArm < 1 {
 		add("samplePlan.minSamplePerArm", "positive_required", "draft")
 	}
@@ -258,6 +261,11 @@ func ReviewProposal(p Proposal, evidence *Envelope) ProposalReview {
 			for _, got := range evidence.Metrics {
 				if got.WorkspaceID == p.WorkspaceID && got.Key == m.Ref.Key && got.Version == m.Ref.Version && got.Hash == m.Ref.DefinitionHash && got.SourcePath == m.SourcePath && m.SourcePath == path {
 					matched = true
+					if got.AttributionWindow <= 0 {
+						add(field+".attributionWindow", "invalid_duration", "data")
+					} else if i == 0 && validDurationHours(p.AnalysisPlan.AttributionWindowHours) && p.AnalysisPlan.AttributionWindowHours*int64(time.Hour) != got.AttributionWindow {
+						add("analysisPlan.attributionWindowHours", "metric_attribution_mismatch", "data")
+					}
 					if got.Status != "published" {
 						add(field, "metric_not_published", "data")
 					}
@@ -353,4 +361,9 @@ func ReviewProposal(p Proposal, evidence *Envelope) ProposalReview {
 		out.State = ProposalNeedsImplementation
 	}
 	return out
+}
+
+// Check before multiplying: wrapping hours could otherwise match a catalog duration.
+func validDurationHours(hours int64) bool {
+	return hours > 0 && hours <= math.MaxInt64/int64(time.Hour)
 }

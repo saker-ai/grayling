@@ -533,10 +533,24 @@ calculated. Nonfinite, missing, mismatched and overflowing inputs are rejected;
 hour-to-nanosecond conversions check overflow before multiplication.
 
 `AnalysisWindowHours` is supplied independently of proposal attribution hours;
-it must cover the latter, but they are never equated. The API's `analysisWindow`
+it must cover every pinned primary and guardrail catalog attribution duration,
+which may differ from one another. The API's `analysisWindow`
 and `minRuntime` serialize as integer nanoseconds with both Go JSON packages.
-Attribution hours remain planning metadata: metric attribution specifications
-are resolved by Grayling from the exact metric references.
+The metric GET allowlist projects the exact `attributionWindow` integer
+nanoseconds. New proposals require a positive, overflow-safe whole-hour
+`analysisPlan.attributionWindowHours` exactly equal to the pinned primary
+catalog duration. Missing/nonpositive catalog durations and mismatched claims
+block readiness, approval and preparation; missing/nonpositive guardrail durations
+also block readiness. Sub-hour or fractional-hour primary definitions cannot be
+represented by this proposal schema and must be revised through human review,
+never rounded. Guardrails may use sub-hour or longer durations; preparation's
+analysis window must cover each exact duration. Invalid wire types or numbers
+outside int64 fail evidence decoding. Historical monitoring and learning retain
+their existing health/lifecycle rules and do not apply new-proposal attribution
+gates. Grayling still resolves exact metric references and authoritatively
+validates experiment creation. These checks neither prove statistical adequacy
+nor authenticate human attestations; approval, binding and publishing gates remain.
+Local fixtures establish no real Saker instrumentation or pilot outcomes.
 
 ```go
 threshold := 0.05 // explicit trusted preparation input, not extracted prose

@@ -23,7 +23,7 @@ func fixture() (Metric, Report, Query) {
 		Diagnostics: &Diagnostics{ExperimentID: "exp1", Epoch: 1, GeneratedAt: start.Add(3 * time.Hour), Window: window},
 		PerVariant:  []Variant{{Variant: "control", ExposedUnits: ptr(int64(100)), RandomizedUnits: ptr(int64(100)), Exposures: ptr(int64(100)), ConvertedUnits: ptr(int64(20)), PrimaryValue: ptr(0.2)}, {Variant: "treatment", ExposedUnits: ptr(int64(100)), RandomizedUnits: ptr(int64(100)), Exposures: ptr(int64(100)), ConvertedUnits: ptr(int64(30)), PrimaryValue: ptr(0.3)}},
 		Decision:    Decision{Verdict: "ship", Reasons: []string{"server fixed-sample result"}}}
-	return Metric{Status: "published", WorkspaceID: "ws1", Key: ref.Key, Version: ref.Version, Hash: ref.DefinitionHash}, report, Query{Metrics: []MetricRef{ref}, Experiments: []ExperimentRef{{ID: "exp1", Epoch: 1, EvidenceVersion: hashB}}}
+	return Metric{AttributionWindow: int64(24 * time.Hour), Status: "published", WorkspaceID: "ws1", Key: ref.Key, Version: ref.Version, Hash: ref.DefinitionHash}, report, Query{Metrics: []MetricRef{ref}, Experiments: []ExperimentRef{{ID: "exp1", Epoch: 1, EvidenceVersion: hashB}}}
 }
 
 func readerFor(t *testing.T, url string, mutate func(*Config)) *Reader {

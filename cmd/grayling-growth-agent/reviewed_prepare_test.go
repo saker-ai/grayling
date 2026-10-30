@@ -23,9 +23,14 @@ func TestReviewedPrepareBinary(t *testing.T) {
 	if b, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, b)
 	}
-	for _, name := range append(append([]string{}, metricLifecycleCases...), append(invalidReportMetadataCases, []string{"breach rollback", "breach continue", "breach ship", "rollback", "ship", "approve", "settings", "unhealthy", "missing evidence", "stale", "forged pin", "roles", "workspace", "reject", "request_changes", "null", "malformed", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing", "oversized", "boundary", "fifo", "directory", "symlink", "empty path", "missing file"}...)...) {
+	names := append([]string{}, metricLifecycleCases...)
+	names = append(names, attributionCases...)
+	for _, name := range append(names, append(invalidReportMetadataCases, []string{"breach rollback", "breach continue", "breach ship", "rollback", "ship", "approve", "settings", "unhealthy", "missing evidence", "stale", "forged pin", "roles", "workspace", "reject", "request_changes", "null", "malformed", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing", "oversized", "boundary", "fifo", "directory", "symlink", "empty path", "missing file"}...)...) {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
+			if name == "attribution overflow" {
+				p.AnalysisPlan.AttributionWindowHours = 9223372036854775807
+			}
 			// Caller-attested fixture, deliberately without reconstructed historical
 			// evidence. Fresh server evidence below remains mandatory.
 			fp, err := growth.ProposalFingerprint(p)
@@ -61,6 +66,15 @@ func TestReviewedPrepareBinary(t *testing.T) {
 				want, diag = 3, "preparation blocked: proposal not ready for review\n"
 				if lifecycleStatus(name) == "published" {
 					want, diag = 0, ""
+				}
+			}
+			if strings.HasPrefix(name, "attribution ") {
+				want, diag = 3, "preparation blocked: proposal not ready for review\n"
+				if name == "attribution match" {
+					want, diag = 0, ""
+				}
+				if name == "attribution longer guardrail" {
+					want, diag = 2, "growth: preparation analysisWindowHours: shorter_than_attribution\n"
 				}
 			}
 			if strings.HasPrefix(name, "metadata ") {
@@ -213,7 +227,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 			} else if out != "" {
 				t.Fatal("partial output", out)
 			}
-			preflight := want == 2 && name != "settings"
+			preflight := want == 2 && name != "settings" && name != "attribution longer guardrail"
 			if writes.Load() != 0 || (preflight && calls.Load() != 0) || (!preflight && calls.Load() < 3) {
 				t.Fatalf("calls %d writes %d", calls.Load(), writes.Load())
 			}

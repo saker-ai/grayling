@@ -118,18 +118,20 @@ func CompileCreateRequest(p Proposal, evidence *Envelope, in PreparationInputs) 
 	if !finite(in.Power) || in.Power <= 0 || in.Power >= 1 {
 		return fail("power", "out_of_range")
 	}
-	validHours := func(hours int64) bool { return hours > 0 && hours <= math.MaxInt64/int64(time.Hour) }
-	if !validHours(in.AnalysisWindowHours) {
+	if !validDurationHours(in.AnalysisWindowHours) {
 		return fail("analysisWindowHours", "invalid_duration")
 	}
-	if !validHours(p.AnalysisPlan.AttributionWindowHours) {
-		return fail("analysisPlan.attributionWindowHours", "invalid_duration")
-	}
-	if !validHours(p.SamplePlan.MinRuntimeHours) {
+	if !validDurationHours(p.SamplePlan.MinRuntimeHours) {
 		return fail("samplePlan.minRuntimeHours", "invalid_duration")
 	}
-	if p.AnalysisPlan.AttributionWindowHours > in.AnalysisWindowHours {
-		return fail("analysisWindowHours", "shorter_than_attribution")
+	// ReviewProposal has already matched these exact catalog pins and validated
+	// their durations. Guardrails may have a different attribution duration.
+	for _, metric := range append([]ProposalMetric{p.PrimaryMetric}, p.Guardrails...) {
+		for _, got := range evidence.Metrics {
+			if got.WorkspaceID == p.WorkspaceID && got.Key == metric.Ref.Key && got.Version == metric.Ref.Version && got.Hash == metric.Ref.DefinitionHash && got.SourcePath == metric.SourcePath && got.AttributionWindow > in.AnalysisWindowHours*int64(time.Hour) {
+				return fail("analysisWindowHours", "shorter_than_attribution")
+			}
+		}
 	}
 	if len(in.Guardrails) != len(p.Guardrails) {
 		return fail("guardrails", "reference_mismatch")
