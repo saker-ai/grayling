@@ -37,7 +37,7 @@ func invalidPrimaryAttributionCase(name string) bool {
 }
 func primaryAttributionReportWire(name string, report growth.Report) any {
 	if !strings.HasPrefix(name, "primary attribution ") {
-		return diagnosticsTimeReportWire(name, report)
+		return srmReportWire(name, report)
 	}
 	data, err := json.Marshal(report)
 	if err != nil {

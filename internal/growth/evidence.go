@@ -4,6 +4,7 @@ package growth
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"io"
@@ -158,7 +159,57 @@ type Variant struct {
 	PrimaryValue    *float64 `json:"primaryValue,omitempty"`
 }
 
+// SRM retains only server health, with omission distinct from explicit null.
+// No test statistics, thresholds, or free-form server fields cross this boundary.
+type SRM struct {
+	Healthy        *bool `json:"healthy"`
+	present        bool
+	null           bool
+	healthyPresent bool
+}
+
+func (s SRM) IsZero() bool { return !s.present && s.Healthy == nil }
+
+func (s *SRM) UnmarshalJSON(data []byte) error {
+	var wire *struct {
+		Healthy jsontext.Value `json:"healthy"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*s = SRM{present: true, null: wire == nil}
+	if wire != nil {
+		s.healthyPresent = len(wire.Healthy) != 0
+		if s.healthyPresent {
+			return json.Unmarshal(wire.Healthy, &s.Healthy)
+		}
+	}
+	return nil
+}
+
+func (s SRM) MarshalJSON() ([]byte, error) {
+	if s.null {
+		return []byte("null"), nil
+	}
+	if s.Healthy == nil && !s.healthyPresent {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(struct {
+		Healthy *bool `json:"healthy"`
+	}{s.Healthy})
+}
+
+// Only Bandit may omit SRM. An explicit null or incomplete/unhealthy object
+// cannot be overridden by the report's summary health or decision verdict.
+func srmValid(p Report) bool {
+	if p.SRM.IsZero() {
+		return p.AnalysisMethod == "bandit-beta-bernoulli"
+	}
+	return !p.SRM.null && p.SRM.Healthy != nil && *p.SRM.Healthy
+}
+
 type Report struct {
+	SRM                 SRM          `json:"srm,omitzero"`
 	ExperimentID        string       `json:"experimentId"`
 	Epoch               int64        `json:"epoch"`
 	EvidenceVersion     string       `json:"evidenceVersion"`
@@ -347,7 +398,7 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 		if len(e.Metrics) != len(q.Metrics) || !historicalMetricsValid(e.Metrics) || !primaryAttributionValid(*p, e.Metrics) {
 			status = Hold
 		}
-		if len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
+		if !srmValid(*p) || len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
 			p.PrimaryMetricRef == nil || p.Diagnostics == nil || !fingerprint.MatchString(p.RegistrationVersion) || !knownAnalysisMethod(p.AnalysisMethod) || !knownExposureMode(p.ExposureMode) ||
 			!usableVariants(p.PerVariant) || !knownVerdict(p.Decision.Verdict) || p.Decision.Verdict == "hold" {
 			status = Hold

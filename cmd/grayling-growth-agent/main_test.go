@@ -102,6 +102,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 	names = append(names, diagnosticsTimeCases...)
 	names = append(names, watermarkCases...)
 	names = append(names, primaryAttributionCases...)
+	names = append(names, srmCases...)
 	names = append(names, attributionCases...)
 	names = append(names, invalidReportMetadataCases...)
 	names = append(names, validReportMethodCases...)
@@ -114,7 +115,8 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			if name == "attribution overflow" {
 				p.AnalysisPlan.AttributionWindowHours = 9223372036854775807
 			}
-			report := growth.Report{PrimaryAttributionWindow: int64(24 * time.Hour), ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, AnalysisMethod: p.AnalysisPlan.Method, ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue", Reasons: []string{secret}}}
+			report := growth.Report{SRM: growth.SRM{Healthy: new(true)}, PrimaryAttributionWindow: int64(24 * time.Hour), ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, AnalysisMethod: p.AnalysisPlan.Method, ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue", Reasons: []string{secret}}}
+			applySRMCase(name, &report)
 			report.Diagnostics = &growth.Diagnostics{ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 			count, value := int64(100), 0.2
 			for _, v := range p.Variants {
@@ -224,6 +226,9 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			}
 			if name == "primary attribution deprecated" {
 				want, state = 3, growth.ProposalNeedsData
+			}
+			if invalidSRMCase(name) {
+				want, status, state = 3, growth.Hold, growth.ProposalNeedsData
 			}
 			if invalidPrimaryAttributionCase(name) {
 				want, status, state = 3, growth.Hold, growth.ProposalNeedsData

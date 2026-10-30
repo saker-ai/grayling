@@ -32,6 +32,8 @@ func TestRecordLearningBinary(t *testing.T) {
 	names = append(names, diagnosticsTimeCases...)
 	names = append(names, watermarkCases...)
 	names = append(names, primaryAttributionCases...)
+	names = append(names, srmCases...)
+	names = append(names, srmMalformedCases...)
 	names = append(names, primaryAttributionBoundaryCases...)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
@@ -39,7 +41,8 @@ func TestRecordLearningBinary(t *testing.T) {
 			p.EvidenceRefs[0].ExperimentID = "baseline"
 			p.EvidenceRefs[0].SourcePath = "/api/v1/admin/experiments/baseline/report/export?format=json"
 			m := growth.MonitorManifest{WorkspaceID: "ws1", EnvironmentID: "env1", ExperimentID: "exp1", Epoch: 1, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, PrimaryMetric: p.PrimaryMetric.Ref, Guardrails: []growth.MetricRef{p.Guardrails[0].Ref}}
-			report := growth.Report{PrimaryAttributionWindow: int64(24 * time.Hour), ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, RegistrationVersion: m.RegistrationVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, AnalysisMethod: "two-proportion-z", ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue"}}
+			report := growth.Report{SRM: growth.SRM{Healthy: new(true)}, PrimaryAttributionWindow: int64(24 * time.Hour), ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, RegistrationVersion: m.RegistrationVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, AnalysisMethod: "two-proportion-z", ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue"}}
+			applySRMCase(name, &report)
 			count, value := int64(100), 0.2
 			for _, v := range p.Variants {
 				report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
@@ -70,6 +73,12 @@ func TestRecordLearningBinary(t *testing.T) {
 			}
 			if applyAggregateCase(name, &report) {
 				code, status, want = 3, growth.Hold, "aggregates_missing"
+			}
+			if invalidSRMCase(name) {
+				code, status, want = 3, growth.Hold, "srm_review_required"
+			}
+			if malformedSRMCase(name) {
+				code = 1
 			}
 			if invalidPrimaryAttributionCase(name) {
 				code, status, want = 3, growth.Hold, "primary_attribution_invalid"
@@ -429,7 +438,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &record); err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasPrefix(name, "primary attribution ") || isWatermarkCase(name) || isDiagnosticsTimeCase(name) || strings.HasPrefix(name, "exposure ") || isAggregateCase(name) {
+			if strings.HasPrefix(name, "srm ") || strings.HasPrefix(name, "primary attribution ") || isWatermarkCase(name) || isDiagnosticsTimeCase(name) || strings.HasPrefix(name, "exposure ") || isAggregateCase(name) {
 				recordPath := writeJSON("record.json", record, "")
 				before := calls.Load()
 				for _, args := range [][]string{
@@ -506,6 +515,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			if got.Status != status || got.PublicationAuthorized {
 				t.Fatalf("summary %+v", got)
 			}
+			checkSRMBlockers(t, name, record.Observation)
 			checkPrimaryAttributionBlockers(t, name, record.Observation)
 			checkDiagnosticsTimeBlockers(t, name, record.Observation)
 			if want != "" {

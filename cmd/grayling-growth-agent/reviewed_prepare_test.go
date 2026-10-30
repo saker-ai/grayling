@@ -30,6 +30,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 	names = append(names, diagnosticsTimeCases...)
 	names = append(names, watermarkCases...)
 	names = append(names, primaryAttributionCases...)
+	names = append(names, srmCases...)
 	names = append(names, attributionCases...)
 	for _, name := range append(names, append(invalidReportMetadataCases, []string{"breach rollback", "breach continue", "breach ship", "rollback", "ship", "approve", "settings", "unhealthy", "missing evidence", "stale", "forged pin", "roles", "workspace", "reject", "request_changes", "null", "malformed", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing", "oversized", "boundary", "fifo", "directory", "symlink", "empty path", "missing file"}...)...) {
 		t.Run(name, func(t *testing.T) {
@@ -81,6 +82,12 @@ func TestReviewedPrepareBinary(t *testing.T) {
 				}
 				if name == "attribution longer guardrail" {
 					want, diag = 2, "growth: preparation analysisWindowHours: shorter_than_attribution\n"
+				}
+			}
+			if strings.HasPrefix(name, "srm ") {
+				want, diag = 0, ""
+				if invalidSRMCase(name) {
+					want, diag = 3, "preparation blocked: proposal not ready for review\n"
 				}
 			}
 			if strings.HasPrefix(name, "primary attribution ") {
@@ -188,7 +195,8 @@ func TestReviewedPrepareBinary(t *testing.T) {
 					w.WriteHeader(404)
 					return
 				}
-				report := growth.Report{PrimaryAttributionWindow: int64(24 * time.Hour), ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, AnalysisMethod: p.AnalysisPlan.Method, ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: name != "unhealthy", PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue"}}
+				report := growth.Report{SRM: growth.SRM{Healthy: new(true)}, PrimaryAttributionWindow: int64(24 * time.Hour), ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, AnalysisMethod: p.AnalysisPlan.Method, ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: name != "unhealthy", PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue"}}
+				applySRMCase(name, &report)
 				if strings.HasPrefix(name, "breach ") {
 					setGuardrailBreach(&report, strings.TrimPrefix(name, "breach "))
 				} else if name == "rollback" || name == "ship" {
