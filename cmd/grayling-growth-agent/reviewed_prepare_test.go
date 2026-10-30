@@ -23,7 +23,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 	if b, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, b)
 	}
-	for _, name := range []string{"approve", "settings", "unhealthy", "missing evidence", "stale", "forged pin", "roles", "workspace", "reject", "request_changes", "null", "malformed", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing", "oversized", "boundary", "fifo", "directory", "symlink", "empty path", "missing file"} {
+	for _, name := range []string{"breach rollback", "breach continue", "breach ship", "rollback", "ship", "approve", "settings", "unhealthy", "missing evidence", "stale", "forged pin", "roles", "workspace", "reject", "request_changes", "null", "malformed", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing", "oversized", "boundary", "fifo", "directory", "symlink", "empty path", "missing file"} {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
 			// Caller-attested fixture, deliberately without reconstructed historical
@@ -35,11 +35,11 @@ func TestReviewedPrepareBinary(t *testing.T) {
 			r := growth.ReviewRecord{SchemaVersion: growth.ReviewRecordSchemaVersion, ProposalID: p.ID, ProposalVersion: p.Version, WorkspaceID: p.WorkspaceID, EnvironmentID: p.EnvironmentID, ProposalFingerprint: fp, PrimaryMetric: p.PrimaryMetric, Guardrails: p.Guardrails, EvidencePins: p.EvidenceRefs, Reviewer: "operator", ReviewedAt: p.AnalysisPlan.Provenance.SuppliedAt, Decision: growth.ReviewApprove, Rationale: secret, Readiness: growth.ProposalReview{State: growth.ProposalReadyForReview, Blockers: []growth.Blocker{}}}
 			want, diag := 2, "invalid or inconsistent preparation review\n"
 			switch name {
-			case "approve", "boundary":
+			case "approve", "boundary", "rollback", "ship":
 				want, diag = 0, ""
 			case "settings":
 				diag = "growth: preparation alpha: out_of_range\n"
-			case "unhealthy", "missing evidence":
+			case "unhealthy", "missing evidence", "breach rollback", "breach continue", "breach ship":
 				want, diag = 3, "preparation blocked: proposal not ready for review\n"
 			case "stale":
 				p.Rationale += " edited without version bump"
@@ -129,6 +129,11 @@ func TestReviewedPrepareBinary(t *testing.T) {
 					return
 				}
 				report := growth.Report{ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, AnalysisMethod: p.AnalysisPlan.Method, ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: name != "unhealthy", PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue"}}
+				if strings.HasPrefix(name, "breach ") {
+					setGuardrailBreach(&report, strings.TrimPrefix(name, "breach "))
+				} else if name == "rollback" || name == "ship" {
+					report.Decision.Verdict = name
+				}
 				report.Diagnostics = &growth.Diagnostics{ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 				count, value := int64(100), 0.2
 				for _, v := range p.Variants {

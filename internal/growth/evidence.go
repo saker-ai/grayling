@@ -332,7 +332,7 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 			return nil, ErrMismatch
 		}
 		status := Ready
-		if !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || p.GeneratedAt.IsZero() ||
+		if len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || p.GeneratedAt.IsZero() ||
 			p.PrimaryMetricRef == nil || p.Diagnostics == nil || p.RegistrationVersion == "" || p.AnalysisMethod == "" ||
 			!usableVariants(p.PerVariant) || !knownVerdict(p.Decision.Verdict) || p.Decision.Verdict == "hold" {
 			status = Hold

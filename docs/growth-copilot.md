@@ -153,11 +153,23 @@ Adapter readiness is separate from `report.decision.verdict`:
 - `HOLD`: a present report is unhealthy, incomplete, non-recomputable, missing
   required metadata/diagnostics/references/aggregates, has inconsistent diagnostic
   windows or issues, has a watermark before window end, or the server verdict is
-  hold/unknown. The original server decision remains visible even if readiness
+  hold/unknown, or has any entry in `decision.guardrailBreaches` (even with
+  `healthy=true` or empty breach fields). The original server decision remains visible even if readiness
   is HOLD.
 - `READY`: all requested evidence is present and passes these checks. This means
   usable evidence, **not** approval, a winner, or permission to publish. Server
   `continue` and `rollback` remain those exact verdicts.
+
+Guardrail breaches block review with `needs_data`/exit 3, approval recording,
+and both plain and review-linked preparation exports; no approval or preparation
+artifact is emitted. Rejection and request-changes records retain readiness
+blockers. Monitoring and learning retain HOLD, the exact server verdict, and
+false publication/business-win claims. Fixed diagnostics do not echo breached
+metric or detail prose, and all requests remain GET. Otherwise healthy reports
+without breaches remain READY for `rollback`, `continue` and `ship`; no statistics
+are calculated by this check. Reader and actual-binary fixtures cover this local
+behavior; real Saker mapping, durable orchestration and pilot acceptance remain
+outstanding.
 
 Missing evidence takes precedence over HOLD at the envelope level; individual
 present reports retain their HOLD status. Local incremental stores cannot
