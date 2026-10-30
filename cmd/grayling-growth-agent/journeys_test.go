@@ -82,7 +82,7 @@ func applyJourneysCase(name string, report *growth.Report) {
 }
 func journeysReportWire(name string, report growth.Report) any {
 	if !strings.HasPrefix(name, "journeys ") {
-		return diagnosticsTimeReportWire(name, report)
+		return countsReportWire(name, report)
 	}
 	data, err := json.Marshal(report)
 	if err != nil {

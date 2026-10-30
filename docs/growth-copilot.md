@@ -12,7 +12,7 @@ existing platform unchanged.
 | --- | --- | --- |
 | Exact metric definition | `GET /api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}` | Reuse workspace-scoped viewer access; check workspace, key, version and hash. Metrics are workspace-level, with no environment field; report scope supplies the environment boundary. |
 | Aggregate experiment evidence | `GET /api/v1/admin/experiments/{id}/report/export?format=json` | Reuse scoped report snapshot, generation time, epoch, evidence version, frozen primary/guardrail references, analysis window, watermark, recomputability, health, primary calculation errors, issues and decision. |
-| Diagnostics | Already embedded in report export | Reuse embedded experiment/epoch, generation time, window and issues. No separate diagnostics request or independently timed snapshot. |
+| Diagnostics | Already embedded in report export | Reuse embedded experiment/epoch, generation time, window, issues and exact nullable crossVariantUnits/assignmentMismatch counts. No separate diagnostics request or independently timed snapshot. |
 | Rollout observation | `GET /api/v1/admin/experiments/{id}` with embedded `releasePlan` | Pin workspace/environment, experiment, epoch and registration version; project bounded plan state/history without sensitive prose. Missing experiment and absent plan are separate observations; neither grants publication authority or establishes a business win. |
 | Binding readiness | `GET /api/v1/admin/experiments/{id}/bind-check` between experiment GETs | Reuse the rollout identity manifest; validate nine prerequisite checks, revision consistency and unchanged surrounding snapshots. Non-atomic observation; never binding or publication authority. |
 | Statistical decisions | Existing report builder and statistics packages | Preserve server verdict and reasons with analysis method; do not calculate significance, sample sizes, uplift, or winning probabilities. Parallel sequential/Bayesian/Bandit views are deliberately omitted, never merged into the fixed-sample decision. |
@@ -882,8 +882,9 @@ No statistics or thresholds are recomputed. True SRM health passes only this
 check: every other health, metadata, attribution and readiness gate still applies.
 
 Unhealthy flags, calculation errors, issue presence or guardrail breaches request
-a generic diagnostics review; the command uses structured SRM health and does not infer contamination,
-retention maturity or any other cause from free-form server text. Window
+a generic diagnostics review; the command uses structured SRM health, explicit
+contamination/assignment counts and supplied journey maturity counts. It does not
+infer these causes from free-form server text. Window
 completeness/recomputability, watermark, metadata and aggregate presence use
 structured fields. Both report and embedded diagnostics windows are checked.
 
@@ -1655,3 +1656,47 @@ passed platform/report/API race tests, the full Agent integration race suite
 (221.585 seconds, original five-minute timeout), and PostgreSQL E2E (4.930
 seconds). The cleanup trap removed the container. No gate, assertion or timeout
 was weakened; these results establish local software behavior only.
+
+
+## Explicit contamination and assignment counts (slice 31)
+
+The embedded diagnostics allowlist preserves `crossVariantUnits` and
+`assignmentMismatch` as exact nullable signed 64-bit integer counts, following
+`internal/experiment/diagnostics.go`. Both must be explicitly zero for READY.
+Missing or null values project as null; negative or positive values, including
+both int64 boundaries, require HOLD even with `healthy: true`, empty issues and
+`ship`, `continue` or `rollback`. This applies to all six supported analysis
+methods, including Bandit. Reading and monitoring share the same validation.
+Malformed types, fractional numbers, int64 overflow and duplicate members reject
+the entire read with the fixed response error; no decoder or response text is
+included in diagnostics.
+
+Review remains `needs_data`; approval recording and both plain and historically
+approved preparation refuse artifacts. Rejection and request-changes retain the
+blockers. Monitoring emits `health_review_required` / `review_diagnostics`, keeps
+the original server verdict and never authorizes publication. Learning export,
+offline verification and search preserve HOLD and false business-win/publication
+claims. Unknown diagnostic fields, unit identities and free-form server details
+are not added to the projection or fixed diagnostics.
+
+Library and actual-binary HTTP regressions cover both fields independently,
+missing/null counts, exact int64 boundaries, malformed input, zero controls,
+all supported methods, negative reviews, earlier approvals, blocked learning
+round trips, secret-safe output and zero non-GET requests. The existing real
+report-handler fixture also compares the projected counts against server output.
+These are local software contracts, not real contamination measurements or Saker
+pilot acceptance. No statistics are recalculated, core APIs changed, production
+writes made or model integration added. Full issue acceptance remains outstanding.
+All existing build, short, vet, race, process/E2E, SDK, frontend/static, license
+and three disposable PostgreSQL gates above remain mandatory with their original
+timeouts and assertions.
+
+
+Local slice 31 validation on 2026-10-30 passed `make build`, the full documented
+short/build/vet/core-race and boot/E2E/smoke commands, SDK tests, frozen pnpm
+installation, workspace frontend tests, static consistency, license checks and
+license-audit unit tests. All three disposable PostgreSQL 16 gates passed:
+platform/report/API race, full Agent integration race (224.073 seconds within the
+unchanged five-minute timeout), and PostgreSQL E2E (4.232 seconds). The container
+was cleaned up by the exit trap. `git diff --check` passed. These results establish
+local software behavior only; full issue and real pilot acceptance remain open.

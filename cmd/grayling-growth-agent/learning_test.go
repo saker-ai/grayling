@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
@@ -35,9 +36,11 @@ func TestRecordLearningBinary(t *testing.T) {
 	names = append(names, srmCases...)
 	names = append(names, guardrailsCases...)
 	names = append(names, journeysCases...)
+	names = append(names, countsCases...)
 	names = append(names, srmMalformedCases...)
 	names = append(names, guardrailsMalformedCases...)
 	names = append(names, journeysMalformedCases...)
+	names = append(names, countsMalformedCases...)
 	names = append(names, primaryAttributionBoundaryCases...)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
@@ -49,11 +52,12 @@ func TestRecordLearningBinary(t *testing.T) {
 			applySRMCase(name, &report)
 			applyGuardrailsCase(name, &report)
 			applyJourneysCase(name, &report)
+			applyCountsCase(name, &report)
 			count, value := int64(100), 0.2
 			for _, v := range p.Variants {
 				report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
 			}
-			report.Diagnostics = &growth.Diagnostics{ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
+			report.Diagnostics = &growth.Diagnostics{CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 			fp, err := growth.ProposalFingerprint(p)
 			if err != nil {
 				t.Fatal(err)
@@ -80,13 +84,13 @@ func TestRecordLearningBinary(t *testing.T) {
 			if applyAggregateCase(name, &report) {
 				code, status, want = 3, growth.Hold, "aggregates_missing"
 			}
-			if invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) {
+			if invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) {
 				code, status, want = 3, growth.Hold, "srm_review_required"
-				if invalidGuardrailsCase(name) || invalidJourneysCase(name) {
+				if invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) {
 					want = "health_review_required"
 				}
 			}
-			if malformedSRMCase(name) || malformedGuardrailsCase(name) || malformedJourneysCase(name) {
+			if malformedSRMCase(name) || malformedGuardrailsCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) {
 				code = 1
 			}
 			if invalidPrimaryAttributionCase(name) {
@@ -342,7 +346,8 @@ func TestRecordLearningBinary(t *testing.T) {
 				if name == "scope mismatch" {
 					ws = "other"
 				}
-				json.MarshalWrite(w, map[string]any{"workspaceId": ws, "environmentId": "env1", "report": exposureReportWire(name, report)})
+				// Preserve deliberate duplicate members so the reader must reject them.
+				json.MarshalWrite(w, map[string]any{"workspaceId": ws, "environmentId": "env1", "report": exposureReportWire(name, report)}, jsontext.AllowDuplicateNames(true))
 			}))
 			defer srv.Close()
 			data, err := json.Marshal(m)
@@ -447,7 +452,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &record); err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasPrefix(name, "srm ") || (strings.HasPrefix(name, "checks ") || strings.HasPrefix(name, "journeys ")) || strings.HasPrefix(name, "primary attribution ") || isWatermarkCase(name) || isDiagnosticsTimeCase(name) || strings.HasPrefix(name, "exposure ") || isAggregateCase(name) {
+			if strings.HasPrefix(name, "srm ") || strings.HasPrefix(name, "checks ") || strings.HasPrefix(name, "journeys ") || strings.HasPrefix(name, "counts ") || strings.HasPrefix(name, "primary attribution ") || isWatermarkCase(name) || isDiagnosticsTimeCase(name) || strings.HasPrefix(name, "exposure ") || isAggregateCase(name) {
 				recordPath := writeJSON("record.json", record, "")
 				before := calls.Load()
 				for _, args := range [][]string{
@@ -527,6 +532,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			checkSRMBlockers(t, name, record.Observation)
 			checkGuardrailsBlockers(t, name, record.Observation)
 			checkJourneysBlockers(t, name, record.Observation)
+			checkCountsBlockers(t, name, record.Observation)
 			checkPrimaryAttributionBlockers(t, name, record.Observation)
 			checkDiagnosticsTimeBlockers(t, name, record.Observation)
 			if want != "" {

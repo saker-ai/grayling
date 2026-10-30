@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
@@ -33,7 +34,9 @@ func TestReviewedPrepareBinary(t *testing.T) {
 	names = append(names, srmCases...)
 	names = append(names, guardrailsCases...)
 	names = append(names, journeysCases...)
+	names = append(names, countsCases...)
 	names = append(names, journeysMalformedCases...)
+	names = append(names, countsMalformedCases...)
 	names = append(names, attributionCases...)
 	for _, name := range append(names, append(invalidReportMetadataCases, []string{"breach rollback", "breach continue", "breach ship", "rollback", "ship", "approve", "settings", "unhealthy", "missing evidence", "stale", "forged pin", "roles", "workspace", "reject", "request_changes", "null", "malformed", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing", "oversized", "boundary", "fifo", "directory", "symlink", "empty path", "missing file"}...)...) {
 		t.Run(name, func(t *testing.T) {
@@ -87,13 +90,13 @@ func TestReviewedPrepareBinary(t *testing.T) {
 					want, diag = 2, "growth: preparation analysisWindowHours: shorter_than_attribution\n"
 				}
 			}
-			if strings.HasPrefix(name, "srm ") || (strings.HasPrefix(name, "checks ") || strings.HasPrefix(name, "journeys ")) {
+			if strings.HasPrefix(name, "srm ") || strings.HasPrefix(name, "checks ") || strings.HasPrefix(name, "journeys ") || strings.HasPrefix(name, "counts ") {
 				want, diag = 0, ""
-				if invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) {
+				if invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) {
 					want, diag = 3, "preparation blocked: proposal not ready for review\n"
 				}
 			}
-			if malformedJourneysCase(name) {
+			if malformedJourneysCase(name) || malformedCountsCase(name) {
 				want, diag = 1, "evidence execution failed\n"
 			}
 			if strings.HasPrefix(name, "primary attribution ") {
@@ -205,13 +208,14 @@ func TestReviewedPrepareBinary(t *testing.T) {
 				applySRMCase(name, &report)
 				applyGuardrailsCase(name, &report)
 				applyJourneysCase(name, &report)
+				applyCountsCase(name, &report)
 				if strings.HasPrefix(name, "breach ") {
 					setGuardrailBreach(&report, strings.TrimPrefix(name, "breach "))
 				} else if name == "rollback" || name == "ship" {
 					report.Decision.Verdict = name
 				}
 				invalidateReportMetadata(name, &report)
-				report.Diagnostics = &growth.Diagnostics{ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
+				report.Diagnostics = &growth.Diagnostics{CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 				count, value := int64(100), 0.2
 				for _, v := range p.Variants {
 					report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
@@ -219,11 +223,12 @@ func TestReviewedPrepareBinary(t *testing.T) {
 				applyWatermarkCase(name, &report)
 				applyDiagnosticsTimeCase(name, &report)
 				applyAggregateCase(name, &report)
+				// Preserve deliberate duplicate members so the reader must reject them.
 				json.MarshalWrite(w, struct {
 					WorkspaceID   string `json:"workspaceId"`
 					EnvironmentID string `json:"environmentId"`
 					Report        any    `json:"report"`
-				}{"ws1", "env1", exposureReportWire(name, report)})
+				}{"ws1", "env1", exposureReportWire(name, report)}, jsontext.AllowDuplicateNames(true))
 			}))
 			defer srv.Close()
 			settings := writeSettings(t, p)

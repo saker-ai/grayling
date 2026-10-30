@@ -129,6 +129,10 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 	}
 	var raw struct {
 		Report struct {
+			Diagnostics *struct {
+				CrossVariantUnits  int64 `json:"crossVariantUnits"`
+				AssignmentMismatch int64 `json:"assignmentMismatch"`
+			} `json:"diagnostics"`
 			Guardrails []struct {
 				Breached bool   `json:"breached"`
 				Metric   string `json:"metric"`
@@ -140,6 +144,11 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 	response.Body.Close()
 	if err != nil || response.StatusCode != http.StatusOK || len(raw.Report.Guardrails) != 1 || len(p.Guardrails) != len(raw.Report.Guardrails) {
 		t.Fatalf("real guardrail checks: %+v %+v %v", raw, p.Guardrails, err)
+	}
+	if d := raw.Report.Diagnostics; d != nil {
+		if p.Diagnostics == nil || p.Diagnostics.CrossVariantUnits == nil || p.Diagnostics.AssignmentMismatch == nil || *p.Diagnostics.CrossVariantUnits != d.CrossVariantUnits || *p.Diagnostics.AssignmentMismatch != d.AssignmentMismatch {
+			t.Fatal("lost real diagnostic counts")
+		}
 	}
 	for i, check := range raw.Report.Guardrails {
 		if p.Guardrails[i].Breached == nil || *p.Guardrails[i].Breached != check.Breached {
