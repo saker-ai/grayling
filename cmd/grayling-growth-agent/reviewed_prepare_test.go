@@ -26,6 +26,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 	names := append([]string{}, metricLifecycleCases...)
 	names = append(names, exposureCases...)
 	names = append(names, aggregateCaseNames()...)
+	names = append(names, diagnosticsTimeCases...)
 	names = append(names, attributionCases...)
 	for _, name := range append(names, append(invalidReportMetadataCases, []string{"breach rollback", "breach continue", "breach ship", "rollback", "ship", "approve", "settings", "unhealthy", "missing evidence", "stale", "forged pin", "roles", "workspace", "reject", "request_changes", "null", "malformed", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing", "oversized", "boundary", "fifo", "directory", "symlink", "empty path", "missing file"}...)...) {
 		t.Run(name, func(t *testing.T) {
@@ -138,6 +139,12 @@ func TestReviewedPrepareBinary(t *testing.T) {
 					path = link
 				}
 			}
+			if isDiagnosticsTimeCase(name) {
+				want, diag = 0, ""
+				if invalidDiagnosticsTimeCase(name) {
+					want, diag = 3, "preparation blocked: proposal not ready for review\n"
+				}
+			}
 			if isAggregateCase(name) {
 				want, diag = 0, ""
 				if invalidAggregateCase(name) {
@@ -178,6 +185,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 				for _, v := range p.Variants {
 					report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
 				}
+				applyDiagnosticsTimeCase(name, &report)
 				applyAggregateCase(name, &report)
 				json.MarshalWrite(w, struct {
 					WorkspaceID   string `json:"workspaceId"`

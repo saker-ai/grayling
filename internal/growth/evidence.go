@@ -349,7 +349,7 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 			!usableVariants(p.PerVariant) || !knownVerdict(p.Decision.Verdict) || p.Decision.Verdict == "hold" {
 			status = Hold
 		}
-		if d := p.Diagnostics; d != nil && (len(d.Issues) != 0 || d.GeneratedAt.IsZero() || !usableWindow(d.Window) || !sameWindow(d.Window, p.Window)) {
+		if d := p.Diagnostics; d != nil && (len(d.Issues) != 0 || d.GeneratedAt.IsZero() || !d.GeneratedAt.Equal(p.GeneratedAt) || !usableWindow(d.Window) || !sameWindow(d.Window, p.Window)) {
 			status = Hold
 		}
 		e.Evidence = append(e.Evidence, Evidence{SourcePath: path, Status: status, Report: *p})
