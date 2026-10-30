@@ -1864,3 +1864,69 @@ short and race suites passed. Disposable PostgreSQL 16 checks passed for
 platform/report/API, full Agent integration race (227.471 seconds within the
 unchanged five-minute timeout), and PostgreSQL E2E (3.967 seconds). The exit trap
 removed the container. These results establish local software behavior only.
+
+## Caller-attested goals and offline linkage (slice 36)
+
+`internal/growth/goal.go` adds `GrowthGoal` (`growth.goal.v1`): `id`, positive
+int64 `version`, `workspaceId`, `environmentId`, caller-attested `owner`,
+`objective`, `primaryMetric`, `guardrails`, and `baselineWindow: {start, end}`.
+Identifiers and owner use the existing 1–128 byte identifier grammar; objective
+is nonblank UTF-8 text up to 4096 bytes; only newline/tab control characters are
+allowed. The observation
+interval requires nonzero RFC3339 timestamps and end strictly after start. It
+makes no completeness, watermark, baseline value or statistical adequacy claim.
+
+Metric pins reuse proposal `{ref: {key, version, definitionHash}, sourcePath}`
+objects: positive versions, lowercase `sha256:` hashes and exactly
+`/api/v1/admin/workspaces/{workspace}/metrics/{key}/versions/{version}`.
+There are 1–20 guardrails. Each metric key occurs once across primary and
+guardrail roles; duplicate keys, conflicting hashes/versions and role overlap
+are rejected. Paths are assertions, never network destinations.
+
+```sh
+grayling-growth-agent verify-goal --goal goal.json --proposal proposal.json \
+  --workspace ws1 --environment env1
+```
+
+`DecodeGoal` strictly rejects unknown and duplicate members at every depth,
+null roots, invalid UTF-8, malformed/trailing JSON, invalid fields/windows and
+inputs larger than 64 KiB including whitespace. `ValidateGoal` and the pure
+`VerifyGoal` also validate programmatic artifacts. The CLI requires explicit
+operator scope and bounded regular files, opens with nonblocking/no-follow flags,
+checks actual read limits, and accepts no credentials, API origin or network
+options. All failures use fixed diagnostics without paths or input prose. It
+prepares the complete output before writing; stdout write errors exit 1, invalid
+input/linkage exits 2, and consistent linkage exits 0 without a readiness check.
+
+Verification requires exact `proposal.goalId`, workspace/environment, primary
+pin and guardrail pin set equality. Guardrail order does not affect matching.
+Output (`growth.goal-verification.v1`) contains only bounded scope/goal/proposal
+identifiers, exact versions, deterministic goal/proposal SHA-256 fingerprints,
+and `publicationAuthorized: false`. Fingerprints cover complete canonical typed
+JSON, preserve array order and exact int64 values (including above 2^53), and
+change when caller text changes. Matching order independence does not make
+reordered artifacts fingerprint-identical. Fingerprints are content identifiers,
+not signatures or independently trusted expected hashes.
+
+Existing proposal/review/preparation/learning schemas and workflows are unchanged.
+Proposals carry only goal ID, so verification identifies the supplied goal
+version; it cannot prove which historical version a proposal intended or prevent
+a caller replacing both artifacts. It does not authenticate owners, validate BI
+facts, establish readiness/approval, submit experiments, or prove real baseline
+data, adequate samples or causal effects. Text stays inert. Automatic goal
+enforcement, persistence, target modelling, BI facts, model generation, durable
+orchestration and real Saker pilot acceptance remain later work; full #20
+acceptance remains outstanding. Original mandatory gates/timeouts are unchanged.
+
+Slice 36 local validation on 2026-10-30 passed all three supplied mandatory gate
+sequences with unchanged timeouts: `make build`, complete short Go suite,
+`go build ./...`, `go vet ./...`, complete core race suite, boot/E2E/smoke,
+`make sdk-test`, frozen pnpm install, workspace frontend tests/build,
+`make check-static`, license inventory check and its five unit tests, and
+`git diff --check`. Core race results included growth library 228.092 seconds
+and growth command 328.118 seconds. Disposable PostgreSQL 16 platform/report/API
+race checks passed; full Agent integration race passed in 228.940 seconds within
+the original five-minute timeout; PostgreSQL E2E passed in 3.923 seconds. The
+exit trap removed the container. Focused goal library and actual-binary
+regressions also passed. These are local software checks, not real baseline
+validation, model evaluation, business outcomes or Saker pilot acceptance.
