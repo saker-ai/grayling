@@ -102,6 +102,7 @@ func validateLearningRecord(r LearningRecord) error {
 		"exposure_mode_invalid":        "review_registration",
 		"analysis_method_invalid":      "review_registration",
 		"generation_time_missing":      "refresh_report",
+		"srm_review_required":          "review_diagnostics",
 		"health_review_required":       "review_diagnostics",
 		"window_metadata_invalid":      "review_window",
 		"window_incomplete":            "wait_for_complete_window",

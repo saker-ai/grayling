@@ -28,9 +28,9 @@ type LearningVerification struct {
 // VerifyLearning checks caller-supplied artifacts against an explicit scope.
 // It is pure: no Reader, credentials, clock, network, persistence or decisions.
 // Every failure returns a nil summary and a fixed diagnostic. HOLD/NEEDS_DATA
-// are valid observations; verification does not clear their blockers. Primary
-// attribution blockers are recorded observations: these artifacts do not contain
-// the historical catalog evidence needed to reconstruct that comparison.
+// are valid observations; verification does not clear their blockers. SRM and
+// primary attribution blockers are recorded observations: these artifacts lack
+// raw SRM and historical catalog evidence needed to reconstruct those checks.
 func VerifyLearning(p Proposal, r LearningRecord, workspace, environment string) (*LearningVerification, error) {
 	if !validSegment(workspace) || !validSegment(environment) || validateLearningRecord(r) != nil {
 		return nil, ErrLearning

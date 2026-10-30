@@ -811,7 +811,7 @@ below. Codes and remediation actions are implementation-owned:
 | --- | --- |
 | `evidence_missing` | `restore_evidence_access` |
 | `metric_lifecycle_invalid`, `primary_attribution_invalid` | `review_metric_definitions` |
-| `verdict_invalid`, `server_hold`, `health_review_required` | `review_diagnostics` |
+| `verdict_invalid`, `server_hold`, `health_review_required`, `srm_review_required` | `review_diagnostics` |
 | `analysis_method_invalid` | `review_registration` |
 | `exposure_mode_invalid` | `review_registration` |
 | `generation_time_missing`, `diagnostics_missing`, `diagnostics_metadata_invalid` | `refresh_report` |
@@ -821,8 +821,30 @@ below. Codes and remediation actions are implementation-owned:
 | `watermark_late` | `wait_for_watermark` |
 | `aggregates_missing` | `restore_aggregate_evidence` |
 
+<a id="server-srm-health"></a>
+
+Fixed-split evidence requires an explicitly true server `srm.healthy` for every
+supported fixed-split analysis method. Omitted/null `srm`, omitted/null `healthy`,
+and `healthy: false` produce HOLD even when report `healthy` is true, issue lists
+are empty and the server verdict is `ship`, `continue` or `rollback`.
+`bandit-beta-bernoulli` may omit SRM because its assignment semantics differ;
+an explicitly supplied null, incomplete or unhealthy SRM still blocks it.
+Malformed SRM objects or non-boolean healthy values fail the entire read with a
+fixed response error, without exporting partial evidence or server text.
+
+The evidence allowlist retains only SRM health, preserving omitted/null members;
+it drops SRM counts, statistics, thresholds and extra prose. One shared check
+serves reading and monitoring. Monitor exports `srm_review_required` /
+`review_diagnostics`, and learning export, offline validation and search retain
+that blocker. Offline learning artifacts contain the observation, not the raw
+SRM report: verification checks local consistency and cannot reconstruct or
+authenticate server SRM health. Approval and both preparation paths refuse blocked
+evidence; rejection/request-changes preserve readiness blockers.
+No statistics or thresholds are recomputed. True SRM health passes only this
+check: every other health, metadata, attribution and readiness gate still applies.
+
 Unhealthy flags, calculation errors, issue presence or guardrail breaches request
-a generic diagnostics review; the command does not infer SRM, contamination,
+a generic diagnostics review; the command uses structured SRM health and does not infer contamination,
 retention maturity or any other cause from free-form server text. Window
 completeness/recomputability, watermark, metadata and aggregate presence use
 structured fields. Both report and embedded diagnostics windows are checked.

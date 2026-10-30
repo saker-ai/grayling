@@ -19,7 +19,7 @@ func fixture() (Metric, Report, Query) {
 	ref := MetricRef{Key: "activation", Version: 1, DefinitionHash: hashA}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	window := Window{Version: "utc-exposure-v1", Start: start, End: start.Add(time.Hour), Watermark: start.Add(2 * time.Hour), Complete: true, Recomputable: true, Backend: "postgresql-raw"}
-	report := Report{PrimaryAttributionWindow: int64(24 * time.Hour), ExperimentID: "exp1", Epoch: 1, EvidenceVersion: hashB, GeneratedAt: start.Add(3 * time.Hour), RegistrationVersion: hashA, AnalysisMethod: "two-proportion-z", ExposureMode: "onRender", Window: window, Healthy: true, PrimaryMetricRef: &ref,
+	report := Report{SRM: SRM{Healthy: new(true)}, PrimaryAttributionWindow: int64(24 * time.Hour), ExperimentID: "exp1", Epoch: 1, EvidenceVersion: hashB, GeneratedAt: start.Add(3 * time.Hour), RegistrationVersion: hashA, AnalysisMethod: "two-proportion-z", ExposureMode: "onRender", Window: window, Healthy: true, PrimaryMetricRef: &ref,
 		Diagnostics: &Diagnostics{ExperimentID: "exp1", Epoch: 1, GeneratedAt: start.Add(3 * time.Hour), Window: window},
 		PerVariant:  []Variant{{Variant: "control", ExposedUnits: ptr(int64(100)), RandomizedUnits: ptr(int64(100)), Exposures: ptr(int64(100)), ConvertedUnits: ptr(int64(20)), PrimaryValue: ptr(0.2)}, {Variant: "treatment", ExposedUnits: ptr(int64(100)), RandomizedUnits: ptr(int64(100)), Exposures: ptr(int64(100)), ConvertedUnits: ptr(int64(30)), PrimaryValue: ptr(0.3)}},
 		Decision:    Decision{Verdict: "ship", Reasons: []string{"server fixed-sample result"}}}
