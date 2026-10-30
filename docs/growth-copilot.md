@@ -821,6 +821,44 @@ below. Codes and remediation actions are implementation-owned:
 | `watermark_late` | `wait_for_watermark` |
 | `aggregates_missing` | `restore_aggregate_evidence` |
 
+<a id="server-report-guardrail-checks"></a>
+### Server report guardrail checks
+
+The evidence projection retains only each `report.guardrails` entry's `breached`
+boolean. Metric names, details, thresholds and unknown fields are omitted.
+Reading and monitoring share validation: any supplied `breached:true`, missing
+boolean, null boolean or null entry requires HOLD, even when `healthy:true` and
+`ship`, `continue` or `rollback` disagree. Monitor records the fixed
+`health_review_required` / `review_diagnostics` blocker.
+
+Omitted, null and empty guardrail arrays remain compatible. This check does not
+infer missing guardrail coverage or recompute thresholds. Each supplied check
+must explicitly report `breached:false` to pass; all other existing checks still
+apply. Malformed array, entry or boolean types fail with `ErrResponse` and no
+partial artifact or response-body diagnostics.
+
+Proposal review inherits HOLD and refuses approval; rejection and requests for
+changes retain blockers. Both preparation paths check fresh evidence, including
+when using a prior approval. Learning export, offline verification and search
+preserve the observed HOLD without reconstructing or authenticating server
+checks. Library and actual-command fixtures cover all supported methods and
+non-HOLD verdicts, mixed checks, missing/null booleans, malformed values, text
+redaction, false controls and GET-only access. Real-handler compatibility checks
+compare the boolean projection with the existing server report.
+
+Local validation for slice 29 on 2026-10-30 passed all three supplied gate
+commands: build, short tests, all-package build/vet, core race, boot/E2E/smoke,
+SDK tests, frozen-lockfile install, frontend tests/static build, license audit
+and its unit tests, and diff whitespace checks. Disposable PostgreSQL 16 tests
+passed for platform/report/API, the full race-enabled Agent integration suite
+(228.191 seconds), and PostgreSQL E2E (4.395 seconds). The cleanup trap removed
+the container; no gate or timeout was weakened.
+
+These local fixtures establish software behavior only. Real Saker pilot
+acceptance, model integration and durable orchestration remain outstanding.
+No schema, persistence, SDK, public API, statistical decision or publication
+behavior changes; all documented mandatory gates and timeouts remain unchanged.
+
 <a id="server-srm-health"></a>
 
 Fixed-split evidence requires an explicitly true server `srm.healthy` for every

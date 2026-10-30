@@ -1,7 +1,9 @@
 package growth_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -114,6 +116,40 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 		t.Fatalf("local incomplete evidence = %+v", got)
 	}
 	p := got.Evidence[0].Report
+	// Compare the boolean allowlist against the real report handler, including
+	// its incomplete-data check. Guardrail text must not enter the projection.
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+got.Evidence[0].SourcePath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+viewer.Secret)
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw struct {
+		Report struct {
+			Guardrails []struct {
+				Breached bool   `json:"breached"`
+				Metric   string `json:"metric"`
+				Detail   string `json:"detail"`
+			} `json:"guardrails"`
+		} `json:"report"`
+	}
+	err = json.UnmarshalRead(response.Body, &raw)
+	response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK || len(raw.Report.Guardrails) != 1 || len(p.Guardrails) != len(raw.Report.Guardrails) {
+		t.Fatalf("real guardrail checks: %+v %+v %v", raw, p.Guardrails, err)
+	}
+	for i, check := range raw.Report.Guardrails {
+		if p.Guardrails[i].Breached == nil || *p.Guardrails[i].Breached != check.Breached {
+			t.Fatal("lost real guardrail boolean")
+		}
+	}
+	projected, err := json.Marshal(p.Guardrails)
+	if err != nil || bytes.Contains(projected, []byte("metric")) || bytes.Contains(projected, []byte("detail")) {
+		t.Fatalf("guardrail projection: %s %v", projected, err)
+	}
 	if p.PrimaryAttributionWindow != int64(def.AttributionWindow) {
 		t.Fatal("lost real report attribution window", p.PrimaryAttributionWindow)
 	}

@@ -208,24 +208,42 @@ func srmValid(p Report) bool {
 	return !p.SRM.null && p.SRM.Healthy != nil && *p.SRM.Healthy
 }
 
+// GuardrailCheck retains only the server's explicit breach state. Missing or
+// null booleans require review; names, thresholds and prose are not evidence.
+type GuardrailCheck struct {
+	Breached *bool `json:"breached"`
+}
+
+// Omitted, null and empty arrays remain compatible. Validate supplied checks
+// without inferring coverage or recalculating the server's thresholds.
+func guardrailsValid(p Report) bool {
+	for _, check := range p.Guardrails {
+		if check.Breached == nil || *check.Breached {
+			return false
+		}
+	}
+	return true
+}
+
 type Report struct {
-	SRM                 SRM          `json:"srm,omitzero"`
-	ExperimentID        string       `json:"experimentId"`
-	Epoch               int64        `json:"epoch"`
-	EvidenceVersion     string       `json:"evidenceVersion"`
-	GeneratedAt         time.Time    `json:"generatedAt"`
-	RegistrationVersion string       `json:"registrationVersion"`
-	AnalysisMethod      string       `json:"analysisMethod"`
-	ExposureMode        string       `json:"exposureMode"`
-	Window              Window       `json:"window"`
-	Healthy             bool         `json:"healthy"`
-	HealthIssues        []string     `json:"healthIssues,omitempty"`
-	PrimaryError        string       `json:"primaryError,omitempty"`
-	PrimaryMetricRef    *MetricRef   `json:"primaryMetricRef"`
-	GuardrailMetricRefs []MetricRef  `json:"guardrailMetricRefs,omitempty"`
-	Diagnostics         *Diagnostics `json:"diagnostics"`
-	PerVariant          []Variant    `json:"perVariant"`
-	Decision            Decision     `json:"decision"`
+	Guardrails          []GuardrailCheck `json:"guardrails,omitempty"`
+	SRM                 SRM              `json:"srm,omitzero"`
+	ExperimentID        string           `json:"experimentId"`
+	Epoch               int64            `json:"epoch"`
+	EvidenceVersion     string           `json:"evidenceVersion"`
+	GeneratedAt         time.Time        `json:"generatedAt"`
+	RegistrationVersion string           `json:"registrationVersion"`
+	AnalysisMethod      string           `json:"analysisMethod"`
+	ExposureMode        string           `json:"exposureMode"`
+	Window              Window           `json:"window"`
+	Healthy             bool             `json:"healthy"`
+	HealthIssues        []string         `json:"healthIssues,omitempty"`
+	PrimaryError        string           `json:"primaryError,omitempty"`
+	PrimaryMetricRef    *MetricRef       `json:"primaryMetricRef"`
+	GuardrailMetricRefs []MetricRef      `json:"guardrailMetricRefs,omitempty"`
+	Diagnostics         *Diagnostics     `json:"diagnostics"`
+	PerVariant          []Variant        `json:"perVariant"`
+	Decision            Decision         `json:"decision"`
 
 	// PrimaryAttributionWindow is the server analysis duration in exact nanoseconds.
 	PrimaryAttributionWindow int64 `json:"primaryAttributionWindow"`
@@ -398,7 +416,7 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 		if len(e.Metrics) != len(q.Metrics) || !historicalMetricsValid(e.Metrics) || !primaryAttributionValid(*p, e.Metrics) {
 			status = Hold
 		}
-		if !srmValid(*p) || len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
+		if !guardrailsValid(*p) || !srmValid(*p) || len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
 			p.PrimaryMetricRef == nil || p.Diagnostics == nil || !fingerprint.MatchString(p.RegistrationVersion) || !knownAnalysisMethod(p.AnalysisMethod) || !knownExposureMode(p.ExposureMode) ||
 			!usableVariants(p.PerVariant) || !knownVerdict(p.Decision.Verdict) || p.Decision.Verdict == "hold" {
 			status = Hold

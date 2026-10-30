@@ -43,7 +43,7 @@ func applySRMCase(name string, report *growth.Report) {
 }
 func srmReportWire(name string, report growth.Report) any {
 	if !strings.HasPrefix(name, "srm ") {
-		return diagnosticsTimeReportWire(name, report)
+		return guardrailsReportWire(name, report)
 	}
 	data, err := json.Marshal(report)
 	if err != nil {

@@ -143,7 +143,7 @@ func (r *Reader) Monitor(ctx context.Context, m MonitorManifest) (*MonitorSummar
 	if !srmValid(p) {
 		add("srm_review_required", "review_diagnostics")
 	}
-	if !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) > 0 || len(p.Decision.GuardrailBreaches) > 0 {
+	if !guardrailsValid(p) || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) > 0 || len(p.Decision.GuardrailBreaches) > 0 {
 		add("health_review_required", "review_diagnostics")
 	}
 	checkWindow := func(w Window) {
