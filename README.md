@@ -31,6 +31,15 @@ Review provenance is exported separately with `publicationAuthorized=false`.
 The record remains caller-attested: it does not authenticate a reviewer, approve
 separate preparation settings, establish historical readiness or authorize submission.
 
+Optionally add [`--goal goal.json`](docs/growth-copilot.md#optional-goal-linkage-before-evidence-reads-slice-37)
+to `review`, `record-review`, or either `prepare` path. Before HTTP requests,
+strict goal decoding and offline verification require matching goal identity,
+explicit operator scope, primary metric and guardrail pin sets. Invalid files or
+linkage exit 2 with fixed diagnostics and empty stdout. Matching goals preserve
+fresh evidence, HOLD, review decisions and existing output schemas. Goals remain
+caller-attested: they authenticate neither ownership nor baseline facts, pin no
+historical goal version in proposals, and grant no approval or publication authority.
+
 The pure [`RecordReview` library contract](docs/growth-copilot.md#pure-human-review-records)
 pins the complete proposal with a deterministic SHA-256 fingerprint and accepts
 separate caller-supplied reviewer, timestamp, rationale and approve/reject/request_changes

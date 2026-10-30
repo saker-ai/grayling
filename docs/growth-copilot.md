@@ -1913,7 +1913,7 @@ Proposals carry only goal ID, so verification identifies the supplied goal
 version; it cannot prove which historical version a proposal intended or prevent
 a caller replacing both artifacts. It does not authenticate owners, validate BI
 facts, establish readiness/approval, submit experiments, or prove real baseline
-data, adequate samples or causal effects. Text stays inert. Automatic goal
+data, adequate samples or causal effects. Text stays inert. Default goal
 enforcement, persistence, target modelling, BI facts, model generation, durable
 orchestration and real Saker pilot acceptance remain later work; full #20
 acceptance remains outstanding. Original mandatory gates/timeouts are unchanged.
@@ -1930,3 +1930,53 @@ the original five-minute timeout; PostgreSQL E2E passed in 3.923 seconds. The
 exit trap removed the container. Focused goal library and actual-binary
 regressions also passed. These are local software checks, not real baseline
 validation, model evaluation, business outcomes or Saker pilot acceptance.
+
+
+## Optional goal linkage before evidence reads (slice 37)
+
+```sh
+./bin/grayling-growth-agent review --proposal proposal.json --goal goal.json \
+  --base-url http://127.0.0.1:8080 --workspace ws1 --environment env1
+./bin/grayling-growth-agent record-review --proposal proposal.json --goal goal.json \
+  --review-input review-input.json --base-url http://127.0.0.1:8080 \
+  --workspace ws1 --environment env1
+./bin/grayling-growth-agent prepare --proposal proposal.json --goal goal.json \
+  --settings preparation.json --base-url http://127.0.0.1:8080 \
+  --workspace ws1 --environment env1
+# The reviewed preparation path also accepts --goal goal.json:
+# add --review-record review-record.json to the prepare command above.
+```
+
+All three commands accept optional `--goal FILE`. When explicitly supplied,
+including `--goal ""`, the command reuses `readGoal` / `DecodeGoal` and then
+`growth.VerifyGoal` against the proposal and separately supplied operator
+workspace/environment before any HTTP request. Empty paths/files, unreadable or
+missing files, directories, pipes/devices, symlinks, files above 64 KiB and
+invalid JSON/goal fields fail with exit 2, empty stdout and fixed diagnostic
+`invalid goal file or JSON`. Valid artifacts with inconsistent goal identity,
+scope, primary metric or guardrail sets fail with exit 2, empty stdout and fixed
+`invalid or inconsistent goal artifacts`. Neither diagnostic echoes paths,
+credentials, input text or decoder errors. Guardrail ordering does not affect
+linkage; roles, keys, versions, definition hashes and canonical source paths
+remain exact pins.
+
+Omitting `--goal` preserves existing behavior. Supplying a matching goal does
+not change any output schema or export a separate verification result. Fresh
+GET-only evidence, readiness, explicit review decisions, expected proposal
+fingerprints, preparation settings and any supplied review record remain
+required under the existing rules. Goal consistency cannot clear HOLD or
+NEEDS_DATA, imply approval, or make an older approval sufficient for preparation.
+Reject/request_changes retain their existing ability to record successfully
+read blocked evidence; approve still requires readiness. Both preparation paths
+retain every readiness and compiler check, and no command submits anything.
+
+Goals are caller-attested planning artifacts. Verification does not authenticate
+ownership, prove baseline facts, or establish which historical goal version the
+proposal intended: existing proposals pin only goal ID. Callers can replace both
+artifacts. This adds no public API, persistence, model integration, submission,
+production migration or real Saker pilot claim. Local actual-binary HTTP fixtures
+exercise matching/reordered pins, mismatches, strict files and redaction,
+request suppression, and HOLD preservation across both preparation paths; they
+do not validate real instrumentation or business outcomes. The original build,
+short/vet/race, boot/E2E/smoke, SDK/frontend/static/license and disposable
+PostgreSQL acceptance gates remain mandatory and unchanged.
