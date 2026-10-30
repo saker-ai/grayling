@@ -1735,3 +1735,52 @@ platform/report/API race suite, full Agent integration race suite (220.326 secon
 within the unchanged five-minute timeout) and PostgreSQL E2E (3.864 seconds) passed.
 The cleanup trap removed the container. The focused diagnostics exposure lifecycle
 tests also passed under the race detector. These are local software checks only.
+
+## Optional embedded diagnostics SRM results (slice 33)
+
+The diagnostics allowlist retains `assignmentSrm` and `exposureSrm` using the
+same presence-aware, healthy-only projection as report SRM. Each optional result
+may be omitted: the real diagnostics builder legitimately omits unavailable
+results, including onDecision and Bandit observations. A supplied result must
+explicitly contain `healthy: true`. Explicit null, an empty object, missing/null
+health or `healthy: false` independently requires HOLD, regardless of report
+health, report SRM, issue strings or the server's ship/continue/rollback verdict.
+A healthy sibling cannot override an unhealthy result. This rule applies to all
+supported analysis methods and both historical exposure modes.
+
+Only the supplied health state crosses the boundary; statistics, thresholds,
+identities and arbitrary server prose are discarded. Omission, null and missing
+versus null health remain distinguishable in reduced evidence. Wrong JSON types,
+duplicate members and malformed responses reject the entire read without partial
+evidence or response-body disclosure. Reader and Monitor share validation;
+Monitor uses the existing `srm_review_required` / `review_diagnostics` blocker.
+The server verdict remains unchanged and publication authority stays false.
+
+Library lifecycle and actual-binary HTTP regressions cover both fields separately
+and together, omission, null/incomplete/unhealthy/healthy results, malformed wire
+values, all supported methods and both exposure modes. They cover approval
+blocking, rejection and change requests, both preparation paths, monitoring,
+learning export/offline verification/search, secret-safe output and zero non-GET
+requests. The real-handler fixture compares optional SRM health with server
+output, including balanced assignments with skewed delivery (healthy assignment
+SRM and unhealthy exposure SRM), and legitimate omission in both exposure modes.
+All original build, short, vet, race, boot/E2E/smoke, SDK, frontend/static,
+license, whitespace and three disposable PostgreSQL gates remain mandatory with
+unchanged timeouts. These fixtures establish local software behavior only; full
+model orchestration, real Saker pilot evidence and full #20 acceptance remain
+outstanding. This slice adds no schema, public API, browser surface, model call
+or platform write.
+
+Local slice 33 recovery validation on 2026-10-30 retained the previous run's
+completed non-database gates (build, short, vet, race, boot/E2E/smoke, SDK,
+frontend/static, license and whitespace). The previously interrupted disposable
+PostgreSQL sequence was rerun in full: platform/report/API race checks passed
+(5.305 / 2.172 / 2.036 seconds), the full Agent integration race suite passed
+in 217.766 seconds within the unchanged five-minute timeout, and PostgreSQL E2E
+passed in 4.016 seconds. The cleanup trap removed the disposable container.
+Targeted library and actual-binary diagnostic SRM lifecycle race checks passed,
+including review, approval, both preparation paths, monitoring and learning.
+After expanding the real-handler fixture to cover populated diagnostics and
+legacy whole-object omission, the complete growth library race suite also passed
+(129.744 seconds), followed by the growth library short tests, vet and whitespace
+checks. These recovery results establish local software behavior only.

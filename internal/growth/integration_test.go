@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -15,17 +16,22 @@ import (
 	"github.com/saker-ai/grayling/internal/api"
 	"github.com/saker-ai/grayling/internal/growth"
 	"github.com/saker-ai/grayling/internal/platform"
+	"github.com/saker-ai/grayling/pkg/model"
 )
 
 // This exercises the real authorization, metric serialization and report
 // builder over HTTP, without a database service, write route or AI provider.
 func TestReaderWithRealAPIHandler(t *testing.T) {
 	for _, mode := range []string{"onDecision", "onRender"} {
-		t.Run(mode, func(t *testing.T) { testReaderWithRealAPIHandler(t, mode) })
+		for _, populated := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/populated=%t", mode, populated), func(t *testing.T) {
+				testReaderWithRealAPIHandler(t, mode, populated)
+			})
+		}
 	}
 }
 
-func testReaderWithRealAPIHandler(t *testing.T, mode string) {
+func testReaderWithRealAPIHandler(t *testing.T, mode string, populated bool) {
 	store, err := platform.NewStore("")
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +83,37 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if populated {
+		if _, err := store.TransitionExperiment(exp.ID, model.ExperimentReviewed, "test"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.TransitionExperiment(exp.ID, model.ExperimentRunning, "test"); err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now().UTC()
+		var events []*platform.Event
+		for _, variant := range exp.Variants {
+			for i := range 100 {
+				key := fmt.Sprintf("%s-%d", variant, i)
+				assignment := &platform.Event{
+					EventID: "asg-" + key, WorkspaceID: ws.ID, EnvironmentID: env.ID,
+					ExperimentID: exp.ID, Epoch: exp.Epoch, Type: platform.EventAssignment,
+					FlagKey: exp.FlagKey, FlagRevision: 1, Variant: variant,
+					UnitHash: store.HashUnit(ws.ID, key), Source: "split", ClientTime: now, ServerTime: now,
+				}
+				events = append(events, assignment)
+				// Balanced assignments with skewed delivery exercise both health states.
+				if variant == "control" || i < 20 {
+					exposure := *assignment
+					exposure.EventID, exposure.Type = "exp-"+key, platform.EventExposure
+					events = append(events, &exposure)
+				}
+			}
+		}
+		if result, err := store.IngestEvents(events); err != nil || result.Accepted != len(events) {
+			t.Fatalf("fixture ingest: %+v %v", result, err)
+		}
 	}
 	viewer, err := store.CreateToken(platform.TokenAdmin, "growth-viewer", platform.RoleViewer, ws.ID, "", "test")
 	if err != nil {
@@ -130,6 +167,12 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 	var raw struct {
 		Report struct {
 			Diagnostics *struct {
+				AssignmentSRM *struct {
+					Healthy bool `json:"healthy"`
+				} `json:"assignmentSrm"`
+				ExposureSRM *struct {
+					Healthy bool `json:"healthy"`
+				} `json:"exposureSrm"`
 				ExposureMode       string `json:"exposureMode"`
 				CrossVariantUnits  int64  `json:"crossVariantUnits"`
 				AssignmentMismatch int64  `json:"assignmentMismatch"`
@@ -146,9 +189,34 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 	if err != nil || response.StatusCode != http.StatusOK || len(raw.Report.Guardrails) != 1 || len(p.Guardrails) != len(raw.Report.Guardrails) {
 		t.Fatalf("real guardrail checks: %+v %+v %v", raw, p.Guardrails, err)
 	}
+	// Legacy onDecision reports omit the entire diagnostics object.
+	if (raw.Report.Diagnostics == nil) != (p.Diagnostics == nil) || (mode == "onRender" && p.Diagnostics == nil) {
+		t.Fatal("lost real diagnostics presence")
+	}
 	if d := raw.Report.Diagnostics; d != nil {
+		if populated && mode == "onRender" {
+			if d.AssignmentSRM == nil || !d.AssignmentSRM.Healthy || d.ExposureSRM == nil || d.ExposureSRM.Healthy {
+				t.Fatal("fixture must supply healthy assignment SRM and unhealthy exposure SRM")
+			}
+		} else if d.AssignmentSRM != nil || d.ExposureSRM != nil {
+			t.Fatal("fixture must legitimately omit optional SRM")
+		}
 		if d.ExposureMode != mode || p.Diagnostics == nil || p.Diagnostics.ExposureMode != mode || p.Diagnostics.CrossVariantUnits == nil || p.Diagnostics.AssignmentMismatch == nil || *p.Diagnostics.CrossVariantUnits != d.CrossVariantUnits || *p.Diagnostics.AssignmentMismatch != d.AssignmentMismatch {
 			t.Fatal("lost real diagnostic counts")
+		}
+		for _, check := range []struct {
+			raw *struct {
+				Healthy bool `json:"healthy"`
+			}
+			projected growth.SRM
+		}{{d.AssignmentSRM, p.Diagnostics.AssignmentSRM}, {d.ExposureSRM, p.Diagnostics.ExposureSRM}} {
+			if check.raw == nil {
+				if !check.projected.IsZero() {
+					t.Fatal("invented optional diagnostic SRM")
+				}
+			} else if check.projected.Healthy == nil || *check.projected.Healthy != check.raw.Healthy {
+				t.Fatal("lost real diagnostic SRM health")
+			}
 		}
 	}
 	for i, check := range raw.Report.Guardrails {
