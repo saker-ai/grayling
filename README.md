@@ -62,6 +62,15 @@ prerequisites produce explicit blockers and exit 3. This is a non-atomic
 observation that never authorizes binding or publication; output always includes
 `publicationAuthorized=false` and excludes server detail prose.
 
+The offline [`verify-review` command](docs/growth-copilot.md#offline-verify-review-command)
+checks an exported human review against its proposal and explicit scope:
+`grayling-growth-agent verify-review --proposal proposal.json --record review-record.json --workspace ws1 --environment env1`.
+It accepts regular local files only (proposal 64 KiB, review 128 KiB), strictly
+checks JSON and copied metric/evidence pins, and emits deterministic JSON with
+`publicationAuthorized=false`. Exit codes are 0 for consistency, 2 for invalid
+input, and 1 for output failure. It uses no credentials, network or persistence
+and does not authenticate reviewers or prove historical readiness.
+
 The offline [`verify-learning` command](docs/growth-copilot.md#offline-verify-learning-command)
 compares an exported learning record with its original proposal and explicit scope:
 `grayling-growth-agent verify-learning --proposal proposal.json --record learning-record.json --workspace ws1 --environment env1`.
