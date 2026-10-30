@@ -140,7 +140,7 @@ func (r *Reader) Monitor(ctx context.Context, m MonitorManifest) (*MonitorSummar
 	if p.GeneratedAt.IsZero() {
 		add("generation_time_missing", "refresh_report")
 	}
-	if !srmValid(p) {
+	if !srmValid(p) || !diagnosticsSRMValid(p.Diagnostics) {
 		add("srm_review_required", "review_diagnostics")
 	}
 	if (p.Diagnostics != nil && !diagnosticsCountsValid(p.Diagnostics)) || !journeysValid(p) || !guardrailsValid(p) || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) > 0 || len(p.Decision.GuardrailBreaches) > 0 {

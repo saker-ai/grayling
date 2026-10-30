@@ -143,6 +143,9 @@ type Decision struct {
 }
 
 type Diagnostics struct {
+	// Optional server SRM results retain presence and only explicit health.
+	AssignmentSRM SRM `json:"assignmentSrm,omitzero"`
+	ExposureSRM   SRM `json:"exposureSrm,omitzero"`
 	// ExposureMode must be recognized and match the report; unknown text is redacted.
 	ExposureMode string `json:"exposureMode"`
 	// Counts preserve exact server aggregates. Missing and null require review.
@@ -211,13 +214,22 @@ func (s SRM) MarshalJSON() ([]byte, error) {
 	}{s.Healthy})
 }
 
+// Diagnostics legitimately omit SRM when no optional test result is available.
+// Supplied results require explicit health, independently of report SRM.
+func diagnosticsSRMValid(d *Diagnostics) bool {
+	return d == nil || ((d.AssignmentSRM.IsZero() || d.AssignmentSRM.valid()) &&
+		(d.ExposureSRM.IsZero() || d.ExposureSRM.valid()))
+}
+
+func (s SRM) valid() bool { return !s.null && s.Healthy != nil && *s.Healthy }
+
 // Only Bandit may omit SRM. An explicit null or incomplete/unhealthy object
 // cannot be overridden by the report's summary health or decision verdict.
 func srmValid(p Report) bool {
 	if p.SRM.IsZero() {
 		return p.AnalysisMethod == "bandit-beta-bernoulli"
 	}
-	return !p.SRM.null && p.SRM.Healthy != nil && *p.SRM.Healthy
+	return p.SRM.valid()
 }
 
 // GuardrailCheck retains only the server's explicit breach state. Missing or
@@ -466,7 +478,7 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 		if len(e.Metrics) != len(q.Metrics) || !historicalMetricsValid(e.Metrics) || !primaryAttributionValid(*p, e.Metrics) {
 			status = Hold
 		}
-		if !diagnosticsCountsValid(p.Diagnostics) || !journeysValid(*p) || !guardrailsValid(*p) || !srmValid(*p) || len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
+		if !diagnosticsCountsValid(p.Diagnostics) || !journeysValid(*p) || !guardrailsValid(*p) || !srmValid(*p) || !diagnosticsSRMValid(p.Diagnostics) || len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
 			p.PrimaryMetricRef == nil || p.Diagnostics == nil || !fingerprint.MatchString(p.RegistrationVersion) || !knownAnalysisMethod(p.AnalysisMethod) || !knownExposureMode(p.ExposureMode) ||
 			!usableVariants(p.PerVariant) || !knownVerdict(p.Decision.Verdict) || p.Decision.Verdict == "hold" {
 			status = Hold
