@@ -53,6 +53,15 @@ history, with observation availability separate from release state. Publication 
 authorized; completion does not establish a business win. See the
 [rollout contract](docs/growth-copilot.md#read-only-rollout-observation).
 
+The read-only [`bind-check` command](docs/growth-copilot.md#read-only-binding-readiness)
+uses the same pinned operator manifest:
+`grayling-growth-agent bind-check --manifest FILE --base-url ORIGIN --workspace ID --environment ID`.
+It validates all nine binding prerequisites between two experiment reads and
+rejects registration, scope or snapshot changes. Missing evidence or failed
+prerequisites produce explicit blockers and exit 3. This is a non-atomic
+observation that never authorizes binding or publication; output always includes
+`publicationAuthorized=false` and excludes server detail prose.
+
 The offline [`verify-learning` command](docs/growth-copilot.md#offline-verify-learning-command)
 compares an exported learning record with its original proposal and explicit scope:
 `grayling-growth-agent verify-learning --proposal proposal.json --record learning-record.json --workspace ws1 --environment env1`.
