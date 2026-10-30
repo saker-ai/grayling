@@ -42,6 +42,14 @@ await client.close();
 
 其他 API：`stringVariation` / `numberVariation` / `jsonVariation`、`trackExposure`（旧式外部决策曝光回填，仅适用于 onDecision）、`syncRevision()`、`status()`。
 
+`flush()` 返回本次调用成功发送的队列事件数；后台采集器已发送的事件不计入，
+因此返回 `0` 也可能表示事件已在后台送达。`status().eventsFlushed` 是该客户端
+显式与后台采集累计成功发送的事件数，`eventsDropped` 累计记录丢弃或拒收的事件。
+服务端在求值时记录的 `onDecision` 曝光不计入客户端发送计数。
+需要断言单次显式发送数量时，可将 `exposureFlushIntervalMs` 设为 `3_600_000`；
+验证后台送达时，应有界轮询累计计数并检查丢弃数、服务端诊断和报告，
+不要依赖之后的 `flush()` 返回值判断此前是否送达。
+
 `src/bucketing.ts` 提供 `grayling-fnv1a-10000-v1` 的纯 TS 实现（BigInt FNV-1a 64），与 Go 参考实现共享同一组黄金向量，测试逐条校验——用于离线复算/分析，客户端求值不依赖它。
 
 ## 测试

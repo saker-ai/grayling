@@ -33,6 +33,7 @@ function makeOptions(overrides: Record<string, unknown> = {}) {
     sdkToken: env.sdkToken,
     collectToken: env.collectToken,
     pollIntervalMs: 3_600_000, // tests drive freshness explicitly
+    exposureFlushIntervalMs: 3_600_000, // explicit-flush tests own delivery
     autoPoll: false,
     ...overrides,
   };
@@ -174,7 +175,7 @@ test("experiment enrollment: server-side exposure + deterministic variant", asyn
 });
 
 test("trackConversion attribution lands in the report", async () => {
-  const client = makeClient({ exposureFlushIntervalMs: 200 });
+  const client = makeClient();
   try {
     let converted = 0;
     let decisionId = "";
@@ -352,7 +353,7 @@ test("partial collect counts successful and rejected events", async () => {
 });
 
 test("manual exposure reporting via collect contract", async () => {
-  const client = makeClient({ exposureFlushIntervalMs: 200 });
+  const client = makeClient();
   try {
     client.trackExposure(env.experimentId, env.epoch, "ts-exp", "control",
       "ts-manual-user", { source: "split" });
@@ -361,6 +362,50 @@ test("manual exposure reporting via collect contract", async () => {
     assert.equal(client.status().eventsDropped, 0);
     assert.throws(() => client.trackExposure(env.experimentId, env.epoch, "ts-exp", "control", ""),
       GraylingError);
+  } finally { await client.close(); }
+});
+
+test("background conversion and manual exposure delivery", async () => {
+  const client = makeClient({ exposureFlushIntervalMs: 200 });
+  try {
+    const unit = "ts-background-conv";
+    const result = await client.stringVariation("ts-exp", "?", { attributes: { user_id: unit } });
+    const exp = result.details.result.experiment;
+    assert.ok(exp);
+    const decisionId = result.details.result.decisionId;
+    assert.equal((await client.diagnose(decisionId)).conversionCount, 0);
+    const before = await env.report();
+
+    client.trackConversion(result.details, "conversion", 1, { sessionId: `sess-${unit}` });
+    client.trackExposure(env.experimentId, env.epoch, "ts-exp", "control",
+      "ts-background-manual", { source: "split" });
+
+    // Only the background collector delivers these events. A later explicit
+    // flush cannot count batches it has already delivered.
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const status = client.status();
+      assert.equal(status.eventsDropped, 0);
+      if (status.eventsFlushed >= 2 || Date.now() >= deadline) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.equal(client.status().eventsFlushed, 2, "background delivery did not complete");
+    const diag = await client.diagnose(decisionId);
+    assert.equal(diag.exposureStatus, "recorded");
+    assert.equal(diag.conversionCount, 1);
+    const after = await env.report();
+    const variant = (report: typeof before, name: string) => {
+      const found = report.perVariant.find((v: any) => v.variant === name);
+      assert.ok(found);
+      return found;
+    };
+    assert.equal(variant(after, exp.variant).convertedUnits,
+      variant(before, exp.variant).convertedUnits + 1);
+    assert.equal(variant(after, "control").randomizedUnits,
+      variant(before, "control").randomizedUnits + 1);
+    assert.equal(await client.flush(), 0);
+    assert.equal(client.status().eventsFlushed, 2);
+    assert.equal(client.status().eventsDropped, 0);
   } finally { await client.close(); }
 });
 
