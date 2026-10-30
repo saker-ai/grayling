@@ -1359,19 +1359,36 @@ proposal, without credentials, network requests, persistence or authorization ef
 
 ```bash
 ./bin/grayling-growth-agent verify-review \
-  --proposal proposal.json --record review-record.json \
+  --proposal proposal.json --goal goal.json --record review-record.json \
   --workspace ws1 --environment env1
 ```
 
-The command accepts only these four explicit input flags (plus help). It does not
+The command accepts the four required input flags and optional `--goal FILE` (plus help). It does not
 accept API origins, tokens, timeouts, implicit environment scope or positional
 arguments. Proposal decoding and complete canonical SHA-256 fingerprinting reuse
-the existing contracts, preserving exact int64 versions above 2^53. Both input
+the existing contracts, preserving exact int64 versions above 2^53. All supplied input
 paths must open as bounded regular files; symlinks, directories, FIFOs and devices
 are rejected without waiting for a writer. The proposal limit is 64 KiB and the
 review record limit is **128 KiB**, including whitespace; actual reads enforce
 these limits even if files grow. Strict JSON rejects unknown members at every
 depth, duplicate/escaped duplicate names, invalid UTF-8, trailing JSON and null roots.
+
+`--goal FILE` is required when the proposal contains `goalPin`; omission exits 2
+with `goal file required for pinned proposal`. Unpinned proposals preserve legacy
+verification when omitted and may opt into goal checking. Explicit empty paths,
+including `--goal=`, fail. Before opening the review record or producing output,
+`readGoal` reuses the bounded strict goal decoder (64 KiB including whitespace),
+and `growth.VerifyGoal` checks the separately supplied operator workspace and
+environment, goal identity, exact primary/guardrail roles and metric references,
+and any goal version/content fingerprint pin. Integers remain exact above 2^53;
+changes to goal content at the same ID/version fail a pinned fingerprint.
+Missing/unreadable/nonregular/symlink/oversized or invalid goal files use
+`invalid goal file or JSON`; linkage mismatches use
+`invalid or inconsistent goal artifacts`. Both exit 2 with empty stdout and
+never echo goal prose, file paths or secrets. Goal consistency does not clear
+historical blockers or confer readiness or approval. Updating goal and proposal
+consistently still leaves earlier review fingerprints stale. Matching goals add
+no fields to the existing verification output.
 
 `growth.VerifyReview` compares supported schemas, explicit workspace/environment,
 proposal identity/version, the recomputed complete proposal fingerprint, every
@@ -2059,3 +2076,29 @@ No public API, database schema, authenticated approvals, model integration or
 production actions are added. All original gates and timeouts remain mandatory;
 full Issue acceptance, durable orchestration and real Saker pilot evidence remain
 outstanding.
+
+
+## Offline review goal linkage (slice 40)
+
+Offline `verify-review` now accepts optional `--goal FILE` and requires it for
+pinned proposals, using the same strict bounded decoder and explicit-scope
+linkage verification as learning commands. See [the command contract](#offline-verify-review-command)
+for diagnostics, file limits and historical review semantics.
+Actual-binary regressions in `verify_review_goal_test.go` cover exact pins and
+versions above 2^53, missing/mismatched goals, scope and metric roles, same-version
+content edits, strict JSON/file boundaries, stale review fingerprints, legacy
+compatibility, historical decisions/readiness, redaction and offline execution.
+These local fixtures establish software behavior only. No model integration,
+persistence, platform writes, authenticated approvals or real pilot acceptance
+is included. All documented mandatory gates, including disposable PostgreSQL
+acceptance and their original timeouts, remain unchanged.
+
+Local slice 40 validation on 2026-10-31 passed all three prescribed gate groups:
+`make build`, the complete short suite, build/vet, full core race,
+boot/E2E/smoke, SDK tests, frozen frontend installation/tests/build/static,
+license checks and whitespace checks. The disposable PostgreSQL replica/report,
+full Agent integration race (215.380 seconds, unchanged five-minute timeout),
+and PostgreSQL E2E suites passed; the trap removed the container. The initial
+pre-build short run lacked frontend test dependencies; after `make build`
+installed them, the full short suite passed. These results establish local
+software behavior only.
