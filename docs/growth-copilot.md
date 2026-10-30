@@ -401,6 +401,76 @@ fixtures establish local command behavior only; they do not validate real Saker
 instrumentation or pilot/business outcomes. Existing Grayling validation, RBAC,
 approval, targeting/binding and rollout gates remain required.
 
+### Review-linked preparation
+
+```bash
+bin/grayling-growth-agent prepare --proposal proposal.json --settings preparation.json \
+  --review-record review-record.json --base-url http://127.0.0.1:27002 \
+  --workspace ws1 --environment env1
+```
+
+The optional `--review-record FILE` accepts the exported `growth.review.v1`
+record from `record-review`. Before HTTP access, it reuses `DecodeReviewRecord`
+and `VerifyReview` and requires `approve`, matching explicit workspace/environment,
+proposal ID/version, complete proposal fingerprint, ordered primary/guardrail
+roles and copied evidence pins including windows. Same-version edits and forged
+copied pins fail even when the record's fingerprint string is unchanged.
+`reject` and `request_changes` remain valid historical records but block this path.
+
+Files must be regular, nonsymlink files, at most 128 KiB including whitespace;
+actual reads are bounded too. Unknown/duplicate members (including escaped aliases
+and nested members), invalid UTF-8, trailing JSON and null are rejected. Empty
+paths, directories, FIFOs and devices fail without blocking. Invalid files exit 2
+with `invalid review record file or JSON`; inconsistent or nonapproval records
+exit 2 with `invalid or inconsistent preparation review`. These failures have
+empty stdout and make zero HTTP requests. Diagnostics never echo paths or content.
+
+After preflight the command reads fresh, exactly pinned evidence via GET and
+reuses `CompileCreateRequest`; every readiness and compiler blocker remains.
+Unhealthy/missing evidence exits 3 without a draft; execution errors retain the
+existing exit 1/130 behavior, and invalid settings retain compiler diagnostics.
+Successful output is deterministic JSON containing the existing `request` and
+`metadata` plus separate `reviewProvenance`: a bounded `verification` summary
+(scope, proposal identity/fingerprint, decision, recorded readiness and
+`publicationAuthorized: false`), caller-attested `reviewer` and UTC `reviewedAt`.
+Rationale, historical blocker prose and copied pins are not repeated in this
+summary. The create request schema and payload remain unchanged.
+Without the flag, preparation keeps its existing contract and output shape.
+
+The pure library wrapper `CompileReviewedCreateRequest(proposal, record,
+workspace, environment, freshEvidence, settings)` verifies linkage then delegates
+to `CompileCreateRequest`, returning nil on any failure. Callers reading evidence
+can first use pure `VerifyPreparationReview` for the same preflight. Evidence is
+supplied independently by trusted caller code, never reconstructed from the review.
+Records remain caller-attested consistency artifacts: they do not authenticate
+reviewers, approve separately supplied preparation settings, prove historical
+readiness, or authorize submission/publication. Current readiness is recomputed.
+RBAC, platform approval, targeting/binding and rollout gates still apply.
+
+Contract and actual-binary local HTTP fixtures cover approval linkage, stale
+same-version edits, forged copied pins/roles, negative decisions, strict JSON and
+file boundaries, fresh unhealthy/missing evidence, invalid settings, unchanged
+requests, deterministic output, fixed diagnostics and zero non-GET requests.
+These fixtures establish local behavior only, not real Saker pilot results.
+All existing CI gates, including the disposable PostgreSQL invocation below,
+remain required and unchanged.
+
+Local validation on 2026-10-30 for review-linked preparation and the PostgreSQL
+recovery fixture passed: `make build`, short Go tests, `go vet ./...`, core race
+tests, boot/E2E/smoke tests, `make sdk-test` (25 Python and 23 TypeScript tests
+plus typechecking), frozen-lockfile frontend tests, `make check-static`, license
+audit and its unit tests, and `git diff --check`. All three PostgreSQL gates
+passed against a disposable PostgreSQL 16 container with their original timeouts;
+the full race-enabled Agent suite took 248.408 seconds and PostgreSQL E2E took
+4.070 seconds. The container was removed on completion.
+
+The restored SDK evaluation probe now clears `CollectToken` through its options
+and closes explicitly before replay checks. A complete stored-event row comparison
+before and after the probe verifies that evaluation leaves events unchanged.
+Original collection, deduplication, recovery, SRM, per-variant and decision checks
+remain intact; SDK runtime behavior is unchanged. This is local fixture evidence,
+not real Saker pilot acceptance, durable orchestration or model integration.
+
 ## Optional create-request compiler
 
 `growth.CompileCreateRequest(proposal, envelope, preparation)` is a pure library

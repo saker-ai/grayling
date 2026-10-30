@@ -20,7 +20,7 @@ import (
 )
 
 const usage = `Usage: grayling-growth-agent review --proposal FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
-       grayling-growth-agent prepare --proposal FILE --settings FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+       grayling-growth-agent prepare --proposal FILE --settings FILE [--review-record FILE] --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent bind-check --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent rollout --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent monitor --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
@@ -98,8 +98,9 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	// flag errors may include caller-supplied values. Never echo them.
 	fs.SetOutput(io.Discard)
 	file := fs.String("proposal", "", "proposal file")
-	var settingsFile string
+	var settingsFile, reviewRecordFile string
 	if prepare {
+		fs.StringVar(&reviewRecordFile, "review-record", "", "exported approval record file")
 		fs.StringVar(&settingsFile, "settings", "", "operator preparation settings file")
 	}
 	var reviewFile string
@@ -161,6 +162,24 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	p, err := readProposal(*file)
 	if err != nil {
 		return fail(2, err.Error())
+	}
+	var approval *growth.ReviewRecord
+	if prepare {
+		recordSpecified := false
+		fs.Visit(func(f *flag.Flag) {
+			if f.Name == "review-record" {
+				recordSpecified = true
+			}
+		})
+		if recordSpecified {
+			approval, err = readReviewRecord(reviewRecordFile)
+			if err != nil {
+				return fail(2, "invalid review record file or JSON")
+			}
+			if _, err = growth.VerifyPreparationReview(*p, *approval, *workspace, *environment); err != nil {
+				return fail(2, "invalid or inconsistent preparation review")
+			}
+		}
 	}
 	var reviewInputs *growth.ReviewInputs
 	if recordReview {
@@ -229,7 +248,12 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 		if review.State != growth.ProposalReadyForReview {
 			return fail(3, "preparation blocked: proposal not ready for review")
 		}
-		prepared, err := growth.CompileCreateRequest(*p, envelope, *settings)
+		var prepared any
+		if approval != nil {
+			prepared, err = growth.CompileReviewedCreateRequest(*p, *approval, *workspace, *environment, envelope, *settings)
+		} else {
+			prepared, err = growth.CompileCreateRequest(*p, envelope, *settings)
+		}
 		if err != nil {
 			// Compiler errors contain only bounded compiler-owned fields/codes.
 			var problem *growth.PreparationError
@@ -238,7 +262,7 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 			}
 			return fail(1, "preparation failed")
 		}
-		if err := json.MarshalWrite(out, prepared); err != nil {
+		if err := json.MarshalWrite(out, prepared, json.Deterministic(approval != nil)); err != nil {
 			return fail(1, "output failed")
 		}
 		if _, err := fmt.Fprintln(out); err != nil {

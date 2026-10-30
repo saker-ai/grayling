@@ -23,6 +23,14 @@ references and keeps proposal/evidence metadata separate. It adds no CLI
 submission or platform writes; human approval, targeting/binding checks and
 existing Grayling validation remain required.
 
+Optionally add [`prepare --review-record review-record.json`](docs/growth-copilot.md#review-linked-preparation)
+to link preparation to an exported approval for the exact proposal. Scope,
+complete fingerprint, metric roles and copied evidence pins are checked before
+HTTP access; fresh evidence must still pass every readiness/compiler check.
+Review provenance is exported separately with `publicationAuthorized=false`.
+The record remains caller-attested: it does not authenticate a reviewer, approve
+separate preparation settings, establish historical readiness or authorize submission.
+
 The pure [`RecordReview` library contract](docs/growth-copilot.md#pure-human-review-records)
 pins the complete proposal with a deterministic SHA-256 fingerprint and accepts
 separate caller-supplied reviewer, timestamp, rationale and approve/reject/request_changes

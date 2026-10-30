@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	gconfig "github.com/godeps/gonacos/pkg/config"
 	"github.com/saker-ai/grayling/internal/api"
 	"github.com/saker-ai/grayling/internal/configstore"
 	"github.com/saker-ai/grayling/internal/experiment"
@@ -28,7 +29,6 @@ import (
 	"github.com/saker-ai/grayling/pkg/model"
 	"github.com/saker-ai/grayling/pkg/sdk"
 	"github.com/saker-ai/grayling/test/pgtest"
-	gconfig "github.com/godeps/gonacos/pkg/config"
 )
 
 func TestE2EPostgresConcurrentCollectCounts(t *testing.T) {
@@ -348,11 +348,20 @@ func TestE2EPostgresExperimentLoop(t *testing.T) {
 	h.api = apiSrv2
 	h.store = reloaded
 	h.rawCfg = restoredConfig
-	restoredClient := newSDK(t, h, nil)
+	// This probe checks restored evaluation only. Collecting a fresh onDecision
+	// exposure would mutate the recovered fixture during the replay comparison.
+	eventsBeforeProbe := pgtest.Query(t, targetDSN, `SELECT to_jsonb(e)::text FROM database_events e ORDER BY to_jsonb(e)::text`)
+	restoredClient := newSDK(t, h, func(opts *sdk.Options) {
+		opts.CollectToken = ""
+	})
 	gotValue, gotEval := restoredClient.StringVariation("pg-checkout",
 		model.EvaluationContext{Attributes: map[string]any{"user_id": "recovery-probe"}}, "?")
+	restoredClient.Close()
 	if gotEval.Failed || gotEval.Experiment == nil || gotValue != wantValue || gotEval.Experiment.Variant != wantEval.Experiment.Variant {
 		t.Fatalf("SDK evaluation drift: before=%s %+v after=%s %+v", wantValue, wantEval, gotValue, gotEval)
+	}
+	if eventsAfterProbe := pgtest.Query(t, targetDSN, `SELECT to_jsonb(e)::text FROM database_events e ORDER BY to_jsonb(e)::text`); !reflect.DeepEqual(eventsBeforeProbe, eventsAfterProbe) {
+		t.Fatal("restored evaluation probe changed stored events")
 	}
 	var secondIngest map[string]any
 	if code := h.do("POST", "/api/v1/collect", h.colTok, duplicate, &secondIngest); code != 200 || secondIngest["duplicates"] != float64(1) {
