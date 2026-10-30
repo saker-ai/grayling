@@ -22,6 +22,7 @@ import (
 )
 
 func TestRuntimeWSSActualInstallationAndAppliedReceipt(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, p := appliedFixture(t)
 	srv, _ := channelServerWithOptions(t, f.b, control.ChannelOptions{ReleaseVerifier: v})
 	opts := client.Options{URL: "wss" + strings.TrimPrefix(srv.URL, "https"), Token: f.secret, Hello: helloFor(f.g), HTTPClient: srv.Client()}
@@ -117,6 +118,7 @@ func TestRuntimeWSSActualInstallationAndAppliedReceipt(t *testing.T) {
 }
 
 func TestRuntimeWSSFailedBuilderDoesNotConsumeOutcome(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, p := appliedFixture(t)
 	srv, _ := channelServerWithOptions(t, f.a, control.ChannelOptions{ReleaseVerifier: v})
 	opts := client.Options{URL: "wss" + strings.TrimPrefix(srv.URL, "https"), Token: f.secret, Hello: helloFor(f.g), HTTPClient: srv.Client()}
@@ -161,6 +163,7 @@ func TestRuntimeWSSFailedBuilderDoesNotConsumeOutcome(t *testing.T) {
 }
 
 func TestRuntimeWSSInstalledViewSurvivesReportConnectionLoss(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, p := appliedFixture(t)
 	srv, _ := channelServerWithOptions(t, f.a, control.ChannelOptions{ReleaseVerifier: v})
 	opts := client.Options{URL: "wss" + strings.TrimPrefix(srv.URL, "https"), Token: f.secret, Hello: helloFor(f.g), HTTPClient: srv.Client()}

@@ -17,6 +17,7 @@ import (
 )
 
 func TestAppliedWSSActivateReplicaRecoveryAndReceipt(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, p := appliedFixture(t)
 	a, _ := channelServerWithOptions(t, f.a, control.ChannelOptions{ReleaseVerifier: v})
 	b, _ := channelServerWithOptions(t, f.b, control.ChannelOptions{ReleaseVerifier: v})
@@ -85,6 +86,7 @@ func TestAppliedWSSActivateReplicaRecoveryAndReceipt(t *testing.T) {
 }
 
 func TestAppliedWSSCapabilityNegativeAndDeadline(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, p := appliedFixture(t)
 	srv, _ := channelServerWithOptions(t, f.b, control.ChannelOptions{ReleaseVerifier: v})
 	opts := client.Options{URL: "wss" + strings.TrimPrefix(srv.URL, "https"), Token: f.secret, Hello: helloFor(f.g), HTTPClient: srv.Client()}
@@ -153,6 +155,7 @@ func TestAppliedWSSCapabilityNegativeAndDeadline(t *testing.T) {
 }
 
 func TestAppliedStatusPaginationPinsCatalogAndPartialSources(t *testing.T) {
+	parallelAgentFixture(t)
 	f, publisher, v, r := activationFixture(t)
 	other := secondGateInstance(t, f, "az-a")
 	target := queueGateTarget(t, other, v, "other", 0)

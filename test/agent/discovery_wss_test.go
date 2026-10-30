@@ -25,6 +25,7 @@ import (
 )
 
 func TestDiscoveryWSSRealNamingCrossReplicaAndImmutableDownload(t *testing.T) {
+	parallelAgentFixture(t)
 	f := newRegistrationFixture(t, 1)
 	a, v := publisher(t, f.a)
 	b, _ := publisher(t, f.b)
@@ -198,6 +199,7 @@ func TestDiscoveryWSSRealNamingCrossReplicaAndImmutableDownload(t *testing.T) {
 }
 
 func TestDiscoveryCapabilityRequiresPublisherAndPermission(t *testing.T) {
+	parallelAgentFixture(t)
 	f := newRegistrationFixture(t, 1)
 	plain, _ := channelServer(t, f.a)
 	c, err := client.Dial(t.Context(), client.Options{URL: "wss" + strings.TrimPrefix(plain.URL, "https"), Token: f.secret, Hello: helloFor(f.g), HTTPClient: plain.Client()})
@@ -257,6 +259,7 @@ func TestDiscoveryCapabilityRequiresPublisherAndPermission(t *testing.T) {
 }
 
 func TestDiscoveryWSSRefreshesStableEmptySet(t *testing.T) {
+	parallelAgentFixture(t)
 	f := newRegistrationFixture(t, 1)
 	_, verifier := publisher(t, f.a)
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x66}, 32))

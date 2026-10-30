@@ -17,6 +17,7 @@ import (
 )
 
 func TestRegisteredLoopReplicaReconnectAndIndependentRenewal(t *testing.T) {
+	parallelAgentFixture(t)
 	f := newRegistrationFixture(t, 1)
 	// Lease/link state must not manufacture Ready for the registered process.
 	f.request.Instance.Ready = false
@@ -90,6 +91,7 @@ func TestRegisteredLoopReplicaReconnectAndIndependentRenewal(t *testing.T) {
 }
 
 func TestRegisteredLoopShutdownStopsCallback(t *testing.T) {
+	parallelAgentFixture(t)
 	f := newRegistrationFixture(t, 1)
 	server, channel := channelServer(t, f.a)
 	owner, err := client.NewInstanceRegistration(f.request)
@@ -129,6 +131,7 @@ func TestRegisteredLoopShutdownStopsCallback(t *testing.T) {
 }
 
 func TestRegisteredLoopCredentialRevocationStopsCallback(t *testing.T) {
+	parallelAgentFixture(t)
 	f := newRegistrationFixture(t, 1)
 	server, _ := channelServer(t, f.a)
 	owner, err := client.NewInstanceRegistration(f.request)

@@ -18,6 +18,7 @@ import (
 )
 
 func TestAgentAppTLSLifecycleAndRestart(t *testing.T) {
+	parallelAgentFixture(t)
 	dsn := pgtest.DSN(t)
 	sessions := openSessions(t, dsn)
 	g := grant()
@@ -105,6 +106,7 @@ func TestAgentAppTLSLifecycleAndRestart(t *testing.T) {
 	}
 }
 func TestAgentAppDisabledKeepsRouteUnavailable(t *testing.T) {
+	parallelAgentFixture(t)
 	app, err := grayling.Start(t.Context(), grayling.Options{GonacosData: filepath.Join(t.TempDir(), "gonacos")})
 	if err != nil {
 		t.Fatal(err)

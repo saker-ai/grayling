@@ -42,8 +42,16 @@ primary/guardrail metric pins; an exact report evidenceVersion pin is optional.
 It exports observed report provenance and bounded blocker/remediation codes,
 keeping server verdicts separate from READY/HOLD/NEEDS_DATA. READY never
 authorizes publication, and all requests remain GET-only. Local fixtures establish
-conservative HOLD; durable monitoring, rollout-history linkage and model generation
+conservative HOLD; durable monitoring and model generation
 remain future work.
+
+Read-only rollout observation is available through
+`grayling-growth-agent rollout --manifest FILE --base-url ORIGIN --workspace ID --environment ID`.
+The strict manifest pins workspace/environment, experiment ID, epoch and registration
+version. One experiment GET exports bounded, allowlisted embedded plan state and recent
+history, with observation availability separate from release state. Publication is never
+authorized; completion does not establish a business win. See the
+[rollout contract](docs/growth-copilot.md#read-only-rollout-observation).
 
 The offline [`search-learning` command](docs/growth-copilot.md#offline-search-learning-command)
 searches literal hypothesis/follow-up text in explicitly supplied exported learning

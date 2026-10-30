@@ -191,7 +191,12 @@ func TestPolicyRevisionUsesFullUint64(t *testing.T) {
 	if _, err := p.PublishPolicy(t.Context(), r); err != nil {
 		t.Fatal(err)
 	}
-	pgtest.Query(t, dsn, `UPDATE agent_resource_heads SET revision=18446744073709551614 RETURNING revision::text`)
+	// Only advance the policy counter; publication also creates a revision-zero
+	// revocation head, which must keep pointing at its unchanged catalog.
+	pgtest.Query(t, dsn, `UPDATE agent_resource_heads SET revision=18446744073709551614 WHERE resource_key='routing' RETURNING revision::text`)
+	if rows := pgtest.Query(t, dsn, `SELECT revision::text FROM agent_resource_heads WHERE resource_key='revocation/state'`); len(rows) != 1 || rows[0][0] != "0" {
+		t.Fatal("uint64 fixture changed revocation head", rows)
+	}
 	r.ExpectedRevision = 18446744073709551614
 	r.OperationID = "last"
 	last, err := p.PublishPolicy(t.Context(), r)

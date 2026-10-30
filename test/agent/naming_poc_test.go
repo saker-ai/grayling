@@ -19,6 +19,7 @@ import (
 
 // This probes the pinned backend, not the Agent authority or A09 in full.
 func TestEmbeddedNamingDirectPOC(t *testing.T) {
+	parallelAgentFixture(t)
 	out, err := exec.CommandContext(t.Context(), "go", "list", "-m", "-f", "{{.Dir}}", "github.com/godeps/gonacos").Output()
 	if err != nil {
 		t.Fatal(err)

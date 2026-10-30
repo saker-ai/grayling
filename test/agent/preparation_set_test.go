@@ -53,6 +53,7 @@ func preparationSetConnection(t *testing.T, f *registrationFixture, v *client.Ve
 }
 
 func TestPreparationSetHotSwapReconnectAndStaleBarrier(t *testing.T) {
+	parallelAgentFixture(t)
 	f, p, v, body := preparationDriverFixture(t)
 	if _, err := f.a.QueuePrepare(t.Context(), reprepareRequest(f, "first", 0), v); err != nil {
 		t.Fatal(err)
@@ -165,6 +166,7 @@ func TestPreparationSetHotSwapReconnectAndStaleBarrier(t *testing.T) {
 }
 
 func TestPreparationSetSlowOldBuilderCannotOverwriteNewTarget(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, body := preparationDriverFixture(t)
 	if _, err := f.a.QueuePrepare(t.Context(), reprepareRequest(f, "first", 0), v); err != nil {
 		t.Fatal(err)
@@ -222,6 +224,7 @@ func TestPreparationSetSlowOldBuilderCannotOverwriteNewTarget(t *testing.T) {
 }
 
 func TestPreparationSetBoundsStuckConstructionAndCleanup(t *testing.T) {
+	parallelAgentFixture(t)
 	for _, tc := range []struct {
 		name         string
 		limit        int
@@ -316,6 +319,7 @@ func TestPreparationSetBoundsStuckConstructionAndCleanup(t *testing.T) {
 }
 
 func TestPreparationSetKnownRemoteConflictDoesNotRemainSelected(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, body := preparationDriverFixture(t)
 	if _, err := f.a.QueuePrepare(t.Context(), reprepareRequest(f, "first", 0), v); err != nil {
 		t.Fatal(err)
@@ -349,6 +353,7 @@ func TestPreparationSetKnownRemoteConflictDoesNotRemainSelected(t *testing.T) {
 }
 
 func TestPreparationSetCleanupFailureStopsNewConstruction(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, body := preparationDriverFixture(t)
 	if _, err := f.a.QueuePrepare(t.Context(), reprepareRequest(f, "first", 0), v); err != nil {
 		t.Fatal(err)
@@ -401,6 +406,7 @@ func TestPreparationSetCleanupFailureStopsNewConstruction(t *testing.T) {
 }
 
 func TestPreparationSetTrustUpdateFencesInflightBuilder(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, body := preparationDriverFixture(t)
 	if _, err := f.a.QueuePrepare(t.Context(), reprepareRequest(f, "first", 0), v); err != nil {
 		t.Fatal(err)

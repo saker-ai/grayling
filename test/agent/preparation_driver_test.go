@@ -56,6 +56,7 @@ func preparationDriverFixture(t *testing.T, lifetime ...time.Duration) (*registr
 }
 
 func TestPreparationDriverOwnedResourcesReconnectAndActualRuntime(t *testing.T) {
+	parallelAgentFixture(t)
 	f, p, v, body := preparationDriverFixture(t)
 	intent, err := f.a.QueuePrepare(t.Context(), reprepareRequest(f, "prepare-resources", 0), v)
 	if err != nil {
@@ -190,6 +191,7 @@ func TestPreparationDriverOwnedResourcesReconnectAndActualRuntime(t *testing.T) 
 }
 
 func TestPreparationDriverFailuresNeverReportPrepared(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, body := preparationDriverFixture(t)
 	if _, err := f.a.QueuePrepare(t.Context(), reprepareRequest(f, "prepare", 0), v); err != nil {
 		t.Fatal(err)
@@ -258,6 +260,7 @@ func TestPreparationDriverFailuresNeverReportPrepared(t *testing.T) {
 }
 
 func TestPreparationDriverExpiryClosesCandidateWithoutActivation(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, body := preparationDriverFixture(t, 5*time.Second)
 	if _, err := f.a.QueuePrepare(t.Context(), reprepareRequest(f, "short-preparation", 0), v); err != nil {
 		t.Fatal(err)
