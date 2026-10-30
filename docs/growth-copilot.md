@@ -1385,3 +1385,48 @@ reports still HOLD for their existing health/window reasons. These fixtures
 establish software compatibility only, not real Saker instrumentation, pilot
 outcomes, model generation, durable orchestration or full issue acceptance.
 No public API, persistence, SDK, model integration or publication behavior changes.
+
+### Report aggregate population consistency
+
+Each variant must supply nonnegative counts satisfying
+`convertedUnits <= randomizedUnits <= exposedUnits <= exposures`. Converted
+units belong to the randomized analysis population; exposed units additionally
+include deterministic targeting, and exposure events may repeat for a unit.
+Equality, repeated exposure events, deterministic-only exposure populations and
+explicit zero counts remain valid inputs to the other evidence checks. Counts
+are compared directly as int64 values, including values above 2^53, without
+subtraction, summation or conversion to floating point.
+
+Missing, negative or contradictory aggregates produce evidence HOLD. Monitoring
+retains the existing fixed `aggregates_missing` /
+`restore_aggregate_evidence` blocker. Proposal approval and both ordinary and
+review-linked preparation are refused without partial artifacts; rejection and
+request-changes reviews preserve the readiness blockers. Learning export,
+offline verification and search retain HOLD and its remediation rather than
+turning a contradictory snapshot into READY.
+
+This checks population consistency only. It does not recompute statistics,
+require exposed and randomized populations to be equal, or interpret
+`primaryValue` as a probability: mean, ratio and quantile reports can use other
+units. Passing these comparisons does not establish sample adequacy, healthy
+instrumentation, freshness, a business win or publication authorization.
+Library and actual-command fixtures exercise all three ordering violations,
+zero-count and maximum-int64 boundaries, valid populations, metric values outside
+[0,1], negative reviews, preparation refusal, learning round trips and zero
+non-GET requests. Existing real-handler compatibility fixtures remain in use;
+local fixtures do not establish real Saker instrumentation, pilot outcomes,
+model generation or durable orchestration. No persistence, public API, SDK,
+browser or model integration is added.
+
+Local validation for this aggregate slice on 2026-10-30 passed all three supplied
+gate commands: `make build`, short tests, `go build ./...`, `go vet ./...`, the
+full core race suite, boot/E2E/smoke, SDK tests (25 Python and 23 TypeScript plus
+typechecking), locked frontend installation/tests/build, static consistency,
+license inventory, all five license-audit unit tests and `git diff --check`.
+The initial pre-change short run lacked frontend dependencies; the locked build
+installed them and the complete subsequent short and race suites passed.
+Disposable PostgreSQL 16 validation also passed the GORM/report/quota race
+suite, full Agent integration race suite (266.756 seconds within the unchanged
+five-minute timeout), and PostgreSQL E2E (4.674 seconds). The cleanup trap removed
+the container. No gate, assertion or timeout was weakened; these are local
+software checks only.
