@@ -1023,13 +1023,21 @@ container, including the full race-enabled Agent package in 243.750 seconds
 under the unchanged five-minute timeout and PostgreSQL E2E in 4.071 seconds.
 The container was removed on completion.
 
-The required `make sdk-test` gate is still **not green** in this run: TypeScript
-typechecking passed, but its unchanged `trackConversion attribution lands in the
-report` test failed `assert.ok(flushed >= converted)` at
-`sdk/typescript/test/integration.test.ts:194` (21 tests passed, one failed).
-That test also uses a 200-millisecond background interval before asserting a
-per-call explicit-flush count. This remaining failure is outside the Python
-scheduling slice and must be resolved before claiming complete validation.
+The TypeScript collect scheduling repair was validated locally on 2026-10-30:
+`make sdk-test` passed TypeScript typechecking, all 23 TypeScript tests and all
+25 Python tests. The previously failing attribution case now uses the existing
+3600000-millisecond interval for explicit flushing, as do the other explicit-flush
+cases, preserving attribution, rejection, diagnosis and report assertions.
+A separate real-binary background case passed both in isolation and in the full
+suite, checking conversion and manual-exposure delivery with bounded cumulative
+counter polling, zero drops, diagnosis/report deltas and an empty subsequent
+explicit flush. SDK runtime behavior is unchanged. Build, short tests (after
+installing locked frontend dependencies), vet, core race, boot/E2E/smoke,
+license, frontend tests, static consistency and whitespace checks also passed.
+All three PostgreSQL gates passed against a disposable PostgreSQL 16 container,
+including the race-enabled Agent suite in 247.950 seconds under the unchanged
+five-minute timeout and PostgreSQL E2E in 3.945 seconds. The container was removed
+on completion.
 This gate repair does not establish model generation, durable orchestration,
 real Saker instrumentation, pilot outcomes or complete Growth Agent acceptance.
 
