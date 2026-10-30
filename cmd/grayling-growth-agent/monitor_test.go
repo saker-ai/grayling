@@ -29,6 +29,7 @@ func TestMonitorBinary(t *testing.T) {
 	names = append(names, validReportMethodCases...)
 	names = append(names, metricLifecycleCases...)
 	names = append(names, exposureCases...)
+	names = append(names, aggregateCaseNames()...)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
@@ -52,6 +53,9 @@ func TestMonitorBinary(t *testing.T) {
 				case "absent":
 					code, status, want = 3, growth.NeedsData, "evidence_missing"
 				}
+			}
+			if applyAggregateCase(name, &report) {
+				code, status, want = 3, growth.Hold, "aggregates_missing"
 			}
 			if invalidExposureCase(name) {
 				code, status, want = 3, growth.Hold, "exposure_mode_invalid"

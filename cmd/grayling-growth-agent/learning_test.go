@@ -28,6 +28,7 @@ func TestRecordLearningBinary(t *testing.T) {
 	names := []string{"breach rollback", "breach continue", "breach ship", "continue", "ship", "rollback", "hold", "unhealthy", "health injection", "reason injection", "window injection", "incomplete", "not recomputable", "late watermark", "diagnostics missing", "diagnostics mismatch", "aggregate missing", "generation missing", "method invalid", "missing report", "missing metric", "registration mismatch", "primary role mismatch", "guardrail missing", "guardrail duplicate", "epoch mismatch", "evidence mismatch", "scope mismatch", "denied", "unauthorized", "malformed", "unknown member", "duplicate JSON", "trailing JSON", "null", "oversized", "invalid epoch", "duplicate metric", "manifest scope", "directory", "fifo", "timeout", "signal", "unpinned", "pinned", "stale fingerprint", "invalid recorder", "missing time", "empty followups", "too many followups", "long followup", "twenty followups", "operator injection", "local metric conflict", "local guard conflict", "proposal scope", "proposal unknown", "proposal duplicate", "proposal trailing", "learning unknown", "learning duplicate", "learning escaped duplicate", "learning trailing", "learning null", "learning malformed", "learning UTF8", "learning oversized", "learning directory", "learning fifo", "sigterm"}
 	names = append(names, metricLifecycleCases...)
 	names = append(names, exposureCases...)
+	names = append(names, aggregateCaseNames()...)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
@@ -56,6 +57,9 @@ func TestRecordLearningBinary(t *testing.T) {
 				case "absent":
 					code, status, want = 3, growth.NeedsData, "evidence_missing"
 				}
+			}
+			if applyAggregateCase(name, &report) {
+				code, status, want = 3, growth.Hold, "aggregates_missing"
 			}
 			if invalidExposureCase(name) {
 				code, status, want = 3, growth.Hold, "exposure_mode_invalid"
@@ -409,7 +413,7 @@ func TestRecordLearningBinary(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &record); err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasPrefix(name, "exposure ") {
+			if strings.HasPrefix(name, "exposure ") || isAggregateCase(name) {
 				recordPath := writeJSON("record.json", record, "")
 				before := calls.Load()
 				for _, args := range [][]string{

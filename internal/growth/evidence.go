@@ -407,6 +407,8 @@ func sameWindow(a, b Window) bool {
 }
 
 // Pointer aggregates distinguish absent data from a server-reported zero.
+// Converted units are randomized; exposed units also include deterministic
+// targeting, and each exposed unit requires at least one exposure event.
 func usableVariants(variants []Variant) bool {
 	if len(variants) < 2 {
 		return false
@@ -421,6 +423,10 @@ func usableVariants(variants []Variant) bool {
 			if count == nil || *count < 0 {
 				return false
 			}
+		}
+		if *v.ConvertedUnits > *v.RandomizedUnits || *v.RandomizedUnits > *v.ExposedUnits ||
+			*v.ExposedUnits > *v.Exposures {
+			return false
 		}
 	}
 	return true

@@ -98,6 +98,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 	}
 	names = append(names, metricLifecycleCases...)
 	names = append(names, exposureCases...)
+	names = append(names, aggregateCaseNames()...)
 	names = append(names, attributionCases...)
 	names = append(names, invalidReportMetadataCases...)
 	names = append(names, validReportMethodCases...)
@@ -345,7 +346,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			if strings.HasPrefix(name, "report method ") {
 				report.AnalysisMethod = strings.TrimPrefix(name, "report method ")
 			}
-			if invalidateReportMetadata(name, &report) || invalidExposureCase(name) {
+			if applyAggregateCase(name, &report) || invalidateReportMetadata(name, &report) || invalidExposureCase(name) {
 				want, status, state = 3, growth.Hold, growth.ProposalNeedsData
 			}
 			if command == "prepare" {
@@ -527,7 +528,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			if code != want {
 				t.Fatalf("exit %d want %d: %s %s", code, want, out, stderr)
 			}
-			if strings.HasPrefix(name, "exposure ") || strings.HasPrefix(name, "breach ") || strings.HasPrefix(name, "metadata ") || strings.HasPrefix(name, "lifecycle ") {
+			if isAggregateCase(name) || strings.HasPrefix(name, "exposure ") || strings.HasPrefix(name, "breach ") || strings.HasPrefix(name, "metadata ") || strings.HasPrefix(name, "lifecycle ") {
 				if strings.Contains(out+stderr, secret) {
 					t.Fatal("breach prose leaked")
 				}
