@@ -28,6 +28,7 @@ import (
 )
 
 func TestActivationRefreshReplicaReplayAndNewApplied(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, _ := activationFixture(t)
 	makePublisher := func(s *control.Sessions) *control.Publisher {
 		p, err := control.NewPublisher(s, "policy-test-key", ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x66}, 32)), 2*time.Second)
@@ -110,6 +111,7 @@ func TestActivationRefreshReplicaReplayAndNewApplied(t *testing.T) {
 }
 
 func TestActivationRefreshRollbackAndAuthorityGuards(t *testing.T) {
+	parallelAgentFixture(t)
 	f, p, v, _ := activationFixture(t)
 	if _, err := p.StartActivation(t.Context(), activationRequest(f), v); err != nil {
 		t.Fatal(err)
@@ -195,6 +197,7 @@ func TestActivationRefreshRollbackAndAuthorityGuards(t *testing.T) {
 }
 
 func TestActivationRefreshWSSInstallsActualNewView(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, _ := activationFixture(t)
 	p, err := control.NewPublisher(f.a, "policy-test-key", ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x66}, 32)), 15*time.Second)
 	if err != nil {
@@ -277,6 +280,7 @@ func TestActivationRefreshWSSInstallsActualNewView(t *testing.T) {
 }
 
 func TestActivationRefreshRejectsTamperedProofSignerAndRevokedBundle(t *testing.T) {
+	parallelAgentFixture(t)
 	f, p, v, _ := activationFixture(t)
 	if _, err := p.StartActivation(t.Context(), activationRequest(f), v); err != nil {
 		t.Fatal(err)

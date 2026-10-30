@@ -64,6 +64,7 @@ func secondGateInstance(t *testing.T, f *registrationFixture, zone string, build
 }
 
 func TestPreparationRejectedConcurrentMutualExclusionAndReadiness(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, r := preparedFixture(t)
 	intent := queueGateTarget(t, f, v, "nack", 0)
 	changed := proto.Clone(f.request.Instance).(*agentv1.Instance)
@@ -127,6 +128,7 @@ func TestPreparationRejectedConcurrentMutualExclusionAndReadiness(t *testing.T) 
 }
 
 func TestPreparationGateAtomicReplicaReplayExpiryAndAbort(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, r := preparedFixture(t)
 	q := gateRequest(f, "gate", 1)
 	empty, err := f.a.EvaluatePreparation(t.Context(), q, v)
@@ -194,6 +196,7 @@ func TestPreparationGateAtomicReplicaReplayExpiryAndAbort(t *testing.T) {
 }
 
 func TestPreparationGateFailureUpperBoundAndEveryZone(t *testing.T) {
+	parallelAgentFixture(t)
 	for _, threshold := range []uint32{0, 4999, 5000} {
 		t.Run(strconv.FormatUint(uint64(threshold), 10), func(t *testing.T) {
 			capacity := control.ReleaseCapacity{Profile: "demo-v1", RequiredZones: []string{"az-a"}, MinimumPerBuildZone: 1, MaximumFailureBasisPoints: threshold}
@@ -235,6 +238,7 @@ func TestPreparationGateFailureUpperBoundAndEveryZone(t *testing.T) {
 }
 
 func TestPreparationGateRollbackAndAuthorizationExpiry(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, r := preparedFixture(t)
 	intent := queueGateTarget(t, f, v, "atomic", 0)
 	if _, err := f.a.RecordPrepared(t.Context(), f.session, intent.CommandID, preparedReport(f, r), v); err != nil {
@@ -277,6 +281,7 @@ func TestPreparationGateRollbackAndAuthorizationExpiry(t *testing.T) {
 }
 
 func TestPreparationPositiveNegativeRaceAndBootTakeover(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, r := preparedFixture(t)
 	intent := queueGateTarget(t, f, v, "race", 0)
 	var positive, negative error
@@ -318,6 +323,7 @@ func TestPreparationPositiveNegativeRaceAndBootTakeover(t *testing.T) {
 }
 
 func TestPreparationV7MigrationPreservesPositiveEvidence(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, r := preparedFixture(t)
 	intent := queueGateTarget(t, f, v, "migration", 0)
 	if _, err := f.a.RecordPrepared(t.Context(), f.session, intent.CommandID, preparedReport(f, r), v); err != nil {
@@ -338,6 +344,7 @@ func TestPreparationV7MigrationPreservesPositiveEvidence(t *testing.T) {
 }
 
 func TestPreparationGateEveryCarriedBuild(t *testing.T) {
+	parallelAgentFixture(t)
 	f := newRegistrationFixtureWithPermissions(t, 2, control.ReleaseReport)
 	registerInstance(t, f, "register")
 	confirmPreparedNaming(t, f)

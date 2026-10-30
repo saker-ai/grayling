@@ -32,6 +32,7 @@ func proofPublisher(t *testing.T, s *control.Sessions, lifetime time.Duration) *
 	return p
 }
 func TestRevocationProofScanBoundedAndIndependentOfRegistration(t *testing.T) {
+	parallelAgentFixture(t)
 	dsn := pgtest.DSN(t)
 	s := openSessions(t, dsn)
 	p, v := publisher(t, s)
@@ -64,6 +65,7 @@ func TestRevocationProofScanBoundedAndIndependentOfRegistration(t *testing.T) {
 	}
 }
 func TestRevocationProofWorkersReplicaDeduplicateAndStop(t *testing.T) {
+	parallelAgentFixture(t)
 	f := newRegistrationFixture(t, 1)
 	_, v := publisher(t, f.a)
 	a, b := proofPublisher(t, f.a, 3*time.Second), proofPublisher(t, f.b, 3*time.Second)
@@ -115,6 +117,7 @@ func TestRevocationProofWorkersReplicaDeduplicateAndStop(t *testing.T) {
 	}
 }
 func TestRevocationProofWorkerDoesNotStarvePastLockedScopes(t *testing.T) {
+	parallelAgentFixture(t)
 	dsn := pgtest.DSN(t)
 	s := openSessions(t, dsn)
 	_, v := publisher(t, s)
@@ -173,6 +176,7 @@ func TestRevocationProofWorkerDoesNotStarvePastLockedScopes(t *testing.T) {
 }
 
 func TestRevocationProofWSSRefreshPreservesInstalledSource(t *testing.T) {
+	parallelAgentFixture(t)
 	f, p, v, _ := activationFixture(t)
 	if _, err := p.RevokeBundles(t.Context(), f.g.Scope, adminMutation("deny-other"), control.RevokeBundlesRequest{BundleHashes: []string{fmt.Sprintf("%064x", 1)}, Reason: "unrelated denial"}, v); err != nil {
 		t.Fatal(err)

@@ -24,9 +24,12 @@ const usage = `Usage: grayling-growth-agent review --proposal FILE --base-url OR
        grayling-growth-agent rollout --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent monitor --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent record-learning --proposal FILE --manifest FILE --learning-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+       grayling-growth-agent verify-learning --proposal FILE --record FILE --workspace ID --environment ID
        grayling-growth-agent search-learning --workspace ID --environment ID --text LITERAL --record FILE [--record FILE ...]
        grayling-growth-agent fingerprint --proposal FILE
        grayling-growth-agent record-review --proposal FILE --review-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+verify-learning is offline: local consistency only; no authorship, execution, freshness or causality proof.
+A consistent verification exits 0, including HOLD/NEEDS_DATA; publication and business win remain false.
 search-learning is offline: explicit local records only, no credentials or evidence refresh.
 A valid search exits 0, including empty results and HOLD/NEEDS_DATA matches.
 Read-only review/preparation; credentials come only from the named environment variable
@@ -59,6 +62,9 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 		fmt.Fprint(out, usage)
 		return 0
+	}
+	if len(args) > 0 && args[0] == "verify-learning" {
+		return runVerifyLearning(args[1:], out, diagnostics)
 	}
 	if len(args) > 0 && args[0] == "search-learning" {
 		return runSearchLearning(args[1:], out, diagnostics)
@@ -280,7 +286,7 @@ func proposalQuery(p growth.Proposal) (growth.Query, error) {
 // Nonblocking open and regular-file checks exclude pipes/devices. DecodeProposal
 // also bounds the actual read, including files which grow after Stat.
 func readProposal(path string) (*growth.Proposal, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, errors.New("cannot read proposal file")
 	}

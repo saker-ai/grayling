@@ -46,6 +46,7 @@ func activationRejection(f *registrationFixture, p *control.ActivationDispatch) 
 }
 
 func TestAppliedReplicaImmutableReceiptStatusAndNoActive(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, p := appliedFixture(t)
 	report := appliedReport(f, p)
 	out := make(chan *agentv1.ActivationReportAck, 8)
@@ -100,6 +101,7 @@ func TestAppliedReplicaImmutableReceiptStatusAndNoActive(t *testing.T) {
 	}
 }
 func TestAppliedVersionsIdentityAndOutcomeRace(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, p := appliedFixture(t)
 	report := appliedReport(f, p)
 	for _, change := range []func(*agentv1.Applied){func(r *agentv1.Applied) { r.BootId = "old" }, func(r *agentv1.Applied) { r.InstanceId = "other" }, func(r *agentv1.Applied) { r.Release.BundleHash = strings.Repeat("f", 64) }, func(r *agentv1.Applied) { r.PolicyRevision++ }, func(r *agentv1.Applied) { r.DiscoveryRevision++ }, func(r *agentv1.Applied) { r.PreparedRevision++ }, func(r *agentv1.Applied) { r.RevocationEpoch++ }, func(r *agentv1.Applied) { r.ActivationArtifactRevision++ }, func(r *agentv1.Applied) { r.ControlPlaneEpoch++ }} {
@@ -129,6 +131,7 @@ func TestAppliedVersionsIdentityAndOutcomeRace(t *testing.T) {
 	expectCode(t, failure, agentv1.ErrorCode_ERROR_CODE_CONFLICT)
 }
 func TestAppliedWriteRollbackDeadlineAndNegativeReadiness(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, p := appliedFixture(t)
 	report := appliedReport(f, p)
 	assertClean := func() {
@@ -187,6 +190,7 @@ func TestAppliedWriteRollbackDeadlineAndNegativeReadiness(t *testing.T) {
 }
 
 func TestAppliedV9MigrationPreservesActivationAndUnknownFields(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, p := appliedFixture(t)
 	original := p.Resource.Body
 	f.a.Close()
@@ -221,6 +225,7 @@ func TestAppliedV9MigrationPreservesActivationAndUnknownFields(t *testing.T) {
 }
 
 func TestAppliedExpiredAuthorizationKeepsDiagnosticFact(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, _ := activationFixture(t)
 	publisher, err := control.NewPublisher(f.a, "policy-test-key", ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x66}, 32)), 2*time.Second)
 	if err != nil {
@@ -248,6 +253,7 @@ func TestAppliedExpiredAuthorizationKeepsDiagnosticFact(t *testing.T) {
 }
 
 func TestAppliedUint64CountersFailClosed(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, p := appliedFixture(t)
 	report := appliedReport(f, p)
 	pgtest.Exec(t, f.dsn, `INSERT INTO agent_activation_report_heads VALUES($1,$2,$3,1,18446744073709551615)`, f.g.Scope.WorkspaceID, f.g.Scope.EnvironmentID, f.g.Scope.ServiceKey)
@@ -267,6 +273,7 @@ func TestAppliedUint64CountersFailClosed(t *testing.T) {
 }
 
 func TestAppliedOldLeaseCrossScopeAndActiveReplayBarriers(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, p := appliedFixture(t)
 	report := appliedReport(f, p)
 	foreign := f.g
@@ -307,6 +314,7 @@ func TestAppliedOldLeaseCrossScopeAndActiveReplayBarriers(t *testing.T) {
 }
 
 func TestActivationRejectedExactArtifactDoesNotConsumeCommand(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, p := appliedFixture(t)
 	report := activationRejection(f, p)
 	for _, revision := range []uint64{0, 2, ^uint64(0)} {
