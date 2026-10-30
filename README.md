@@ -53,6 +53,14 @@ history, with observation availability separate from release state. Publication 
 authorized; completion does not establish a business win. See the
 [rollout contract](docs/growth-copilot.md#read-only-rollout-observation).
 
+The offline [`verify-learning` command](docs/growth-copilot.md#offline-verify-learning-command)
+compares an exported learning record with its original proposal and explicit scope:
+`grayling-growth-agent verify-learning --proposal proposal.json --record learning-record.json --workspace ws1 --environment env1`.
+It recomputes the complete fingerprint and checks copied provenance and metric roles.
+The bounded summary preserves observation status; publication and business win remain
+false. Verification establishes local consistency only, without authenticated
+authorship, execution, freshness or causality.
+
 The offline [`search-learning` command](docs/growth-copilot.md#offline-search-learning-command)
 searches literal hypothesis/follow-up text in explicitly supplied exported learning
 records within a required workspace/environment. It validates all bounded regular

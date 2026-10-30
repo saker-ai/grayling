@@ -24,6 +24,7 @@ func reprepareRequest(f *registrationFixture, op string, revision uint64) contro
 }
 
 func TestPreparedEvidenceIndependentOfCommandAndLeaseDeadline(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, r := preparedFixture(t)
 	intent, err := f.a.QueuePrepare(t.Context(), reprepareRequest(f, "initial", 0), v)
 	if err != nil {
@@ -53,6 +54,7 @@ func TestPreparedEvidenceIndependentOfCommandAndLeaseDeadline(t *testing.T) {
 }
 
 func TestReprepareAfterInitialWindowAndExpiredCommand(t *testing.T) {
+	parallelAgentFixture(t)
 	f, p, v, r := preparedFixture(t)
 	// Shorten only the initial fixture window, then wait on real clocks. The
 	// production 120s/300s constants remain unchanged and are asserted separately.
@@ -142,6 +144,7 @@ func TestReprepareAfterInitialWindowAndExpiredCommand(t *testing.T) {
 }
 
 func TestReprepareExpiredFirstReportAndApprovalRollback(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, _ := appliedFixture(t)
 	q := reprepareRequest(f, "short-command", 1)
 	q.AuthorizationExpiresAt = time.Now().Add(300 * time.Millisecond)
@@ -172,6 +175,7 @@ func TestReprepareExpiredFirstReportAndApprovalRollback(t *testing.T) {
 }
 
 func TestReprepareWSSNegativeThenNewPositiveAndActivation(t *testing.T) {
+	parallelAgentFixture(t)
 	f, v, activation := appliedFixture(t)
 	server, _ := channelServerWithOptions(t, f.b, control.ChannelOptions{ReleaseVerifier: v})
 	opts := client.Options{URL: "wss" + strings.TrimPrefix(server.URL, "https"), Token: f.secret, Hello: helloFor(f.g), HTTPClient: server.Client()}
@@ -235,6 +239,7 @@ func TestReprepareWSSNegativeThenNewPositiveAndActivation(t *testing.T) {
 }
 
 func TestPreparedStoredTimingCannotBeLaundered(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, r := preparedFixture(t)
 	intent, err := f.a.QueuePrepare(t.Context(), reprepareRequest(f, "initial", 0), v)
 	if err != nil {

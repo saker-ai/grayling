@@ -935,8 +935,9 @@ Durable orchestration, model generation and real pilot acceptance remain outstan
 
 The Agent integration gate remains the full race-enabled package with its original
 five-minute timeout. Its independent preparation, registration, release-loop,
-discovery, applied/runtime WSS and embedded app/naming fixtures overlap with at most four active
-fixtures; they own separate PostgreSQL databases where needed, ephemeral listeners
+discovery, applied/runtime WSS and embedded app/naming fixtures, plus isolated
+repreparation, activation refresh, Applied storage, preparation gate and revocation
+proof worker scenarios, overlap with at most four active fixtures; they own separate PostgreSQL databases where needed, ephemeral listeners
 and temporary runtime directories. The slot is retained through client, worker,
 server, pool and database cleanup. Real
 polling, renewal, expiry and safety waits and all assertions remain unchanged.
@@ -945,3 +946,123 @@ refresh rejection fixture compares complete durable resource, head and operation
 rows, including the publication-created revision-zero revocation head. These are
 local software checks, not pilot or business acceptance. The uint64 policy fixture
 advances only the routing head, preserving the independent revocation catalog.
+
+### Shared local PostgreSQL for integration gates
+
+Use one disposable, loopback-only PostgreSQL 16 server for the three PostgreSQL
+gates in [Go quality](../.github/workflows/go-quality.yml). With Docker available,
+run this whole block in a Bash shell from the repository root:
+
+```bash
+bash -euc '
+export PATH="$HOME/.npm-global/bin:/usr/local/bin:/usr/local/go/bin:$PATH"
+export GOWORK=off
+unset GRAYLING_TEST_PG_SKIP
+pg_container=$(docker run -d --rm -e POSTGRES_PASSWORD=grayling-test \
+  -p 127.0.0.1::5432 postgres:16-alpine)
+trap "docker rm -f \"$pg_container\" >/dev/null" EXIT
+ready=0
+for attempt in $(seq 1 60); do
+  if docker exec "$pg_container" pg_isready -U postgres >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+test "$ready" = 1
+pg_port=$(docker port "$pg_container" 5432/tcp | sed -n "s/^127\\.0\\.0\\.1://p")
+test -n "$pg_port"
+docker exec -e PGPASSWORD=grayling-test "$pg_container" \
+  psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "SELECT 1" >/dev/null
+export GRAYLING_TEST_PG_DSN="postgres://postgres:grayling-test@127.0.0.1:$pg_port/postgres?sslmode=disable"
+
+go test -race -count=1 -timeout=15m \
+  ./internal/platform ./internal/experiment ./internal/api \
+  -run "TestGORMPostgres|TestPostgresReport|TestQuotaAdminReplicaRead"
+go test -tags=integration -race -count=1 -timeout=5m ./test/agent
+go test -count=1 -timeout=10m ./test/e2e -run "^TestE2EPostgres"
+'
+```
+
+The password above is disposable fixture configuration. The SQL probe checks
+TCP authentication as well as readiness; a TCP listener alone is insufficient.
+The trap stops the container even when a gate fails. Alternatively, use a dedicated
+local PostgreSQL server (version 14 or newer) with an explicit admin DSN and an
+account allowed to create and drop databases; never use production data.
+
+With an explicit DSN, `test/pgtest` creates unique scratch databases and drops them
+during test cleanup. A bad explicit DSN fails instead of silently falling back to
+Docker. Reuse the server across all three commands. Keep the full Agent package,
+race detection, assertions and original timeouts shown above; the other build,
+unit, vet, SDK, frontend and static gates remain required. A run with
+`GRAYLING_TEST_PG_SKIP=1`, missing Docker or unavailable fixtures does not validate
+these PostgreSQL gates. Local database and WSS checks establish fixture behavior,
+not real Saker pilot results or production acceptance.
+
+
+Local validation on 2026-10-30 passed all three PostgreSQL gates against a
+disposable PostgreSQL 16 container: the full race-enabled Agent package completed
+all 144 top-level scenarios without skips in 259.421 seconds under the unchanged
+five-minute timeout. Scratch database cleanup left zero test databases. Build,
+short tests, vet, core race tests, binary/E2E/smoke tests, frontend tests, static
+consistency and whitespace checks also passed. These timings describe this local
+run, not a CI performance guarantee.
+
+The required `make sdk-test` gate is **not green** locally: the unchanged Python
+`test_track_conversion_reaches_report` fails its `n >= converted` assertion at
+`sdk/python/tests/test_collect.py:51` (23 tests pass). Its 0.2-second background
+flusher can drain conversions before the explicit `flush()` call, which returns
+only the events it posts itself. The same assertion failed on three attempts,
+including after the Agent run finished. TypeScript SDK typechecking and tests passed separately. No SDK code or
+assertions were changed; this remaining gate failure must be resolved before claiming complete validation.
+
+## Offline verify-learning command
+
+Compare a caller-supplied exported record with its original proposal:
+
+```sh
+./bin/grayling-growth-agent verify-learning \
+  --proposal proposal.json --record learning-record.json \
+  --workspace ws1 --environment env1
+```
+
+The pure `growth.VerifyLearning(proposal, record, workspace, environment)` function
+reuses `ProposalFingerprint` and the existing learning-record validation. It requires
+exact proposal schema, identity, version and explicit scope; recomputes the fingerprint
+of every proposal field (including same-version edits); and compares the original
+hypothesis, every baseline field in array order, and exact primary/guardrail metric
+roles (key, version and definition hash). Guardrails are compared as a role set.
+Proposal baselines remain distinct from the linked experiment: they may reference
+other experiments, epochs and windows. A matching fingerprint string alone cannot
+excuse inconsistent copied fields. This does not require proposal readiness or add
+statistical decisions.
+
+Inputs are strict UTF-8 JSON: unknown or duplicate members (including escaped
+aliases), trailing values, malformed JSON and null roots are rejected. Proposal
+files are limited to 64 KiB; records to 128 KiB, including whitespace. Reads are
+bounded even if files grow, reject symlinks and require regular files; nonblocking
+opens reject FIFOs and other special files. Only the four documented flags are
+accepted: credentials, API origins, timeouts and network configuration cannot be
+supplied. No credentials or proxy environment variables are read, no network
+requests occur, and no artifact or index is written. Hypotheses and follow-ups are
+inert data, never instructions or shell commands.
+
+Success emits one deterministic `growth.learning-verification.v1` JSON summary
+with explicit scope, proposal identity/version/fingerprint, linked experiment ID
+and epoch, observed evidenceVersion (empty when missing), observationStatus and
+`publicationAuthorized: false`, `businessWinEstablished: false`. Prose and file paths
+are omitted. READY, HOLD and NEEDS_DATA can all be consistent and exit 0; blocked
+observations retain their status and never become successful experiment claims.
+Invalid configuration, files or mismatched artifacts exit 2 with fixed diagnostics
+and no summary; output failures exit 1. Serialization completes before writing.
+
+Verification establishes local consistency of caller-supplied artifacts only.
+It does not authenticate authors or recorder identity, prove execution, establish
+freshness or causality, refresh evidence, authorize publication or establish a
+business win. A caller can fabricate a mutually consistent pair. Durable
+orchestration, model generation and real Saker pilot acceptance remain outstanding.
+Contract and actual-binary tests cover valid/blocked observations, same-version
+edits, mismatched copies despite matching fingerprint strings, role/scope conflicts,
+strict input and size boundaries, inert injection text and deterministic output.
+Existing CI jobs and mandatory gates remain unchanged; no DB, SDK, public API or
+browser behavior is added.
