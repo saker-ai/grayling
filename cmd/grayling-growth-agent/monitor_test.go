@@ -25,7 +25,7 @@ func TestMonitorBinary(t *testing.T) {
 	if b, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %s %v", b, err)
 	}
-	names := []string{"continue", "ship", "rollback", "hold", "unhealthy", "health injection", "reason injection", "window injection", "incomplete", "not recomputable", "late watermark", "diagnostics missing", "diagnostics mismatch", "aggregate missing", "generation missing", "method invalid", "missing report", "missing metric", "registration mismatch", "primary role mismatch", "guardrail missing", "guardrail duplicate", "epoch mismatch", "evidence mismatch", "scope mismatch", "denied", "unauthorized", "malformed", "unknown member", "duplicate JSON", "trailing JSON", "null", "oversized", "invalid epoch", "duplicate metric", "manifest scope", "directory", "fifo", "timeout", "signal", "unpinned", "pinned"}
+	names := []string{"breach rollback", "breach continue", "breach ship", "continue", "ship", "rollback", "hold", "unhealthy", "health injection", "reason injection", "window injection", "incomplete", "not recomputable", "late watermark", "diagnostics missing", "diagnostics mismatch", "aggregate missing", "generation missing", "method invalid", "missing report", "missing metric", "registration mismatch", "primary role mismatch", "guardrail missing", "guardrail duplicate", "epoch mismatch", "evidence mismatch", "scope mismatch", "denied", "unauthorized", "malformed", "unknown member", "duplicate JSON", "trailing JSON", "null", "oversized", "invalid epoch", "duplicate metric", "manifest scope", "directory", "fifo", "timeout", "signal", "unpinned", "pinned"}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
@@ -40,6 +40,9 @@ func TestMonitorBinary(t *testing.T) {
 			raw := ""
 			noNetwork := false
 			switch name {
+			case "breach rollback", "breach continue", "breach ship":
+				setGuardrailBreach(&report, strings.TrimPrefix(name, "breach "))
+				code, status, want = 3, growth.Hold, "health_review_required"
 			case "ship", "rollback":
 				report.Decision.Verdict = name
 			case "hold":
@@ -315,6 +318,9 @@ func TestMonitorBinary(t *testing.T) {
 			}
 			if name != "missing report" && (got.EvidenceVersion != report.EvidenceVersion || got.SourcePath == "" || !got.GeneratedAt.Equal(report.GeneratedAt) || got.RegistrationVersion != report.RegistrationVersion || got.Window.Issues != nil) {
 				t.Fatalf("lost provenance %+v", got)
+			}
+			if name != "missing report" && got.ServerVerdict != report.Decision.Verdict {
+				t.Fatal("changed server verdict")
 			}
 			if code == 0 && (got.ServerVerdict != report.Decision.Verdict || len(got.Blockers) != 0) {
 				t.Fatalf("changed server verdict %+v", got)

@@ -89,7 +89,7 @@ func TestReviewCommand(t *testing.T) {
 }
 
 func testCommand(t *testing.T, binary, command string, decisions ...growth.ReviewDecision) {
-	names := []string{"fifo", "directory", "invalid flag", "workspace scope", "duplicate JSON", "secret variant", "READY", "HOLD", "unhealthy", "NEEDS_DATA", "draft", "implementation", "malformed", "oversized", "envelope", "approval", "scope", "source", "invalid id", "unpinned", "duplicate", "metric mismatch", "epoch mismatch", "version mismatch", "report scope", "denied", "transport", "redirect", "bad response", "timeout", "signal", "invalid config", "missing credential"}
+	names := []string{"fifo", "directory", "invalid flag", "workspace scope", "duplicate JSON", "secret variant", "READY", "rollback", "ship", "breach rollback", "breach continue", "breach ship", "HOLD", "unhealthy", "NEEDS_DATA", "draft", "implementation", "malformed", "oversized", "envelope", "approval", "scope", "source", "invalid id", "unpinned", "duplicate", "metric mismatch", "epoch mismatch", "version mismatch", "report scope", "denied", "transport", "redirect", "bad response", "timeout", "signal", "invalid config", "missing credential"}
 	if command == "prepare" {
 		names = append(names, "settings missing", "settings fifo", "settings directory", "settings oversized", "settings null", "settings array", "settings malformed", "settings trailing", "settings duplicate", "settings escaped duplicate", "settings unknown", "settings nested unknown", "settings nested duplicate", "settings authorization", "settings evidence", "settings omitted threshold", "settings bandit", "settings missing alpha", "unsupported method", "multi-arm")
 	}
@@ -216,6 +216,11 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 				p.Implementation = nil
 				want = 3
 				state = growth.ProposalNeedsImplementation
+			case "rollback", "ship":
+				report.Decision.Verdict = name
+			case "breach rollback", "breach continue", "breach ship":
+				setGuardrailBreach(&report, strings.TrimPrefix(name, "breach "))
+				want, status, state = 3, growth.Hold, growth.ProposalNeedsData
 			case "HOLD", "unhealthy":
 				if name == "HOLD" {
 					report.Decision.Verdict = "hold"
@@ -484,6 +489,20 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			if code != want {
 				t.Fatalf("exit %d want %d: %s %s", code, want, out, stderr)
 			}
+			if strings.HasPrefix(name, "breach ") {
+				if strings.Contains(out+stderr, secret) {
+					t.Fatal("breach prose leaked")
+				}
+				if want == 3 && command != "review" {
+					diagnostic := "preparation blocked: proposal not ready for review\n"
+					if command == "record-review" {
+						diagnostic = "review blocked: proposal not ready for review\n"
+					}
+					if stderr != diagnostic {
+						t.Fatalf("diagnostic %q", stderr)
+					}
+				}
+			}
 			if command == "record-review" {
 				if want == 0 {
 					var got growth.ReviewRecord
@@ -689,4 +708,13 @@ func writeSettings(t *testing.T, p growth.Proposal) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// Breach contents are untrusted server prose, never CLI output.
+func setGuardrailBreach(report *growth.Report, verdict string) {
+	report.Decision.Verdict = verdict
+	report.Decision.GuardrailBreaches = append(report.Decision.GuardrailBreaches, struct {
+		Metric string `json:"metric"`
+		Detail string `json:"detail"`
+	}{secret + "-breached-metric", secret + "-breach-detail"})
 }

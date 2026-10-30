@@ -90,6 +90,20 @@ func TestEvidenceFixtures(t *testing.T) {
 		{name: "rollback", mutate: func(_ *Metric, p *Report, _ *string, _ *string) { p.Decision.Verdict = "rollback" }, status: Ready},
 		{name: "continue", mutate: func(_ *Metric, p *Report, _ *string, _ *string) { p.Decision.Verdict = "continue" }, status: Ready},
 	}
+	for _, verdict := range []string{"rollback", "continue", "ship"} {
+		tests = append(tests, struct {
+			name   string
+			mutate func(*Metric, *Report, *string, *string)
+			status Status
+			err    error
+		}{name: "healthy breach " + verdict, status: Hold, mutate: func(_ *Metric, p *Report, _ *string, _ *string) {
+			p.Decision.Verdict = verdict
+			p.Decision.GuardrailBreaches = append(p.Decision.GuardrailBreaches, struct {
+				Metric string `json:"metric"`
+				Detail string `json:"detail"`
+			}{})
+		}})
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			metric, report, query := fixture()
@@ -128,6 +142,9 @@ func TestEvidenceFixtures(t *testing.T) {
 				t.Fatalf("envelope = %+v, calls %d", got, calls)
 			}
 			p := got.Evidence[0]
+			if p.Status != tt.status {
+				t.Fatalf("report status = %s, want %s", p.Status, tt.status)
+			}
 			if p.SourcePath != "/api/v1/admin/experiments/exp1/report/export?format=json" || p.Report.Decision.Verdict != report.Decision.Verdict || got.Metrics[0].SourcePath == "" {
 				t.Fatal("lost provenance or server semantics")
 			}
