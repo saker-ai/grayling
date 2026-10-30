@@ -4,10 +4,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
-	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 )
 
 const LearningRecordSchemaVersion = "growth.learning.v1"
@@ -49,7 +46,9 @@ type LearningRecord struct {
 }
 
 // RecordLearning validates all local pins before network access, then reuses
-// Monitor without adding health/statistical decisions. Errors return no record.
+// Monitor without adding health/statistical decisions. Completed records satisfy
+// the offline consumer contract and MaxLearningRecordBytes JSON bound. Errors
+// return no record.
 // No clock, random ID, retries, persistence or HTTP writes are introduced.
 func (r *Reader) RecordLearning(ctx context.Context, p Proposal, m MonitorManifest, in LearningInputs) (*LearningRecord, error) {
 	if !fingerprint.MatchString(in.ExpectedProposalFingerprint) {
@@ -62,7 +61,7 @@ func (r *Reader) RecordLearning(ctx context.Context, p Proposal, m MonitorManife
 	if actual != in.ExpectedProposalFingerprint {
 		return nil, ErrLearning
 	}
-	if p.SchemaVersion != ProposalSchemaVersion || !validSegment(p.ID) || p.Version < 1 || !validSegment(p.WorkspaceID) || !validSegment(p.EnvironmentID) || strings.TrimSpace(p.Hypothesis) == "" || len(p.Hypothesis) > 4096 {
+	if p.SchemaVersion != ProposalSchemaVersion || !validSegment(p.ID) || p.Version < 1 || !validSegment(p.WorkspaceID) || !validSegment(p.EnvironmentID) || !learningText(p.Hypothesis, 4096) || validateLearningBaselines(p.EvidenceRefs) != nil {
 		return nil, ErrLearning
 	}
 	if err := m.validate(); err != nil {
@@ -83,13 +82,8 @@ func (r *Reader) RecordLearning(ctx context.Context, p Proposal, m MonitorManife
 		return nil, ErrLearning
 	}
 	for _, s := range in.Followups {
-		if strings.TrimSpace(s) == "" || len(s) > MaxLearningFollowupBytes || !utf8.ValidString(s) {
+		if !learningText(s, MaxLearningFollowupBytes) {
 			return nil, ErrLearning
-		}
-		for _, c := range s {
-			if unicode.IsControl(c) && c != '\n' && c != '\t' {
-				return nil, ErrLearning
-			}
 		}
 	}
 	// Snapshot nested inputs before the read, including baseline window issues.
@@ -111,10 +105,18 @@ func (r *Reader) RecordLearning(ctx context.Context, p Proposal, m MonitorManife
 		// Monitor's constructed source path is a request target, not observed provenance.
 		observed.SourcePath = ""
 	}
-	return &LearningRecord{
+	record := &LearningRecord{
 		SchemaVersion: LearningRecordSchemaVersion, ProposalID: snapshot.ID, ProposalVersion: snapshot.Version,
 		ProposalFingerprint: actual, WorkspaceID: snapshot.WorkspaceID, EnvironmentID: snapshot.EnvironmentID,
 		OriginalHypothesis: snapshot.Hypothesis, ProposalBaselineReferences: snapshot.EvidenceRefs,
 		LinkedExperiment: m, Observation: *observed, Recorder: in.Recorder, RecordedAt: recordedAt, Followups: followups,
-	}, nil
+	}
+	if validateLearningRecord(*record) != nil {
+		return nil, ErrLearning
+	}
+	data, err = json.Marshal(record)
+	if err != nil || len(data) > MaxLearningRecordBytes {
+		return nil, ErrLearning
+	}
+	return record, nil
 }

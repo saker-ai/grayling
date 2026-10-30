@@ -26,7 +26,7 @@ func TestRecordLearningBinary(t *testing.T) {
 	if b, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %s %v", b, err)
 	}
-	names := []string{"breach rollback", "breach continue", "breach ship", "continue", "ship", "rollback", "hold", "unhealthy", "health injection", "reason injection", "window injection", "incomplete", "not recomputable", "late watermark", "diagnostics missing", "diagnostics mismatch", "aggregate missing", "generation missing", "method invalid", "missing report", "missing metric", "registration mismatch", "primary role mismatch", "guardrail missing", "guardrail duplicate", "epoch mismatch", "evidence mismatch", "scope mismatch", "denied", "unauthorized", "malformed", "unknown member", "duplicate JSON", "trailing JSON", "null", "oversized", "invalid epoch", "duplicate metric", "manifest scope", "directory", "fifo", "timeout", "signal", "unpinned", "pinned", "stale fingerprint", "invalid recorder", "missing time", "empty followups", "too many followups", "long followup", "twenty followups", "operator injection", "local metric conflict", "local guard conflict", "proposal scope", "proposal unknown", "proposal duplicate", "proposal trailing", "learning unknown", "learning duplicate", "learning escaped duplicate", "learning trailing", "learning null", "learning malformed", "learning UTF8", "learning oversized", "learning directory", "learning fifo", "sigterm"}
+	names := []string{"size below", "size exact", "size over", "hypothesis control", "hypothesis delete", "baseline identity", "baseline path", "baseline epoch", "baseline hash", "breach rollback", "breach continue", "breach ship", "continue", "ship", "rollback", "hold", "unhealthy", "health injection", "reason injection", "window injection", "incomplete", "not recomputable", "late watermark", "diagnostics missing", "diagnostics mismatch", "aggregate missing", "generation missing", "method invalid", "missing report", "missing metric", "registration mismatch", "primary role mismatch", "guardrail missing", "guardrail duplicate", "epoch mismatch", "evidence mismatch", "scope mismatch", "denied", "unauthorized", "malformed", "unknown member", "duplicate JSON", "trailing JSON", "null", "oversized", "invalid epoch", "duplicate metric", "manifest scope", "directory", "fifo", "timeout", "signal", "unpinned", "pinned", "stale fingerprint", "invalid recorder", "missing time", "empty followups", "too many followups", "long followup", "twenty followups", "operator injection", "local metric conflict", "local guard conflict", "proposal scope", "proposal unknown", "proposal duplicate", "proposal trailing", "learning unknown", "learning duplicate", "learning escaped duplicate", "learning trailing", "learning null", "learning malformed", "learning UTF8", "learning oversized", "learning directory", "learning fifo", "sigterm"}
 	names = append(names, metricLifecycleCases...)
 	names = append(names, exposureCases...)
 	names = append(names, diagnosticsExposureCases...)
@@ -313,6 +313,34 @@ func TestRecordLearningBinary(t *testing.T) {
 				noNetwork = true
 			}
 
+			if strings.HasPrefix(name, "hypothesis ") || strings.HasPrefix(name, "baseline ") {
+				code, noNetwork = 2, true
+				switch name {
+				case "hypothesis control":
+					p.Hypothesis = "bad\x00text"
+				case "hypothesis delete":
+					p.Hypothesis = "bad\x7ftext"
+				case "baseline identity":
+					p.EvidenceRefs[0].ExperimentID = "../bad"
+				case "baseline path":
+					p.EvidenceRefs[0].SourcePath = "/api/v1/admin/experiments/exp1/report/export?format=json"
+				case "baseline epoch":
+					p.EvidenceRefs[0].Epoch = 0
+				case "baseline hash":
+					p.EvidenceRefs[0].EvidenceVersion = "latest"
+				}
+				fp, _ = growth.ProposalFingerprint(p)
+				in.ExpectedProposalFingerprint = fp
+			}
+			if strings.HasPrefix(name, "size ") {
+				in.Followups = make([]string, 20)
+				for i := range in.Followups {
+					in.Followups[i] = strings.Repeat("x", 4096)
+				}
+				p.EvidenceRefs[0].Window.Issues = []string{""}
+				fp, _ = growth.ProposalFingerprint(p)
+				in.ExpectedProposalFingerprint = fp
+			}
 			var calls, writes atomic.Int32
 			started := make(chan struct{}, 1)
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -419,6 +447,37 @@ func TestRecordLearningBinary(t *testing.T) {
 			if name == "timeout" {
 				args = append(args, "--timeout", "30ms")
 			}
+			if strings.HasPrefix(name, "size ") {
+				probe := exec.CommandContext(t.Context(), binary, args...)
+				probe.Env = append(os.Environ(), "GRAYLING_GROWTH_TOKEN="+secret)
+				output, err := probe.Output()
+				if err != nil {
+					t.Fatal(err)
+				}
+				target := growth.MaxLearningRecordBytes - 1
+				if name == "size exact" {
+					target++
+				}
+				if name == "size over" {
+					target += 2
+				}
+				padding := target - (len(output) - 1)
+				p.EvidenceRefs[0].Window.Issues[0] = strings.Repeat("\"", padding/2) + strings.Repeat("x", padding%2)
+				fp, _ = growth.ProposalFingerprint(p)
+				in.ExpectedProposalFingerprint = fp
+				for path, v := range map[string]any{proposalPath: p, learningPath: in} {
+					data, err := json.Marshal(v)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, data, 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if name != "size below" {
+					code = 2
+				}
+			}
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, binary, args...)
@@ -461,6 +520,14 @@ func TestRecordLearningBinary(t *testing.T) {
 			if writes.Load() != 0 || (noNetwork && calls.Load() != 0) {
 				t.Fatalf("requests: %d reads %d writes", calls.Load(), writes.Load())
 			}
+			if (strings.HasPrefix(name, "size ") && name != "size below") || strings.HasPrefix(name, "hypothesis ") || strings.HasPrefix(name, "baseline ") {
+				if diag.String() != "invalid or stale learning input\n" {
+					t.Fatalf("diagnostic: %q", diag.String())
+				}
+			}
+			if name == "size below" && out.Len() != growth.MaxLearningRecordBytes {
+				t.Fatalf("size: %d", out.Len())
+			}
 			if code == 1 || code == 2 || code == 130 {
 				if out.Len() != 0 {
 					t.Fatal("partial summary")
@@ -471,12 +538,15 @@ func TestRecordLearningBinary(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &record); err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasPrefix(name, "diagnostic-srm ") || strings.HasPrefix(name, "srm ") || strings.HasPrefix(name, "checks ") || strings.HasPrefix(name, "journeys ") || strings.HasPrefix(name, "unexposed ") || strings.HasPrefix(name, "counts ") || strings.HasPrefix(name, "rejections ") || strings.HasPrefix(name, "primary attribution ") || isWatermarkCase(name) || isDiagnosticsTimeCase(name) || strings.HasPrefix(name, "exposure ") || isDiagnosticsExposureCase(name) || isAggregateCase(name) {
-				recordPath := writeJSON("record.json", record, "")
+			{
+				if _, err := growth.DecodeLearningRecord(bytes.NewReader(out.Bytes())); err != nil {
+					t.Fatal("export cannot be decoded", err)
+				}
+				recordPath := writeJSON("record.json", record, out.String())
 				before := calls.Load()
 				for _, args := range [][]string{
 					{"verify-learning", "--proposal", proposalPath, "--record", recordPath, "--workspace", "ws1", "--environment", "env1"},
-					{"search-learning", "--record", recordPath, "--workspace", "ws1", "--environment", "env1", "--text", "review next observation"},
+					{"search-learning", "--record", recordPath, "--workspace", "ws1", "--environment", "env1", "--text", record.Followups[0]},
 				} {
 					offline := exec.CommandContext(ctx, binary, args...)
 					offline.Env = append(os.Environ(), "GRAYLING_GROWTH_TOKEN="+secret)
@@ -509,7 +579,7 @@ func TestRecordLearningBinary(t *testing.T) {
 						forgedPath := writeJSON("forged.json", forged, "")
 						for _, args := range [][]string{
 							{"verify-learning", "--proposal", proposalPath, "--record", forgedPath, "--workspace", "ws1", "--environment", "env1"},
-							{"search-learning", "--record", forgedPath, "--workspace", "ws1", "--environment", "env1", "--text", "review next observation"},
+							{"search-learning", "--record", forgedPath, "--workspace", "ws1", "--environment", "env1", "--text", record.Followups[0]},
 						} {
 							cmd := exec.CommandContext(ctx, binary, args...)
 							var stdout, stderr bytes.Buffer

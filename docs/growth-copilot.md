@@ -949,6 +949,28 @@ produce identical records; nested slices are detached from caller inputs.
 Before any HTTP request, the library checks the proposal schema, identity and
 positive version, required hypothesis, complete proposal fingerprint, reader and
 manifest workspace/environment, and exact primary/guardrail metric-role agreement.
+Hypotheses use the consumer text rules: nonblank valid UTF-8, at most 4096
+bytes, and no control characters except newline/tab. Every baseline reference
+requires a valid experiment identity, positive epoch, SHA-256 evidence version and
+exact `/api/v1/admin/experiments/{experimentId}/report/export?format=json` path.
+These locally knowable constraints are checked before HTTP using shared consumer
+validation; they do not require proposal readiness or baseline health, nor require
+baselines to identify the linked experiment. Invalid inputs return fixed diagnostics
+and no partial record.
+
+Completed records pass the same structural validation as offline consumers and
+must serialize to at most 128 KiB. JSON escaping counts toward the limit, so valid
+individual text fields can still exceed the combined record budget. The CLI also
+counts its trailing newline: JSON of exactly 128 KiB is valid for the library but
+cannot be exported by the CLI. Oversized exports produce no stdout and the fixed
+`invalid or stale learning input` diagnostic (exit 2). Completed-record failures can
+occur after evidence GETs; malformed local hypothesis/baseline fields fail before
+any request. Successful exports round-trip through `DecodeLearningRecord`,
+`VerifyLearning` and `SearchLearning`, including unhealthy and missing-evidence
+observations. These checks prove local artifact consistency only; they authenticate
+no author and grant no publication or business-win authority. Existing gates,
+including disposable PostgreSQL acceptance and unchanged timeouts, remain required.
+
 Changing proposal content at the same version invalidates the expected fingerprint.
 The manifest supplies the actual experiment ID, epoch, registration version and
 optional evidence-version pin. `Reader.Monitor` performs the existing read and

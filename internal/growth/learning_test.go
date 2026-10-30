@@ -15,7 +15,7 @@ import (
 
 func TestRecordLearningContract(t *testing.T) {
 	for _, name := range []string{
-		"ship", "continue", "rollback", "hold", "unhealthy", "incomplete", "not recomputable", "late watermark", "missing diagnostics", "diagnostic window", "missing aggregates", "missing report", "null report", "missing metric", "injection", "unknown verdict",
+		"incomplete proposal", "hypothesis whitespace controls", "size below", "size exact", "size over", "hypothesis control", "hypothesis delete", "baseline identity", "baseline path", "baseline epoch", "baseline hash", "ship", "continue", "rollback", "hold", "unhealthy", "incomplete", "not recomputable", "late watermark", "missing diagnostics", "diagnostic window", "missing aggregates", "missing report", "null report", "missing metric", "injection", "unknown verdict",
 		"stale fingerprint", "missing fingerprint", "malformed fingerprint", "proposal schema", "proposal id", "proposal version", "hypothesis", "workspace", "environment", "reader scope", "primary role", "guard role", "extra guard", "metric version", "registration", "epoch", "evidence pin", "server roles", "server scope",
 		"recorder", "timestamp", "timestamp range", "missing followups", "too many followups", "blank followup", "long followup", "invalid utf8", "control text", "authorization", "transport", "cancel",
 	} {
@@ -25,6 +25,7 @@ func TestRecordLearningContract(t *testing.T) {
 			m := MonitorManifest{WorkspaceID: p.WorkspaceID, EnvironmentID: p.EnvironmentID, ExperimentID: report.ExperimentID, Epoch: report.Epoch, RegistrationVersion: report.RegistrationVersion, EvidenceVersion: report.EvidenceVersion, PrimaryMetric: p.PrimaryMetric.Ref, Guardrails: []MetricRef{p.Guardrails[0].Ref}}
 			// The baseline deliberately differs from the actual linked run.
 			p.EvidenceRefs[0].ExperimentID = "baseline-only"
+			p.EvidenceRefs[0].SourcePath = reportSource("baseline-only")
 			p.EvidenceRefs[0].Window.Issues = []string{"baseline claim"}
 			in := LearningInputs{Recorder: "owner", RecordedAt: report.GeneratedAt, Followups: []string{"Inspect again after the next complete window."}}
 			status := Ready
@@ -35,6 +36,26 @@ func TestRecordLearningContract(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			switch name {
+			case "incomplete proposal":
+				p.Rationale = ""
+			case "hypothesis whitespace controls":
+				p.Hypothesis = "Inspect\nnext\twindow"
+			case "hypothesis control", "hypothesis delete", "baseline identity", "baseline path", "baseline epoch", "baseline hash":
+				wantErr, preflight = ErrLearning, true
+				switch name {
+				case "hypothesis control":
+					p.Hypothesis = "bad\x00text"
+				case "hypothesis delete":
+					p.Hypothesis = "bad\x7ftext"
+				case "baseline identity":
+					p.EvidenceRefs[0].ExperimentID = "../bad"
+				case "baseline path":
+					p.EvidenceRefs[0].SourcePath = reportSource("exp1")
+				case "baseline epoch":
+					p.EvidenceRefs[0].Epoch = 0
+				case "baseline hash":
+					p.EvidenceRefs[0].EvidenceVersion = "latest"
+				}
 			case "continue", "rollback":
 				report.Decision.Verdict = name
 			case "hold":
@@ -238,6 +259,29 @@ func TestRecordLearningContract(t *testing.T) {
 			}))
 			defer srv.Close()
 			reader := readerFor(t, srv.URL, nil)
+			if strings.HasPrefix(name, "size ") {
+				in.Followups = make([]string, MaxLearningFollowups)
+				for i := range in.Followups {
+					in.Followups[i] = strings.Repeat("x", MaxLearningFollowupBytes)
+				}
+				base, err := reader.RecordLearning(ctx, p, m, in)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data, _ := json.Marshal(base)
+				target := MaxLearningRecordBytes
+				if name == "size below" {
+					target--
+				}
+				if name == "size over" {
+					target++
+					wantErr = ErrLearning
+				}
+				// Quotes consume two serialized bytes; raw string length is insufficient.
+				padding := target - len(data)
+				p.EvidenceRefs[0].Window.Issues[0] += strings.Repeat("\"", padding/2) + strings.Repeat("x", padding%2)
+				in.ExpectedProposalFingerprint, _ = ProposalFingerprint(p)
+			}
 			beforeP, _ := json.Marshal(p)
 			beforeM, _ := json.Marshal(m)
 			got, err := reader.RecordLearning(ctx, p, m, in)
@@ -275,7 +319,14 @@ func TestRecordLearningContract(t *testing.T) {
 			if status == Hold && len(got.Observation.Blockers) == 0 {
 				t.Fatal("lost blockers")
 			}
+			assertLearningRoundTrip(t, p, got)
 			encoded, _ := json.Marshal(got)
+			if name == "size exact" && len(encoded) != MaxLearningRecordBytes {
+				t.Fatalf("size: %d", len(encoded))
+			}
+			if name == "size below" && len(encoded) != MaxLearningRecordBytes-1 {
+				t.Fatalf("size: %d", len(encoded))
+			}
 			if strings.Contains(string(encoded), "SERVER_SECRET") {
 				t.Fatal("exported untrusted server prose")
 			}
@@ -288,11 +339,12 @@ func TestRecordLearningContract(t *testing.T) {
 			if string(beforeP) != string(afterP) || string(beforeM) != string(afterM) {
 				t.Fatal("mutated input")
 			}
+			baselineClaim := p.EvidenceRefs[0].Window.Issues[0]
 			got.ProposalBaselineReferences[0].Window.Issues[0] = "changed"
 			got.LinkedExperiment.Guardrails[0].Key = "changed"
 			got.Observation.Guardrails[0].Key = "changed"
 			got.Followups[0] = "changed"
-			if p.EvidenceRefs[0].Window.Issues[0] != "baseline claim" || m.Guardrails[0].Key == "changed" || in.Followups[0] == "changed" || replay.Followups[0] == "changed" {
+			if p.EvidenceRefs[0].Window.Issues[0] != baselineClaim || m.Guardrails[0].Key == "changed" || in.Followups[0] == "changed" || replay.Followups[0] == "changed" {
 				t.Fatal("shared nested data")
 			}
 		})
