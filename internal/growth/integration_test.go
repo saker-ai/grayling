@@ -130,8 +130,9 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 	var raw struct {
 		Report struct {
 			Diagnostics *struct {
-				CrossVariantUnits  int64 `json:"crossVariantUnits"`
-				AssignmentMismatch int64 `json:"assignmentMismatch"`
+				ExposureMode       string `json:"exposureMode"`
+				CrossVariantUnits  int64  `json:"crossVariantUnits"`
+				AssignmentMismatch int64  `json:"assignmentMismatch"`
 			} `json:"diagnostics"`
 			Guardrails []struct {
 				Breached bool   `json:"breached"`
@@ -146,7 +147,7 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 		t.Fatalf("real guardrail checks: %+v %+v %v", raw, p.Guardrails, err)
 	}
 	if d := raw.Report.Diagnostics; d != nil {
-		if p.Diagnostics == nil || p.Diagnostics.CrossVariantUnits == nil || p.Diagnostics.AssignmentMismatch == nil || *p.Diagnostics.CrossVariantUnits != d.CrossVariantUnits || *p.Diagnostics.AssignmentMismatch != d.AssignmentMismatch {
+		if d.ExposureMode != mode || p.Diagnostics == nil || p.Diagnostics.ExposureMode != mode || p.Diagnostics.CrossVariantUnits == nil || p.Diagnostics.AssignmentMismatch == nil || *p.Diagnostics.CrossVariantUnits != d.CrossVariantUnits || *p.Diagnostics.AssignmentMismatch != d.AssignmentMismatch {
 			t.Fatal("lost real diagnostic counts")
 		}
 	}
@@ -173,7 +174,7 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 			t.Fatalf("historical report: %+v %v", observed, err)
 		}
 		for _, b := range observed.Blockers {
-			if b.Code == "exposure_mode_invalid" || b.Code == "primary_attribution_invalid" {
+			if b.Code == "diagnostics_metadata_invalid" || b.Code == "exposure_mode_invalid" || b.Code == "primary_attribution_invalid" {
 				t.Fatal("supported historical mode rejected")
 			}
 		}
@@ -190,7 +191,7 @@ func testReaderWithRealAPIHandler(t *testing.T, mode string) {
 		t.Fatalf("real handler monitor HOLD: %+v, %v", monitor, err)
 	}
 	for _, b := range monitor.Blockers {
-		if b.Code == "exposure_mode_invalid" || b.Code == "primary_attribution_invalid" {
+		if b.Code == "diagnostics_metadata_invalid" || b.Code == "exposure_mode_invalid" || b.Code == "primary_attribution_invalid" {
 			t.Fatal("supported real report exposure rejected", mode)
 		}
 	}

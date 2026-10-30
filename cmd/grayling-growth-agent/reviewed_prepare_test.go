@@ -27,6 +27,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 	}
 	names := append([]string{}, metricLifecycleCases...)
 	names = append(names, exposureCases...)
+	names = append(names, diagnosticsExposureCases...)
 	names = append(names, aggregateCaseNames()...)
 	names = append(names, diagnosticsTimeCases...)
 	names = append(names, watermarkCases...)
@@ -108,11 +109,14 @@ func TestReviewedPrepareBinary(t *testing.T) {
 			if strings.HasPrefix(name, "metadata ") {
 				want, diag = 3, "preparation blocked: proposal not ready for review\n"
 			}
-			if strings.HasPrefix(name, "exposure ") {
+			if strings.HasPrefix(name, "exposure ") || isDiagnosticsExposureCase(name) {
 				want, diag = 0, ""
-				if invalidExposureCase(name) {
+				if invalidExposureCase(name) || invalidDiagnosticsExposureCase(name) {
 					want, diag = 3, "preparation blocked: proposal not ready for review\n"
 				}
+			}
+			if malformedDiagnosticsExposureCase(name) {
+				want, diag = 1, "evidence execution failed\n"
 			}
 			b, err := json.Marshal(r)
 			if err != nil {
@@ -215,7 +219,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 					report.Decision.Verdict = name
 				}
 				invalidateReportMetadata(name, &report)
-				report.Diagnostics = &growth.Diagnostics{CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
+				report.Diagnostics = &growth.Diagnostics{ExposureMode: "onRender", CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 				count, value := int64(100), 0.2
 				for _, v := range p.Variants {
 					report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
@@ -224,6 +228,9 @@ func TestReviewedPrepareBinary(t *testing.T) {
 				applyDiagnosticsTimeCase(name, &report)
 				applyAggregateCase(name, &report)
 				// Preserve deliberate duplicate members so the reader must reject them.
+				if writeMalformedDiagnosticsExposure(w, name) {
+					return
+				}
 				json.MarshalWrite(w, struct {
 					WorkspaceID   string `json:"workspaceId"`
 					EnvironmentID string `json:"environmentId"`

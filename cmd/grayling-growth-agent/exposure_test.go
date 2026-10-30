@@ -16,7 +16,7 @@ func invalidExposureCase(name string) bool {
 // Use an object to distinguish an omitted member from an explicit empty string.
 func exposureReportWire(name string, report growth.Report) any {
 	if !strings.HasPrefix(name, "exposure ") {
-		return primaryAttributionReportWire(name, report)
+		return diagnosticsExposureReportWire(name, report)
 	}
 	data, err := json.Marshal(report)
 	if err != nil {
@@ -41,6 +41,7 @@ func exposureReportWire(name string, report growth.Report) any {
 		wire["exposureMode"] = " onRender "
 	default:
 		wire["exposureMode"] = strings.TrimPrefix(name, "exposure ")
+		wire["diagnostics"].(map[string]any)["exposureMode"] = wire["exposureMode"]
 	}
 	return wire
 }

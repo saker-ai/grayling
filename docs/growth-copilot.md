@@ -12,7 +12,7 @@ existing platform unchanged.
 | --- | --- | --- |
 | Exact metric definition | `GET /api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}` | Reuse workspace-scoped viewer access; check workspace, key, version and hash. Metrics are workspace-level, with no environment field; report scope supplies the environment boundary. |
 | Aggregate experiment evidence | `GET /api/v1/admin/experiments/{id}/report/export?format=json` | Reuse scoped report snapshot, generation time, epoch, evidence version, frozen primary/guardrail references, analysis window, watermark, recomputability, health, primary calculation errors, issues and decision. |
-| Diagnostics | Already embedded in report export | Reuse embedded experiment/epoch, generation time, window, issues and exact nullable crossVariantUnits/assignmentMismatch counts. No separate diagnostics request or independently timed snapshot. |
+| Diagnostics | Already embedded in report export | Reuse embedded experiment/epoch, matching allowlisted exposureMode, generation time, window, issues and exact nullable crossVariantUnits/assignmentMismatch counts. No separate diagnostics request or independently timed snapshot. |
 | Rollout observation | `GET /api/v1/admin/experiments/{id}` with embedded `releasePlan` | Pin workspace/environment, experiment, epoch and registration version; project bounded plan state/history without sensitive prose. Missing experiment and absent plan are separate observations; neither grants publication authority or establishes a business win. |
 | Binding readiness | `GET /api/v1/admin/experiments/{id}/bind-check` between experiment GETs | Reuse the rollout identity manifest; validate nine prerequisite checks, revision consistency and unchanged surrounding snapshots. Non-atomic observation; never binding or publication authority. |
 | Statistical decisions | Existing report builder and statistics packages | Preserve server verdict and reasons with analysis method; do not calculate significance, sample sizes, uplift, or winning probabilities. Parallel sequential/Bayesian/Bandit views are deliberately omitted, never merged into the fixed-sample decision. |
@@ -1700,3 +1700,38 @@ platform/report/API race, full Agent integration race (224.073 seconds within th
 unchanged five-minute timeout), and PostgreSQL E2E (4.232 seconds). The container
 was cleaned up by the exit trap. `git diff --check` passed. These results establish
 local software behavior only; full issue and real pilot acceptance remain open.
+
+
+## Embedded diagnostics exposure mode
+
+Embedded `diagnostics.exposureMode` must explicitly be `onDecision` or `onRender`
+and exactly match `report.exposureMode`. Both matching modes permit historical
+observation; new proposals retain their existing `onRender` restriction. Missing,
+null, empty, unknown, differently cased, whitespace-padded or mismatched diagnostic
+modes produce HOLD even with healthy counts and a server ship/continue/rollback
+verdict. Unknown diagnostic mode text is cleared before exporting the reduced
+evidence envelope. Wrong JSON types, duplicate members and malformed JSON reject
+the entire read with the existing fixed response error and no partial evidence.
+
+Monitor reports `diagnostics_metadata_invalid` / `refresh_report` for invalid or
+mismatched modes. Absent diagnostics keep `diagnostics_missing` / `refresh_report`.
+The server verdict is preserved, approval recording and both preparation paths
+remain blocked, and learning export, offline verification and search retain HOLD.
+Publication authority and business-win claims remain false.
+
+Library lifecycle and actual-binary HTTP fixtures cover both matches, both mismatch
+directions, missing/null/invalid modes, malformed responses, secret-bearing text,
+review and preparation blocking, learning round trips and zero non-GET requests.
+The existing real-handler fixture checks server-generated diagnostic modes when
+present against the report in both historical modes. These local consistency
+checks do not establish real Saker instrumentation, pilot outcomes, authenticated
+human approval or completion of #20. All documented mandatory gates remain required.
+
+
+Local validation on 2026-10-30 passed all three documented gate sequences:
+`make build`, the complete short suite, build/vet, core race, boot/E2E/smoke,
+SDK, frontend/static, license and whitespace checks. The disposable PostgreSQL 16
+platform/report/API race suite, full Agent integration race suite (220.326 seconds
+within the unchanged five-minute timeout) and PostgreSQL E2E (3.864 seconds) passed.
+The cleanup trap removed the container. The focused diagnostics exposure lifecycle
+tests also passed under the race detector. These are local software checks only.

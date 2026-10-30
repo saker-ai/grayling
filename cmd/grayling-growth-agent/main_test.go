@@ -99,6 +99,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 	}
 	names = append(names, metricLifecycleCases...)
 	names = append(names, exposureCases...)
+	names = append(names, diagnosticsExposureCases...)
 	names = append(names, aggregateCaseNames()...)
 	names = append(names, diagnosticsTimeCases...)
 	names = append(names, watermarkCases...)
@@ -126,7 +127,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			applyGuardrailsCase(name, &report)
 			applyJourneysCase(name, &report)
 			applyCountsCase(name, &report)
-			report.Diagnostics = &growth.Diagnostics{CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
+			report.Diagnostics = &growth.Diagnostics{ExposureMode: "onRender", CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 			count, value := int64(100), 0.2
 			for _, v := range p.Variants {
 				report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
@@ -197,6 +198,9 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 					workspace = "other"
 				}
 				// Preserve deliberate duplicate members so the reader must reject them.
+				if writeMalformedDiagnosticsExposure(w, name) {
+					return
+				}
 				json.MarshalWrite(w, struct {
 					WorkspaceID   string `json:"workspaceId"`
 					EnvironmentID string `json:"environmentId"`
@@ -376,8 +380,11 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			if strings.HasPrefix(name, "report method ") {
 				report.AnalysisMethod = strings.TrimPrefix(name, "report method ")
 			}
-			if applyWatermarkCase(name, &report) || applyDiagnosticsTimeCase(name, &report) || applyAggregateCase(name, &report) || invalidateReportMetadata(name, &report) || invalidExposureCase(name) {
+			if applyWatermarkCase(name, &report) || applyDiagnosticsTimeCase(name, &report) || applyAggregateCase(name, &report) || invalidateReportMetadata(name, &report) || invalidExposureCase(name) || invalidDiagnosticsExposureCase(name) {
 				want, status, state = 3, growth.Hold, growth.ProposalNeedsData
+			}
+			if malformedDiagnosticsExposureCase(name) {
+				want = 1
 			}
 			if command == "prepare" {
 				settingsPath := writeSettings(t, p)
@@ -558,7 +565,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			if code != want {
 				t.Fatalf("exit %d want %d: %s %s", code, want, out, stderr)
 			}
-			if isWatermarkCase(name) || isDiagnosticsTimeCase(name) || isAggregateCase(name) || strings.HasPrefix(name, "exposure ") || strings.HasPrefix(name, "breach ") || strings.HasPrefix(name, "metadata ") || strings.HasPrefix(name, "lifecycle ") {
+			if isWatermarkCase(name) || isDiagnosticsTimeCase(name) || isAggregateCase(name) || strings.HasPrefix(name, "exposure ") || isDiagnosticsExposureCase(name) || strings.HasPrefix(name, "breach ") || strings.HasPrefix(name, "metadata ") || strings.HasPrefix(name, "lifecycle ") {
 				if strings.Contains(out+stderr, secret) {
 					t.Fatal("breach prose leaked")
 				}
