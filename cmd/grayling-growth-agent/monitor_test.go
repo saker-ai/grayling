@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
@@ -36,9 +37,11 @@ func TestMonitorBinary(t *testing.T) {
 	names = append(names, srmCases...)
 	names = append(names, guardrailsCases...)
 	names = append(names, journeysCases...)
+	names = append(names, countsCases...)
 	names = append(names, srmMalformedCases...)
 	names = append(names, guardrailsMalformedCases...)
 	names = append(names, journeysMalformedCases...)
+	names = append(names, countsMalformedCases...)
 	names = append(names, primaryAttributionBoundaryCases...)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
@@ -48,6 +51,7 @@ func TestMonitorBinary(t *testing.T) {
 			applySRMCase(name, &report)
 			applyGuardrailsCase(name, &report)
 			applyJourneysCase(name, &report)
+			applyCountsCase(name, &report)
 			if strings.HasPrefix(name, "report method ") {
 				report.AnalysisMethod = strings.TrimPrefix(name, "report method ")
 			}
@@ -55,7 +59,7 @@ func TestMonitorBinary(t *testing.T) {
 			for _, v := range p.Variants {
 				report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
 			}
-			report.Diagnostics = &growth.Diagnostics{ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
+			report.Diagnostics = &growth.Diagnostics{CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 			want, code, status := "", 0, growth.Ready
 			raw := ""
 			noNetwork := false
@@ -76,13 +80,13 @@ func TestMonitorBinary(t *testing.T) {
 			if applyAggregateCase(name, &report) {
 				code, status, want = 3, growth.Hold, "aggregates_missing"
 			}
-			if invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) {
+			if invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) {
 				code, status, want = 3, growth.Hold, "srm_review_required"
-				if invalidGuardrailsCase(name) || invalidJourneysCase(name) {
+				if invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) {
 					want = "health_review_required"
 				}
 			}
-			if malformedSRMCase(name) || malformedGuardrailsCase(name) || malformedJourneysCase(name) {
+			if malformedSRMCase(name) || malformedGuardrailsCase(name) || malformedJourneysCase(name) || malformedCountsCase(name) {
 				code = 1
 			}
 			if invalidPrimaryAttributionCase(name) {
@@ -282,7 +286,8 @@ func TestMonitorBinary(t *testing.T) {
 				if name == "scope mismatch" {
 					ws = "other"
 				}
-				json.MarshalWrite(w, map[string]any{"workspaceId": ws, "environmentId": "env1", "report": exposureReportWire(name, report)})
+				// Preserve deliberate duplicate members so the reader must reject them.
+				json.MarshalWrite(w, map[string]any{"workspaceId": ws, "environmentId": "env1", "report": exposureReportWire(name, report)}, jsontext.AllowDuplicateNames(true))
 			}))
 			defer srv.Close()
 			data, err := json.Marshal(m)
@@ -363,6 +368,7 @@ func TestMonitorBinary(t *testing.T) {
 			checkSRMBlockers(t, name, got)
 			checkGuardrailsBlockers(t, name, got)
 			checkJourneysBlockers(t, name, got)
+			checkCountsBlockers(t, name, got)
 			checkPrimaryAttributionBlockers(t, name, got)
 			checkDiagnosticsTimeBlockers(t, name, got)
 			if want != "" {

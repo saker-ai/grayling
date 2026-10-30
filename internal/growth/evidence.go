@@ -143,11 +143,21 @@ type Decision struct {
 }
 
 type Diagnostics struct {
-	ExperimentID string    `json:"experimentId"`
-	Epoch        int64     `json:"epoch"`
-	GeneratedAt  time.Time `json:"generatedAt"`
-	Window       Window    `json:"window"`
-	Issues       []string  `json:"issues,omitempty"`
+	// Counts preserve exact server aggregates. Missing and null require review.
+	CrossVariantUnits  *int64    `json:"crossVariantUnits"`
+	AssignmentMismatch *int64    `json:"assignmentMismatch"`
+	ExperimentID       string    `json:"experimentId"`
+	Epoch              int64     `json:"epoch"`
+	GeneratedAt        time.Time `json:"generatedAt"`
+	Window             Window    `json:"window"`
+	Issues             []string  `json:"issues,omitempty"`
+}
+
+// diagnosticsCountsValid trusts only explicit zero counts, independently of
+// summary health, issue prose or verdict. No statistical inference is performed.
+func diagnosticsCountsValid(d *Diagnostics) bool {
+	return d != nil && d.CrossVariantUnits != nil && *d.CrossVariantUnits == 0 &&
+		d.AssignmentMismatch != nil && *d.AssignmentMismatch == 0
 }
 
 type Variant struct {
@@ -454,7 +464,7 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 		if len(e.Metrics) != len(q.Metrics) || !historicalMetricsValid(e.Metrics) || !primaryAttributionValid(*p, e.Metrics) {
 			status = Hold
 		}
-		if !journeysValid(*p) || !guardrailsValid(*p) || !srmValid(*p) || len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
+		if !diagnosticsCountsValid(p.Diagnostics) || !journeysValid(*p) || !guardrailsValid(*p) || !srmValid(*p) || len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || !validWindowMetadata(p.Window, p.GeneratedAt) || p.GeneratedAt.IsZero() ||
 			p.PrimaryMetricRef == nil || p.Diagnostics == nil || !fingerprint.MatchString(p.RegistrationVersion) || !knownAnalysisMethod(p.AnalysisMethod) || !knownExposureMode(p.ExposureMode) ||
 			!usableVariants(p.PerVariant) || !knownVerdict(p.Decision.Verdict) || p.Decision.Verdict == "hold" {
 			status = Hold

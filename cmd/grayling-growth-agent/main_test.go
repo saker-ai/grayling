@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
@@ -105,7 +106,9 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 	names = append(names, srmCases...)
 	names = append(names, guardrailsCases...)
 	names = append(names, journeysCases...)
+	names = append(names, countsCases...)
 	names = append(names, journeysMalformedCases...)
+	names = append(names, countsMalformedCases...)
 	names = append(names, attributionCases...)
 	names = append(names, invalidReportMetadataCases...)
 	names = append(names, validReportMethodCases...)
@@ -122,7 +125,8 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			applySRMCase(name, &report)
 			applyGuardrailsCase(name, &report)
 			applyJourneysCase(name, &report)
-			report.Diagnostics = &growth.Diagnostics{ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
+			applyCountsCase(name, &report)
+			report.Diagnostics = &growth.Diagnostics{CrossVariantUnits: new(int64(0)), AssignmentMismatch: new(int64(0)), ExperimentID: "exp1", Epoch: 1, GeneratedAt: report.GeneratedAt, Window: report.Window}
 			count, value := int64(100), 0.2
 			for _, v := range p.Variants {
 				report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
@@ -192,11 +196,12 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 				if name == "report scope" {
 					workspace = "other"
 				}
+				// Preserve deliberate duplicate members so the reader must reject them.
 				json.MarshalWrite(w, struct {
 					WorkspaceID   string `json:"workspaceId"`
 					EnvironmentID string `json:"environmentId"`
 					Report        any    `json:"report"`
-				}{workspace, "env1", exposureReportWire(name, report)})
+				}{workspace, "env1", exposureReportWire(name, report)}, jsontext.AllowDuplicateNames(true))
 			}))
 			defer srv.Close()
 			raw := ""
@@ -232,10 +237,10 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			if name == "primary attribution deprecated" {
 				want, state = 3, growth.ProposalNeedsData
 			}
-			if invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) {
+			if invalidSRMCase(name) || invalidGuardrailsCase(name) || invalidJourneysCase(name) || invalidCountsCase(name) {
 				want, status, state = 3, growth.Hold, growth.ProposalNeedsData
 			}
-			if malformedJourneysCase(name) {
+			if malformedJourneysCase(name) || malformedCountsCase(name) {
 				want = 1
 			}
 			if invalidPrimaryAttributionCase(name) {
