@@ -45,6 +45,13 @@ client.flush()   # 立即上报排队事件（close() 也会 flush）
 client.close()
 ```
 
+`flush()` 返回本次调用成功上报的事件数，不包含后台线程此前已上报的事件；
+后台已清空队列时返回 `0`。`status()["eventsFlushed"]` 与
+`status()["eventsDropped"]` 是当前客户端生命周期内的累计计数，包含后台与
+显式 flush 的成功上报和丢弃/拒收事件。`onDecision` 求值时由服务端直接记录的
+曝光不计入这些客户端队列计数。观察后台投递时应有界轮询累计计数，并检查
+丢弃计数及服务端诊断/报告；不能用后续一次 `flush()` 的返回值代表总投递量。
+
 其他 API：`string_variation` / `number_variation` / `json_variation`、
 `track_exposure`（旧式外部决策曝光回填，仅适用于 onDecision）、`sync_revision()`（显式新鲜度探测）、`status()`（revision/缓存命中/错误/事件计数观测）。
 

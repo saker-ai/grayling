@@ -1008,13 +1008,29 @@ short tests, vet, core race tests, binary/E2E/smoke tests, frontend tests, stati
 consistency and whitespace checks also passed. These timings describe this local
 run, not a CI performance guarantee.
 
-The required `make sdk-test` gate is **not green** locally: the unchanged Python
-`test_track_conversion_reaches_report` fails its `n >= converted` assertion at
-`sdk/python/tests/test_collect.py:51` (23 tests pass). Its 0.2-second background
-flusher can drain conversions before the explicit `flush()` call, which returns
-only the events it posts itself. The same assertion failed on three attempts,
-including after the Agent run finished. TypeScript SDK typechecking and tests passed separately. No SDK code or
-assertions were changed; this remaining gate failure must be resolved before claiming complete validation.
+The Python collect scheduling repair was validated locally on 2026-10-30:
+all 25 Python SDK tests passed in `make sdk-test`. Explicit-flush cases use the
+existing 3600-second interval while preserving their assertions. A separate
+real-binary background case covers conversion and manual-exposure delivery with
+bounded polling of cumulative counters, zero drops, server diagnosis/report
+checks and an empty subsequent explicit flush. SDK behavior is unchanged.
+The background case also passed in isolation. Build, short tests (after installing
+locked frontend dependencies), vet, core race, boot/E2E/smoke, frontend tests,
+static consistency and whitespace checks passed again for this repair.
+All three PostgreSQL gates passed again against a disposable PostgreSQL 16
+container, including the full race-enabled Agent package in 243.750 seconds
+under the unchanged five-minute timeout and PostgreSQL E2E in 4.071 seconds.
+The container was removed on completion.
+
+The required `make sdk-test` gate is still **not green** in this run: TypeScript
+typechecking passed, but its unchanged `trackConversion attribution lands in the
+report` test failed `assert.ok(flushed >= converted)` at
+`sdk/typescript/test/integration.test.ts:194` (21 tests passed, one failed).
+That test also uses a 200-millisecond background interval before asserting a
+per-call explicit-flush count. This remaining failure is outside the Python
+scheduling slice and must be resolved before claiming complete validation.
+This gate repair does not establish model generation, durable orchestration,
+real Saker instrumentation, pilot outcomes or complete Growth Agent acceptance.
 
 ## Offline verify-learning command
 

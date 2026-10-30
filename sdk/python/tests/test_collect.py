@@ -5,6 +5,7 @@ mismatch rejection — verified through the real /api/v1/collect endpoint."""
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -32,7 +33,7 @@ def _now_rfc3339() -> str:
 
 
 def test_track_conversion_reaches_report(env):
-    with make_client(env, exposure_flush_interval=0.2) as client:
+    with make_client(env, exposure_flush_interval=3600) as client:
         converted = 0
         converted_details = None
         for i in range(30):
@@ -123,7 +124,7 @@ def test_partial_collect_counts_success_and_rejection(env):
 
 
 def test_manual_exposure_reporting(env):
-    with make_client(env, exposure_flush_interval=0.2) as client:
+    with make_client(env, exposure_flush_interval=3600) as client:
         client.track_exposure(env.experiment_id, env.epoch, "py-exp",
                             "control", "manual-user-1", source="split")
         assert client.flush() == 1
@@ -133,6 +134,45 @@ def test_manual_exposure_reporting(env):
         with pytest.raises(Exception):
             client.track_exposure(env.experiment_id, env.epoch, "py-exp",
                                   "control", "")
+
+
+def test_background_conversion_and_manual_exposure_delivery(env):
+    with make_client(env, exposure_flush_interval=0.2) as client:
+        unit = f"background-conv-{uuid.uuid4().hex}"
+        _, details = client.string_variation(
+            "py-exp", "?", attributes={"user_id": unit})
+        assert details.result.experiment is not None
+        decision = details.result.decision_id
+        assert client.diagnose(decision)["conversionCount"] == 0
+        before = {v["variant"]: v for v in env.report()["perVariant"]}
+
+        client.track_conversion(details, "conversion", 1.0,
+                                session_id=f"sess-{unit}")
+        client.track_exposure(env.experiment_id, env.epoch, "py-exp",
+                              "control", f"background-manual-{uuid.uuid4().hex}",
+                              source="split")
+
+        # Only the background worker delivers these events. Its cumulative
+        # counters include batches that an explicit flush can no longer drain.
+        deadline = time.monotonic() + 10
+        while True:
+            status = client.status()
+            assert status["eventsDropped"] == 0, status
+            if status["eventsFlushed"] >= 2 or time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
+        assert status["eventsFlushed"] == 2, status
+
+        diag = client.diagnose(decision)
+        assert diag["exposureStatus"] == "recorded"
+        assert diag["conversionCount"] == 1
+        after = {v["variant"]: v for v in env.report()["perVariant"]}
+        variant = details.result.experiment.variant
+        assert after[variant]["convertedUnits"] == before[variant]["convertedUnits"] + 1
+        assert after["control"]["randomizedUnits"] == before["control"]["randomizedUnits"] + 1
+        assert client.flush() == 0
+        status = client.status()
+        assert status["eventsFlushed"] == 2 and status["eventsDropped"] == 0
 
 
 def test_collect_requires_collect_audience(env):
@@ -180,7 +220,7 @@ def test_on_render_requires_explicit_exposure(env):
     env.server.request("POST", f"/api/v1/admin/experiments/{exp['id']}/transition",
                        env.server.owner_token, {"to": "running", "reason": "launch"}, expect=200)
 
-    with make_client(env) as client:
+    with make_client(env, exposure_flush_interval=3600) as client:
         _, before = env.server.request("GET", "/api/v1/sdk/metrics", env.sdk_token, expect=200)
         _, details = client.string_variation(key, "?", attributes={"user_id": "py-render-user"})
         assert details.result.experiment.exposure_mode == "onRender"
