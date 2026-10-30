@@ -28,11 +28,12 @@ func TestMonitorBinary(t *testing.T) {
 	names := []string{"breach rollback", "breach continue", "breach ship", "continue", "ship", "rollback", "hold", "unhealthy", "health injection", "reason injection", "window injection", "incomplete", "not recomputable", "late watermark", "diagnostics missing", "diagnostics mismatch", "aggregate missing", "generation missing", "method invalid", "missing report", "missing metric", "registration mismatch", "primary role mismatch", "guardrail missing", "guardrail duplicate", "epoch mismatch", "evidence mismatch", "scope mismatch", "denied", "unauthorized", "malformed", "unknown member", "duplicate JSON", "trailing JSON", "null", "oversized", "invalid epoch", "duplicate metric", "manifest scope", "directory", "fifo", "timeout", "signal", "unpinned", "pinned"}
 	names = append(names, validReportMethodCases...)
 	names = append(names, metricLifecycleCases...)
+	names = append(names, exposureCases...)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
 			m := growth.MonitorManifest{WorkspaceID: "ws1", EnvironmentID: "env1", ExperimentID: "exp1", Epoch: 1, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, PrimaryMetric: p.PrimaryMetric.Ref, Guardrails: []growth.MetricRef{p.Guardrails[0].Ref}}
-			report := growth.Report{ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, RegistrationVersion: m.RegistrationVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, AnalysisMethod: "two-proportion-z", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue"}}
+			report := growth.Report{ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, RegistrationVersion: m.RegistrationVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, AnalysisMethod: "two-proportion-z", ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue"}}
 			if strings.HasPrefix(name, "report method ") {
 				report.AnalysisMethod = strings.TrimPrefix(name, "report method ")
 			}
@@ -51,6 +52,9 @@ func TestMonitorBinary(t *testing.T) {
 				case "absent":
 					code, status, want = 3, growth.NeedsData, "evidence_missing"
 				}
+			}
+			if invalidExposureCase(name) {
+				code, status, want = 3, growth.Hold, "exposure_mode_invalid"
 			}
 			switch name {
 			case "breach rollback", "breach continue", "breach ship":
@@ -240,7 +244,7 @@ func TestMonitorBinary(t *testing.T) {
 				if name == "scope mismatch" {
 					ws = "other"
 				}
-				json.MarshalWrite(w, map[string]any{"workspaceId": ws, "environmentId": "env1", "report": report})
+				json.MarshalWrite(w, map[string]any{"workspaceId": ws, "environmentId": "env1", "report": exposureReportWire(name, report)})
 			}))
 			defer srv.Close()
 			data, err := json.Marshal(m)

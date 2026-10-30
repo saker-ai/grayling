@@ -24,6 +24,7 @@ func TestReviewedPrepareBinary(t *testing.T) {
 		t.Fatalf("build: %v %s", err, b)
 	}
 	names := append([]string{}, metricLifecycleCases...)
+	names = append(names, exposureCases...)
 	names = append(names, attributionCases...)
 	for _, name := range append(names, append(invalidReportMetadataCases, []string{"breach rollback", "breach continue", "breach ship", "rollback", "ship", "approve", "settings", "unhealthy", "missing evidence", "stale", "forged pin", "roles", "workspace", "reject", "request_changes", "null", "malformed", "unknown", "duplicate", "escaped duplicate", "nested unknown", "nested duplicate", "utf8", "trailing", "oversized", "boundary", "fifo", "directory", "symlink", "empty path", "missing file"}...)...) {
 		t.Run(name, func(t *testing.T) {
@@ -79,6 +80,12 @@ func TestReviewedPrepareBinary(t *testing.T) {
 			}
 			if strings.HasPrefix(name, "metadata ") {
 				want, diag = 3, "preparation blocked: proposal not ready for review\n"
+			}
+			if strings.HasPrefix(name, "exposure ") {
+				want, diag = 0, ""
+				if invalidExposureCase(name) {
+					want, diag = 3, "preparation blocked: proposal not ready for review\n"
+				}
 			}
 			b, err := json.Marshal(r)
 			if err != nil {
@@ -164,10 +171,10 @@ func TestReviewedPrepareBinary(t *testing.T) {
 					report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
 				}
 				json.MarshalWrite(w, struct {
-					WorkspaceID   string        `json:"workspaceId"`
-					EnvironmentID string        `json:"environmentId"`
-					Report        growth.Report `json:"report"`
-				}{"ws1", "env1", report})
+					WorkspaceID   string `json:"workspaceId"`
+					EnvironmentID string `json:"environmentId"`
+					Report        any    `json:"report"`
+				}{"ws1", "env1", exposureReportWire(name, report)})
 			}))
 			defer srv.Close()
 			settings := writeSettings(t, p)

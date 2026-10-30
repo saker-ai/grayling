@@ -345,7 +345,7 @@ func (r *Reader) Read(ctx context.Context, q Query) (*Envelope, error) {
 			status = Hold
 		}
 		if len(p.Decision.GuardrailBreaches) != 0 || !p.Healthy || p.PrimaryError != "" || len(p.HealthIssues) != 0 || !usableWindow(p.Window) || p.GeneratedAt.IsZero() ||
-			p.PrimaryMetricRef == nil || p.Diagnostics == nil || !fingerprint.MatchString(p.RegistrationVersion) || !knownAnalysisMethod(p.AnalysisMethod) ||
+			p.PrimaryMetricRef == nil || p.Diagnostics == nil || !fingerprint.MatchString(p.RegistrationVersion) || !knownAnalysisMethod(p.AnalysisMethod) || !knownExposureMode(p.ExposureMode) ||
 			!usableVariants(p.PerVariant) || !knownVerdict(p.Decision.Verdict) || p.Decision.Verdict == "hold" {
 			status = Hold
 		}
@@ -390,6 +390,12 @@ func knownAnalysisMethod(method string) bool {
 	default:
 		return false
 	}
+}
+
+// Historical reports support both exposure semantics. New proposals separately
+// require onRender; observation must not apply that creation restriction.
+func knownExposureMode(mode string) bool {
+	return mode == "onDecision" || mode == "onRender"
 }
 
 func knownVerdict(v string) bool {

@@ -98,6 +98,7 @@ func validateLearningRecord(r LearningRecord) error {
 		"metric_lifecycle_invalid":     "review_metric_definitions",
 		"evidence_missing":             "restore_evidence_access",
 		"verdict_invalid":              "review_diagnostics",
+		"exposure_mode_invalid":        "review_registration",
 		"analysis_method_invalid":      "review_registration",
 		"generation_time_missing":      "refresh_report",
 		"health_review_required":       "review_diagnostics",

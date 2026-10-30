@@ -27,13 +27,14 @@ func TestRecordLearningBinary(t *testing.T) {
 	}
 	names := []string{"breach rollback", "breach continue", "breach ship", "continue", "ship", "rollback", "hold", "unhealthy", "health injection", "reason injection", "window injection", "incomplete", "not recomputable", "late watermark", "diagnostics missing", "diagnostics mismatch", "aggregate missing", "generation missing", "method invalid", "missing report", "missing metric", "registration mismatch", "primary role mismatch", "guardrail missing", "guardrail duplicate", "epoch mismatch", "evidence mismatch", "scope mismatch", "denied", "unauthorized", "malformed", "unknown member", "duplicate JSON", "trailing JSON", "null", "oversized", "invalid epoch", "duplicate metric", "manifest scope", "directory", "fifo", "timeout", "signal", "unpinned", "pinned", "stale fingerprint", "invalid recorder", "missing time", "empty followups", "too many followups", "long followup", "twenty followups", "operator injection", "local metric conflict", "local guard conflict", "proposal scope", "proposal unknown", "proposal duplicate", "proposal trailing", "learning unknown", "learning duplicate", "learning escaped duplicate", "learning trailing", "learning null", "learning malformed", "learning UTF8", "learning oversized", "learning directory", "learning fifo", "sigterm"}
 	names = append(names, metricLifecycleCases...)
+	names = append(names, exposureCases...)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			p := fixtureProposal(t)
 			p.EvidenceRefs[0].ExperimentID = "baseline"
 			p.EvidenceRefs[0].SourcePath = "/api/v1/admin/experiments/baseline/report/export?format=json"
 			m := growth.MonitorManifest{WorkspaceID: "ws1", EnvironmentID: "env1", ExperimentID: "exp1", Epoch: 1, RegistrationVersion: p.PrimaryMetric.Ref.DefinitionHash, PrimaryMetric: p.PrimaryMetric.Ref, Guardrails: []growth.MetricRef{p.Guardrails[0].Ref}}
-			report := growth.Report{ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, RegistrationVersion: m.RegistrationVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, AnalysisMethod: "two-proportion-z", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue"}}
+			report := growth.Report{ExperimentID: "exp1", Epoch: 1, EvidenceVersion: p.EvidenceRefs[0].EvidenceVersion, RegistrationVersion: m.RegistrationVersion, GeneratedAt: p.AnalysisPlan.Provenance.SuppliedAt, AnalysisMethod: "two-proportion-z", ExposureMode: "onRender", Window: p.EvidenceRefs[0].Window, Healthy: true, PrimaryMetricRef: &p.PrimaryMetric.Ref, GuardrailMetricRefs: []growth.MetricRef{p.Guardrails[0].Ref}, Decision: growth.Decision{Verdict: "continue"}}
 			count, value := int64(100), 0.2
 			for _, v := range p.Variants {
 				report.PerVariant = append(report.PerVariant, growth.Variant{Variant: v.Key, ExposedUnits: &count, RandomizedUnits: &count, Exposures: &count, ConvertedUnits: &count, PrimaryValue: &value})
@@ -55,6 +56,9 @@ func TestRecordLearningBinary(t *testing.T) {
 				case "absent":
 					code, status, want = 3, growth.NeedsData, "evidence_missing"
 				}
+			}
+			if invalidExposureCase(name) {
+				code, status, want = 3, growth.Hold, "exposure_mode_invalid"
 			}
 			switch name {
 			case "breach rollback", "breach continue", "breach ship":
@@ -300,7 +304,7 @@ func TestRecordLearningBinary(t *testing.T) {
 				if name == "scope mismatch" {
 					ws = "other"
 				}
-				json.MarshalWrite(w, map[string]any{"workspaceId": ws, "environmentId": "env1", "report": report})
+				json.MarshalWrite(w, map[string]any{"workspaceId": ws, "environmentId": "env1", "report": exposureReportWire(name, report)})
 			}))
 			defer srv.Close()
 			data, err := json.Marshal(m)
@@ -405,6 +409,35 @@ func TestRecordLearningBinary(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &record); err != nil {
 				t.Fatal(err)
 			}
+			if strings.HasPrefix(name, "exposure ") {
+				recordPath := writeJSON("record.json", record, "")
+				before := calls.Load()
+				for _, args := range [][]string{
+					{"verify-learning", "--proposal", proposalPath, "--record", recordPath, "--workspace", "ws1", "--environment", "env1"},
+					{"search-learning", "--record", recordPath, "--workspace", "ws1", "--environment", "env1", "--text", "review next observation"},
+				} {
+					offline := exec.CommandContext(ctx, binary, args...)
+					offline.Env = append(os.Environ(), "GRAYLING_GROWTH_TOKEN="+secret)
+					output, err := offline.CombinedOutput()
+					if err != nil || strings.Contains(string(output), secret) {
+						t.Fatalf("offline round trip: %v %s", err, output)
+					}
+					if args[0] == "search-learning" {
+						var result growth.LearningSearchResult
+						if err := json.Unmarshal(output, &result); err != nil || len(result.Matches) != 1 || !bytes.Equal(mustLearningJSON(t, result.Matches[0]), mustLearningJSON(t, record)) {
+							t.Fatalf("search lost observation: %v %s", err, output)
+						}
+					} else {
+						var verification growth.LearningVerification
+						if err := json.Unmarshal(output, &verification); err != nil || verification.ObservationStatus != status || verification.PublicationAuthorized || verification.BusinessWinEstablished {
+							t.Fatalf("verify lost status: %v %s", err, output)
+						}
+					}
+				}
+				if calls.Load() != before || writes.Load() != 0 {
+					t.Fatal("offline round trip used network")
+				}
+			}
 			got := record.Observation
 			if record.BusinessWinEstablished || record.PublicationAuthorized || record.ProposalFingerprint != fp || record.ProposalID != p.ID {
 				t.Fatalf("invalid record %+v", record)
@@ -449,4 +482,14 @@ func TestRecordLearningBinary(t *testing.T) {
 			}
 		})
 	}
+}
+
+// mustLearningJSON compares complete records across the actual process round trip.
+func mustLearningJSON(t *testing.T, record growth.LearningRecord) []byte {
+	t.Helper()
+	data, err := json.Marshal(record, json.Deterministic(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

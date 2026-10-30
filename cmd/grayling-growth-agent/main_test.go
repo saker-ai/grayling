@@ -97,6 +97,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 		names = append(names, "input missing", "input fifo", "input directory", "input oversized", "input null", "input array", "input malformed", "input invalid utf8", "input trailing", "input duplicate", "input escaped duplicate", "input unknown", "input authorization", "input evidence", "input nested", "input timestamp omitted", "input timestamp invalid", "input decision invalid", "input reviewer omitted", "input rationale omitted", "input rationale long", "input stale", "input unchanged version stale")
 	}
 	names = append(names, metricLifecycleCases...)
+	names = append(names, exposureCases...)
 	names = append(names, attributionCases...)
 	names = append(names, invalidReportMetadataCases...)
 	names = append(names, validReportMethodCases...)
@@ -181,10 +182,10 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 					workspace = "other"
 				}
 				json.MarshalWrite(w, struct {
-					WorkspaceID   string        `json:"workspaceId"`
-					EnvironmentID string        `json:"environmentId"`
-					Report        growth.Report `json:"report"`
-				}{workspace, "env1", report})
+					WorkspaceID   string `json:"workspaceId"`
+					EnvironmentID string `json:"environmentId"`
+					Report        any    `json:"report"`
+				}{workspace, "env1", exposureReportWire(name, report)})
 			}))
 			defer srv.Close()
 			raw := ""
@@ -344,7 +345,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			if strings.HasPrefix(name, "report method ") {
 				report.AnalysisMethod = strings.TrimPrefix(name, "report method ")
 			}
-			if invalidateReportMetadata(name, &report) {
+			if invalidateReportMetadata(name, &report) || invalidExposureCase(name) {
 				want, status, state = 3, growth.Hold, growth.ProposalNeedsData
 			}
 			if command == "prepare" {
@@ -526,7 +527,7 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 			if code != want {
 				t.Fatalf("exit %d want %d: %s %s", code, want, out, stderr)
 			}
-			if strings.HasPrefix(name, "breach ") || strings.HasPrefix(name, "metadata ") || strings.HasPrefix(name, "lifecycle ") {
+			if strings.HasPrefix(name, "exposure ") || strings.HasPrefix(name, "breach ") || strings.HasPrefix(name, "metadata ") || strings.HasPrefix(name, "lifecycle ") {
 				if strings.Contains(out+stderr, secret) {
 					t.Fatal("breach prose leaked")
 				}
