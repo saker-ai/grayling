@@ -14,6 +14,7 @@ func runVerifyLearning(args []string, out, diagnostics io.Writer) int {
 	fail := func(message string) int { fmt.Fprintln(diagnostics, message); return 2 }
 	fs := flag.NewFlagSet("verify-learning", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	goalFile := fs.String("goal", "", "optional caller-attested goal file")
 	proposal := fs.String("proposal", "", "original proposal file")
 	record := fs.String("record", "", "exported learning record file")
 	workspace := fs.String("workspace", "", "required workspace")
@@ -31,6 +32,24 @@ func runVerifyLearning(args []string, out, diagnostics io.Writer) int {
 	p, err := readProposal(*proposal)
 	if err != nil {
 		return fail("invalid proposal file or JSON")
+	}
+	goalSpecified := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "goal" {
+			goalSpecified = true
+		}
+	})
+	if p.GoalPin != nil && !goalSpecified {
+		return fail("goal file required for pinned proposal")
+	}
+	if goalSpecified {
+		goal, err := readGoal(*goalFile)
+		if err != nil {
+			return fail("invalid goal file or JSON")
+		}
+		if _, err := growth.VerifyGoal(*goal, *p, *workspace, *environment); err != nil {
+			return fail("invalid or inconsistent goal artifacts")
+		}
 	}
 	r, _, err := readLearningRecord(*record, growth.MaxLearningRecordBytes)
 	if err != nil {
