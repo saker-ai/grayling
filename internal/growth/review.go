@@ -93,6 +93,8 @@ func ProposalFingerprint(p Proposal) (string, error) {
 // Evidence must come separately from Reader.Read via trusted caller code, never
 // from model JSON. Approval requires the existing ReviewProposal readiness result;
 // rejection/changes can record missing or HOLD evidence without clearing blockers.
+// Completed records must satisfy the bounded offline consumer contract; invalid
+// or excessive blockers fail without truncation or a partial record.
 func RecordReview(p Proposal, evidence *Envelope, in ReviewInputs) (*ReviewRecord, error) {
 	fail := func(field, code string) (*ReviewRecord, error) {
 		return nil, &ReviewError{Field: field, Code: code}
@@ -138,13 +140,17 @@ func RecordReview(p Proposal, evidence *Envelope, in ReviewInputs) (*ReviewRecor
 	if in.Decision == ReviewApprove && readiness.State != ProposalReadyForReview {
 		return fail("proposal", "not_ready_for_review")
 	}
-	return &ReviewRecord{
+	record := &ReviewRecord{
 		SchemaVersion: ReviewRecordSchemaVersion, ProposalID: snapshot.ID, ProposalVersion: snapshot.Version,
 		WorkspaceID: snapshot.WorkspaceID, EnvironmentID: snapshot.EnvironmentID, ProposalFingerprint: actual,
 		PrimaryMetric: snapshot.PrimaryMetric, Guardrails: snapshot.Guardrails, EvidencePins: snapshot.EvidenceRefs,
 		Reviewer: in.Reviewer, ReviewedAt: reviewedAt, Decision: in.Decision, Rationale: in.Rationale,
 		Readiness: readiness,
-	}, nil
+	}
+	if validateReviewRecord(*record) != nil {
+		return fail("record", "too_large_or_invalid")
+	}
+	return record, nil
 }
 
 // validateReviewInputs shares operator input rules with offline verification.

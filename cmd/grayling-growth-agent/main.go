@@ -217,7 +217,11 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 		// freshly read evidence below; no replacement fingerprint is supplied.
 		_, err = growth.RecordReview(*p, nil, *reviewInputs)
 		var problem *growth.ReviewError
-		if err != nil && !(errors.As(err, &problem) && problem.Field == "proposal" && problem.Code == "not_ready_for_review") {
+		// A nil evidence preflight is not a completed export: fresh evidence
+		// can remove missing-evidence blockers and bring it within the bound.
+		if err != nil && !(errors.As(err, &problem) &&
+			((problem.Field == "proposal" && problem.Code == "not_ready_for_review") ||
+				(problem.Field == "record" && problem.Code == "too_large_or_invalid"))) {
 			return fail(2, "invalid or stale review input")
 		}
 	}
@@ -260,10 +264,10 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 			}
 			return fail(2, "invalid or stale review input")
 		}
-		if err := json.MarshalWrite(out, record); err != nil {
-			return fail(1, "output failed")
-		}
-		if _, err := fmt.Fprintln(out); err != nil {
+		if err := writeReviewRecord(out, record); err != nil {
+			if errors.Is(err, growth.ErrReviewVerification) {
+				return fail(2, "invalid or stale review input")
+			}
 			return fail(1, "output failed")
 		}
 		return 0
@@ -359,4 +363,22 @@ func readProposal(path string) (*growth.Proposal, error) {
 		return nil, errors.New("invalid proposal JSON")
 	}
 	return p, nil
+}
+
+// writeReviewRecord buffers the entire file before output. The consumer's byte
+// bound includes JSON escaping and the trailing newline.
+func writeReviewRecord(out io.Writer, record *growth.ReviewRecord) error {
+	data, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	if len(data)+1 > growth.MaxReviewRecordBytes {
+		return growth.ErrReviewVerification
+	}
+	data = append(data, '\n')
+	n, err := out.Write(data)
+	if err == nil && n != len(data) {
+		return io.ErrShortWrite
+	}
+	return err
 }

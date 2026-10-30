@@ -95,7 +95,8 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 		names = append(names, "settings missing", "settings fifo", "settings directory", "settings oversized", "settings null", "settings array", "settings malformed", "settings trailing", "settings duplicate", "settings escaped duplicate", "settings unknown", "settings nested unknown", "settings nested duplicate", "settings authorization", "settings evidence", "settings omitted threshold", "settings bandit", "settings missing alpha", "unsupported method", "bandit proposal method", "multi-arm")
 	}
 	if command == "record-review" {
-		names = append(names, "input missing", "input fifo", "input directory", "input oversized", "input null", "input array", "input malformed", "input invalid utf8", "input trailing", "input duplicate", "input escaped duplicate", "input unknown", "input authorization", "input evidence", "input nested", "input timestamp omitted", "input timestamp invalid", "input decision invalid", "input reviewer omitted", "input rationale omitted", "input rationale long", "input stale", "input unchanged version stale")
+		names = append(names, "export count exact", "export count excessive", "export field exact", "export field excessive", "export field control", "export serialized exact",
+			"input missing", "input fifo", "input directory", "input oversized", "input null", "input array", "input malformed", "input invalid utf8", "input trailing", "input duplicate", "input escaped duplicate", "input unknown", "input authorization", "input evidence", "input nested", "input timestamp omitted", "input timestamp invalid", "input decision invalid", "input reviewer omitted", "input rationale omitted", "input rationale long", "input stale", "input unchanged version stale")
 	}
 	names = append(names, metricLifecycleCases...)
 	names = append(names, exposureCases...)
@@ -284,6 +285,39 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 				raw = `{"workspaceId":"ws1","workspaceId":"ws1"}`
 				want = 2
 				noNetwork = true
+			case "export serialized exact":
+				// Fill a copied provenance field to the proposal JSON boundary;
+				// escaping counts toward both input and output file budgets.
+				p.EvidenceRefs[0].Window.Issues = []string{"x\t"}
+				encoded, err := json.Marshal(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				p.EvidenceRefs[0].Window.Issues[0] += strings.Repeat("x", growth.MaxProposalBytes-len(encoded))
+				want, state = 3, growth.ProposalNeedsData
+			case "export count exact", "export count excessive":
+				count := growth.MaxReviewBlockers - 1
+				if name == "export count excessive" {
+					count++
+				}
+				p.RollbackConditions = make([]string, count)
+				want, state = 3, growth.ProposalDraft
+				if name == "export count excessive" && decisions[0] != growth.ReviewApprove {
+					want = 2
+				}
+			case "export field exact", "export field excessive", "export field control":
+				key := strings.Repeat("v", growth.MaxReviewBlockerTextBytes-len("implementation.variant."))
+				if name == "export field excessive" {
+					key += "x"
+				}
+				if name == "export field control" {
+					key = "private\x00variant"
+				}
+				p.Variants[0].Key = key
+				want, state = 3, growth.ProposalDraft
+				if name != "export field exact" && decisions[0] != growth.ReviewApprove {
+					want = 2
+				}
 			case "secret variant":
 				p.Variants[0].Key = secret
 				p.Implementation = nil
@@ -601,10 +635,21 @@ func testCommand(t *testing.T, binary, command string, decisions ...growth.Revie
 				}
 			}
 			if command == "record-review" {
+				if strings.HasPrefix(name, "export ") && want == 2 && stderr != "invalid or stale review input\n" {
+					t.Fatalf("diagnostic %q", stderr)
+				}
 				if want == 0 {
 					var got growth.ReviewRecord
 					if err := json.Unmarshal([]byte(out), &got, json.RejectUnknownMembers(true)); err != nil {
 						t.Fatal(err)
+					}
+					decoded, err := growth.DecodeReviewRecord(strings.NewReader(out))
+					if err != nil {
+						t.Fatal(err)
+					}
+					verified, err := growth.VerifyReview(p, *decoded, p.WorkspaceID, p.EnvironmentID)
+					if err != nil || verified.PublicationAuthorized || verified.RecordedReadiness != state || verified.Decision != decisions[0] {
+						t.Fatalf("round trip: %+v %v", verified, err)
 					}
 					fp, err := growth.ProposalFingerprint(p)
 					if err != nil {
