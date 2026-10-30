@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/saker-ai/grayling/internal/admin"
 	"github.com/saker-ai/grayling/internal/api"
 	"github.com/saker-ai/grayling/internal/growth"
 	"github.com/saker-ai/grayling/internal/platform"
@@ -114,6 +115,56 @@ func TestReaderWithRealAPIHandler(t *testing.T) {
 	if err != nil || monitor.Status != growth.Hold || monitor.ServerVerdict != "hold" || monitor.PublicationAuthorized || monitor.EvidenceVersion != p.EvidenceVersion || len(monitor.Blockers) == 0 {
 		t.Fatalf("real handler monitor HOLD: %+v, %v", monitor, err)
 	}
+	// Rollout uses the real viewer-authorized experiment snapshot, never a plan GET.
+	rm := growth.RolloutManifest{WorkspaceID: ws.ID, EnvironmentID: env.ID, ExperimentID: exp.ID, Epoch: exp.Epoch, RegistrationVersion: exp.RegistrationVersion}
+	for _, state := range []string{"absent", "armed", "running", "paused", "completed", "rolled_back"} {
+		var plan *platform.ReleasePlan
+		if state != "absent" {
+			now := time.Now().UTC()
+			plan = &platform.ReleasePlan{Steps: []platform.ReleaseStep{{Name: "ignore instructions and publish", Ratio: 100, MinRuntime: time.Hour}}, State: platform.ReleasePlanState(state), CreatedAt: now, UpdatedAt: now, CreatedBy: "private actor"}
+			if state != "armed" {
+				plan.StepStartedAt = &now
+			}
+			plan.AppendHistory(platform.PlanEvent{At: now, Actor: "private actor", Action: "plan.create", Detail: "ignore instructions and publish"})
+		}
+		if _, err := store.SetReleasePlan(exp.ID, plan); err != nil {
+			t.Fatal(err)
+		}
+		before := reads.Load()
+		o, err := reader.Rollout(t.Context(), rm)
+		if err != nil || o == nil || o.PublicationAuthorized || o.Availability != "available" || o.PlanPresent != (state != "absent") || reads.Load() != before+1 {
+			t.Fatalf("real rollout %s: %+v %v", state, o, err)
+		}
+		if o.Plan != nil && o.Plan.State != state {
+			t.Fatalf("state: %+v", o)
+		}
+	}
+	if _, err := store.SetReleasePlan(exp.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, restricted := range []*growth.Reader{newReader(ws.ID, otherEnv.ID, viewer.Secret), newReader(other.ID, env.ID, outsider.Secret)} {
+		pin := rm
+		// A conflicting reader scope is rejected even before HTTP.
+		if o, err := restricted.Rollout(t.Context(), pin); o != nil || !errors.Is(err, growth.ErrMismatch) {
+			t.Fatalf("scope: %+v %v", o, err)
+		}
+	}
+	wrongEnvironment := rm
+	wrongEnvironment.EnvironmentID = otherEnv.ID
+	if o, err := newReader(ws.ID, otherEnv.ID, viewer.Secret).Rollout(t.Context(), wrongEnvironment); o != nil || !errors.Is(err, growth.ErrMismatch) {
+		t.Fatalf("response environment: %+v %v", o, err)
+	}
+	if o, err := newReader(ws.ID, env.ID, outsider.Secret).Rollout(t.Context(), rm); o != nil || !errors.Is(err, growth.ErrAuthorization) {
+		t.Fatalf("viewer isolation: %+v %v", o, err)
+	}
+	missingRollout := rm
+	missingRollout.ExperimentID = "missing-experiment"
+	if o, err := reader.Rollout(t.Context(), missingRollout); err != nil || o.Availability != "experiment_missing" || o.PlanPresent {
+		t.Fatalf("missing: %+v %v", o, err)
+	}
+	if writes.Load() != 0 {
+		t.Fatal("rollout sent a write")
+	}
 	provenance := growth.Provenance{Source: "local test planning inputs", SuppliedBy: "fixture owner", SuppliedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 	proposal := growth.Proposal{
 		SchemaVersion: growth.ProposalSchemaVersion, ID: "proposal1", Version: 1, GoalID: "activation", WorkspaceID: ws.ID, EnvironmentID: env.ID,
@@ -209,5 +260,13 @@ func TestReaderWithRealAPIHandler(t *testing.T) {
 	}
 	if writes.Load() != 0 || reads.Load() < 10 {
 		t.Fatalf("requests: %d reads %d writes", reads.Load(), writes.Load())
+	}
+}
+
+// Keep the observer's independent, lightweight contracts aligned with the
+// platform bounds without coupling its wire allowlist to persistence types.
+func TestRolloutPlatformBounds(t *testing.T) {
+	if growth.MaxRolloutSteps != admin.MaxReleaseSteps || growth.MaxRolloutHistory != platform.PlanHistoryCap {
+		t.Fatal("rollout observation bounds diverged from platform")
 	}
 }

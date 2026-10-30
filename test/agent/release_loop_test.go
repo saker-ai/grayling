@@ -73,6 +73,7 @@ func stopReleaseLoop(t *testing.T, cancel context.CancelFunc, done <-chan error,
 }
 
 func TestReleaseLoopRegisteredActualInstallAndReplicaReconnect(t *testing.T) {
+	parallelAgentFixture(t)
 	f, p, v, body := preparationDriverFixture(t)
 	var builds, closed atomic.Int64
 	set, err := client.NewPreparationSet(preparationSetOptions(f, v, body, &builds, &closed))
@@ -153,6 +154,7 @@ func TestReleaseLoopRegisteredActualInstallAndReplicaReconnect(t *testing.T) {
 }
 
 func TestReleaseLoopSlowOldPreparationCannotBlockNewTarget(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, body := preparationDriverFixture(t)
 	var builds, closed, entered atomic.Int64
 	started, release := make(chan struct{}), make(chan struct{})
@@ -212,6 +214,7 @@ func TestReleaseLoopSlowOldPreparationCannotBlockNewTarget(t *testing.T) {
 }
 
 func TestReleaseLoopRevocationDoesNotWaitForBlockedBuilder(t *testing.T) {
+	parallelAgentFixture(t)
 	f, p, v, body := preparationDriverFixture(t)
 	var builds, closed, entered atomic.Int64
 	started, release := make(chan struct{}), make(chan struct{})
@@ -237,6 +240,7 @@ func TestReleaseLoopRevocationDoesNotWaitForBlockedBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer c.Close()
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- loop.Serve(ctx, c) }()

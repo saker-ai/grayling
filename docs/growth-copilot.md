@@ -13,6 +13,7 @@ existing platform unchanged.
 | Exact metric definition | `GET /api/v1/admin/workspaces/{ws}/metrics/{key}/versions/{version}` | Reuse workspace-scoped viewer access; check workspace, key, version and hash. Metrics are workspace-level, with no environment field; report scope supplies the environment boundary. |
 | Aggregate experiment evidence | `GET /api/v1/admin/experiments/{id}/report/export?format=json` | Reuse scoped report snapshot, generation time, epoch, evidence version, frozen primary/guardrail references, analysis window, watermark, recomputability, health, primary calculation errors, issues and decision. |
 | Diagnostics | Already embedded in report export | Reuse embedded experiment/epoch, generation time, window and issues. No separate diagnostics request or independently timed snapshot. |
+| Rollout observation | `GET /api/v1/admin/experiments/{id}` with embedded `releasePlan` | Pin workspace/environment, experiment, epoch and registration version; project bounded plan state/history without sensitive prose. Missing experiment and absent plan are separate observations; neither grants publication authority or establishes a business win. |
 | Statistical decisions | Existing report builder and statistics packages | Preserve server verdict and reasons with analysis method; do not calculate significance, sample sizes, uplift, or winning probabilities. Parallel sequential/Bayesian/Bandit views are deliberately omitted, never merged into the fixed-sample decision. |
 | RBAC and isolation | Existing admin API / `report.read` viewer permission | Fixed reader workspace/environment, existing bearer authentication, explicit response validation; no privileged endpoint. Workspace-wide viewer tokens are not environment-restricted by this library at the server. The reader rejects other environments before exposing evidence. |
 | Flags, preregistration, exposure, conversion, approvals, rollout | Existing platform, SDK, collect and admin APIs | Unchanged and unwired. Reader has no write operations and does not authorize rollout. |
@@ -878,3 +879,69 @@ execution, or authorize publication. Search provides neither authenticated audit
 storage nor the full learning journal, durable orchestration, model integration,
 real Saker pilot or complete issue acceptance. Existing PostgreSQL and all other
 CI jobs remain required; no database, public API, SDK or browser surface is added.
+
+## Read-only rollout observation
+
+`Reader.Rollout(ctx, RolloutManifest)` and the independent command inspect only
+`GET /api/v1/admin/experiments/{id}`. The embedded `releasePlan` comes from that
+same snapshot; no separately timed, unscoped release-plan response is used.
+Existing monitor and learning contracts remain unchanged.
+
+```sh
+./bin/grayling-growth-agent rollout --manifest rollout.json \
+  --base-url https://grayling.example.com --workspace ws1 --environment env1 \
+  --token-env GRAYLING_GROWTH_TOKEN --timeout 10s
+```
+
+An operator-owned manifest contains exactly these members (replace synthetic IDs
+and fingerprint with actual pinned values):
+
+```json
+{"workspaceId":"ws1","environmentId":"env1","experimentId":"exp1","epoch":1,"registrationVersion":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+```
+
+The manifest must be a regular file at most 16 KiB. Unknown/duplicate members,
+trailing JSON, malformed references and scope conflicts fail before HTTP (exit 2).
+The command reuses Reader origin, environment-variable credentials, redirect rejection,
+total timeout (positive, at most 30 seconds), signal cancellation (exit 130), and fixed
+non-sensitive diagnostics. Denial, malformed responses and identity/scope/epoch/version
+conflicts return exit 1 with no observation output. There are no retries or writes.
+
+`availability: available` (exit 0) means the experiment snapshot was validated;
+`planPresent: false` means that existing experiment has no plan. HTTP 404 instead
+returns `availability: experiment_missing` (exit 3), without experiment timestamps
+or a plan. A missing experiment cannot validate the manifest pins against a response.
+Availability is independent of the plan's `armed`, `running`, `paused`, `completed`
+or `rolled_back` lifecycle. `publicationAuthorized` is always false. Completed
+never establishes a business win or authorizes publication.
+
+Output carries the pinned identity, internally constructed source path, experiment
+updatedAt, plan presence, known state/current step, numeric step configuration
+(ratio, minRuntime, observationWindow, autoAdvance), manual override, plan timestamps,
+and recent history timestamps/actions/step indices. Durations are integer nanoseconds.
+Names, actors, creators, pause reasons and history detail prose are omitted even if
+containing instructions. Unknown response members are ignored; duplicate members
+and malformed allowlisted fields fail the entire read. Ratios strictly increase in
+(0,100], minimum runtime is positive, observation window is nonnegative, and their
+sum cannot overflow int64. At most 32 steps and 64 history events are accepted,
+matching current platform bounds. Current/history indices must refer to existing
+steps; armed starts at zero and completed refers to the final step. Running and
+completed require a step start timestamp. Unsupported states/actions fail closed.
+
+History is bounded recent server history, **not a complete authenticated audit export**.
+Local contract, actual-binary HTTP and real-handler viewer/isolation fixtures verify
+these boundaries and zero non-GET requests; they do not prove real Saker acceptance.
+Durable orchestration, model generation and real pilot acceptance remain outstanding.
+
+The Agent integration gate remains the full race-enabled package with its original
+five-minute timeout. Its independent preparation, registration, release-loop,
+discovery, applied/runtime WSS and embedded app/naming fixtures overlap with at most four active
+fixtures; they own separate PostgreSQL databases where needed, ephemeral listeners
+and temporary runtime directories. The slot is retained through client, worker,
+server, pool and database cleanup. Real
+polling, renewal, expiry and safety waits and all assertions remain unchanged.
+The blocked-builder revocation fixture explicitly closes its client. The bundle
+refresh rejection fixture compares complete durable resource, head and operation
+rows, including the publication-created revision-zero revocation head. These are
+local software checks, not pilot or business acceptance. The uint64 policy fixture
+advances only the routing head, preserving the independent revocation catalog.

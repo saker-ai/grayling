@@ -98,6 +98,7 @@ func TestInstanceNamingWorkerWaitsForInFlightCallback(t *testing.T) {
 }
 
 func TestInstanceNamingWorkerRestoresConfirmedProjectionAfterRestart(t *testing.T) {
+	parallelAgentFixture(t)
 	f := newRegistrationFixture(t, 1)
 	registered := registerInstance(t, f, "restart-projection")
 	makeBackend := func(name string) (*server.Server, *control.EmbeddedNaming) {

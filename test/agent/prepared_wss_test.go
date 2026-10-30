@@ -19,6 +19,7 @@ import (
 )
 
 func TestPreparedWSSReplicaRedeliveryDownloadAndReceipt(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, r := preparedFixture(t)
 	intent, err := f.a.QueuePrepare(t.Context(), control.QueuePrepareRequest{Scope: f.g.Scope, PrincipalID: "controller", OperationID: "wire-target", Generation: 1, InstanceID: f.g.InstanceID}, v)
 	if err != nil {
@@ -98,6 +99,7 @@ func TestPreparedWSSReplicaRedeliveryDownloadAndReceipt(t *testing.T) {
 }
 
 func TestPreparedWSSCapabilityRequiresTrustAndExplicitOptIn(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, r := preparedFixture(t)
 	noTrust, _ := channelServer(t, f.a)
 	opts := client.Options{URL: "wss" + strings.TrimPrefix(noTrust.URL, "https"), Token: f.secret, Hello: helloFor(f.g), HTTPClient: noTrust.Client()}
@@ -133,6 +135,7 @@ func TestPreparedWSSCapabilityRequiresTrustAndExplicitOptIn(t *testing.T) {
 }
 
 func TestPreparedWSSDeadlineRollsBackEvidence(t *testing.T) {
+	parallelAgentFixture(t)
 	f, _, v, r := preparedFixture(t)
 	intent, err := f.a.QueuePrepare(t.Context(), control.QueuePrepareRequest{Scope: f.g.Scope, PrincipalID: "controller", OperationID: "deadline-target", Generation: 1, InstanceID: f.g.InstanceID}, v)
 	if err != nil {

@@ -18,6 +18,7 @@ import (
 )
 
 func TestRevocationProofAppWorkerRunsAndDrains(t *testing.T) {
+	parallelAgentFixture(t)
 	dsn := pgtest.DSN(t)
 	server := httptest.NewUnstartedServer(nil)
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x78}, 32))

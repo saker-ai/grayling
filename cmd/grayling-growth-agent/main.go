@@ -21,6 +21,7 @@ import (
 
 const usage = `Usage: grayling-growth-agent review --proposal FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent prepare --proposal FILE --settings FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+       grayling-growth-agent rollout --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent monitor --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent record-learning --proposal FILE --manifest FILE --learning-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent search-learning --workspace ID --environment ID --text LITERAL --record FILE [--record FILE ...]
@@ -31,6 +32,7 @@ A valid search exits 0, including empty results and HOLD/NEEDS_DATA matches.
 Read-only review/preparation; credentials come only from the named environment variable
 (default GRAYLING_GROWTH_TOKEN). Timeout bounds the entire read (0 < timeout <= 30s).
 prepare exports request and separate provenance metadata; it never submits.
+rollout exports one pinned experiment/plan snapshot; availability is separate from release state.
 monitor exports linked experiment evidence; READY never authorizes publication.
 Exit codes: 0 ready_for_review/exported; 3 readiness blockers; 2 input/configuration error;
 1 execution/evidence failure; 130 canceled by signal. No submission or platform approval.
@@ -63,6 +65,9 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	}
 	if len(args) > 0 && args[0] == "record-learning" {
 		return runRecordLearning(ctx, args[1:], out, diagnostics)
+	}
+	if len(args) > 0 && args[0] == "rollout" {
+		return runRollout(ctx, args[1:], out, diagnostics)
 	}
 	if len(args) > 0 && args[0] == "monitor" {
 		return runMonitor(ctx, args[1:], out, diagnostics)

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -263,25 +264,56 @@ func TestBundleRefreshFailureLeavesNoNewArtifactOrOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Publication also creates the revision-zero revocation coordination head.
+	// Compare complete durable rows around each rejection, including body/hash,
+	// expiry and operation records, rather than assuming only two heads exist.
+	snapshot := func() map[string][][]string {
+		t.Helper()
+		state := make(map[string][][]string)
+		for _, table := range []string{"agent_resources", "agent_resource_heads", "agent_resource_operations"} {
+			state[table] = pgtest.Query(t, dsn, `SELECT to_jsonb(r)::text FROM `+table+` r ORDER BY to_jsonb(r)::text`)
+		}
+		return state
+	}
+	unchanged := func(before map[string][][]string) {
+		t.Helper()
+		if after := snapshot(); !reflect.DeepEqual(before, after) {
+			t.Fatalf("rejected refresh changed durable state: before=%v after=%v", before, after)
+		}
+	}
+	baseline := snapshot()
+	t.Logf("published fixture rows: resources=%d heads=%d operations=%d", len(baseline["agent_resources"]), len(baseline["agent_resource_heads"]), len(baseline["agent_resource_operations"]))
+	if rows := pgtest.Query(t, dsn, `SELECT revision::text FROM agent_resource_heads WHERE resource_key='revocation/state'`); len(rows) != 1 || rows[0][0] != "0" {
+		t.Fatal("missing publication revocation coordination head", rows)
+	}
+
 	request := control.RefreshBundleRequest{Scope: grant().Scope, PrincipalID: "approved-owner", OperationID: "refresh", BundleHash: pair.BundleHash, ExpectedRevision: 1}
 	foreign := request
 	foreign.Scope.EnvironmentID += "-foreign"
+	before := snapshot()
 	_, err = p.RefreshBundle(t.Context(), foreign, v)
 	expectCode(t, err, agentv1.ErrorCode_ERROR_CODE_NOT_READY)
+	unchanged(before)
 	pgtest.Exec(t, dsn, `UPDATE agent_schema SET control_plane_epoch=control_plane_epoch+1 WHERE id=true`)
+	before = snapshot()
 	_, err = p.RefreshBundle(t.Context(), request, v)
 	expectCode(t, err, agentv1.ErrorCode_ERROR_CODE_NOT_READY)
+	unchanged(before)
 	// Restore test fixtures only; production epoch recovery never decrements it.
 	pgtest.Exec(t, dsn, `UPDATE agent_schema SET control_plane_epoch=control_plane_epoch-1 WHERE id=true`)
 	pgtest.Exec(t, dsn, `UPDATE agent_resources SET expires_at=clock_timestamp()-interval '1 second' WHERE resource_key='routing' AND revision=1`)
+	before = snapshot()
 	_, err = p.RefreshBundle(t.Context(), request, v)
 	expectCode(t, err, agentv1.ErrorCode_ERROR_CODE_RESOURCE_EXPIRED)
+	unchanged(before)
 	pgtest.Exec(t, dsn, `UPDATE agent_resources SET expires_at=$1 WHERE resource_key='routing' AND revision=1`, pair.Policy.ExpiresAt)
 	pgtest.Exec(t, dsn, `ALTER TABLE agent_resources ADD CONSTRAINT test_deny_refresh CHECK(resource_key NOT LIKE 'bundle/%' OR revision=1)`)
+	before = snapshot()
 	if _, err := p.RefreshBundle(t.Context(), request, v); err == nil {
 		t.Fatal("injected artifact INSERT failure accepted")
 	}
-	for table, want := range map[string]string{"agent_resources": "2", "agent_resource_heads": "2", "agent_resource_operations": "1"} {
+	unchanged(before)
+	for table, want := range map[string]string{"agent_resources": "2", "agent_resource_heads": "3", "agent_resource_operations": "1"} {
 		if count := pgtest.Query(t, dsn, `SELECT count(*) FROM `+table)[0][0]; count != want {
 			t.Fatal("failed refresh left durable state", table, count)
 		}
