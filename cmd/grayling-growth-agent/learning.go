@@ -140,7 +140,8 @@ func runRecordLearning(ctx context.Context, args []string, out, diagnostics io.W
 	if len(data)+1 > growth.MaxLearningRecordBytes {
 		return fail(2, "invalid or stale learning input")
 	}
-	if _, err := out.Write(append(data, '\n')); err != nil {
+	data = append(data, '\n')
+	if n, err := out.Write(data); err != nil || n != len(data) {
 		return fail(1, "output failed")
 	}
 	if record.Observation.Status != growth.Ready {
