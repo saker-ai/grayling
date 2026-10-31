@@ -29,7 +29,7 @@ const usage = `Usage: grayling-growth-agent review --proposal FILE [--goal FILE]
        grayling-growth-agent verify-goal --goal FILE --proposal FILE --workspace ID --environment ID
        grayling-growth-agent verify-review --proposal FILE [--goal FILE] --record FILE --workspace ID --environment ID
        grayling-growth-agent verify-learning --proposal FILE [--goal FILE] --record FILE --workspace ID --environment ID
-       grayling-growth-agent search-learning --workspace ID --environment ID --text LITERAL --record FILE [--record FILE ...]
+       grayling-growth-agent search-learning [--goal FILE] --workspace ID --environment ID --text LITERAL --record FILE [--record FILE ...]
        grayling-growth-agent fingerprint --proposal FILE
        grayling-growth-agent fingerprint-goal --goal FILE
        grayling-growth-agent init-proposal --goal FILE --proposal-id ID --proposal-version N --workspace ID --environment ID
@@ -40,6 +40,7 @@ verify-review is offline: artifact consistency only; no historical readiness pro
 verify-learning is offline: local consistency only; no authorship, execution, freshness or causality proof.
 A consistent verification exits 0, including HOLD/NEEDS_DATA; publication and business win remain false.
 search-learning is offline: explicit local records only, no credentials or evidence refresh.
+With --goal, matches indicate exact metric-role compatibility only, not historical goal linkage or approval.
 fingerprint-goal is offline: prints validated goal content consistency hash only; no approval or baseline truth.
 init-proposal is offline: exits 0 for construction only; output remains draft and preparation is blocked.
 A valid search exits 0, including empty results and HOLD/NEEDS_DATA matches.

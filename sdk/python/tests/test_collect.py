@@ -33,14 +33,30 @@ def _now_rfc3339() -> str:
 
 
 def test_track_conversion_reaches_report(env):
-    with make_client(env, exposure_flush_interval=3600) as client:
+    errors = []
+
+    def record_error(phase, exc):
+        # Never print exception text, HTTP bodies, tokens or evaluation context.
+        # The SDK wraps HTTPError; keep only transport class and status.
+        cause = exc.__cause__
+        errors.append({"phase": phase, "type": type(exc).__name__,
+                       "cause": type(cause).__name__ if cause else None,
+                       "httpStatus": cause.code if isinstance(
+                           cause, urllib.error.HTTPError) else None})
+
+    with make_client(env, exposure_flush_interval=3600,
+                     on_error=record_error) as client:
         converted = 0
         converted_details = None
         for i in range(30):
             unit = f"conv-user-{i}"
             _, details = client.string_variation(
                 "py-exp", "?", attributes={"user_id": unit})
-            assert details.result.experiment is not None
+            assert details.result.experiment is not None, {
+                "failed": details.result.failed,
+                "transportErrors": errors,
+                "serverExit": env.server.proc.poll(),
+            }
             if details.result.experiment.variant == "treatment":
                 client.track_conversion(details, "conversion", 1.0,
                                         session_id=f"sess-{unit}")

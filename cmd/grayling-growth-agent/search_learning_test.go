@@ -36,6 +36,7 @@ func TestSearchLearningBinary(t *testing.T) {
 	if b, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, b)
 	}
+	t.Run("goal-aware", func(t *testing.T) { testGoalLearningSearchBinary(t, binary) })
 	runBinary := func(args []string) (int, []byte, string) {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -101,6 +102,16 @@ func TestSearchLearningBinary(t *testing.T) {
 	}
 	if len(got.Matches) != 2 || !reflect.DeepEqual(got.Matches[1], r) || got.Matches[0].ProposalID != "a" {
 		t.Fatalf("lost snapshot: %+v", got)
+	}
+	// Omitting --goal preserves the entire original artifact, including its
+	// schema, field order and trailing newline.
+	want, err := growth.SearchLearning([]growth.LearningRecord{r, other, second, env, r}, growth.LearningSearchQuery{WorkspaceID: "ws1", EnvironmentID: "env1", Text: "literal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantJSON, err := json.Marshal(want)
+	if err != nil || !bytes.Equal(data, append(wantJSON, '\n')) {
+		t.Fatalf("unscoped artifact changed: %s (%v)", data, err)
 	}
 	args = append(append([]string{}, base...), "--record", secondPath, "--record", path)
 	_, reordered, _ := runBinary(args)
