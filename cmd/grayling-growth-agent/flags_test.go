@@ -89,6 +89,7 @@ func TestSingletonFlagsCommands(t *testing.T) {
 		{"prepare", "proposal goal settings review-record " + online},
 		{"record-review", "proposal goal review-input " + online},
 		{"record-learning", "proposal goal manifest learning-input " + online},
+		{"check-goal", "goal manifest " + online},
 		{"bind-check", "manifest " + online}, {"rollout", "manifest " + online}, {"monitor", "manifest " + online},
 		{"verify-goal", "goal proposal workspace environment"},
 		{"verify-review", "proposal goal record workspace environment"},
