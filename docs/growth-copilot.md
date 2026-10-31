@@ -2349,3 +2349,89 @@ ordinary errors and successful controls.
 These checks establish local software behavior only. Model integration, durable
 orchestration and real Saker pilot acceptance remain outstanding. All previously
 documented mandatory gates and their original timeouts remain unchanged.
+
+## Read-only goal evidence check
+
+Check an existing experiment against a goal before creating a proposal:
+
+```sh
+./bin/grayling-growth-agent check-goal --goal goal.json --manifest monitor.json \
+  --base-url https://grayling.example --workspace ws1 --environment env1 \
+  --token-env GRAYLING_GROWTH_TOKEN --timeout 10s
+```
+
+`Reader.CheckGoal(ctx, goal, manifest)` reuses `GoalFingerprint` (including full
+`GrowthGoal` validation), `MonitorManifest` validation, exact metric-role matching
+and `Reader.Monitor`. Goal, manifest and separately configured operator
+workspace/environment must all match before HTTP. The primary metric's key,
+exact int64 version and definition hash must match; guardrails must match as an
+exact set, with no missing, additional, duplicate or conflicting roles. Goal
+source paths retain their canonical validation. Although a goal may describe up
+to 20 guardrails, this command accepts only the monitor's existing maximum of 16;
+17–20 are rejected, never truncated. All experiment/epoch/registration/evidence
+pins and existing monitor limits remain enforced.
+
+The `growth.goal-check.v1` JSON artifact contains bounded goal ID, exact version,
+complete fingerprint, workspace/environment, the existing monitor snapshot in
+`observation`, overall `status`, fixed `blockers` and
+`publicationAuthorized=false`. Owner/objective and server free-form prose are
+not exported. The observation retains its original status, server verdict,
+evidence provenance, health blockers and `publicationAuthorized=false`.
+Overall blockers copy the monitor blockers. If a report is present, both goal
+`baselineWindow` endpoints must equal the observed report window endpoints as
+instants: timezone offsets representing the same instant match; even a one
+nanosecond difference adds `baseline_window_mismatch` with remediation
+`review_baseline_window` and requires HOLD. Missing evidence keeps NEEDS_DATA
+precedence, including a missing metric alongside a mismatched report window.
+A missing report has no interval to compare and remains NEEDS_DATA.
+
+READY means only inspectable matching experiment evidence. It does not establish
+a general product baseline, diagnosis, authenticated ownership, approval,
+statistical superiority, a business win or publication authority. Server
+continue/ship/rollback/hold verdicts remain authoritative and separate from
+readiness. No health or statistical logic is duplicated or recalculated.
+
+Both selectors are required. The existing strict, bounded, nonblocking no-follow
+readers reject final-component symlinks, nonregular files, unknown/duplicate JSON
+members (including nested and escaped names), invalid UTF-8, null/trailing JSON
+and oversized files: goal 64 KiB, manifest 16 KiB, including whitespace. Ancestor
+symlinks follow the existing reader contract. All flags are singleton, with the
+existing trusted origin/scope/credential/total-timeout controls and GET-only
+transport. Credentials come only from the named environment variable.
+
+Exit 0 means READY; HOLD/NEEDS_DATA export the complete artifact and exit 3.
+Invalid local inputs exit 2 with empty stdout, before any HTTP. Diagnostics are
+fixed: `invalid flags; use --help`, `invalid configuration`,
+`invalid goal file or JSON`, `invalid monitor manifest`, or
+`invalid or inconsistent goal check inputs`. Evidence permission, scope/pin,
+transport or deadline failures exit 1 without artifacts, using the existing
+redacted evidence diagnostics. Cancellation exits 130 with `check-goal canceled`.
+JSON and the trailing newline are buffered before a single write; failed or
+short writes exit 1 with `output failed`, overriding readiness exits. Discard any
+partial bytes after an output failure.
+
+Library and actual-binary local HTTP regressions cover health, missing data,
+window equality/mismatch, pin/scope/permission conflicts, guardrail count limits,
+strict files/JSON, duplicate flags, deadlines/cancellation, redaction and output
+failures. They assert zero non-GET requests and zero HTTP for local preflight
+rejection. Injected writers additionally cover short writes for all statuses.
+These fixtures establish software behavior only. No model, BI connector,
+persistence, UI, public API, platform writes or production migrations are added.
+Real Saker pilot evidence, durable orchestration, authenticated approval and full
+Issue #20 acceptance remain outstanding. All documented mandatory build, short,
+vet, race, boot/E2E/smoke, SDK, frontend/static, license, whitespace and disposable
+PostgreSQL gates and their original timeouts remain unchanged.
+
+Recovery validation for this goal-check slice on 2026-10-31 passed all three
+prescribed mandatory gate sequences: `make build`, the complete short suite,
+`go build ./...`, `go vet ./...`, the uncached core race suite, boot/E2E/smoke,
+`make sdk-test`, frozen-lockfile install, workspace tests, frontend build,
+`make check-static`, license inventory and its five Python tests, and
+`git diff --check`. Disposable PostgreSQL 16 validation passed the
+GORM/report/quota race checks, the full Agent integration race suite and
+PostgreSQL E2E checks with the original 15m/5m/10m timeouts; the container was
+removed afterward. Formatting was checked using the actual filenames
+`internal/growth/check_goal.go`, `cmd/grayling-growth-agent/check_goal.go` and
+their tests. These results establish local software behavior only; the model,
+durable orchestration, authenticated approval and real Saker pilot boundaries
+above remain outstanding.

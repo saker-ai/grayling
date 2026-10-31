@@ -67,6 +67,17 @@ The separate bounded operator input supplies the expected fingerprint, decision,
 reviewer, explicit timestamp and rationale. Exported records contain operator-supplied
 review content and are not authenticated authorization. See
 [review command usage](docs/growth-copilot.md#review-record-commands).
+Use [`check-goal --goal goal.json --manifest monitor.json`](docs/growth-copilot.md#read-only-goal-evidence-check)
+with the same trusted origin, scope, credential and timeout flags to inspect a
+goal against live experiment evidence before a proposal exists. Scope and exact
+primary/guardrail pins must match before HTTP; the existing monitor supplies all
+health checks and server verdicts. A baseline-window mismatch requires HOLD,
+while missing evidence retains NEEDS_DATA. READY means inspectable matching
+experiment evidence only, never a general product baseline, diagnosis, approval
+or business win; `publicationAuthorized` remains false. READY exits 0,
+HOLD/NEEDS_DATA 3, invalid local inputs 2, execution/output failure 1 and cancellation
+130. Local fixtures do not establish real Saker pilot outcomes.
+
 The one-shot [`monitor --manifest monitor.json` command](docs/growth-copilot.md#read-only-monitor-command)
 reads the actual linked experiment with explicit epoch, registration and exact
 primary/guardrail metric pins; an exact report evidenceVersion pin is optional.

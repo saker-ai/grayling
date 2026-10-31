@@ -23,6 +23,7 @@ const usage = `Usage: grayling-growth-agent review --proposal FILE [--goal FILE]
        grayling-growth-agent prepare --proposal FILE [--goal FILE] --settings FILE [--review-record FILE] --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent bind-check --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent rollout --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+       grayling-growth-agent check-goal --goal FILE --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent monitor --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent record-learning --proposal FILE [--goal FILE] --manifest FILE --learning-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent verify-goal --goal FILE --proposal FILE --workspace ID --environment ID
@@ -45,6 +46,7 @@ Read-only review/preparation; credentials come only from the named environment v
 prepare exports request and separate provenance metadata; it never submits.
 rollout exports one pinned experiment/plan snapshot; availability is separate from release state.
 bind-check is a non-atomic prerequisite observation; it never authorizes binding or publication.
+check-goal checks matching goal/experiment evidence and baseline window; READY is not a product baseline, diagnosis, approval or business win.
 monitor exports linked experiment evidence; READY never authorizes publication.
 Exit codes: 0 ready_for_review/exported; 3 readiness blockers; 2 input/configuration error;
 1 execution/evidence failure; 130 canceled by signal. No submission or platform approval.
@@ -95,6 +97,9 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	}
 	if len(args) > 0 && args[0] == "rollout" {
 		return runRollout(ctx, args[1:], out, diagnostics)
+	}
+	if len(args) > 0 && args[0] == "check-goal" {
+		return runCheckGoal(ctx, args[1:], out, diagnostics)
 	}
 	if len(args) > 0 && args[0] == "monitor" {
 		return runMonitor(ctx, args[1:], out, diagnostics)
