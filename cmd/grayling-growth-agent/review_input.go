@@ -17,7 +17,8 @@ const maxReviewInputBytes = 16 << 10
 // UTF-8; the struct allowlist excludes authorization and embedded evidence.
 func readReviewInputs(path string) (*growth.ReviewInputs, error) {
 	invalid := errors.New("invalid review input")
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	// O_NOFOLLOW rejects final-component symlinks, not symlinked ancestors.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, invalid
 	}
