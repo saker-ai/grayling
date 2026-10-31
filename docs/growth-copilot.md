@@ -2190,3 +2190,61 @@ platform/report/API race checks passed, full Agent integration race passed in
 225.695 seconds within the original five-minute timeout, and PostgreSQL E2E
 passed in 4.370 seconds. The exit trap removed the container. Focused export
 regressions also passed. These are local software checks only.
+
+
+## Offline goal fingerprint (slice 44)
+
+Before authoring a pinned proposal, validate and fingerprint the local goal:
+
+```sh
+./bin/grayling-growth-agent fingerprint-goal --goal goal.json
+```
+
+Copy its single `sha256:<64 lowercase hex digits>` output into
+`proposal.goalPin.fingerprint` and copy the goal's exact positive int64 `version`
+into `proposal.goalPin.version`. Keep JSON integers exact, including versions
+above 2^53; do not round through floating-point tools. The command reuses
+`readGoal`, `DecodeGoal` and `growth.GoalFingerprint`: complete validated canonical
+goal content determines the hash, including exact versions and array order.
+Whitespace and JSON object member order do not change it. Content edits at the
+same ID/version change the fingerprint; update pins deliberately and re-review
+the resulting proposal rather than reusing earlier review/learning records.
+
+Success exits 0 and prints exactly the fingerprint plus newline, with empty
+stderr. No proposal, credentials, workspace/environment flags or network access
+are required. Missing/empty goal arguments, duplicate goal flags and extra positional
+arguments exit 2 with `invalid fingerprint configuration`. Invalid/unknown flags
+(including network, credential, scope and proposal flags) exit 2 with
+`invalid flags; use --help`. Missing/unreadable files, symlinks, nonregular files,
+files over 64 KiB (including whitespace), malformed JSON or invalid goals exit 2
+with `invalid goal file or JSON`. The existing bounded decoder rejects unknown
+and duplicate members (including escaped names and nested members), invalid UTF-8,
+null roots, trailing JSON and invalid/overflow/fractional versions. All input
+failures have empty stdout and fixed bounded diagnostics without paths or goal
+prose. Failed or short output writes exit 1 with `output failed`; a writer may
+already have accepted bytes before failing. Use top-level `--help` for CLI help.
+
+Fingerprints establish caller-attested content consistency only, not approval,
+authenticated ownership, baseline truth, readiness or permission to publish.
+Callers can replace both goal and proposal. Actual-binary regressions reuse the
+verify-goal fixture and cover deterministic hashes, exact versions above 2^53,
+content changes, strict inputs, offline operation without credentials and output
+failure; short writes use an injected writer. These prove local software behavior
+only. Real Saker pilot evidence, model integration and durable orchestration
+remain outside this milestone. All original mandatory gates and timeouts remain
+unchanged.
+
+
+Local slice 44 validation on 2026-10-31 passed all three supplied mandatory gate
+sequences with unchanged assertions and timeouts: build, full short Go suite,
+build/vet, full core race, boot/E2E/smoke, SDK tests (Python 25, TypeScript 23
+plus typecheck), frozen pnpm install, frontend tests/build/static, license audit
+and its five unit tests, and whitespace checks. Core race included CLI 358.778
+seconds and growth library 218.351 seconds. Disposable PostgreSQL 16
+replica/report/API race checks, full Agent integration race (219.229 seconds
+within the original five-minute timeout), and PostgreSQL E2E (4.045 seconds)
+passed; the exit trap removed the container. The initial baseline short run
+failed only web contracts because Vitest was not installed; the frozen install
+resolved the environment dependency and the full prescribed short run passed.
+Focused actual-binary goal fingerprint regressions also passed. These are local
+software checks, not real pilot or business validation.

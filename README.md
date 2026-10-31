@@ -52,6 +52,14 @@ separate caller-supplied reviewer, timestamp, rationale and approve/reject/reque
 decisions. Stale content is rejected; approval requires existing evidence readiness,
 while rejection/changes retain blockers. Records are caller-attested artifacts,
 not authenticated authorization, durable audit storage or permission to submit/publish.
+Use offline `grayling-growth-agent fingerprint-goal --goal goal.json` to obtain
+`goalPin.fingerprint`; copy the exact positive integer `version` from that goal
+into `goalPin.version` (preserve integers above 2^53 without floating-point rounding).
+It prints only the validated fingerprint and a newline, requires no proposal,
+credentials or scope, and rejects network options. Goal fingerprints establish
+caller-attested content consistency, not approval or baseline truth. See
+[goal fingerprint usage and errors](docs/growth-copilot.md#offline-goal-fingerprint-slice-44).
+
 The offline `fingerprint --proposal FILE` command prints the proposal fingerprint;
 `record-review --proposal FILE --review-input review.json` re-reads pinned evidence
 with the same trusted connection flags as `review` and exports one record.
