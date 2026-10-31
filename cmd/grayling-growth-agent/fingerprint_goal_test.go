@@ -120,8 +120,11 @@ func testFingerprintGoal(t *testing.T, binary string, goal growth.GrowthGoal) {
 	for _, bad := range []string{fifo, link, dir, filepath.Join(dir, "SECRET-absent"), "/dev/null"} {
 		run([]string{"--goal", bad}, 2, "invalid goal file or JSON")
 	}
-	for _, bad := range [][]string{nil, {"--goal="}, {"--goal", path, "SECRET"}, {"--goal", path, "--goal", path}, {"--goal=" + path, "--goal=" + path}} {
+	for _, bad := range [][]string{nil, {"--goal="}, {"--goal", path, "SECRET"}} {
 		run(bad, 2, "invalid fingerprint configuration")
+	}
+	for _, duplicate := range [][]string{{"--goal", path, "--goal", path}, {"--goal=" + path, "--goal=" + path}} {
+		run(duplicate, 2, "invalid flags; use --help")
 	}
 	run([]string{"--goal"}, 2, "invalid flags; use --help")
 	for _, flag := range []string{"--base-url", "--token-env", "--timeout", "--workspace", "--environment", "--proposal"} {

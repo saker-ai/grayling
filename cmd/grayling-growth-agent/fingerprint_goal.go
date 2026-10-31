@@ -22,7 +22,7 @@ func runFingerprintGoal(args []string, out, diagnostics io.Writer) int {
 		goals++
 		return nil
 	})
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return fail(2, "invalid flags; use --help")
 	}
 	if fs.NArg() != 0 || path == "" || goals != 1 {

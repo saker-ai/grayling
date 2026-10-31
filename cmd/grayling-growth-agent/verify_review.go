@@ -21,7 +21,7 @@ func runVerifyReview(args []string, out, diagnostics io.Writer) int {
 	record := fs.String("record", "", "exported review record file")
 	workspace := fs.String("workspace", "", "required workspace")
 	environment := fs.String("environment", "", "required environment")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(out, usage)
 			return 0

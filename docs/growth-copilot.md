@@ -2278,3 +2278,51 @@ The exit trap removed the container. Focused injected-writer and goal-linkage
 regressions passed. The initial baseline short run lacked Vitest dependencies;
 after the frozen installation, the full prescribed short suite passed. These
 are local software checks, not real pilot or business validation.
+
+## Singleton CLI flags (slice 46)
+
+All `grayling-growth-agent` commands reject a second occurrence of any singleton
+flag, even if its value is identical. This includes scope (`workspace`,
+`environment`), trusted origin (`base-url`), credentials (`token-env`), timeout,
+search text and all artifact selectors. Single/double dash and equals/separate
+value spellings refer to the same option: `--workspace ws1 -workspace=ws1` is
+rejected. Rejection occurs during parsing, before artifact reads, credential
+lookup or HTTP requests: exit 2, empty stdout, and only the fixed redacted stderr
+line `invalid flags; use --help`. No option name, value, path, origin or credential
+is echoed. `fingerprint-goal` duplicate flags now use this same diagnostic.
+
+Only `search-learning --record` is repeatable, including mixed spellings and
+repeated paths. Its existing limits remain: 64 files, 128 KiB each and 4 MiB total
+including whitespace and repeated files; every input is validated before output.
+Other commands' `--record` options remain singleton.
+
+Parsing keeps Go flag semantics: a string option consumes its next token as a
+value even when that token looks like another option (`--text --workspace`),
+and equals values can contain flag-looking text. Parsing stops at `--` or the
+first positional argument; commands still reject leftover positional arguments.
+Help retains its existing ordering and output: when reached before a parsing
+error it returns help; it does not override an earlier duplicate/error.
+`fingerprint-goal` retains its existing exit-2 command-help behavior; top-level
+`--help` lists its usage.
+
+Parser and actual-binary regressions cover every command and singleton flag,
+identical/conflicting values, mixed spellings, fixed diagnostics, zero HTTP
+requests on rejection, help and flag-looking values. Valid repeated local search
+records remain accepted and deduplicated. Successful artifacts, strict artifact
+validation and GET-only transport are unchanged. These are local software
+checks; model integration, durable workflows and real Saker pilot acceptance
+remain outstanding. All documented mandatory gates and original timeouts remain
+unchanged.
+
+Recovery validation on 2026-10-31 passed all three prescribed mandatory gate
+sequences: `make build`, the complete short Go suite, build/vet, uncached core
+race, boot/E2E/smoke, Python and TypeScript SDK tests, frozen pnpm installation,
+workspace frontend tests/build, static consistency, license inventory and audit
+unit tests, and whitespace checks. The Growth CLI package passed in 265.684
+seconds in the short suite and 364.652 seconds under race detection. Disposable
+PostgreSQL 16 platform/report/API race tests, full Agent integration race
+(231.248 seconds within the unchanged five-minute timeout), and PostgreSQL E2E
+(9.630 seconds) passed; the exit trap removed the container. The earlier
+interrupted run is not counted as a successful gate. These checks establish
+local software behavior, not model integration, durable workflows or real pilot
+acceptance.

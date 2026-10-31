@@ -130,7 +130,7 @@ func testLearningGoalLinkage(t *testing.T, binary string, pinned bool) {
 		} else {
 			args = append(args, "--record", rp)
 		}
-		args = append(args, extra...)
+		args = appendScopeFixtureArgs(t, args, extra)
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, binary, args...)

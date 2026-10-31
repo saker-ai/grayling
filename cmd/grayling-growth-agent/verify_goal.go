@@ -20,7 +20,7 @@ func runVerifyGoal(args []string, out, diagnostics io.Writer) int {
 	record := fs.String("goal", "", "caller-attested goal file")
 	workspace := fs.String("workspace", "", "required workspace")
 	environment := fs.String("environment", "", "required environment")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(out, usage)
 			return 0

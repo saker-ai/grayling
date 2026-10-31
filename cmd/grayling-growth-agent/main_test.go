@@ -50,7 +50,7 @@ func invokeCommand(t *testing.T, binary, base, command string, p growth.Proposal
 		t.Fatal(err)
 	}
 	args := []string{command, "--proposal", path, "--base-url", base, "--workspace", "ws1", "--environment", "env1"}
-	args = append(args, extra...)
+	args = appendScopeFixtureArgs(t, args, extra)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binary, args...)
