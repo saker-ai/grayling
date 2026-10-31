@@ -28,6 +28,7 @@ type LearningInputs struct {
 // Server verdicts describe platform decisions, never a business winning claim.
 // Records provide neither durable audit storage nor publication authorization.
 type LearningRecord struct {
+	GoalRef                    *LearningGoalRef      `json:"goalRef,omitempty"`
 	SchemaVersion              string                `json:"schemaVersion"`
 	ProposalID                 string                `json:"proposalId"`
 	ProposalVersion            int64                 `json:"proposalVersion"`
@@ -45,6 +46,18 @@ type LearningRecord struct {
 	PublicationAuthorized      bool                  `json:"publicationAuthorized"`
 }
 
+// LearningGoalRef copies an existing proposal goal pin. It is caller-attested
+// consistency metadata, not authenticated execution, ownership or approval.
+type LearningGoalRef struct {
+	ID          string `json:"id"`
+	Version     int64  `json:"version"`
+	Fingerprint string `json:"fingerprint"`
+}
+
+func validLearningGoalRef(ref *LearningGoalRef) bool {
+	return ref == nil || (validSegment(ref.ID) && ref.Version > 0 && fingerprint.MatchString(ref.Fingerprint))
+}
+
 // RecordLearning validates all local pins before network access, then reuses
 // Monitor without adding health/statistical decisions. Completed records satisfy
 // the offline consumer contract and MaxLearningRecordBytes JSON bound. Errors
@@ -52,6 +65,9 @@ type LearningRecord struct {
 // No clock, random ID, retries, persistence or HTTP writes are introduced.
 func (r *Reader) RecordLearning(ctx context.Context, p Proposal, m MonitorManifest, in LearningInputs) (*LearningRecord, error) {
 	if !fingerprint.MatchString(in.ExpectedProposalFingerprint) {
+		return nil, ErrLearning
+	}
+	if !validGoalPin(p.GoalPin) || (p.GoalPin != nil && !validSegment(p.GoalID)) {
 		return nil, ErrLearning
 	}
 	actual, err := ProposalFingerprint(p)
@@ -110,6 +126,9 @@ func (r *Reader) RecordLearning(ctx context.Context, p Proposal, m MonitorManife
 		ProposalFingerprint: actual, WorkspaceID: snapshot.WorkspaceID, EnvironmentID: snapshot.EnvironmentID,
 		OriginalHypothesis: snapshot.Hypothesis, ProposalBaselineReferences: snapshot.EvidenceRefs,
 		LinkedExperiment: m, Observation: *observed, Recorder: in.Recorder, RecordedAt: recordedAt, Followups: followups,
+	}
+	if snapshot.GoalPin != nil {
+		record.GoalRef = &LearningGoalRef{ID: snapshot.GoalID, Version: snapshot.GoalPin.Version, Fingerprint: snapshot.GoalPin.Fingerprint}
 	}
 	if validateLearningRecord(*record) != nil {
 		return nil, ErrLearning

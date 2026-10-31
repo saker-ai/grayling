@@ -15,7 +15,7 @@ import (
 
 func TestRecordLearningContract(t *testing.T) {
 	for _, name := range []string{
-		"incomplete proposal", "hypothesis whitespace controls", "size below", "size exact", "size over", "hypothesis control", "hypothesis delete", "baseline identity", "baseline path", "baseline epoch", "baseline hash", "ship", "continue", "rollback", "hold", "unhealthy", "incomplete", "not recomputable", "late watermark", "missing diagnostics", "diagnostic window", "missing aggregates", "missing report", "null report", "missing metric", "injection", "unknown verdict",
+		"pinned ready", "pinned hold", "pinned missing", "invalid goal id", "invalid goal version", "invalid goal hash", "incomplete proposal", "hypothesis whitespace controls", "size below", "size exact", "size over", "hypothesis control", "hypothesis delete", "baseline identity", "baseline path", "baseline epoch", "baseline hash", "ship", "continue", "rollback", "hold", "unhealthy", "incomplete", "not recomputable", "late watermark", "missing diagnostics", "diagnostic window", "missing aggregates", "missing report", "null report", "missing metric", "injection", "unknown verdict",
 		"stale fingerprint", "missing fingerprint", "malformed fingerprint", "proposal schema", "proposal id", "proposal version", "hypothesis", "workspace", "environment", "reader scope", "primary role", "guard role", "extra guard", "metric version", "registration", "epoch", "evidence pin", "server roles", "server scope",
 		"recorder", "timestamp", "timestamp range", "missing followups", "too many followups", "blank followup", "long followup", "invalid utf8", "control text", "authorization", "transport", "cancel",
 	} {
@@ -36,6 +36,24 @@ func TestRecordLearningContract(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			switch name {
+			case "pinned ready", "pinned hold", "pinned missing", "invalid goal id", "invalid goal version", "invalid goal hash":
+				p.GoalPin = &GoalPin{Version: 1<<53 + 1, Fingerprint: hashA}
+				switch name {
+				case "pinned hold":
+					report.Healthy = false
+					status = Hold
+				case "pinned missing":
+					status = NeedsData
+				case "invalid goal id":
+					p.GoalID = "../bad"
+					wantErr, preflight = ErrLearning, true
+				case "invalid goal version":
+					p.GoalPin.Version = 0
+					wantErr, preflight = ErrLearning, true
+				case "invalid goal hash":
+					p.GoalPin.Fingerprint = "secret"
+					wantErr, preflight = ErrLearning, true
+				}
 			case "incomplete proposal":
 				p.Rationale = ""
 			case "hypothesis whitespace controls":
@@ -247,7 +265,7 @@ func TestRecordLearningContract(t *testing.T) {
 				if r.URL.RequestURI() != "/api/v1/admin/experiments/exp1/report/export?format=json" {
 					t.Error("unexpected report request")
 				}
-				if name == "missing report" {
+				if name == "missing report" || name == "pinned missing" {
 					w.WriteHeader(404)
 					return
 				}
@@ -260,6 +278,8 @@ func TestRecordLearningContract(t *testing.T) {
 			defer srv.Close()
 			reader := readerFor(t, srv.URL, nil)
 			if strings.HasPrefix(name, "size ") {
+				p.GoalPin = &GoalPin{Version: 1<<53 + 1, Fingerprint: hashA}
+				in.ExpectedProposalFingerprint, _ = ProposalFingerprint(p)
 				in.Followups = make([]string, MaxLearningFollowups)
 				for i := range in.Followups {
 					in.Followups[i] = strings.Repeat("x", MaxLearningFollowupBytes)
@@ -306,18 +326,25 @@ func TestRecordLearningContract(t *testing.T) {
 			if got.LinkedExperiment.ExperimentID != "exp1" || got.LinkedExperiment.Epoch != m.Epoch || got.LinkedExperiment.RegistrationVersion != m.RegistrationVersion || got.ProposalBaselineReferences[0].ExperimentID != "baseline-only" {
 				t.Fatal("conflated experiment and baseline")
 			}
-			if name == "missing report" || name == "null report" {
+			if name == "missing report" || name == "null report" || name == "pinned missing" {
 				if got.Observation.EvidenceVersion != "" || got.Observation.SourcePath != "" || !got.Observation.GeneratedAt.IsZero() || got.Observation.RegistrationVersion != "" || !reflect.DeepEqual(got.Observation.Window, Window{}) || got.Observation.ServerVerdict != "" {
 					t.Fatal("invented observed metadata")
 				}
 			} else if got.Observation.EvidenceVersion != report.EvidenceVersion || got.Observation.SourcePath == "" || got.Observation.Window.Watermark != report.Window.Watermark || got.Observation.RegistrationVersion != report.RegistrationVersion {
 				t.Fatal("lost provenance")
 			}
-			if knownVerdict(report.Decision.Verdict) && name != "missing report" && name != "null report" && got.Observation.ServerVerdict != report.Decision.Verdict {
+			if knownVerdict(report.Decision.Verdict) && name != "missing report" && name != "null report" && name != "pinned missing" && got.Observation.ServerVerdict != report.Decision.Verdict {
 				t.Fatal("changed server verdict")
 			}
 			if status == Hold && len(got.Observation.Blockers) == 0 {
 				t.Fatal("lost blockers")
+			}
+			if p.GoalPin != nil {
+				if got.GoalRef == nil || got.GoalRef.ID != p.GoalID || got.GoalRef.Version != p.GoalPin.Version || got.GoalRef.Fingerprint != p.GoalPin.Fingerprint {
+					t.Fatal("lost goal pin")
+				}
+			} else if got.GoalRef != nil {
+				t.Fatal("invented goal provenance")
 			}
 			assertLearningRoundTrip(t, p, got)
 			encoded, _ := json.Marshal(got)
@@ -338,6 +365,12 @@ func TestRecordLearningContract(t *testing.T) {
 			afterM, _ := json.Marshal(m)
 			if string(beforeP) != string(afterP) || string(beforeM) != string(afterM) {
 				t.Fatal("mutated input")
+			}
+			if got.GoalRef != nil {
+				got.GoalRef.Version++
+				if p.GoalPin.Version != 1<<53+1 || replay.GoalRef.Version != 1<<53+1 {
+					t.Fatal("shared goal pin")
+				}
 			}
 			baselineClaim := p.EvidenceRefs[0].Window.Issues[0]
 			got.ProposalBaselineReferences[0].Window.Issues[0] = "changed"

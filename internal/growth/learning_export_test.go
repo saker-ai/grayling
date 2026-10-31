@@ -18,7 +18,7 @@ func assertLearningRoundTrip(t *testing.T, p Proposal, r *LearningRecord) {
 		t.Fatalf("decode round trip: %v", err)
 	}
 	v, err := VerifyLearning(p, *decoded, p.WorkspaceID, p.EnvironmentID)
-	if err != nil || v.ObservationStatus != r.Observation.Status {
+	if err != nil || v.ObservationStatus != r.Observation.Status || !reflect.DeepEqual(v.GoalRef, r.GoalRef) {
 		t.Fatalf("verify round trip: %v", err)
 	}
 	found, err := SearchLearning([]LearningRecord{*decoded}, LearningSearchQuery{p.WorkspaceID, p.EnvironmentID, r.Followups[0]})

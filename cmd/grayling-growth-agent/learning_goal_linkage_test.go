@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -120,11 +121,25 @@ func testLearningGoalLinkage(t *testing.T, binary string, pinned bool) {
 	}))
 	defer srv.Close()
 	rp := filepath.Join(dir, "record.json")
+	outputFull := false
 	run := func(command string, extra ...string) (int, string, string) {
 		t.Helper()
 		calls.Store(0)
 		writes.Store(0)
-		args := []string{command, "--proposal", pp, "--workspace", "ws1", "--environment", "env1"}
+		args := []string{command, "--workspace", "ws1", "--environment", "env1"}
+		if command != "search-learning" {
+			args = append(args, "--proposal", pp)
+		} else {
+			text := input.Followups[0]
+			for i := 0; i+1 < len(extra); i++ {
+				if extra[i] == "--text" {
+					text = extra[i+1]
+					extra = append(append([]string{}, extra[:i]...), extra[i+2:]...)
+					break
+				}
+			}
+			args = append(args, "--text", text)
+		}
 		if command == "record-learning" {
 			args = append(args, "--manifest", mp, "--learning-input", ip, "--base-url", srv.URL)
 		} else {
@@ -137,6 +152,14 @@ func testLearningGoalLinkage(t *testing.T, binary string, pinned bool) {
 		cmd.Env = append(os.Environ(), "GRAYLING_GROWTH_TOKEN="+secret)
 		var out, diag bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &diag
+		if outputFull {
+			full, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer full.Close()
+			cmd.Stdout = full
+		}
 		code := 0
 		if err := cmd.Run(); err != nil {
 			ee, ok := err.(*exec.ExitError)
@@ -163,6 +186,14 @@ func testLearningGoalLinkage(t *testing.T, binary string, pinned bool) {
 		var record growth.LearningRecord
 		if code != want || diag != "" || calls.Load() == 0 || json.Unmarshal([]byte(out), &record, json.RejectUnknownMembers(true)) != nil || record.Observation.Status != status || record.PublicationAuthorized || record.BusinessWinEstablished || record.ProposalFingerprint != fp {
 			t.Fatalf("export: %d %s %s", code, out, diag)
+		}
+
+		if pinned {
+			if record.GoalRef == nil || record.GoalRef.ID != goal.ID || record.GoalRef.Version != goal.Version || record.GoalRef.Fingerprint != p.GoalPin.Fingerprint || !strings.Contains(out, "9007199254740993") {
+				t.Fatal("lost exact goal reference")
+			}
+		} else if record.GoalRef != nil || strings.Contains(out, "goalRef") {
+			t.Fatal("invented legacy provenance")
 		}
 
 		t.Run("output/"+string(status), func(t *testing.T) {
@@ -193,13 +224,91 @@ func testLearningGoalLinkage(t *testing.T, binary string, pinned bool) {
 			code, verified, diag := run(command, "--goal", gp)
 			if command == "verify-learning" {
 				var v growth.LearningVerification
-				if code != 0 || diag != "" || calls.Load() != 0 || json.Unmarshal([]byte(verified), &v, json.RejectUnknownMembers(true)) != nil || v.ObservationStatus != status || v.PublicationAuthorized || v.BusinessWinEstablished {
+				if code != 0 || diag != "" || calls.Load() != 0 || json.Unmarshal([]byte(verified), &v, json.RejectUnknownMembers(true)) != nil || v.ObservationStatus != status || v.PublicationAuthorized || v.BusinessWinEstablished || !reflect.DeepEqual(v.GoalRef, record.GoalRef) {
 					t.Fatalf("offline: %d %s %s", code, verified, diag)
 				}
+				t.Run("verify-output/"+string(status), func(t *testing.T) {
+					checkArtifactOutput(t, []byte(verified), 0, func(stdout, diagnostics io.Writer) int {
+						return runVerifyLearning([]string{"--proposal", pp, "--goal", gp, "--record", rp, "--workspace", "ws1", "--environment", "env1"}, stdout, diagnostics)
+					})
+				})
 			} else if code != want || verified != out || diag != "" || calls.Load() == 0 {
 				t.Fatal("goal changed export")
 			}
 		}
+		for _, extra := range [][]string{nil, {"--goal", gp}} {
+			code, searched, diag := run("search-learning", extra...)
+			var found struct {
+				Matches []growth.LearningRecord `json:"matches"`
+			}
+			if code != 0 || diag != "" || calls.Load() != 0 || json.Unmarshal([]byte(searched), &found) != nil || len(found.Matches) != 1 || !reflect.DeepEqual(found.Matches[0], record) {
+				t.Fatalf("search: %d %s %s", code, searched, diag)
+			}
+		}
+		outputFull = true
+		for _, command := range []string{"record-learning", "verify-learning", "search-learning"} {
+			code, value, diag := run(command, "--goal", gp)
+			if code != 1 || value != "" || diag != "output failed\n" || (command != "record-learning" && calls.Load() != 0) {
+				t.Fatalf("binary output failure: %d %q %q", code, value, diag)
+			}
+		}
+		outputFull = false
+		if pinned {
+			legacy := record
+			legacy.GoalRef = nil
+			write("record.json", legacy)
+			code, verified, diag := run("verify-learning", "--goal", gp)
+			var summary growth.LearningVerification
+			if code != 0 || diag != "" || calls.Load() != 0 || json.Unmarshal([]byte(verified), &summary) != nil || summary.GoalRef != nil || strings.Contains(verified, "goalRef") {
+				t.Fatalf("legacy provenance invented: %d %s %s", code, verified, diag)
+			}
+			for _, ref := range []growth.LearningGoalRef{
+				{ID: "other", Version: goal.Version, Fingerprint: p.GoalPin.Fingerprint},
+				{ID: goal.ID, Version: goal.Version - 1, Fingerprint: p.GoalPin.Fingerprint},
+				{ID: goal.ID, Version: goal.Version, Fingerprint: "sha256:" + strings.Repeat("c", 64)},
+			} {
+				changed := record
+				changed.GoalRef = &ref
+				write("record.json", changed)
+				code, out, diag := run("verify-learning", "--goal", gp)
+				if code != 2 || out != "" || diag != "invalid or inconsistent learning artifacts\n" || calls.Load() != 0 {
+					t.Fatalf("tamper: %d %q %q", code, out, diag)
+				}
+			}
+		}
+		for _, ref := range []string{"null", "{}", `{"id":"../` + secret + `","version":1,"fingerprint":"bad"}`} {
+			// Validate every supplied record even when excluded by the text query.
+			raw := record
+			raw.GoalRef = nil
+			data, _ := json.Marshal(raw)
+			writeRaw("record.json", `{"goalRef":`+ref+`,`+string(data[1:]))
+			for _, command := range []string{"verify-learning", "search-learning"} {
+				extra := []string{"--goal", gp}
+				if command == "search-learning" {
+					extra = []string{"--text", "excluded"}
+				}
+				code, out, diag := run(command, extra...)
+				if code != 2 || out != "" || diag != "invalid learning record file or JSON\n" || calls.Load() != 0 {
+					t.Fatalf("invalid reference: %d %q %q", code, out, diag)
+				}
+			}
+		}
+		writeRaw("record.json", out)
+		padded := strings.TrimSuffix(out, "\n")
+		padded += strings.Repeat(" ", growth.MaxLearningRecordBytes-len(padded))
+		for _, over := range []bool{false, true} {
+			raw := padded
+			if over {
+				raw += " "
+			}
+			writeRaw("record.json", raw)
+			code, value, diag := run("verify-learning", "--goal", gp)
+			if (!over && (code != 0 || diag != "")) || (over && (code != 2 || value != "" || diag != "invalid learning record file or JSON\n")) || calls.Load() != 0 {
+				t.Fatalf("size boundary: %d %q", code, diag)
+			}
+		}
+		writeRaw("record.json", out)
+
 	}
 	state.Store(growth.Ready)
 	// Both artifacts may change consistently, but earlier learning fingerprints

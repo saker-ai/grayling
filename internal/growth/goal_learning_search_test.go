@@ -12,6 +12,8 @@ func TestSearchGoalLearning(t *testing.T) {
 	g, _ := goalFixture()
 	q := LearningSearchQuery{g.WorkspaceID, g.EnvironmentID, "introduction"}
 	r := searchFixture(t)
+	// Goal-aware search remains metric-compatible even for a different historical goal.
+	r.GoalRef = &LearningGoalRef{ID: "other-goal", Version: 1<<53 + 1, Fingerprint: hashB}
 	// Exact adjacent integers above 2^53 must not collapse through JSON.
 	g.PrimaryMetric.Ref.Version = 1<<53 + 1
 	g.PrimaryMetric.SourcePath = "/api/v1/admin/workspaces/ws1/metrics/" + g.PrimaryMetric.Ref.Key + "/versions/9007199254740993"

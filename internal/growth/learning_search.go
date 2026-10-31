@@ -2,6 +2,7 @@ package growth
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"io"
 	"sort"
@@ -66,6 +67,11 @@ func DecodeLearningRecord(r io.Reader) (*LearningRecord, error) {
 	if json.Unmarshal(data, &record, json.RejectUnknownMembers(true)) != nil || record == nil || validateLearningRecord(*record) != nil {
 		return nil, ErrLearning
 	}
+	// A missing reference is legacy data; explicit null is invalid.
+	var members map[string]jsontext.Value
+	if json.Unmarshal(data, &members) != nil || (members["goalRef"] != nil && record.GoalRef == nil) {
+		return nil, ErrLearning
+	}
 	return record, nil
 }
 
@@ -74,7 +80,7 @@ func reportSource(id string) string {
 }
 
 func validateLearningRecord(r LearningRecord) error {
-	if r.SchemaVersion != LearningRecordSchemaVersion || !validSegment(r.ProposalID) || r.ProposalVersion < 1 || !fingerprint.MatchString(r.ProposalFingerprint) || !validSegment(r.WorkspaceID) || !validSegment(r.EnvironmentID) || !learningText(r.OriginalHypothesis, 4096) || !validSegment(r.Recorder) || r.RecordedAt.IsZero() || r.BusinessWinEstablished || r.PublicationAuthorized || len(r.Followups) < 1 || len(r.Followups) > MaxLearningFollowups {
+	if !validLearningGoalRef(r.GoalRef) || r.SchemaVersion != LearningRecordSchemaVersion || !validSegment(r.ProposalID) || r.ProposalVersion < 1 || !fingerprint.MatchString(r.ProposalFingerprint) || !validSegment(r.WorkspaceID) || !validSegment(r.EnvironmentID) || !learningText(r.OriginalHypothesis, 4096) || !validSegment(r.Recorder) || r.RecordedAt.IsZero() || r.BusinessWinEstablished || r.PublicationAuthorized || len(r.Followups) < 1 || len(r.Followups) > MaxLearningFollowups {
 		return ErrLearning
 	}
 	for _, f := range r.Followups {
