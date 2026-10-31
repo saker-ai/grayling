@@ -47,7 +47,7 @@ func TestVerifyReviewGoalBinary(t *testing.T) {
 	run := func(t *testing.T, extra []string, want int, diagnostic string) []byte {
 		t.Helper()
 		args := []string{"verify-review", "--proposal", pp, "--record", rp, "--workspace", "ws1", "--environment", "env1"}
-		args = append(args, extra...)
+		args = appendScopeFixtureArgs(t, args, extra)
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, binary, args...)

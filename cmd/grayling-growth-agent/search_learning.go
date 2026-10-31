@@ -48,7 +48,7 @@ func runSearchLearning(args []string, out, diagnostics io.Writer) int {
 		paths = append(paths, s)
 		return nil
 	})
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args, "record"); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(out, usage)
 			return 0

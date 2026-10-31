@@ -119,7 +119,7 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 		fs.StringVar(&reviewFile, "review-input", "", "operator review input file")
 	}
 	if fingerprintOnly {
-		if err := fs.Parse(args[1:]); err != nil {
+		if err := parseFlags(fs, args[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				fmt.Fprint(out, usage)
 				return 0
@@ -149,7 +149,7 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	environment := fs.String("environment", "", "trusted environment ID")
 	tokenEnv := fs.String("token-env", "GRAYLING_GROWTH_TOKEN", "credential environment variable")
 	timeout := fs.Duration("timeout", 10*time.Second, "total read timeout")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := parseFlags(fs, args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(out, usage)
 			return 0

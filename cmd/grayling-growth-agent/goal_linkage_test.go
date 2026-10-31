@@ -374,3 +374,33 @@ func goalLinkedOutputEqual(left, right string) bool {
 	return a.Canonicalize(jsontext.CanonicalizeRawInts(false)) == nil &&
 		b.Canonicalize(jsontext.CanonicalizeRawInts(false)) == nil && string(a) == string(b)
 }
+
+// Scope-isolation fixtures replace the default scope rather than repeating a
+// singleton flag. Keep exercising artifact validation, not duplicate rejection.
+// Duplicate spellings are passed directly to the executable in flags_test.go.
+func appendScopeFixtureArgs(t *testing.T, args, extra []string) []string {
+	t.Helper()
+	for i := 0; i < len(extra); i++ {
+		name := extra[i]
+		if name != "--workspace" && name != "--environment" {
+			args = append(args, name)
+			continue
+		}
+		if i+1 >= len(extra) {
+			t.Fatal("scope fixture is missing its value")
+		}
+		found := false
+		for j := 1; j+1 < len(args); j++ {
+			if args[j] == name {
+				args[j+1] = extra[i+1]
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("scope fixture is missing its default option")
+		}
+		i++
+	}
+	return args
+}

@@ -24,7 +24,7 @@ func runRollout(ctx context.Context, args []string, out, diagnostics io.Writer) 
 	environment := fs.String("environment", "", "trusted environment")
 	tokenEnv := fs.String("token-env", "GRAYLING_GROWTH_TOKEN", "credential environment variable")
 	timeout := fs.Duration("timeout", 10*time.Second, "total read timeout")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(out, usage)
 			return 0
