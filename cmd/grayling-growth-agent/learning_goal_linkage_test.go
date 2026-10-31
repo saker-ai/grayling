@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/v2"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -163,6 +164,20 @@ func testLearningGoalLinkage(t *testing.T, binary string, pinned bool) {
 		if code != want || diag != "" || calls.Load() == 0 || json.Unmarshal([]byte(out), &record, json.RejectUnknownMembers(true)) != nil || record.Observation.Status != status || record.PublicationAuthorized || record.BusinessWinEstablished || record.ProposalFingerprint != fp {
 			t.Fatalf("export: %d %s %s", code, out, diag)
 		}
+
+		t.Run("output/"+string(status), func(t *testing.T) {
+			args := []string{"record-learning", "--proposal", pp, "--goal", gp, "--workspace", "ws1", "--environment", "env1", "--manifest", mp, "--learning-input", ip, "--base-url", srv.URL}
+			t.Setenv("GRAYLING_GROWTH_TOKEN", secret)
+			checkArtifactOutput(t, []byte(out), want, func(stdout, diagnostics io.Writer) int {
+				calls.Store(0)
+				writes.Store(0)
+				code := runRecordLearning(t.Context(), args[1:], stdout, diagnostics)
+				if calls.Load() == 0 || writes.Load() != 0 {
+					t.Fatalf("calls %d writes %d", calls.Load(), writes.Load())
+				}
+				return code
+			})
+		})
 		writeRaw("record.json", out)
 		for _, command := range []string{"record-learning", "verify-learning"} {
 			code, legacy, diag := run(command)

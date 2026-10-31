@@ -137,7 +137,8 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 		if err != nil {
 			return fail(2, "invalid proposal fingerprint input")
 		}
-		if _, err := fmt.Fprintln(out, fp); err != nil {
+		data := []byte(fp + "\n")
+		if n, err := out.Write(data); err != nil || n != len(data) {
 			return fail(1, "output failed")
 		}
 		return 0

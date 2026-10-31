@@ -61,7 +61,12 @@ func runVerifyLearning(args []string, out, diagnostics io.Writer) int {
 	}
 	data, err := json.Marshal(result)
 	if err == nil {
-		_, err = out.Write(append(data, '\n'))
+		data = append(data, '\n')
+		var n int
+		n, err = out.Write(data)
+		if err == nil && n != len(data) {
+			err = io.ErrShortWrite
+		}
 	}
 	if err != nil {
 		fmt.Fprintln(diagnostics, "output failed")

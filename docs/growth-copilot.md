@@ -2248,3 +2248,33 @@ failed only web contracts because Vitest was not installed; the frozen install
 resolved the environment dependency and the full prescribed short run passed.
 Focused actual-binary goal fingerprint regressions also passed. These are local
 software checks, not real pilot or business validation.
+
+## Complete fingerprint and learning output (slice 45)
+
+`fingerprint`, `record-learning`, `verify-learning` and `search-learning` require
+stdout to accept the complete artifact, including its trailing newline. Writer
+errors and short writes (even without an error) exit 1 with the fixed diagnostic
+`output failed`. For `record-learning`, this overrides both READY's exit 0 and
+HOLD/NEEDS_DATA's exit 3. An output failure may leave partial bytes on stdout;
+discard that incomplete artifact. Successful output bytes, schemas, size limits,
+fingerprints, readiness checks and authorization boundaries remain unchanged.
+Injected-writer regressions cover zero, partial and newline-only truncation,
+ordinary errors and successful controls. Learning export tests reuse local HTTP
+fixtures across all three statuses and retain GET-only assertions. These checks
+establish local export reliability only; durable orchestration, model integration
+and real Saker pilot acceptance remain outstanding. All original mandatory gates
+and timeouts remain unchanged.
+
+Local slice 45 validation on 2026-10-31 passed all three prescribed mandatory
+gate sequences with unchanged assertions and timeouts: `make build`, complete
+short Go suite, `go build ./...`, `go vet ./...`, full core race suite,
+boot/E2E/smoke, SDK tests (Python 25, TypeScript 23 plus typecheck), frozen pnpm
+install, workspace frontend tests/build/static, license inventory and its five
+unit tests, and `git diff --check`. Core race included CLI 368.738 seconds and
+growth library 248.018 seconds. Disposable PostgreSQL 16 replica/report/API
+race checks passed, full Agent integration race passed in 234.121 seconds within
+the original five-minute timeout, and PostgreSQL E2E passed in 6.918 seconds.
+The exit trap removed the container. Focused injected-writer and goal-linkage
+regressions passed. The initial baseline short run lacked Vitest dependencies;
+after the frozen installation, the full prescribed short suite passed. These
+are local software checks, not real pilot or business validation.
