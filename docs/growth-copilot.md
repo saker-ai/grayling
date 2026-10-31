@@ -6,6 +6,55 @@ read-only command. No public route, SDK behavior, persistence, browser UI, model
 call or production write is added. Never running the command leaves the
 existing platform unchanged.
 
+## Offline proposal initializer
+
+```sh
+bin/grayling-growth-agent init-proposal --goal goal.json \
+  --proposal-id proposal1 --proposal-version 1 --workspace ws1 --environment env1
+```
+
+The pure `growth.InitProposal` library validates the complete goal, proposal ID,
+positive int64 proposal version and independently supplied workspace/environment.
+Scope must match the goal; it is never inferred from file contents. The existing
+`growth.proposal.v1` output copies goal ID, exact goal version and complete
+`GoalFingerprint` into `goalPin`, scope, primary metric and guardrail references.
+Guardrail order is preserved and the returned slice does not alias the goal.
+Goal, proposal and metric versions above 2^53 remain exact int64 values; the CLI
+parses the proposal version as a base-10 integer, rejecting fractions, exponents,
+overflow and nonpositive values.
+
+Hypothesis, rationale, evidence, flag, audience, randomization unit, exposure,
+variants, risk, rollback conditions, sample/analysis plans and implementation
+attestations remain zero/empty. No goal prose becomes planning claims and no
+execution defaults or statistical facts are invented. Empty struct fields serialize
+using the existing schema's zero values. Output passes `DecodeProposal`,
+`VerifyGoal` and fingerprint round trips, while `ReviewProposal` remains `draft`
+even with a READY evidence envelope; `CompileCreateRequest` remains blocked.
+Humans must supply the missing planning and implementation facts and existing
+review/evidence gates still apply.
+
+This command is offline: no credentials or network options are accepted, no HTTP
+requests are made and no files are written. It reuses strict bounded `readGoal` /
+`DecodeGoal`, final-component no-follow regular-file checks and singleton flags.
+JSON is fully buffered before one output write including its newline. Exit 0 means
+construction only, never readiness, approval, execution or baseline truth. Invalid
+flags exit 2 with `invalid flags; use --help`; invalid version/missing goal or
+positional arguments use `invalid initialization configuration`; goal read/decode
+failures use `invalid goal file or JSON`; other goal/scope/identifier failures use
+`invalid proposal initialization input`. All invalid inputs produce empty stdout.
+Output failures, including short writes, exit 1 with `output failed`. Diagnostics
+never echo supplied paths, prose, option values or writer errors. Use the root
+`--help` for usage.
+
+Library and actual-binary regressions cover exact versions, ordered references,
+independent slices, scope and content/version pin integrity, strict malformed /
+unknown / duplicate / oversized JSON, symlinks and special files, singleton flags,
+secret-safe diagnostics and single-write output failures. These local regressions
+prove software behavior only. All original mandatory gates below and their
+timeouts remain unchanged. This adds no model calls, platform writes,
+authenticated approval, durable workflow or real Saker pilot evidence; full #20
+acceptance remains outstanding.
+
 ## Operator file symlink boundary
 
 The CLI opens preparation settings, record-review inputs, record-learning inputs
@@ -82,7 +131,7 @@ The exit trap removed the container. These are local software checks only.
 | RBAC and isolation | Existing admin API / `report.read` viewer permission | Fixed reader workspace/environment, existing bearer authentication, explicit response validation; no privileged endpoint. Workspace-wide viewer tokens are not environment-restricted by this library at the server. The reader rejects other environments before exposing evidence. |
 | Flags, preregistration, exposure, conversion, approvals, rollout | Existing platform, SDK, collect and admin APIs | Unchanged and unwired. Reader has no write operations and does not authorize rollout. |
 | Saker goal-to-metric mapping and activation baseline | No real Saker mapping or pilot evidence supplied | Caller must supply actual metric references and experiment IDs. No inferred mapping, product trends, BI connector or causal claim. |
-| Proposal contract | `DecodeProposal` / `ReviewProposal` in `internal/growth` | Strict, bounded planning JSON and evidence-based completeness for human review; no generation, review UI or submission. Pure caller-attested review records are available separately. |
+| Proposal contract | `DecodeProposal` / `ReviewProposal` in `internal/growth` | Strict, bounded planning JSON and evidence-based completeness for human review; offline empty draft initialization only, no model generation, review UI or submission. Pure caller-attested review records are available separately. |
 | Hypotheses, model generation, proposal review UI, experiment submission | Requires later work | No growth API or model integration; no experiment draft submission. |
 | Durable orchestration, recovery, learning journal, business acceptance | Requires later design and evidence | No task storage/retries, restart recovery, model budget, review UI or real customer acceptance claim. |
 
