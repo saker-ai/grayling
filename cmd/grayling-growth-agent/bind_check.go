@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json/v2"
 	"errors"
 	"flag"
 	"fmt"
@@ -62,10 +61,7 @@ func runBindCheck(ctx context.Context, args []string, out, diagnostics io.Writer
 			return fail(1, "evidence execution failed")
 		}
 	}
-	if err := json.MarshalWrite(out, summary); err != nil {
-		return fail(1, "output failed")
-	}
-	if _, err := fmt.Fprintln(out); err != nil {
+	if err := writeJSONArtifact(out, summary); err != nil {
 		return fail(1, "output failed")
 	}
 	if !summary.Ready {

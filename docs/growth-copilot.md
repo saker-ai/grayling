@@ -2326,3 +2326,26 @@ PostgreSQL 16 platform/report/API race tests, full Agent integration race
 interrupted run is not counted as a successful gate. These checks establish
 local software behavior, not model integration, durable workflows or real pilot
 acceptance.
+
+## Complete review, preparation and observation output
+
+`review`, both `prepare` paths (with or without `--review-record`), `monitor`,
+`rollout` and `bind-check` serialize the complete JSON artifact and trailing
+newline before a single stdout write. Any writer error or short write, including
+truncation of only the newline without an error, exits 1 with the fixed stderr
+line `output failed`. This takes precedence over successful exports and the
+readiness/availability blocker exit 3. Output is not retried; bytes already
+accepted by the writer cannot be retracted. Discard partial output after an I/O
+failure.
+
+Successful artifact bytes and serialization options remain unchanged, including
+nondeterministic map ordering for unreviewed preparation and deterministic
+reviewed preparation. Readiness and availability exit codes, preparation checks,
+and fresh GET-only evidence access retain their existing behavior. Injected
+writer regressions use local HTTP fixtures for ready and blocked observations,
+reviewed/unreviewed preparation, zero/partial writes, newline-only truncation,
+ordinary errors and successful controls.
+
+These checks establish local software behavior only. Model integration, durable
+orchestration and real Saker pilot acceptance remain outstanding. All previously
+documented mandatory gates and their original timeouts remain unchanged.
