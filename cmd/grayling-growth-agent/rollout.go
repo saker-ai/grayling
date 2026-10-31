@@ -76,7 +76,8 @@ func runRollout(ctx context.Context, args []string, out, diagnostics io.Writer) 
 }
 
 func readRolloutManifest(path string) (*growth.RolloutManifest, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	// O_NOFOLLOW rejects final-component symlinks, not symlinked ancestors.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, growth.ErrConfig
 	}

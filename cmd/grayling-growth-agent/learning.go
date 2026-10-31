@@ -19,7 +19,8 @@ const maxLearningInputBytes = 128 << 10
 // Operator inputs are separate from proposal and evidence. JSON v2 rejects
 // unknown/duplicate members, trailing values and invalid UTF-8.
 func readLearningInputs(path string) (*growth.LearningInputs, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	// O_NOFOLLOW rejects final-component symlinks, not symlinked ancestors.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, growth.ErrLearning
 	}

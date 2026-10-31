@@ -6,6 +6,31 @@ read-only command. No public route, SDK behavior, persistence, browser UI, model
 call or production write is added. Never running the command leaves the
 existing platform unchanged.
 
+## Operator file symlink boundary
+
+The CLI opens preparation settings, record-review inputs, record-learning inputs
+and monitor/rollout manifests with the existing nonblocking `O_NOFOLLOW` pattern.
+This includes record-learning's shared monitor-manifest reader and bind-check's
+shared rollout-manifest reader. Final-component symlinks are rejected, including
+links to valid JSON, dangling links and link loops. **Symlinked ancestor
+directories are still followed**: this is not path confinement or authentication
+of operator artifacts.
+
+Descriptor-based regular-file checks still reject directories, FIFOs and other
+special files before reading. Actual-read byte limits, strict JSON validation,
+fixed diagnostics and exit codes remain unchanged. Rejected inputs exit 2 with
+empty stdout and bounded diagnostics that contain no paths, artifact contents or
+credentials, before any HTTP request.
+
+Focused reader and actual-binary tables cover valid regular files, the three
+final-component link cases, FIFOs and directories, plus a symlinked-ancestor
+compatibility control. The binary is built once for the command/path table;
+regular-file controls reach a local HTTP denial fixture, while rejected inputs
+make zero HTTP requests. These are local software regressions only. All existing
+build, short-test, vet, core-race, boot/E2E/smoke, SDK, frontend/static, license,
+whitespace and disposable PostgreSQL gates below remain mandatory with unchanged
+timeouts. No public API, SDK, schema, model, publication or pilot claim is added.
+
 ## Rejected collection attempts
 
 The evidence allowlist now projects `report.diagnostics.rejectedByReason` using

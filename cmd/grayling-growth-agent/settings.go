@@ -17,7 +17,8 @@ const maxSettingsBytes = 16 << 10
 // evidence envelope here. Semantic validation remains in CompileCreateRequest.
 func readSettings(path string) (*growth.PreparationInputs, error) {
 	invalid := errors.New("invalid preparation settings")
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	// O_NOFOLLOW rejects final-component symlinks, not symlinked ancestors.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, invalid
 	}
