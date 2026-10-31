@@ -94,7 +94,7 @@ func TestSingletonFlagsCommands(t *testing.T) {
 		{"verify-goal", "goal proposal workspace environment"},
 		{"verify-review", "proposal goal record workspace environment"},
 		{"verify-learning", "proposal goal record workspace environment"},
-		{"search-learning", "workspace environment text"},
+		{"search-learning", "goal workspace environment text"},
 		{"fingerprint", "proposal"}, {"fingerprint-goal", "goal"},
 	}
 	execute := func(t *testing.T, args []string, binaryMode bool) (int, string, string) {

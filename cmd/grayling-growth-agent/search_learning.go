@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json/v2"
 	"errors"
 	"flag"
 	"fmt"
@@ -40,6 +39,7 @@ func runSearchLearning(args []string, out, diagnostics io.Writer) int {
 	workspace := fs.String("workspace", "", "required workspace")
 	environment := fs.String("environment", "", "required environment")
 	text := fs.String("text", "", "case-sensitive literal hypothesis/follow-up substring")
+	goalFile := fs.String("goal", "", "optional caller-attested goal file for exact metric-role matching")
 	var paths []string
 	fs.Func("record", "exported learning record file (repeatable)", func(s string) error {
 		if s == "" || len(paths) >= growth.MaxLearningSearchFiles {
@@ -59,6 +59,19 @@ func runSearchLearning(args []string, out, diagnostics io.Writer) int {
 	if fs.NArg() != 0 || len(paths) == 0 || q.Validate() != nil {
 		return fail("invalid search configuration")
 	}
+	var goal *growth.GrowthGoal
+	goalSupplied := false
+	fs.Visit(func(f *flag.Flag) { goalSupplied = goalSupplied || f.Name == "goal" })
+	if goalSupplied {
+		var err error
+		goal, err = readGoal(*goalFile)
+		if err != nil {
+			return fail("invalid goal file or JSON")
+		}
+		if goal.WorkspaceID != q.WorkspaceID || goal.EnvironmentID != q.EnvironmentID {
+			return fail("invalid or inconsistent goal search inputs")
+		}
+	}
 	records := make([]growth.LearningRecord, 0, len(paths))
 	remaining := int64(growth.MaxLearningSearchBytes)
 	for _, path := range paths {
@@ -69,20 +82,17 @@ func runSearchLearning(args []string, out, diagnostics io.Writer) int {
 		remaining -= n
 		records = append(records, *r)
 	}
-	result, err := growth.SearchLearning(records, q)
+	var result any
+	var err error
+	if goal != nil {
+		result, err = growth.SearchGoalLearning(*goal, records, q)
+	} else {
+		result, err = growth.SearchLearning(records, q)
+	}
 	if err != nil {
 		return fail("invalid learning records")
 	}
-	data, err := json.Marshal(result)
-	if err == nil {
-		data = append(data, '\n')
-		var n int
-		n, err = out.Write(data)
-		if err == nil && n != len(data) {
-			err = io.ErrShortWrite
-		}
-	}
-	if err != nil {
+	if err := writeJSONArtifact(out, result); err != nil {
 		fmt.Fprintln(diagnostics, "output failed")
 		return 1
 	}

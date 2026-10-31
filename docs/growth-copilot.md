@@ -2484,3 +2484,109 @@ removed afterward. Formatting was checked using the actual filenames
 their tests. These results establish local software behavior only; the model,
 durable orchestration, authenticated approval and real Saker pilot boundaries
 above remain outstanding.
+
+## Offline goal-aware learning search
+
+```sh
+grayling-growth-agent search-learning --goal goal.json \
+  --workspace ws1 --environment env1 --text 'first task' \
+  --record learning-a.json --record learning-b.json
+```
+
+`--goal FILE` is optional and singleton. Without it, search retains the existing
+`growth.learning-search.v1` schema and behavior. With it, pure
+`growth.SearchGoalLearning` reuses `ValidateGoal`/`GoalFingerprint` and
+`SearchLearning`. The query's independent workspace/environment must match the
+validated goal. The CLI rejects invalid scope, invalid goal files and goal scope
+conflicts before reading any learning files. It uses the existing bounded,
+nonblocking no-follow `readGoal`: 64 KiB including whitespace, regular files only,
+strict unknown/duplicate members at every depth (including escaped names), valid
+UTF-8, no null root or trailing JSON. Ancestor symlinks retain the existing reader
+contract. An explicitly empty `--goal` is invalid.
+
+Every supplied record is validated and bounded before filtering, including
+records excluded by scope, literal text or metrics and duplicate records. Existing
+64-file, 128 KiB per record and 4 MiB total limits apply unchanged. Match the linked
+experiment's exact primary metric key, int64 version and definition hash, and the
+exact guardrail set in its guardrail role. Guardrail order is irrelevant to
+compatibility; no missing/additional metric, role swap or version/hash conflict
+matches. A valid goal with 17–20 guardrails simply has no compatible records under
+the current 16-guardrail manifest limit; nothing is truncated or rejected merely
+for exceeding that record limit. Goal validation still enforces its own limits.
+
+The distinct `growth.goal-learning-search.v1` artifact contains `workspaceId`,
+`environmentId`, `goalId`, exact `goalVersion`, complete `goalFingerprint` and
+`matches` (an empty JSON array when none match). Goal owner/objective/baseline prose
+are omitted. Complete READY/HOLD/NEEDS_DATA records, blockers, evidence provenance
+and server verdicts are preserved. Matching remains case-sensitive literal text
+in hypothesis/follow-ups only, with deterministic canonical-byte ordering and
+identical-record deduplication. Input text is inert, including shell, regex and
+instruction-like strings. Guardrail order still affects the complete goal
+fingerprint, even though it does not affect metric compatibility.
+
+Metric compatibility does not establish historical goal linkage, transferability,
+freshness, authenticated approval or causal benefit. Baseline windows are not a
+search filter. Caller-attested snapshots are not refreshed or authenticated, and
+no health/statistical decision is recalculated. This command requires no
+credentials, makes no network/model calls and writes only the requested stdout
+artifact. It accepts no origin/token/timeout flags.
+
+Success, including empty matches and HOLD/NEEDS_DATA snapshots, exits 0. Invalid
+inputs exit 2 with empty stdout and fixed redacted diagnostics:
+`invalid flags; use --help`, `invalid search configuration`,
+`invalid goal file or JSON`, `invalid or inconsistent goal search inputs`,
+`invalid learning record file or JSON`, or `invalid learning records`.
+`writeJSONArtifact` buffers JSON plus newline before one write; failed/short writes
+exit 1 with `output failed`. Discard partial output on write failure.
+
+Library and actual-binary regressions cover exact versions above 2^53, metric
+roles/versions/hashes, reordered guardrails, excluded invalid records, strict goal
+files, duplicate flags, empty matches, scope preflight, inert injection text,
+offline operation and failed/short writes. The unscoped binary artifact is also
+compared byte for byte with the original library output, including its schema
+and trailing newline. All original mandatory gates and
+timeouts remain unchanged. No DB schema, browser UI, public API, platform writes,
+durable orchestration or real Saker pilot acceptance is included. Full Issue #20
+acceptance remains outstanding.
+
+### SDK evaluation failure investigation
+
+The preserved run's Python conversion test failed before conversion collection:
+remote evaluation returned the caller default with `GENERAL` and no experiment.
+Its pytest representation truncated `error_details`, so that log does not identify
+an HTTP status, transport failure or server cause. This is distinct from the
+previous explicit/background flush scheduling repair. Attribution, diagnosis,
+forged-unit rejection, aggregate counts and report assertions remain required.
+
+The test now captures the SDK's existing `on_error` callback and includes only
+exception/cause class names, HTTP status and server process exit status when the
+experiment assertion fails. It never prints exception messages, HTTP bodies,
+credentials or evaluation context. No evaluation retries, success polling,
+increased timeouts or weaker attribution assertions are added. The isolated test
+and a full unchanged Python suite passed during recovery before this diagnostic
+change; those passes do not establish a cause or repair of the historical failure.
+No speculative SDK/runtime change is justified by the available failure log.
+
+Recovery validation on 2026-10-31 completed the prescribed first gate sequence:
+`make build`, the full short suite, `go build ./...`, `go vet ./...`, uncached
+core race tests, boot/E2E/smoke, `make sdk-test`, frozen-lockfile install, workspace
+tests, frontend build/static consistency, license inventory, all five license
+audit tests and whitespace checks. The CLI race package completed in 425.644s
+and the growth library in 288.591s. All 25 Python SDK tests passed with the
+redacted callback diagnostic enabled, without reproducing the conversion failure.
+This is completed regression validation, not evidence that its historical cause
+was identified or repaired. No retry, timeout or assertion changes were made.
+
+Final recovery review on 2026-10-31 retained the completed non-database evidence
+in `.recovery-E7LG-gates.log` and completed a fresh full disposable PostgreSQL 16
+sequence, recorded in `.recovery-s50-postgres.log`: GORM/report/quota race tests
+passed for platform (5.278s), experiment (2.315s) and API (2.069s); the full Agent
+integration race suite passed in 221.683s with its original five-minute timeout;
+PostgreSQL E2E passed in 3.943s with its original ten-minute timeout. The exit
+trap removed the container. The interrupted `.recovery-E7LG-postgres.log` is not
+counted as a completed sequence. Final formatting and whitespace checks passed.
+Review retained the SDK diagnostic because it records only fixed SDK phases,
+exception class names, HTTP status and process exit status, with the experiment
+assertion and all subsequent assertions unchanged. These local software results
+do not identify or repair the historical intermittent evaluation failure, prove
+historical goal linkage or establish real Saker pilot acceptance.
