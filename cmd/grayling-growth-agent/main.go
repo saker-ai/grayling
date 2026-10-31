@@ -297,10 +297,7 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 			}
 			return fail(1, "preparation failed")
 		}
-		if err := json.MarshalWrite(out, prepared, json.Deterministic(approval != nil)); err != nil {
-			return fail(1, "output failed")
-		}
-		if _, err := fmt.Fprintln(out); err != nil {
+		if err := writeJSONArtifact(out, prepared, json.Deterministic(approval != nil)); err != nil {
 			return fail(1, "output failed")
 		}
 		return 0
@@ -317,10 +314,7 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 			}
 		}
 	}
-	if err := json.MarshalWrite(out, result{EvidenceStatus: envelope.Status, Review: review}); err != nil {
-		return fail(1, "output failed")
-	}
-	if _, err := fmt.Fprintln(out); err != nil {
+	if err := writeJSONArtifact(out, result{EvidenceStatus: envelope.Status, Review: review}); err != nil {
 		return fail(1, "output failed")
 	}
 	if review.State != growth.ProposalReadyForReview {
@@ -380,6 +374,21 @@ func writeReviewRecord(out io.Writer, record *growth.ReviewRecord) error {
 	}
 	if len(data)+1 > growth.MaxReviewRecordBytes {
 		return growth.ErrReviewVerification
+	}
+	data = append(data, '\n')
+	n, err := out.Write(data)
+	if err == nil && n != len(data) {
+		return io.ErrShortWrite
+	}
+	return err
+}
+
+// writeJSONArtifact serializes the complete artifact before a single write so
+// even truncation of only the trailing newline is an output failure.
+func writeJSONArtifact(out io.Writer, value any, options ...json.Options) error {
+	data, err := json.Marshal(value, options...)
+	if err != nil {
+		return err
 	}
 	data = append(data, '\n')
 	n, err := out.Write(data)
