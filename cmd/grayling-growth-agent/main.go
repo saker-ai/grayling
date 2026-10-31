@@ -32,6 +32,7 @@ const usage = `Usage: grayling-growth-agent review --proposal FILE [--goal FILE]
        grayling-growth-agent search-learning --workspace ID --environment ID --text LITERAL --record FILE [--record FILE ...]
        grayling-growth-agent fingerprint --proposal FILE
        grayling-growth-agent fingerprint-goal --goal FILE
+       grayling-growth-agent init-proposal --goal FILE --proposal-id ID --proposal-version N --workspace ID --environment ID
        grayling-growth-agent record-review --proposal FILE [--goal FILE] --review-input FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
 --goal is required for pinned proposals; it checks caller-attested consistency before evidence reads, never approval.
 verify-goal is offline: caller-attested consistency only; no baseline, readiness or approval proof.
@@ -40,6 +41,7 @@ verify-learning is offline: local consistency only; no authorship, execution, fr
 A consistent verification exits 0, including HOLD/NEEDS_DATA; publication and business win remain false.
 search-learning is offline: explicit local records only, no credentials or evidence refresh.
 fingerprint-goal is offline: prints validated goal content consistency hash only; no approval or baseline truth.
+init-proposal is offline: exits 0 for construction only; output remains draft and preparation is blocked.
 A valid search exits 0, including empty results and HOLD/NEEDS_DATA matches.
 Read-only review/preparation; credentials come only from the named environment variable
 (default GRAYLING_GROWTH_TOKEN). Timeout bounds the entire read (0 < timeout <= 30s).
@@ -73,6 +75,9 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 		fmt.Fprint(out, usage)
 		return 0
+	}
+	if len(args) > 0 && args[0] == "init-proposal" {
+		return runInitProposal(args[1:], out, diagnostics)
 	}
 	if len(args) > 0 && args[0] == "fingerprint-goal" {
 		return runFingerprintGoal(args[1:], out, diagnostics)

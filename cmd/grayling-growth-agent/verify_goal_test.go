@@ -41,6 +41,7 @@ func TestVerifyGoalBinary(t *testing.T) {
 	}
 	write(pp, p)
 	write(rp, r)
+	t.Run("init-proposal", func(t *testing.T) { testInitProposalBinary(t, binary, *r) })
 	t.Run("fingerprint-goal", func(t *testing.T) { testFingerprintGoal(t, binary, *r) })
 	base := []string{"verify-goal", "--proposal", pp, "--goal", rp, "--workspace", "ws1", "--environment", "env1"}
 	run := func(args []string) (int, []byte, string) {

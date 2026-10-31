@@ -60,6 +60,15 @@ credentials or scope, and rejects network options. Goal fingerprints establish
 caller-attested content consistency, not approval or baseline truth. See
 [goal fingerprint usage and errors](docs/growth-copilot.md#offline-goal-fingerprint-slice-44).
 
+Use offline `grayling-growth-agent init-proposal --goal goal.json --proposal-id proposal1
+--proposal-version 1 --workspace ws1 --environment env1` (on one command line)
+to construct a pinned proposal from a validated goal and independently supplied
+scope. It copies exact goal/metric versions and references, preserving guardrail
+order. Planning claims, evidence, execution settings and attestations remain empty;
+the result is a draft that cannot pass preparation. Exit 0 means construction only.
+No credentials, HTTP or file writes are used. See the
+[initializer contract](docs/growth-copilot.md#offline-proposal-initializer).
+
 The offline `fingerprint --proposal FILE` command prints the proposal fingerprint;
 `record-review --proposal FILE --review-input review.json` re-reads pinned evidence
 with the same trusted connection flags as `review` and exports one record.
