@@ -2157,8 +2157,9 @@ invalid UTF-8, null roots and trailing JSON are rejected. Versions remain exact
 int64 values above 2^53. Metric roles compare as sets; goal array order remains
 part of a pinned goal's complete fingerprint.
 
-Matching goals preserve the existing learning schemas and complete proposal
-fingerprints, including goal pins. Changing both goal and proposal consistently
+Matching goals preserve complete proposal fingerprints, including goal pins.
+Pinned learning exports additionally retain the optional goal reference described
+in [the goal reference contract](#caller-attested-goal-references-in-learning-exports). Changing both goal and proposal consistently
 still invalidates earlier learning inputs and exported records. Export always
 performs fresh GET-only monitoring; READY exits 0, HOLD/NEEDS_DATA export records
 and exit 3. Offline verification preserves all three statuses and exits 0 for
@@ -2590,3 +2591,42 @@ exception class names, HTTP status and process exit status, with the experiment
 assertion and all subsequent assertions unchanged. These local software results
 do not identify or repair the historical intermittent evaluation failure, prove
 historical goal linkage or establish real Saker pilot acceptance.
+
+## Caller-attested goal references in learning exports
+
+Pinned proposals now export optional `goalRef: {id, version, fingerprint}` in
+`growth.learning.v1`. The values come only from the proposal's existing valid
+`goalId` and `goalPin`, independently snapshotted before read-only HTTP access.
+The reference counts toward the existing 128 KiB record limit. Unpinned exports
+omit the member and retain their previous bytes, even when `--goal` is supplied.
+
+Decoding and search validate every supplied reference before filtering, including
+excluded records. Explicit null, incomplete references, invalid identifiers or
+hashes and nonpositive, fractional or overflowing versions are rejected. Versions
+remain exact int64 values, including adjacent integers above 2^53.
+Offline verification compares a supplied reference with the original proposal's
+goal identity and pin and copies it independently into the verification summary.
+Legacy records without the field remain readable and verifiable; verification
+does not invent historical provenance from a goal file or a pinned proposal.
+
+`SearchGoalLearning` still selects by linked-experiment metric compatibility,
+not goal identity. Matches retain any recorded reference, even when it identifies
+a different goal. This reference remains caller-attested consistency metadata;
+it does not authenticate ownership, execution, approval or business outcomes.
+Older strict consumers reject the added optional field; update such consumers
+before importing pinned exports or verification summaries.
+
+Library and actual-binary regressions cover READY/HOLD/NEEDS_DATA round trips,
+exact versions, altered references, legacy omission, excluded invalid records,
+size boundaries, independent snapshots, redaction, output failures and GET-only
+access. All original mandatory gates and timeouts remain unchanged. Durable
+orchestration, model integration and real Saker pilot acceptance remain outstanding.
+
+Local validation on 2026-10-31 passed both supplied mandatory gate sequences:
+build, complete short suite, build/vet, full core race suite, boot/E2E/smoke,
+Python and TypeScript SDKs, frozen-lockfile workspace tests, frontend/static
+consistency, license inventory/unit tests and whitespace; plus PostgreSQL
+replica/report checks, full race-enabled Agent integration (213.579 seconds)
+and PostgreSQL E2E (3.844 seconds). The disposable PostgreSQL cleanup trap
+completed. Focused goal-reference library and actual-binary race regressions also
+passed. These are local fixture results, not real Saker pilot acceptance.

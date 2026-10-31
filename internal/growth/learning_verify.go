@@ -11,18 +11,19 @@ const LearningVerificationSchemaVersion = "growth.learning-verification.v1"
 // neither authorship nor execution and establishes no freshness or causality.
 // Status is the supplied observation's status, never an experiment win.
 type LearningVerification struct {
-	SchemaVersion          string `json:"schemaVersion"`
-	WorkspaceID            string `json:"workspaceId"`
-	EnvironmentID          string `json:"environmentId"`
-	ProposalID             string `json:"proposalId"`
-	ProposalVersion        int64  `json:"proposalVersion"`
-	ProposalFingerprint    string `json:"proposalFingerprint"`
-	ExperimentID           string `json:"experimentId"`
-	Epoch                  int64  `json:"epoch"`
-	EvidenceVersion        string `json:"evidenceVersion"`
-	ObservationStatus      Status `json:"observationStatus"`
-	PublicationAuthorized  bool   `json:"publicationAuthorized"`
-	BusinessWinEstablished bool   `json:"businessWinEstablished"`
+	GoalRef                *LearningGoalRef `json:"goalRef,omitempty"`
+	SchemaVersion          string           `json:"schemaVersion"`
+	WorkspaceID            string           `json:"workspaceId"`
+	EnvironmentID          string           `json:"environmentId"`
+	ProposalID             string           `json:"proposalId"`
+	ProposalVersion        int64            `json:"proposalVersion"`
+	ProposalFingerprint    string           `json:"proposalFingerprint"`
+	ExperimentID           string           `json:"experimentId"`
+	Epoch                  int64            `json:"epoch"`
+	EvidenceVersion        string           `json:"evidenceVersion"`
+	ObservationStatus      Status           `json:"observationStatus"`
+	PublicationAuthorized  bool             `json:"publicationAuthorized"`
+	BusinessWinEstablished bool             `json:"businessWinEstablished"`
 }
 
 // VerifyLearning checks caller-supplied artifacts against an explicit scope.
@@ -46,6 +47,14 @@ func VerifyLearning(p Proposal, r LearningRecord, workspace, environment string)
 	if err != nil || fp != r.ProposalFingerprint || p.ID != r.ProposalID || p.Version != r.ProposalVersion || p.WorkspaceID != workspace || r.WorkspaceID != workspace || p.EnvironmentID != environment || r.EnvironmentID != environment || p.Hypothesis != r.OriginalHypothesis {
 		return nil, ErrLearning
 	}
+	var goalRef *LearningGoalRef
+	if r.GoalRef != nil {
+		if p.GoalPin == nil || !validGoalPin(p.GoalPin) || r.GoalRef.ID != p.GoalID || r.GoalRef.Version != p.GoalPin.Version || r.GoalRef.Fingerprint != p.GoalPin.Fingerprint {
+			return nil, ErrLearning
+		}
+		snapshot := *r.GoalRef
+		goalRef = &snapshot
+	}
 	// Compare all copied baseline fields in order, including windows. Baselines
 	// need not be the linked experiment and must never be compared as if they were.
 	baseline, err := json.Marshal(p.EvidenceRefs, json.Deterministic(true))
@@ -64,7 +73,7 @@ func VerifyLearning(p Proposal, r LearningRecord, workspace, environment string)
 		return nil, ErrLearning
 	}
 	return &LearningVerification{
-		SchemaVersion: LearningVerificationSchemaVersion, WorkspaceID: workspace, EnvironmentID: environment,
+		GoalRef: goalRef, SchemaVersion: LearningVerificationSchemaVersion, WorkspaceID: workspace, EnvironmentID: environment,
 		ProposalID: p.ID, ProposalVersion: p.Version, ProposalFingerprint: fp,
 		ExperimentID: r.LinkedExperiment.ExperimentID, Epoch: r.LinkedExperiment.Epoch,
 		EvidenceVersion: r.Observation.EvidenceVersion, ObservationStatus: r.Observation.Status,
