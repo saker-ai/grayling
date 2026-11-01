@@ -205,3 +205,68 @@ readiness or a healthy real randomized Saker experiment.
 | Create, review, bind | Existing workspace/environment experiment POST and experiment review/bind POST | Durable intent/reconciliation; optional atomic flag-revision precondition |
 | Goal, proposal review, tasks, learning | Existing strict growth artifacts and compilers | Separate private API/UI, authenticated actors, SQLite recovery and immutable journal |
 | Product/BI aggregate baseline | No authorized provider is assumed | NEEDS_DATA until an approved source exists; no collect warehouse or invented trend |
+
+## Finite baseline, design and direct provider
+
+An optional create-task `baseline` accepts one finite
+`growth.aggregate-baseline.v1` export instead of a prior report manifest. Configure
+`baselineSources` explicitly (default empty). This adapter accepts no arbitrary
+URL/warehouse query or raw user rows. It checks scope, exact primary/guard metric
+versions/hashes, usable window/watermark, refresh time, unit, license/policy
+reference and aggregate privacy threshold. Unknown fields fail. Baselines are
+observational and `causal` must be false; they never become fictional A/B reports.
+Their canonical source/version/fingerprint is pinned into proposal, review,
+preparation and learning and survives backup/restore. Source permission statements
+remain operator assertions; the service does not manufacture a license grant.
+
+The workbench `design` action selects an actual pinned suggestion and explicit
+flag/unit/audience/render/implementation/rollback inputs. `sample-plan` calls the
+existing deterministic stats package with observed control/all-group rate and
+explicit MDE/alpha/power/direction/runtime. It supports equal-arm proportion
+planning only, uses a two-sided normal approximation without continuity
+correction, rounds up, and is not an exact-power or superiority result. Missing
+catalog type, invalid rates, unequal splits or unknown evidence fail closed.
+Preparation cannot change calculated alpha/power without recalculation or an
+explicitly edited plan. Manual plan inputs remain possible with provenance.
+
+To opt in to a direct OpenAI-compatible provider, add only environment **names**:
+
+```json
+{"provider":{"baseUrlEnv":"GROWTH_PROVIDER_ORIGIN","apiKeyEnv":"GROWTH_PROVIDER_KEY","modelEnv":"GROWTH_PROVIDER_MODEL","maxOutputTokens":1800,"maxCalls":1}}
+```
+
+HTTPS is required outside literal loopback. Redirects are refused. The adapter
+has a 25-second timeout, 64-KiB response limit, one completion, no tools, strict
+qualitative output/evidence pin validation and an explicit per-process call cap
+(1–10). Output tokens are bounded 128–2048; task budget is reserved durably before
+the call. Failure does not retry provider spending. `localPlannerUrl` and
+`provider` are mutually exclusive. No provider configuration values, raw responses
+or prompts are logged/persisted. Only allowlisted aggregate facts reach the
+provider; goal prose, identities, credentials and report free text do not.
+Providers may meter internal tokens differently; `maxCalls` bounds calls rather
+than asserting a currency estimate. AI remains off when neither option is set.
+
+The opt-in live test `TestProviderLiveAcceptance` sends one bounded request using
+synthetic aggregate facts. It is excluded unless
+`GRAYLING_GROWTH_LIVE_ACCEPTANCE=1`; it records only validated suggestions and
+non-secret result metadata. Passing transport/schema is not a human quality
+assessment. The ordinary test suite cannot accidentally invoke a paid provider.
+
+`GET /v1/tasks/{id}/study` prepares blind review and honest measurements;
+`POST .../study` records bounded operator-supplied observations. Exported scores
+are never machine-certified as independent human evidence. `GET /v1/archive`
+returns one verified, consistent scoped JSON archive (16 MiB maximum) including
+all task/proposal/audit/learning records; it performs no deletion. Restore still
+uses a verified SQLite backup. The executable sample application and licensed
+synthetic assets are documented in [the lab runbook](growth-synthetic-lab.md).
+
+`GET /v1/study` reports current scoped task/run denominators, readiness and healthy
+run numerators, repeated blocked checkpoints, and immutable learning snapshots
+by UTC month. It explicitly leaves distinct defect discovery rate unknown;
+snapshots are not distinct experiments and data health is not business benefit.
+
+Learning search groups exact normalized or strongly overlapping hypotheses only
+within the same workspace/environment and primary/guard metric pins. Non-exact
+matches require at least four common tokens and Jaccard similarity ≥ .8; explicit
+negation mismatches are separated. All original failure records remain immutable.
+This conservative lexical aid is not a semantic or cross-environment merge.

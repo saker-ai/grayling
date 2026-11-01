@@ -246,3 +246,8 @@ GET /api/v1/gateway/forwardauth?flagKey=<key>&defaultVariant=<v>&unitField=<f>&u
 ## Flag DSL（schemaVersion 1）
 
 见 `pkg/model/types.go` 与技术方案 §5.2。要点：`type ∈ bool|string|number|json`；规则必须有且仅有 `variation|percentage` 之一；约束字段必须在 `fields` 注册（`targetingKey` 隐式注册）；操作符闭集 `eq,ne,in,not_in,gt,gte,lt,lte,time_before,time_after,regex,in_cidr,semver_gt,semver_gte,semver_lt,semver_lte,semver_eq`；`bucketing.algorithm` 固定 `grayling-fnv1a-10000-v1`；实验绑定 flag 的 `defaultRule.variation` 必填（未入组回退）。
+
+The separate Growth private service also supports explicit `design`,
+`sample-plan` and `study` actions, finite aggregate baseline input, scoped study
+exports and verified evidence archives. These are not core Admin API endpoints;
+see [its OpenAPI](growth-service.openapi.yaml) and [service contract](growth-service.md).

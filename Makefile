@@ -23,6 +23,7 @@ build: frontend
 	$(GO) build ./...
 	$(GO) build -o bin/grayling ./cmd/grayling
 	$(GO) build -o bin/grayling-growth-agent ./cmd/grayling-growth-agent
+	$(GO) build -o bin/grayling-growth-lab ./cmd/grayling-growth-lab
 	$(GO) build -o bin/grayling-proxy ./cmd/grayling-proxy
 	$(GO) build -o bin/grayling-native-proxy ./cmd/grayling-native-proxy
 	$(GO) build -o bin/nacos-native-grpc-probe ./cmd/nacos-native-grpc-probe
@@ -229,6 +230,7 @@ build-go: ensure-static
 	$(GO) build ./...
 	$(GO) build -o bin/grayling ./cmd/grayling
 	$(GO) build -o bin/grayling-growth-agent ./cmd/grayling-growth-agent
+	$(GO) build -o bin/grayling-growth-lab ./cmd/grayling-growth-lab
 	$(GO) build -o bin/grayling-proxy ./cmd/grayling-proxy
 	$(GO) build -o bin/grayling-native-proxy ./cmd/grayling-native-proxy
 	$(GO) build -o bin/nacos-native-grpc-probe ./cmd/nacos-native-grpc-probe
@@ -245,3 +247,10 @@ dev-backend: run
 .PHONY: test-growth-service
 test-growth-service: frontend
 	$(GO) test -race -count=1 -v ./internal/growthservice
+
+.PHONY: test-growth-lab test-nacos-synchronization
+test-growth-lab: frontend
+	$(GO) test -race -count=1 ./internal/growthlab
+
+test-nacos-synchronization:
+	$(GO) test -race github.com/nacos-group/nacos-sdk-go/v2/common/remote/rpc -run TestGrayling -count=1

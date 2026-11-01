@@ -37,6 +37,7 @@ type ReviewInputs struct {
 // authorization, durable audit storage, or permission to submit or publish.
 // Readiness and evidence pins describe this invocation's supplied snapshot.
 type ReviewRecord struct {
+	BaselinePin         *BaselinePin          `json:"baselinePin,omitempty"`
 	SchemaVersion       string                `json:"schemaVersion"`
 	ProposalID          string                `json:"proposalId"`
 	ProposalVersion     int64                 `json:"proposalVersion"`
@@ -140,7 +141,7 @@ func RecordReview(p Proposal, evidence *Envelope, in ReviewInputs) (*ReviewRecor
 	if in.Decision == ReviewApprove && readiness.State != ProposalReadyForReview {
 		return fail("proposal", "not_ready_for_review")
 	}
-	record := &ReviewRecord{
+	record := &ReviewRecord{BaselinePin: snapshot.BaselinePin,
 		SchemaVersion: ReviewRecordSchemaVersion, ProposalID: snapshot.ID, ProposalVersion: snapshot.Version,
 		WorkspaceID: snapshot.WorkspaceID, EnvironmentID: snapshot.EnvironmentID, ProposalFingerprint: actual,
 		PrimaryMetric: snapshot.PrimaryMetric, Guardrails: snapshot.Guardrails, EvidencePins: snapshot.EvidenceRefs,

@@ -24,8 +24,9 @@ var identifier = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$`)
 
 type Principal struct{ Name, Token, Role string }
 type Config struct {
-	Evidence   growth.Config
-	Principals []Principal
+	BaselineSources []string
+	Evidence        growth.Config
+	Principals      []Principal
 	// Model is nil by default. Providers receive only pinned aggregate identity,
 	// never goal prose, tokens, identities, descriptions, reports or tool access.
 	Model         Planner
@@ -90,6 +91,15 @@ func New(ctx context.Context, store *Store, c Config) (*Service, error) {
 	if c.MaxTasks < 1 || c.MaxTasks > 64 || c.MaxModelCalls < 0 || c.MaxModelCalls > 10 {
 		return nil, ErrInput
 	}
+	if len(c.BaselineSources) > 8 {
+		return nil, ErrInput
+	}
+	for _, source := range c.BaselineSources {
+		if !identifier.MatchString(source) {
+			return nil, ErrInput
+		}
+	}
+	c.BaselineSources = append([]string(nil), c.BaselineSources...)
 	c.Principals = append([]Principal(nil), c.Principals...)
 	r, err := growth.NewReader(c.Evidence)
 	if err != nil {
@@ -177,6 +187,9 @@ func (s *Service) analyze(ctx context.Context, t *Task) {
 	state, code := "NEEDS_DATA", "baseline_missing"
 	var suggestions []Suggestion
 	var observation *growth.MonitorSummary
+	if t.Baseline != nil && t.Manifest == nil && readErr == nil {
+		evidence, readErr = growth.AttachPlanningBaseline(evidence, *t.Baseline)
+	}
 	if readErr != nil {
 		code = "evidence_unavailable"
 		if errors.Is(readErr, growth.ErrMismatch) || errors.Is(readErr, growth.ErrResponse) {
@@ -185,6 +198,8 @@ func (s *Service) analyze(ctx context.Context, t *Task) {
 		if errors.Is(readErr, growth.ErrAuthorization) {
 			state, code = "HOLD", "evidence_permission_denied"
 		}
+	} else if t.Baseline != nil && t.Manifest == nil {
+		state, code = "READY", ""
 	} else if t.Manifest != nil {
 		check, e := s.reader.CheckGoal(ctx, t.Goal, *t.Manifest)
 		if e != nil {
@@ -200,7 +215,7 @@ func (s *Service) analyze(ctx context.Context, t *Task) {
 	}
 	// The envelope and goal monitor are separate reads. Never join healthy
 	// metadata from a newer report to older unhealthy facts or model inputs.
-	if state == "READY" && (evidence.Status != growth.Ready || len(evidence.Evidence) != 1 || observation == nil || observation.EvidenceVersion != evidence.Evidence[0].Report.EvidenceVersion || observation.RegistrationVersion != evidence.Evidence[0].Report.RegistrationVersion || observation.ServerVerdict != evidence.Evidence[0].Report.Decision.Verdict) {
+	if state == "READY" && t.Baseline == nil && (evidence.Status != growth.Ready || len(evidence.Evidence) != 1 || observation == nil || observation.EvidenceVersion != evidence.Evidence[0].Report.EvidenceVersion || observation.RegistrationVersion != evidence.Evidence[0].Report.RegistrationVersion || observation.ServerVerdict != evidence.Evidence[0].Report.Decision.Verdict) {
 		state, code = "HOLD", "evidence_snapshot_changed"
 		observation = nil
 	}
@@ -214,10 +229,20 @@ func (s *Service) analyze(ctx context.Context, t *Task) {
 			return
 		}
 		pin := ""
+		if t.Baseline != nil {
+			pin, _ = growth.BaselineFingerprint(*t.Baseline)
+		}
 		if len(evidence.Evidence) > 0 {
 			pin = evidence.Evidence[0].Report.EvidenceVersion
 		}
 		aggregates := []Aggregate{}
+		if t.Baseline != nil {
+			for i, g := range t.Baseline.Groups {
+				n, c := g.Units, g.Converted
+				v := float64(c) / float64(n)
+				aggregates = append(aggregates, Aggregate{Arm: i, ExposedUnits: &n, ConvertedUnits: &c, PrimaryValue: &v})
+			}
+		}
 		if len(evidence.Evidence) > 0 {
 			for i, v := range evidence.Evidence[0].Report.PerVariant {
 				aggregates = append(aggregates, Aggregate{Arm: i, ExposedUnits: v.ExposedUnits, ConvertedUnits: v.ConvertedUnits, PrimaryValue: v.PrimaryValue})
@@ -303,6 +328,27 @@ func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
 		fail(429, "rate_limited")
 		return
 	}
+	if r.Method == "GET" && r.URL.Path == "/v1/study" {
+		summary, e := s.studySummary(r.Context())
+		if e != nil {
+			fail(500, "study_summary_failed")
+			return
+		}
+		write(w, 200, summary)
+		return
+	}
+	if r.Method == "GET" && r.URL.Path == "/v1/archive" {
+		raw, err := s.store.ExportArchive(r.Context())
+		if err != nil {
+			fail(422, "archive_integrity_or_size_failed")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", `attachment; filename="growth-evidence-archive.json"`)
+		w.WriteHeader(200)
+		_, _ = w.Write(raw)
+		return
+	}
 	if r.Method == "GET" && r.URL.Path == "/v1/learning" {
 		records, e := s.store.journal(r.Context())
 		if e != nil {
@@ -362,12 +408,32 @@ func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var in struct {
-			Goal     growth.GrowthGoal       `json:"goal"`
-			Manifest *growth.MonitorManifest `json:"manifest,omitempty"`
+			Goal     growth.GrowthGoal         `json:"goal"`
+			Manifest *growth.MonitorManifest   `json:"manifest,omitempty"`
+			Baseline *growth.AggregateBaseline `json:"baseline,omitempty"`
 		}
 		if !s.decode(w, r, &in) || growth.ValidateGoal(in.Goal) != nil || in.Goal.WorkspaceID != s.cfg.Evidence.WorkspaceID || in.Goal.EnvironmentID != s.cfg.Evidence.EnvironmentID || (!identifier.MatchString(r.Header.Get("Idempotency-Key")) || s.containsSecret([]byte(r.Header.Get("Idempotency-Key")))) {
 			fail(400, "invalid_goal_or_key")
 			return
+		}
+		if in.Baseline != nil {
+			allowed := false
+			for _, source := range s.cfg.BaselineSources {
+				if source == in.Baseline.SourceID {
+					allowed = true
+				}
+			}
+			b := in.Baseline
+			if !allowed || in.Manifest != nil || growth.ValidateAggregateBaseline(*b) != nil || b.WorkspaceID != in.Goal.WorkspaceID || b.EnvironmentID != in.Goal.EnvironmentID || b.Metrics[0] != in.Goal.PrimaryMetric.Ref || !b.Window.Start.Equal(in.Goal.BaselineWindow.Start) || !b.Window.End.Equal(in.Goal.BaselineWindow.End) || b.RefreshedAt.After(time.Now().UTC()) || len(b.Metrics) != 1+len(in.Goal.Guardrails) {
+				fail(400, "invalid_or_unapproved_baseline")
+				return
+			}
+			for i, g := range in.Goal.Guardrails {
+				if b.Metrics[i+1] != g.Ref {
+					fail(400, "baseline_metric_mismatch")
+					return
+				}
+			}
 		}
 		if in.Manifest != nil {
 			b, _ := json.Marshal(in.Manifest)
@@ -388,10 +454,7 @@ func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
 		var priorID, priorHash string
 		replayErr := s.store.db.QueryRowContext(r.Context(), `SELECT id,input_hash FROM tasks WHERE request_key=?`, r.Header.Get("Idempotency-Key")).Scan(&priorID, &priorHash)
 		if replayErr == nil {
-			inputHash := digest(struct {
-				Goal     growth.GrowthGoal
-				Manifest *growth.MonitorManifest
-			}{in.Goal, in.Manifest})
+			inputHash := inputFingerprint(in.Goal, in.Manifest, in.Baseline)
 			if inputHash != priorHash {
 				fail(409, "idempotency_conflict")
 				return
@@ -419,7 +482,10 @@ func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
 			fail(400, "invalid_goal")
 			return
 		}
-		t, err := s.store.create(r.Context(), &Task{ID: id, Goal: in.Goal, Proposal: *p, Manifest: in.Manifest, State: "QUEUED", Suggestions: []Suggestion{}}, r.Header.Get("Idempotency-Key"), principal.Name)
+		if in.Baseline != nil {
+			p.BaselinePin, _ = growth.PinBaseline(*in.Baseline)
+		}
+		t, err := s.store.create(r.Context(), &Task{Baseline: in.Baseline, ID: id, Goal: in.Goal, Proposal: *p, Manifest: in.Manifest, State: "QUEUED", Suggestions: []Suggestion{}}, r.Header.Get("Idempotency-Key"), principal.Name)
 		if err != nil {
 			fail(409, "idempotency_conflict")
 			return
@@ -439,6 +505,15 @@ func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == "GET" && len(parts) == 3 {
 		write(w, 200, t)
+		return
+	}
+	if r.Method == "GET" && len(parts) == 4 && parts[3] == "study" {
+		bundle, e := s.study(r.Context(), t)
+		if e != nil {
+			fail(500, "study_export_failed")
+			return
+		}
+		write(w, 200, bundle)
 		return
 	}
 	if r.Method == "GET" && len(parts) == 4 && parts[3] == "versions" {
@@ -469,7 +544,7 @@ func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	action := parts[3]
 	switch action {
-	case "edit", "review", "prepare", "submit", "platform-review", "bind", "monitor", "learning", "retry", "cancel":
+	case "study", "design", "sample-plan", "edit", "review", "prepare", "submit", "platform-review", "bind", "monitor", "learning", "retry", "cancel":
 	default:
 		fail(404, "not_found")
 		return
@@ -577,6 +652,9 @@ func (s *Service) containsSecret(raw []byte) bool {
 // This is a conservative model-disclosure floor, never a statistical/sample
 // adequacy rule. A real deployment still needs its approved privacy policy.
 func modelAggregatesReady(e *growth.Envelope) bool {
+	if e != nil && e.PlanningBaseline != nil {
+		return growth.ValidateAggregateBaseline(*e.PlanningBaseline) == nil
+	}
 	if e == nil || len(e.Evidence) != 1 || len(e.Evidence[0].Report.PerVariant) < 2 {
 		return false
 	}

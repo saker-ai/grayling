@@ -54,3 +54,17 @@ THE SOFTWARE IS PROVIDED AS IS AND THE AUTHOR DISCLAIMS ALL WARRANTIES.
 
 if __name__ == "__main__":
     unittest.main()
+
+class LocalSourcePinTest(unittest.TestCase):
+    def test_local_source_drift_changes_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.go").write_text("package example\n")
+            mod = {"Path": "example.test/local", "Version": "v1.0.0", "Dir": directory,
+                   "Replace": {"Path": "./third_party/example", "Dir": directory}}
+            with mock.patch.object(license_audit, "go_modules", return_value=[mod]), mock.patch.object(license_audit, "runtime_modules", return_value=set()):
+                before = license_audit.inventory()
+            (root / "source.go").write_text("package changed\n")
+            with mock.patch.object(license_audit, "go_modules", return_value=[mod]), mock.patch.object(license_audit, "runtime_modules", return_value=set()):
+                after = license_audit.inventory()
+            self.assertNotEqual(before["go"][0]["local_source_sha256"], after["go"][0]["local_source_sha256"])

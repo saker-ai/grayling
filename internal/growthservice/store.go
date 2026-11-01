@@ -25,6 +25,9 @@ var ErrInput = errors.New("growth service: invalid input")
 // A Task is a versioned aggregate. Every mutation and its audit checkpoint commit
 // in one SQLite transaction. No credentials, raw events or model prompts belong here.
 type Task struct {
+	Study                []StudyEntry               `json:"study,omitempty"`
+	SampleCalculation    *SampleInputs              `json:"sampleCalculation,omitempty"`
+	Baseline             *growth.AggregateBaseline  `json:"baseline,omitempty"`
 	Readiness            *growth.ProposalReview     `json:"readiness,omitempty"`
 	Remediation          string                     `json:"remediation,omitempty"`
 	PreparedFlagRevision int64                      `json:"preparedFlagRevision,omitempty"`
@@ -212,10 +215,7 @@ func (s *Store) history(ctx context.Context, id string) ([]Audit, error) {
 func (s *Store) create(ctx context.Context, t *Task, key, actor string) (*Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	hash := digest(struct {
-		Goal     growth.GrowthGoal
-		Manifest *growth.MonitorManifest
-	}{t.Goal, t.Manifest})
+	hash := inputFingerprint(t.Goal, t.Manifest, t.Baseline)
 	var id, oldHash string
 	err := s.db.QueryRowContext(ctx, `SELECT id,input_hash FROM tasks WHERE request_key=?`, key).Scan(&id, &oldHash)
 	if err == nil {
@@ -479,4 +479,69 @@ func (s *Store) journal(ctx context.Context) ([]growth.LearningRecord, error) {
 		out = append(out, *record)
 	}
 	return out, rows.Err()
+}
+
+func inputFingerprint(goal growth.GrowthGoal, manifest *growth.MonitorManifest, baseline *growth.AggregateBaseline) string {
+	if baseline == nil {
+		return digest(struct {
+			Goal     growth.GrowthGoal
+			Manifest *growth.MonitorManifest
+		}{goal, manifest})
+	}
+	return digest(struct {
+		Goal     growth.GrowthGoal
+		Manifest *growth.MonitorManifest
+		Baseline *growth.AggregateBaseline
+	}{goal, manifest, baseline})
+}
+
+// ExportArchive returns one consistent, bounded, scoped evidence archive. It
+// never deletes records or replaces the verifiable SQLite backup/restore path.
+func (s *Store) ExportArchive(ctx context.Context) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.Verify(ctx); err != nil {
+		return nil, err
+	}
+	tasks, err := s.list(ctx)
+	if err != nil {
+		return nil, err
+	}
+	type record struct {
+		Task     *Task             `json:"task"`
+		Versions []growth.Proposal `json:"versions"`
+		Audit    []Audit           `json:"audit"`
+	}
+	records := []record{}
+	for _, t := range tasks {
+		versions, e := s.versions(ctx, t.ID)
+		if e != nil {
+			return nil, e
+		}
+		audit, e := s.history(ctx, t.ID)
+		if e != nil {
+			return nil, e
+		}
+		records = append(records, record{t, versions, audit})
+	}
+	journal, err := s.journal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	content := struct {
+		Schema   string                  `json:"schema"`
+		Records  []record                `json:"records"`
+		Learning []growth.LearningRecord `json:"learning"`
+	}{"growth.archive.v1", records, journal}
+	raw, err := json.Marshal(struct {
+		Content     any    `json:"content"`
+		Fingerprint string `json:"fingerprint"`
+	}{content, digest(content)}, json.Deterministic(true))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > 16<<20 {
+		return nil, ErrInput
+	}
+	return raw, nil
 }

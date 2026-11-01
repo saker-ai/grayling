@@ -29,6 +29,7 @@ const (
 // Proposal is untrusted planning data, never authorization. No input state,
 // approval, submission, or evidence envelope is part of this contract.
 type Proposal struct {
+	BaselinePin        *BaselinePin          `json:"baselinePin,omitempty"`
 	SchemaVersion      string                `json:"schemaVersion"`
 	ID                 string                `json:"id"`
 	Version            int64                 `json:"version"`
@@ -143,7 +144,7 @@ func DecodeProposal(r io.Reader) (*Proposal, error) {
 	}
 	// An explicit null is a supplied malformed pin, not an absent pin.
 	var members map[string]jsontext.Value
-	if json.Unmarshal(data, &members) != nil || (members["goalPin"] != nil && p.GoalPin == nil) || !validGoalPin(p.GoalPin) {
+	if json.Unmarshal(data, &members) != nil || (members["goalPin"] != nil && p.GoalPin == nil) || (members["baselinePin"] != nil && p.BaselinePin == nil) || (!validGoalPin(p.GoalPin) || !validBaselinePin(p.BaselinePin)) {
 		return nil, ErrProposal
 	}
 	return p, nil
@@ -296,7 +297,10 @@ func ReviewProposal(p Proposal, evidence *Envelope) ProposalReview {
 			add(field, "metric_evidence_mismatch", "data")
 		}
 	}
-	if len(p.EvidenceRefs) < 1 || len(p.EvidenceRefs) > 20 {
+	if p.BaselinePin != nil && !baselineMatches(p, evidence) {
+		add("baselinePin", "baseline_evidence_mismatch", "data")
+	}
+	if (len(p.EvidenceRefs) < 1 && !baselineMatches(p, evidence)) || len(p.EvidenceRefs) > 20 {
 		add("evidenceRefs", "count_out_of_bounds", "data")
 	}
 	seenEvidence := map[string]bool{}

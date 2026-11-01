@@ -33,6 +33,9 @@ paths:
               required: [goal]
               properties:
                 goal: {$ref: '#/components/schemas/Goal'}
+                baseline:
+                  type: object
+                  description: Optional growth.aggregate-baseline.v1 finite observational export; source must be allowlisted; mutually exclusive with manifest.
                 manifest:
                   oneOf:
                     - {$ref: '#/components/schemas/Manifest'}
@@ -69,7 +72,7 @@ paths:
         required: true
         schema:
           type: string
-          enum: [edit, review, prepare, submit, platform-review, bind, monitor, learning, retry, cancel]
+          enum: [design, sample-plan, study, edit, review, prepare, submit, platform-review, bind, monitor, learning, retry, cancel]
       - in: header
         name: X-Grayling-Token
         description: >-
@@ -94,6 +97,15 @@ paths:
               required: [revision]
               properties:
                 revision: {type: integer, format: int64, minimum: 1}
+                design:
+                  type: object
+                  description: Suggestion index and explicit flag/unit/audience/render/allocation/implementation/rollback inputs
+                sample:
+                  type: object
+                  description: Explicit absoluteMde, alpha, power, direction, minRuntimeHours; equal-arm proportion calculator
+                study:
+                  type: object
+                  description: Operator-supplied manual_before/assisted duration or recommendation_review score; no independent-human verification
                 proposal:
                   type: object
                   description: 'Existing growth.proposal.v1, strictly decoded; see growth-copilot.md#proposal-contract'
@@ -115,6 +127,23 @@ paths:
         '409': {description: Stale revision, state/evidence/flag/epoch conflict; refresh task and remediation}
         '422': {description: Action blocked; refresh task to inspect readiness and remediation}
         '429': {description: Rate limit}
+  /v1/tasks/{id}/study:
+    parameters: [{$ref: '#/components/parameters/TaskID'}]
+    get:
+      summary: Export anonymous recommendation IDs, pinned evidence, review rubric and honest measurements
+      responses:
+        '200': {description: growth.study.v1; independentHumanVerified always false}
+  /v1/study:
+    get:
+      summary: Scoped current readiness/run counts, explicit denominators and monthly UTC learning snapshots
+      responses:
+        '200': {description: 'growth.study-summary.v1; distinct defect discovery and independent human verification are not inferred'}
+  /v1/archive:
+    get:
+      summary: Export a verified consistent scoped archive without deleting evidence
+      responses:
+        '200': {description: growth.archive.v1 content plus fingerprint; maximum 16 MiB}
+        '422': {description: Integrity check or size budget failed}
   /v1/learning:
     get:
       summary: Search immutable learning and lexically group matching hypotheses

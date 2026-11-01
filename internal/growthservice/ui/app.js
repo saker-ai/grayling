@@ -47,3 +47,11 @@ el('prepare').onclick = () => guard(() => action('prepare', {settings: JSON.pars
 el('learning').onclick = () => guard(() => action('learning', {followups: el('followups').value.split('\n').filter(Boolean)}));
 for (const name of ['submit','platform-review','bind','monitor','retry','cancel']) el(name).onclick = () => guard(() => action(name));
 el('search').onclick = () => guard(async () => show('results', await api('/v1/learning?text=' + encodeURIComponent(el('query').value))));
+
+el('design').onclick = () => guard(() => action('design', {design: JSON.parse(el('design-input').value)}));
+el('sample-plan').onclick = () => guard(() => action('sample-plan', {sample: JSON.parse(el('sample-input').value)}));
+
+el('study-export').onclick = () => guard(async () => { if (!current) throw Error('Select a task first.'); show('study-view', await api('/v1/tasks/' + current.id + '/study')); });
+el('study-save').onclick = () => guard(() => action('study', {study: JSON.parse(el('study-input').value)}));
+
+el('study-summary').onclick = () => guard(async () => show('study-summary-view', await api('/v1/study')));

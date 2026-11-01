@@ -81,7 +81,10 @@ func newFixture(t *testing.T, mutate func(*fixture)) *fixture {
 		if strings.Contains(r.URL.Path, "/metrics/") {
 			segments := strings.Split(r.URL.Path, "/")
 			key := segments[len(segments)-3]
-			write(w, 200, growth.Metric{WorkspaceID: f.goal.WorkspaceID, Key: key, Version: 1, Hash: ha, Status: "published", AttributionWindow: int64(24 * time.Hour)})
+			metric := growth.Metric{WorkspaceID: f.goal.WorkspaceID, Key: key, Version: 1, Hash: ha, Status: "published", AttributionWindow: int64(24 * time.Hour)}
+			metric.Spec.Type = "proportion"
+			metric.Spec.Direction = "increase"
+			write(w, 200, metric)
 			return
 		}
 		report := f.report

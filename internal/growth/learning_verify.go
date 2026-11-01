@@ -57,11 +57,11 @@ func VerifyLearning(p Proposal, r LearningRecord, workspace, environment string)
 	}
 	// Compare all copied baseline fields in order, including windows. Baselines
 	// need not be the linked experiment and must never be compared as if they were.
-	baseline, err := json.Marshal(p.EvidenceRefs, json.Deterministic(true))
+	baseline, err := json.Marshal([]any{p.EvidenceRefs, p.BaselinePin}, json.Deterministic(true))
 	if err != nil {
 		return nil, ErrLearning
 	}
-	copied, err := json.Marshal(r.ProposalBaselineReferences, json.Deterministic(true))
+	copied, err := json.Marshal([]any{r.ProposalBaselineReferences, r.BaselinePin}, json.Deterministic(true))
 	if err != nil || !bytes.Equal(baseline, copied) {
 		return nil, ErrLearning
 	}

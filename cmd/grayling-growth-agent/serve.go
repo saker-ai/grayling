@@ -17,13 +17,15 @@ import (
 )
 
 type serviceFile struct {
-	LocalPlannerURL string `json:"localPlannerUrl,omitempty"`
-	Database        string `json:"database"`
-	Address         string `json:"address"`
-	BaseURL         string `json:"baseUrl"`
-	Workspace       string `json:"workspace"`
-	Environment     string `json:"environment"`
-	ReadTokenEnv    string `json:"readTokenEnv"`
+	BaselineSources []string                        `json:"baselineSources,omitempty"`
+	Provider        *growthservice.ProviderSettings `json:"provider,omitempty"`
+	LocalPlannerURL string                          `json:"localPlannerUrl,omitempty"`
+	Database        string                          `json:"database"`
+	Address         string                          `json:"address"`
+	BaseURL         string                          `json:"baseUrl"`
+	Workspace       string                          `json:"workspace"`
+	Environment     string                          `json:"environment"`
+	ReadTokenEnv    string                          `json:"readTokenEnv"`
 	Principals      []struct {
 		Name     string `json:"name"`
 		TokenEnv string `json:"tokenEnv"`
@@ -40,7 +42,7 @@ func runServe(ctx context.Context, args []string, out, diagnostics io.Writer) in
 		return 2
 	}
 	// Reuse no-follow and actual-read bounds; configuration contains env names,
-	// never credentials. No provider is enabled by the command.
+	// never credentials. A provider requires an explicit configuration block.
 	f, err := os.OpenFile(*config, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		io.WriteString(diagnostics, "invalid service configuration\n")
@@ -65,13 +67,26 @@ func runServe(ctx context.Context, args []string, out, diagnostics io.Writer) in
 		io.WriteString(diagnostics, "service address must be loopback\n")
 		return 2
 	}
-	cfg := growthservice.Config{Evidence: growth.Config{BaseURL: strings.TrimRight(c.BaseURL, "/"), WorkspaceID: c.Workspace, EnvironmentID: c.Environment, BearerToken: os.Getenv(c.ReadTokenEnv)}}
+	cfg := growthservice.Config{BaselineSources: c.BaselineSources, Evidence: growth.Config{BaseURL: strings.TrimRight(c.BaseURL, "/"), WorkspaceID: c.Workspace, EnvironmentID: c.Environment, BearerToken: os.Getenv(c.ReadTokenEnv)}}
 	for _, p := range c.Principals {
 		if !envName.MatchString(p.TokenEnv) {
 			io.WriteString(diagnostics, "invalid principal configuration\n")
 			return 2
 		}
 		cfg.Principals = append(cfg.Principals, growthservice.Principal{Name: p.Name, Token: os.Getenv(p.TokenEnv), Role: p.Role})
+	}
+	if c.LocalPlannerURL != "" && c.Provider != nil {
+		io.WriteString(diagnostics, "select only one planner\n")
+		return 2
+	}
+	if c.Provider != nil {
+		planner, e := growthservice.NewProviderPlanner(*c.Provider)
+		if e != nil {
+			io.WriteString(diagnostics, "invalid provider configuration\n")
+			return 2
+		}
+		cfg.Model = planner
+		cfg.MaxModelCalls = 1
 	}
 	if c.LocalPlannerURL != "" {
 		planner, e := growthservice.NewLocalPlanner(c.LocalPlannerURL)

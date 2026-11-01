@@ -103,6 +103,8 @@ type Data struct {
 // Persistence backend as one transactional unit (file JSON for dev, or
 // PostgreSQL for production — docs/技术方案.md §3, §10.2).
 type Store struct {
+	// clock is set only at construction by the isolated synthetic lab.
+	clock      func() time.Time
 	banditPins map[string]*Event
 	// rawAnalysisEvents retains the full immutable ledger snapshot for one
 	// report replay. It is populated only on short-lived analysis views.
@@ -370,7 +372,31 @@ func (s *Store) nextID(prefix string) string {
 	return id
 }
 
-func (s *Store) now() time.Time { return time.Now().UTC() }
+func (s *Store) now() time.Time {
+	if s.clock != nil {
+		return s.clock().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// CurrentTime returns the authoritative event/report clock. Production stores
+// always use wall time. No HTTP or production configuration can change it.
+func (s *Store) CurrentTime() time.Time { return s.now() }
+
+// NewSyntheticSQLiteStore opens an isolated simulation store with an injected
+// clock. Callers must supply a concurrency-safe clock before sharing the store.
+// It is deliberately unavailable through the production server configuration.
+func NewSyntheticSQLiteStore(ctx context.Context, path string, clock func() time.Time) (*Store, error) {
+	if clock == nil {
+		return nil, ErrValidation
+	}
+	s, err := NewSQLiteStore(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	s.clock = clock
+	return s, nil
+}
 
 // ---------------------------------------------------------------------------
 // Workspaces & environments

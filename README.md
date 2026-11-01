@@ -298,3 +298,9 @@ The console is a React 19 + TypeScript SPA built with Vite, organized as a pnpm 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and checks, and [SECURITY.md](SECURITY.md) for private vulnerability reports.
 
 Grayling is licensed under [Apache-2.0](LICENSE). Third-party attribution and the pinned dependency license inventory are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [`third_party/licenses.json`](third_party/licenses.json). Run `make release-check` before redistributing binaries.
+
+The optional [synthetic growth lab](docs/growth-synthetic-lab.md) runs owned local
+activation/upgrade samples with real platform APIs, persistent tasks, browser
+exposure/conversion and virtual D1 maturity. It uses no real identities or payments.
+Direct provider access and finite aggregate import require explicit configuration;
+see [Growth service](docs/growth-service.md).

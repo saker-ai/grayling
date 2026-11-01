@@ -16,6 +16,9 @@ import (
 var ErrFlagChanged = errors.New("growth service: prepared flag revision changed")
 
 type Action struct {
+	Study     *StudyEntry               `json:"study,omitempty"`
+	Design    *DesignInputs             `json:"design,omitempty"`
+	Sample    *SampleInputs             `json:"sample,omitempty"`
 	Revision  int64                     `json:"revision"`
 	Proposal  *growth.Proposal          `json:"proposal,omitempty"`
 	Decision  growth.ReviewDecision     `json:"decision,omitempty"`
@@ -32,7 +35,27 @@ func (s *Service) evidence(ctx context.Context, p growth.Proposal) (*growth.Enve
 	for _, r := range p.EvidenceRefs {
 		q.Experiments = append(q.Experiments, growth.ExperimentRef{ID: r.ExperimentID, Epoch: r.Epoch, EvidenceVersion: r.EvidenceVersion})
 	}
-	return s.reader.Read(ctx, q)
+	e, err := s.reader.Read(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	if p.BaselinePin != nil {
+		tasks, err := s.store.list(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, task := range tasks {
+			if task.Proposal.ID == p.ID && task.Baseline != nil {
+				pin, e2 := growth.PinBaseline(*task.Baseline)
+				if e2 != nil || *pin != *p.BaselinePin {
+					return nil, ErrConflict
+				}
+				return growth.AttachPlanningBaseline(e, *task.Baseline)
+			}
+		}
+		return nil, ErrConflict
+	}
+	return e, nil
 }
 func (s *Service) action(ctx context.Context, t *Task, p Principal, action string, in Action, upstreamToken string) (*Task, error) {
 	save := func(fn func(*Task) error) (*Task, error) {
@@ -50,6 +73,21 @@ func (s *Service) action(ctx context.Context, t *Task, p Principal, action strin
 		return nil, ErrConflict
 	}
 	switch action {
+	case "study":
+		if in.Study == nil {
+			return nil, ErrInput
+		}
+		return s.recordStudy(ctx, t, p, *in.Study)
+	case "design":
+		if in.Design == nil {
+			return nil, ErrInput
+		}
+		return s.design(ctx, t, p, *in.Design)
+	case "sample-plan":
+		if in.Sample == nil {
+			return nil, ErrInput
+		}
+		return s.sample(ctx, t, p, *in.Sample)
 	case "cancel":
 		return save(func(t *Task) error { t.State = "CANCELED"; t.ErrorCode = ""; return nil })
 	case "retry":
@@ -73,6 +111,7 @@ func (s *Service) action(ctx context.Context, t *Task, p Principal, action strin
 		}
 		return save(func(t *Task) error {
 			t.Proposal = candidate
+			t.SampleCalculation = nil
 			t.Review = nil
 			t.Prepared = nil
 			t.State = "IMPLEMENTATION_CHECK"
@@ -109,6 +148,9 @@ func (s *Service) action(ctx context.Context, t *Task, p Principal, action strin
 	case "prepare":
 		if t.State != "APPROVED" && t.State != "PREPARED" {
 			return nil, ErrConflict
+		}
+		if t.SampleCalculation != nil && in.Settings != nil && (in.Settings.Alpha != t.SampleCalculation.Alpha || in.Settings.Power != t.SampleCalculation.Power) {
+			return nil, ErrInput
 		}
 		if t.Review == nil || in.Settings == nil || t.ReservedEpoch != 0 {
 			return nil, ErrInput

@@ -1315,7 +1315,10 @@
       "version": "v2.3.5",
       "runtime": false,
       "license": "NOT_DISTRIBUTED",
-      "evidence": []
+      "evidence": [],
+      "resolved_module": "./third_party/nacos-sdk-go",
+      "resolved_version": "local",
+      "local_source_sha256": "4ffa54efb2bcb8640e4dfd9f36c5583ce6037dceecbc78b69574c131a77425e9"
     },
     {
       "module": "github.com/ncruces/go-strftime",
