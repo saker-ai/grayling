@@ -141,21 +141,32 @@ func TestMultiReplicaPlanStartTakeoverAndManualAdvance(t *testing.T) {
 	ctxA, cancelA := context.WithCancel(t.Context())
 	ctxB, cancelB := context.WithCancel(t.Context())
 	var runs sync.WaitGroup
+	defer func() { cancelA(); cancelB(); runs.Wait() }()
 	runs.Go(func() { h.api.Rollout.Run(ctxA, 40*time.Millisecond) })
 	deadline := time.Now().Add(3 * time.Second)
+	var first platform.RolloutLeadership
+	ready := false
 	for time.Now().Before(deadline) {
 		if err := a.ReloadFromBackend(); err != nil {
 			t.Fatal(err)
 		}
 		plan := h.getPlan(t, expID)
-		if plan.State == platform.ReleasePlanRunning {
+		// The durable plan may be visible before a slow publish finishes, and
+		// a short test lease can expire meanwhile. Observe the two required
+		// conditions together; retain the original deadline and lease TTL.
+		leadership, err := a.RolloutLeadership(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if plan.State == platform.ReleasePlanRunning && leadership.Holder != "" {
+			first = leadership
+			ready = true
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	first, err := a.RolloutLeadership(t.Context())
-	if err != nil || first.Holder == "" {
-		t.Fatalf("initial leader: %+v %v", first, err)
+	if !ready {
+		t.Fatalf("running plan and live initial leader not observed within original deadline: %+v", first)
 	}
 	var observed platform.RolloutLeadership
 	if code := h.do("GET", "/api/v1/admin/rollout/leadership", h.owner, nil, &observed); code != http.StatusOK || observed.Generation != first.Generation {
