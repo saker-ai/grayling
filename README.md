@@ -4,6 +4,15 @@
 
 Grayling is a self-hosted platform for feature flags, gradual rollouts, and A/B experiments. It also versions and gates AI resources such as prompts, skills, and agent specifications. The control plane, web console, and HTTP API can run as a standalone service or inside another Go service. This repository is named **Grayling**; the application and Go package remain **Grayling**.
 
+The optional [`grayling-growth-agent serve --config FILE`](docs/growth-service.md)
+adds a separate authenticated workbench and durable SQLite workflow: goal analysis,
+proposal editing/review, prepared drafts, explicit human Admin API submission/review/binding,
+read-only monitoring and searchable learning. AI defaults off; optional planning is
+restricted to a loopback adapter. Restart/restore and lost-response reconciliation
+preserve checkpoints without a second experiment or automatic publication. Real
+Saker pilot, blind suggestion review and measured business outcomes remain outstanding.
+The [private service OpenAPI](docs/growth-service.openapi.yaml) is separate from the core API.
+
 The optional `bin/grayling-growth-agent review` and `prepare` commands and `internal/growth` library read aggregate evidence and validate
 versioned proposal JSON for human review. Missing/mismatched/HOLD evidence and
 missing implementation attestations block readiness. For example, a complete

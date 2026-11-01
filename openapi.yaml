@@ -5065,7 +5065,7 @@ components:
         flagRevision:
           type: integer
           format: int64
-          description: 注册时所绑定的 flag revision。
+          description: 注册时所绑定的 flag revision；创建时可提供正整数作为当前已发布版本的前置条件，版本变化返回 409；0 或省略由服务端选择当前版本。
         epoch:
           type: integer
           format: int64

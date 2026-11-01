@@ -52,6 +52,7 @@ import (
 	gw "github.com/saker-ai/grayling/internal/gateway"
 	"github.com/saker-ai/grayling/pkg/bucketing"
 	"github.com/saker-ai/grayling/pkg/model"
+	"github.com/saker-ai/grayling/test/porttest"
 	"github.com/saker-ai/grayling/test/redistest"
 	"github.com/saker-ai/grayling/test/traefiktest"
 )
@@ -60,16 +61,7 @@ import (
 // Process helpers
 // ---------------------------------------------------------------------------
 
-func freePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("free port: %v", err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	return port
-}
+func freePort(t *testing.T) int { t.Helper(); return porttest.Free(t) }
 
 func repoRoot(t *testing.T) string {
 	t.Helper()

@@ -1,0 +1,194 @@
+openapi: 3.1.0
+info:
+  title: Optional Grayling Growth Copilot private service
+  version: 1.0.0
+  description: >-
+    Separate loopback service, disabled unless explicitly started. Each database
+    has one immutable workspace/environment. Bearer principals are provisioned
+    by the operator; artifacts and model output grant no authorization.
+    Platform writes require a separate ephemeral human Grayling credential and
+    independently pass existing Grayling RBAC. No publication endpoint exists.
+security:
+  - ServiceBearer: []
+paths:
+  /v1/tasks:
+    get:
+      summary: List task summaries in this service scope
+      responses:
+        '200': {description: 'Array of id, revision, state, and goal objective summaries'}
+    post:
+      summary: Persist an idempotent goal analysis task without waiting for the model
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: {type: string, pattern: '^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [goal]
+              properties:
+                goal: {$ref: '#/components/schemas/Goal'}
+                manifest:
+                  oneOf:
+                    - {$ref: '#/components/schemas/Manifest'}
+                    - {type: 'null'}
+      responses:
+        '202': {description: Durable task ID and current task snapshot; replays retain ID}
+        '400': {description: Invalid goal, scope, strict JSON, or request key}
+        '409': {description: Same request key with a different input}
+        '429': {description: Task or request budget exhausted}
+  /v1/tasks/{id}:
+    parameters: [{$ref: '#/components/parameters/TaskID'}]
+    get:
+      summary: Read a durable task and its evidence, review, preparation, run and learning
+      responses:
+        '200': {description: 'Task snapshot; revision is required for a subsequent mutation'}
+        '404': {description: Task does not exist}
+  /v1/tasks/{id}/audit:
+    parameters: [{$ref: '#/components/parameters/TaskID'}]
+    get:
+      summary: Read ordered audit checkpoints and goal/proposal/version/hash pins
+      responses:
+        '200': {description: 'Audit array; hashes detect corruption, not hostile-owner rewriting'}
+  /v1/tasks/{id}/versions:
+    parameters: [{$ref: '#/components/parameters/TaskID'}]
+    get:
+      summary: Read immutable proposal versions, including rejected and superseded versions
+      responses:
+        '200': {description: Array of growth.proposal.v1 artifacts in version order}
+  /v1/tasks/{id}/{action}:
+    parameters:
+      - {$ref: '#/components/parameters/TaskID'}
+      - in: path
+        name: action
+        required: true
+        schema:
+          type: string
+          enum: [edit, review, prepare, submit, platform-review, bind, monitor, learning, retry, cancel]
+      - in: header
+        name: X-Grayling-Token
+        description: >-
+          Required only for explicit submit/platform-review/bind. Ephemeral human
+          Grayling token, never persisted. Reviewer service role is also required.
+        schema: {type: string}
+    post:
+      summary: Execute one explicit version-checked action
+      description: >-
+        edit requires proposal with next version and immutable goal pin; review
+        requires decision and rationale and binds authenticated reviewer/time;
+        prepare requires explicit settings; learning requires followups.
+        Model text cannot select or execute any action. Abort stops future service
+        work and does not undo a completed platform action.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [revision]
+              properties:
+                revision: {type: integer, format: int64, minimum: 1}
+                proposal:
+                  type: object
+                  description: 'Existing growth.proposal.v1, strictly decoded; see growth-copilot.md#proposal-contract'
+                decision: {type: string, enum: [approve, reject, request_changes]}
+                rationale: {type: string, maxLength: 4096}
+                settings:
+                  type: object
+                  description: Existing growth.PreparationInputs; no inferred defaults or thresholds
+                followups:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items: {type: string, maxLength: 4096}
+      responses:
+        '200': {description: Current task after the single action}
+        '400': {description: Invalid or oversized strict JSON}
+        '401': {description: Service bearer invalid}
+        '403': {description: Role or origin denied}
+        '409': {description: Stale revision, state/evidence/flag/epoch conflict; refresh task and remediation}
+        '422': {description: Action blocked; refresh task to inspect readiness and remediation}
+        '429': {description: Rate limit}
+  /v1/learning:
+    get:
+      summary: Search immutable learning and lexically group matching hypotheses
+      parameters:
+        - in: query
+          name: text
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 4096}
+      responses:
+        '200': {description: 'growth.learning-search.v1 fields plus groups; every failure is preserved, empty journals return empty arrays'}
+        '400': {description: Invalid search query}
+components:
+  securitySchemes:
+    ServiceBearer: {type: http, scheme: bearer}
+  parameters:
+    TaskID:
+      in: path
+      name: id
+      required: true
+      schema: {type: string, pattern: '^task_[0-9a-f]{32}$'}
+  schemas:
+    Ref:
+      type: object
+      additionalProperties: false
+      required: [key, version, definitionHash]
+      properties:
+        key: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+        definitionHash: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+    Metric:
+      type: object
+      additionalProperties: false
+      required: [ref, sourcePath]
+      properties:
+        ref: {$ref: '#/components/schemas/Ref'}
+        sourcePath: {type: string, description: Exact canonical metric-version Admin API path}
+    Goal:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, id, version, workspaceId, environmentId, owner, objective, primaryMetric, guardrails, baselineWindow]
+      properties:
+        schemaVersion: {type: string, const: growth.goal.v1}
+        id: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+        workspaceId: {type: string}
+        environmentId: {type: string}
+        owner: {type: string}
+        objective: {type: string, maxLength: 4096}
+        primaryMetric: {$ref: '#/components/schemas/Metric'}
+        guardrails:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: {$ref: '#/components/schemas/Metric'}
+        baselineWindow:
+          type: object
+          additionalProperties: false
+          required: [start, end]
+          properties:
+            start: {type: string, format: date-time}
+            end: {type: string, format: date-time}
+    Manifest:
+      type: object
+      additionalProperties: false
+      required: [workspaceId, environmentId, experimentId, epoch, registrationVersion, primaryMetric, guardrails]
+      properties:
+        workspaceId: {type: string}
+        environmentId: {type: string}
+        experimentId: {type: string}
+        epoch: {type: integer, format: int64, minimum: 1}
+        registrationVersion: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+        evidenceVersion: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+        primaryMetric: {$ref: '#/components/schemas/Ref'}
+        guardrails:
+          type: array
+          maxItems: 16
+          items: {$ref: '#/components/schemas/Ref'}

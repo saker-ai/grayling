@@ -239,3 +239,9 @@ dev-frontend:
 # dev-backend is the existing run target: build everything and start the
 # server; use dev-frontend alongside it for Vite hot reload.
 dev-backend: run
+
+# Optional isolated Growth Copilot: SQLite recovery, real-process fault/restore,
+# actual Admin API orchestration, and Chromium UI acceptance (local fixtures).
+.PHONY: test-growth-service
+test-growth-service: frontend
+	$(GO) test -race -count=1 -v ./internal/growthservice

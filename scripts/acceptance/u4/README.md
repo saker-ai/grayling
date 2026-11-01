@@ -81,6 +81,7 @@ U4_BASE_URL=http://127.0.0.1:28090 node scripts/acceptance/u4/axe-audit.mjs
 ```
 
 Knobs: `U4_PORT` (first port tried, default 28090), `U4_TMP` (scratch root),
+`U4_EVIDENCE_DIR` (private evidence output; default remains the documented docs directory),
 `U4_REBUILD=1` (force `make build`), `U4_BASE_URL` (attach, skip boot/teardown).
 
 Note on the browser: `@playwright/test` is pinned to the release whose

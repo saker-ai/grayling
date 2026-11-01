@@ -349,7 +349,31 @@ func TestRecordLearningBinary(t *testing.T) {
 					writes.Add(1)
 				}
 				if r.Header.Get("Authorization") != "Bearer "+secret {
-					t.Error("credential missing")
+					// Classify unexpected local traffic without printing credentials, raw
+					// URLs, headers or report bodies. Keep the authorization assertion intact.
+					route := "other"
+					switch r.URL.Path {
+					case "/":
+						route = "root"
+					case "/favicon.ico":
+						route = "favicon"
+					case "/api/v1/health":
+						route = "health"
+					}
+					agent := "other"
+					switch {
+					case strings.HasPrefix(r.UserAgent(), "Go-http-client/"):
+						agent = "go"
+					case strings.Contains(r.UserAgent(), "Chrome/"):
+						agent = "chromium"
+					case strings.HasPrefix(r.UserAgent(), "python"):
+						agent = "python"
+					}
+					method := "other"
+					if r.Method == http.MethodGet {
+						method = "get"
+					}
+					t.Errorf("credential missing (method=%s route=%s agent=%s)", method, route, agent)
 				}
 				if name == "signal" || name == "sigterm" || name == "timeout" {
 					select {
