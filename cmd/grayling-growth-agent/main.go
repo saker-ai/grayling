@@ -19,7 +19,9 @@ import (
 	"github.com/saker-ai/grayling/internal/growth"
 )
 
-const usage = `Usage: grayling-growth-agent review --proposal FILE [--goal FILE] --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
+const usage = `Usage: grayling-growth-agent serve --config FILE
+       grayling-growth-agent backup --database FILE --output FILE
+       grayling-growth-agent review --proposal FILE [--goal FILE] --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent prepare --proposal FILE [--goal FILE] --settings FILE [--review-record FILE] --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent bind-check --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
        grayling-growth-agent rollout --manifest FILE --base-url ORIGIN --workspace ID --environment ID [--token-env NAME] [--timeout 10s]
@@ -76,6 +78,12 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) int {
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 		fmt.Fprint(out, usage)
 		return 0
+	}
+	if len(args) > 0 && args[0] == "backup" {
+		return runBackup(ctx, args[1:], out, diagnostics)
+	}
+	if len(args) > 0 && args[0] == "serve" {
+		return runServe(ctx, args[1:], out, diagnostics)
 	}
 	if len(args) > 0 && args[0] == "init-proposal" {
 		return runInitProposal(args[1:], out, diagnostics)

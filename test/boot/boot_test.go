@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,18 +19,10 @@ import (
 	"time"
 
 	"github.com/saker-ai/grayling/test/pgtest"
+	"github.com/saker-ai/grayling/test/porttest"
 )
 
-func freePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	return port
-}
+func freePort(t *testing.T) int { t.Helper(); return porttest.Free(t) }
 
 func TestAnonymousNativeListenerRejectsNonLoopbackEvenWithOverride(t *testing.T) {
 	if testing.Short() {

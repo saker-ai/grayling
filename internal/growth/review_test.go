@@ -59,6 +59,8 @@ func TestProposalFingerprintCompleteAndCanonical(t *testing.T) {
 			value := reflect.ValueOf(&changed).Elem().Field(i)
 			if field.Name == "GoalPin" {
 				value.Set(reflect.ValueOf(&GoalPin{Version: 1, Fingerprint: hashA}))
+			} else if field.Name == "BaselinePin" {
+				value.Set(reflect.ValueOf(&BaselinePin{SourceID: "synthetic", Version: 1, Fingerprint: hashA}))
 			} else {
 				value.SetZero()
 			}

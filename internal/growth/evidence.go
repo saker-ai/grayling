@@ -111,6 +111,10 @@ type Query struct {
 // server fields (including free-form metric descriptions and identities) never
 // pass through to the envelope. Server issue/reason strings remain untrusted data.
 type Metric struct {
+	Spec struct {
+		Type      string `json:"type"`
+		Direction string `json:"direction,omitempty"`
+	} `json:"spec,omitzero"`
 	// AttributionWindow preserves catalog nanoseconds without rounding to hours.
 	AttributionWindow int64 `json:"attributionWindow"`
 	// Status is projected from the catalog; unknown values are redacted on read.
@@ -402,12 +406,13 @@ type Evidence struct {
 }
 
 type Envelope struct {
-	WorkspaceID   string     `json:"workspaceId"`
-	EnvironmentID string     `json:"environmentId"`
-	Status        Status     `json:"status"`
-	Metrics       []Metric   `json:"metrics"`
-	Evidence      []Evidence `json:"evidence"`
-	MissingPaths  []string   `json:"missingPaths,omitempty"`
+	PlanningBaseline *AggregateBaseline `json:"planningBaseline,omitempty"`
+	WorkspaceID      string             `json:"workspaceId"`
+	EnvironmentID    string             `json:"environmentId"`
+	Status           Status             `json:"status"`
+	Metrics          []Metric           `json:"metrics"`
+	Evidence         []Evidence         `json:"evidence"`
+	MissingPaths     []string           `json:"missingPaths,omitempty"`
 }
 
 // get only accepts internally constructed paths. Errors never wrap a URL,

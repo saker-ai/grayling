@@ -2,6 +2,11 @@
 
 > 与实现同步的端点清单（来源：`internal/api/server.go` 路由表）。机器可读规范见仓库根 [`openapi.yaml`](../openapi.yaml)（由 `internal/api/openapi_test.go` 与路由表机械化双向核对）；本文以实际行为为准。
 
+可选 Growth Copilot 使用独立进程和[私有服务 API](growth-service.openapi.yaml)，
+不增加核心 `/api/v1/growth` 路由。其认证、耐久任务与恢复见[服务说明](growth-service.md)。
+实验创建的 `flagRevision` 可提供正数作为当前已发布版本前置条件；版本不符返回 409，
+省略/0 保持服务端选择当前版本的行为，注册时原子复核。
+
 ## 认证与受众
 
 所有请求携带 `Authorization: Bearer <token>`。凭证决定作用域（workspace/environment），**任何端点不接受用 query/body 参数选择租户**。三受众互斥：
@@ -241,3 +246,8 @@ GET /api/v1/gateway/forwardauth?flagKey=<key>&defaultVariant=<v>&unitField=<f>&u
 ## Flag DSL（schemaVersion 1）
 
 见 `pkg/model/types.go` 与技术方案 §5.2。要点：`type ∈ bool|string|number|json`；规则必须有且仅有 `variation|percentage` 之一；约束字段必须在 `fields` 注册（`targetingKey` 隐式注册）；操作符闭集 `eq,ne,in,not_in,gt,gte,lt,lte,time_before,time_after,regex,in_cidr,semver_gt,semver_gte,semver_lt,semver_lte,semver_eq`；`bucketing.algorithm` 固定 `grayling-fnv1a-10000-v1`；实验绑定 flag 的 `defaultRule.variation` 必填（未入组回退）。
+
+The separate Growth private service also supports explicit `design`,
+`sample-plan` and `study` actions, finite aggregate baseline input, scoped study
+exports and verified evidence archives. These are not core Admin API endpoints;
+see [its OpenAPI](growth-service.openapi.yaml) and [service contract](growth-service.md).

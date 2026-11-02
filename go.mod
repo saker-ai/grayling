@@ -118,3 +118,6 @@ require (
 // own replace directives do not apply to the main module, so it is restated
 // here (docs/技术方案.md §2).
 replace github.com/nikunjy/rules => github.com/hairyhenderson/rules v0.0.0-20250704181428-58ee76134adc
+
+// v2.3.5 wire behavior; local RPC connection/registry synchronization repair.
+replace github.com/nacos-group/nacos-sdk-go/v2 => ./third_party/nacos-sdk-go

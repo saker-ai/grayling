@@ -6,7 +6,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-export const EVIDENCE_DIR = path.resolve(HERE, '..', '..', '..', '..', 'docs', 'acceptance', 'web-2026-10-18-redesign');
+export const EVIDENCE_DIR = process.env.U4_EVIDENCE_DIR
+  ? path.resolve(process.env.U4_EVIDENCE_DIR)
+  : path.resolve(HERE, '..', '..', '..', '..', 'docs', 'acceptance', 'web-2026-10-18-redesign');
 
 let ensured = false;
 function ensureDir() {

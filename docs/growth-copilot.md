@@ -1,5 +1,11 @@
 # Growth Copilot: evidence and proposal contracts
 
+The integrated [optional durable service and workbench](growth-service.md) now
+reuses these contracts. The historical slice descriptions below describe the
+one-shot commands and their original boundaries; their statements about no
+service/UI/persistence do not describe the new `serve` command. Real pilot and
+human quality/business evidence remain outstanding.
+
 Part of [#20](https://github.com/saker-ai/grayling/issues/20). `internal/growth`
 is an optional Go library exposed by `cmd/grayling-growth-agent`, an independent
 read-only command. No public route, SDK behavior, persistence, browser UI, model

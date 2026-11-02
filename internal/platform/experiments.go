@@ -46,6 +46,18 @@ func ExperimentTransitionAllowed(from, to model.ExperimentState) bool {
 // service) has already validated metric specs and proportions; the store
 // re-checks invariants that protect analysis integrity.
 func (s *Store) CreateExperiment(exp *Experiment) (*Experiment, error) {
+	return s.createExperiment(exp, 0)
+}
+
+// CreateExperimentAtRevision atomically verifies the published flag revision
+// observed by the admin service while registering the experiment.
+func (s *Store) CreateExperimentAtRevision(exp *Experiment, revision int64) (*Experiment, error) {
+	if revision < 1 {
+		return nil, fmt.Errorf("%w: positive flag revision required", ErrValidation)
+	}
+	return s.createExperiment(exp, revision)
+}
+func (s *Store) createExperiment(exp *Experiment, expectedRevision int64) (*Experiment, error) {
 	if exp == nil {
 		return nil, fmt.Errorf("%w: nil experiment", ErrValidation)
 	}
@@ -62,6 +74,9 @@ func (s *Store) CreateExperiment(exp *Experiment) (*Experiment, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if expectedRevision > 0 && s.data.CurrentFlagRev[flagScopeKey(exp.WorkspaceID, exp.EnvironmentID, exp.FlagKey)] != expectedRevision {
+		return nil, fmt.Errorf("%w: published flag revision changed", ErrConflict)
+	}
 	if err := s.checkEnvLocked(exp.WorkspaceID, exp.EnvironmentID); err != nil {
 		return nil, err
 	}

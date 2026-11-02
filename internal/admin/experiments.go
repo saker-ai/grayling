@@ -39,6 +39,12 @@ func (s *Service) CreateExperiment(actor Actor, workspaceID, environmentID strin
 	if current == nil {
 		return nil, fmt.Errorf("%w: flag %q has no published revision", platform.ErrValidation, exp.FlagKey)
 	}
+	if exp.FlagRevision < 0 {
+		return nil, fmt.Errorf("%w: invalid flag revision", platform.ErrValidation)
+	}
+	if exp.FlagRevision > 0 && exp.FlagRevision != current.Revision {
+		return nil, fmt.Errorf("%w: flag revision changed; prepare and review again", platform.ErrConflict)
+	}
 	exp.FlagRevision = current.Revision
 
 	// Variants must be flag variations; proportions must reference exactly
@@ -93,7 +99,7 @@ func (s *Service) CreateExperiment(actor Actor, workspaceID, environmentID strin
 		}
 		exp.LayerSlot = slot
 	}
-	created, err := s.Store.CreateExperiment(exp)
+	created, err := s.Store.CreateExperimentAtRevision(exp, current.Revision)
 	if err != nil {
 		return nil, err
 	}

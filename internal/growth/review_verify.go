@@ -55,6 +55,9 @@ func validateReviewRecord(r ReviewRecord) error {
 	if err != nil || len(data) > MaxReviewRecordBytes || r.SchemaVersion != ReviewRecordSchemaVersion || !validSegment(r.ProposalID) || r.ProposalVersion < 1 || !validSegment(r.WorkspaceID) || !validSegment(r.EnvironmentID) || !fingerprint.MatchString(r.ProposalFingerprint) {
 		return ErrReviewVerification
 	}
+	if !validBaselinePin(r.BaselinePin) {
+		return ErrReviewVerification
+	}
 	if validateReviewInputs(ReviewInputs{Decision: r.Decision, Reviewer: r.Reviewer, ReviewedAt: r.ReviewedAt, Rationale: r.Rationale}) != nil {
 		return ErrReviewVerification
 	}
@@ -96,11 +99,11 @@ func VerifyReview(p Proposal, r ReviewRecord, workspace, environment string) (*R
 	}
 	// Compare serialized values to preserve ordering and null/empty distinctions,
 	// without relying on the record's fingerprint string for copied-field integrity.
-	original, err := json.Marshal([]any{p.PrimaryMetric, p.Guardrails, p.EvidenceRefs}, json.Deterministic(true))
+	original, err := json.Marshal([]any{p.PrimaryMetric, p.Guardrails, p.EvidenceRefs, p.BaselinePin}, json.Deterministic(true))
 	if err != nil {
 		return nil, ErrReviewVerification
 	}
-	copied, err := json.Marshal([]any{r.PrimaryMetric, r.Guardrails, r.EvidencePins}, json.Deterministic(true))
+	copied, err := json.Marshal([]any{r.PrimaryMetric, r.Guardrails, r.EvidencePins, r.BaselinePin}, json.Deterministic(true))
 	if err != nil || !bytes.Equal(original, copied) {
 		return nil, ErrReviewVerification
 	}

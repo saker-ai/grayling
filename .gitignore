@@ -47,3 +47,7 @@ Thumbs.db
 __pycache__/
 *.egg-info/
 .pytest_cache/
+
+# Private engineering closeout evidence
+/CLOSEOUT_RESULT.json
+/CLOSEOUT_RESULT.md

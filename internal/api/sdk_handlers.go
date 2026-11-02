@@ -266,7 +266,7 @@ func (s *Server) handleSDKEval(w http.ResponseWriter, r *http.Request) {
 	res.ManifestRevision = revision
 	generated := snapshot.GeneratedAt
 	if generated.IsZero() {
-		generated = time.Now()
+		generated = s.Store.CurrentTime()
 	}
 	res.SnapshotAgeMillis = max(0, time.Since(generated).Milliseconds())
 
@@ -339,7 +339,7 @@ func (s *Server) pinRemoteBanditAssignment(env *platform.Environment, snapshot *
 		UnitHash: s.Store.HashUnit(env.WorkspaceID, unit), Variant: res.Experiment.Variant,
 		Source: res.Experiment.Source, PolicyVersion: res.Experiment.PolicyVersion,
 		StateVersion: res.Experiment.StateVersion, AllocationProbability: res.Experiment.AllocationProbability,
-		ClientTime: time.Now().UTC()})
+		ClientTime: s.Store.CurrentTime().UTC()})
 	if err != nil {
 		return err
 	}
@@ -376,7 +376,7 @@ func (s *Server) recordRemoteExposure(tok *platform.Token, env *platform.Environ
 	eventID := fmt.Sprintf("srv-%s-%d-%s-%s", res.Experiment.ExperimentID, res.Experiment.Epoch,
 		unitHash[:16], res.Experiment.Variant)
 	flagRev := flagRevisionIn(snapshot, res.FlagKey)
-	now := time.Now().UTC()
+	now := s.Store.CurrentTime().UTC()
 	ingested, err := s.Store.IngestEvents([]*platform.Event{{
 		EventID: eventID, WorkspaceID: env.WorkspaceID, EnvironmentID: env.ID,
 		Type: platform.EventExposure, ExperimentID: res.Experiment.ExperimentID,
@@ -432,7 +432,7 @@ func (s *Server) recordRemoteAssignment(env *platform.Environment, snapshot *mod
 		FlagKey: res.FlagKey, FlagRevision: revision, Variant: res.Experiment.Variant,
 		UnitHash: unitHash, Source: res.Experiment.Source,
 		PolicyVersion: res.Experiment.PolicyVersion, StateVersion: res.Experiment.StateVersion,
-		AllocationProbability: res.Experiment.AllocationProbability, ClientTime: time.Now().UTC(),
+		AllocationProbability: res.Experiment.AllocationProbability, ClientTime: s.Store.CurrentTime().UTC(),
 	}})
 	if err != nil || result.Accepted+result.Duplicates != 1 {
 		return "", "", time.Time{}, fmt.Errorf("%w: assignment could not be recorded: %v", platform.ErrInvalidState, err)

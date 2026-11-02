@@ -23,7 +23,7 @@ func (s *Server) authorizedExperimentReport(r *http.Request) (*platform.Experime
 	if err := admin.Authorize(actor, exp.WorkspaceID, admin.PermReportRead); err != nil {
 		return nil, nil, err
 	}
-	report, err := experiment.BuildReport(s.Store, exp.ID, time.Now())
+	report, err := experiment.BuildReport(s.Store, exp.ID, s.Store.CurrentTime())
 	if err != nil {
 		return nil, nil, err
 	}

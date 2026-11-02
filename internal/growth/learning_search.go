@@ -80,7 +80,7 @@ func reportSource(id string) string {
 }
 
 func validateLearningRecord(r LearningRecord) error {
-	if !validLearningGoalRef(r.GoalRef) || r.SchemaVersion != LearningRecordSchemaVersion || !validSegment(r.ProposalID) || r.ProposalVersion < 1 || !fingerprint.MatchString(r.ProposalFingerprint) || !validSegment(r.WorkspaceID) || !validSegment(r.EnvironmentID) || !learningText(r.OriginalHypothesis, 4096) || !validSegment(r.Recorder) || r.RecordedAt.IsZero() || r.BusinessWinEstablished || r.PublicationAuthorized || len(r.Followups) < 1 || len(r.Followups) > MaxLearningFollowups {
+	if !validBaselinePin(r.BaselinePin) || !validLearningGoalRef(r.GoalRef) || r.SchemaVersion != LearningRecordSchemaVersion || !validSegment(r.ProposalID) || r.ProposalVersion < 1 || !fingerprint.MatchString(r.ProposalFingerprint) || !validSegment(r.WorkspaceID) || !validSegment(r.EnvironmentID) || !learningText(r.OriginalHypothesis, 4096) || !validSegment(r.Recorder) || r.RecordedAt.IsZero() || r.BusinessWinEstablished || r.PublicationAuthorized || len(r.Followups) < 1 || len(r.Followups) > MaxLearningFollowups {
 		return ErrLearning
 	}
 	for _, f := range r.Followups {

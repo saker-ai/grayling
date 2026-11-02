@@ -62,6 +62,7 @@ type CreateGuardrail struct {
 // PreparationMetadata is provenance, not part of the experiment API request.
 // Audience is retained as a planning claim; targeting/binding still needs review.
 type PreparationMetadata struct {
+	BaselinePin            *BaselinePin          `json:"baselinePin,omitempty"`
 	ProposalID             string                `json:"proposalId"`
 	ProposalVersion        int64                 `json:"proposalVersion"`
 	Audience               string                `json:"audience"`
@@ -162,6 +163,11 @@ func CompileCreateRequest(p Proposal, evidence *Envelope, in PreparationInputs) 
 		pins[i] = pin
 		pins[i].Window.Issues = append([]string(nil), pin.Window.Issues...)
 	}
+	var baselinePin *BaselinePin
+	if p.BaselinePin != nil {
+		copy := *p.BaselinePin
+		baselinePin = &copy
+	}
 	return &PreparedExperiment{
 		Request: CreateRequest{WorkspaceID: p.WorkspaceID, EnvironmentID: p.EnvironmentID, FlagKey: p.FlagKey, Unit: p.Unit,
 			Variants: variants, Proportions: proportions, AllocationMode: in.AllocationMode, ExposureMode: p.ExposureMode,
@@ -169,7 +175,7 @@ func CompileCreateRequest(p Proposal, evidence *Envelope, in PreparationInputs) 
 			Alpha: in.Alpha, Power: in.Power, MDE: p.SamplePlan.MDE, MinSamplePerArm: p.SamplePlan.MinSamplePerArm,
 			MinRuntime: p.SamplePlan.MinRuntimeHours * int64(time.Hour), AnalysisWindow: in.AnalysisWindowHours * int64(time.Hour),
 			Hypothesis: p.Hypothesis, AnalysisMethod: p.AnalysisPlan.Method},
-		Metadata: PreparationMetadata{ProposalID: p.ID, ProposalVersion: p.Version, Audience: p.Audience,
+		Metadata: PreparationMetadata{BaselinePin: baselinePin, ProposalID: p.ID, ProposalVersion: p.Version, Audience: p.Audience,
 			AttributionWindowHours: p.AnalysisPlan.AttributionWindowHours, EvidencePins: pins},
 	}, nil
 }

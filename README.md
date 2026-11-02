@@ -4,6 +4,15 @@
 
 Grayling is a self-hosted platform for feature flags, gradual rollouts, and A/B experiments. It also versions and gates AI resources such as prompts, skills, and agent specifications. The control plane, web console, and HTTP API can run as a standalone service or inside another Go service. This repository is named **Grayling**; the application and Go package remain **Grayling**.
 
+The optional [`grayling-growth-agent serve --config FILE`](docs/growth-service.md)
+adds a separate authenticated workbench and durable SQLite workflow: goal analysis,
+proposal editing/review, prepared drafts, explicit human Admin API submission/review/binding,
+read-only monitoring and searchable learning. AI defaults off; optional planning is
+restricted to a loopback adapter. Restart/restore and lost-response reconciliation
+preserve checkpoints without a second experiment or automatic publication. Real
+Saker pilot, blind suggestion review and measured business outcomes remain outstanding.
+The [private service OpenAPI](docs/growth-service.openapi.yaml) is separate from the core API.
+
 The optional `bin/grayling-growth-agent review` and `prepare` commands and `internal/growth` library read aggregate evidence and validate
 versioned proposal JSON for human review. Missing/mismatched/HOLD evidence and
 missing implementation attestations block readiness. For example, a complete
@@ -289,3 +298,9 @@ The console is a React 19 + TypeScript SPA built with Vite, organized as a pnpm 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and checks, and [SECURITY.md](SECURITY.md) for private vulnerability reports.
 
 Grayling is licensed under [Apache-2.0](LICENSE). Third-party attribution and the pinned dependency license inventory are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [`third_party/licenses.json`](third_party/licenses.json). Run `make release-check` before redistributing binaries.
+
+The optional [synthetic growth lab](docs/growth-synthetic-lab.md) runs owned local
+activation/upgrade samples with real platform APIs, persistent tasks, browser
+exposure/conversion and virtual D1 maturity. It uses no real identities or payments.
+Direct provider access and finite aggregate import require explicit configuration;
+see [Growth service](docs/growth-service.md).

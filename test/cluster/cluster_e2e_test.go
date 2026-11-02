@@ -58,7 +58,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -73,6 +72,7 @@ import (
 	"github.com/saker-ai/grayling/pkg/bucketing"
 	"github.com/saker-ai/grayling/pkg/model"
 	"github.com/saker-ai/grayling/test/pgtest"
+	"github.com/saker-ai/grayling/test/porttest"
 	"github.com/saker-ai/grayling/test/redistest"
 )
 
@@ -137,16 +137,7 @@ func TestRolloutLeaderProcessFailover(t *testing.T) {
 // Process helpers
 // ---------------------------------------------------------------------------
 
-func freePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("free port: %v", err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	return port
-}
+func freePort(t *testing.T) int { t.Helper(); return porttest.Free(t) }
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -389,8 +380,18 @@ func (c *client) doOnce(method, path string, body any, out any) int {
 func (c *client) publishFlag(flag *model.Flag) (manifestRev int64, status int) {
 	c.t.Helper()
 	base := fmt.Sprintf("/api/v1/admin/workspaces/acme/environments/prod/flags/%s", flag.Key)
+	// Read the editor's actual optimistic-lock contract. Empty/zero pins are
+	// valid only for a new flag; reusing them after r1 correctly returns 409.
+	// Keep retries and assertions unchanged: a concurrent edit must still fail.
+	var view struct {
+		CurrentRevision int64  `json:"currentRevision"`
+		DraftHash       string `json:"draftHash"`
+	}
+	if status = c.do(http.MethodGet, base, nil, &view); status != http.StatusOK {
+		return 0, status
+	}
 	if status = c.do("PUT", base+"/draft", map[string]any{
-		"content": flag, "risk": "normal", "baseRevision": 0, "expectedDraftHash": "",
+		"content": flag, "risk": "normal", "baseRevision": view.CurrentRevision, "expectedDraftHash": view.DraftHash,
 	}, nil); status != 200 {
 		return 0, status
 	}

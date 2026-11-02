@@ -28,6 +28,7 @@ type LearningInputs struct {
 // Server verdicts describe platform decisions, never a business winning claim.
 // Records provide neither durable audit storage nor publication authorization.
 type LearningRecord struct {
+	BaselinePin                *BaselinePin          `json:"baselinePin,omitempty"`
 	GoalRef                    *LearningGoalRef      `json:"goalRef,omitempty"`
 	SchemaVersion              string                `json:"schemaVersion"`
 	ProposalID                 string                `json:"proposalId"`
@@ -121,7 +122,7 @@ func (r *Reader) RecordLearning(ctx context.Context, p Proposal, m MonitorManife
 		// Monitor's constructed source path is a request target, not observed provenance.
 		observed.SourcePath = ""
 	}
-	record := &LearningRecord{
+	record := &LearningRecord{BaselinePin: snapshot.BaselinePin,
 		SchemaVersion: LearningRecordSchemaVersion, ProposalID: snapshot.ID, ProposalVersion: snapshot.Version,
 		ProposalFingerprint: actual, WorkspaceID: snapshot.WorkspaceID, EnvironmentID: snapshot.EnvironmentID,
 		OriginalHypothesis: snapshot.Hypothesis, ProposalBaselineReferences: snapshot.EvidenceRefs,

@@ -70,7 +70,11 @@ def inventory():
         row = {"module": mod["Path"], "version": mod["Version"], "runtime": used, "license": (license_type(primary.read_bytes()) if primary else "UNRESOLVED") if used else "NOT_DISTRIBUTED", "evidence": evidence}
         if "Replace" in mod:
             row["resolved_module"] = actual["Path"]
-            row["resolved_version"] = actual["Version"]
+            row["resolved_version"] = actual.get("Version", "local")
+            if "Version" not in actual:
+                local = Path(actual["Dir"])
+                files = sorted(p for p in local.rglob("*") if p.is_file() and not any(part in {".git", "node_modules"} for part in p.relative_to(local).parts))
+                row["local_source_sha256"] = sha(b"".join(str(p.relative_to(local)).encode() + b"\0" + p.read_bytes() + b"\0" for p in files))
         rows.append(row)
     lock = json.loads((ROOT / "sdk/typescript/package-lock.json").read_text())
     npm = [{"package": name.removeprefix("node_modules/"), "version": value["version"], "license": value.get("license", "UNRESOLVED")}

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "growth.aggregate-baseline.v1",
+  "sourceId": "synthetic-owned-export",
+  "version": 1,
+  "workspaceId": "synthetic_workspace",
+  "environmentId": "synthetic_local",
+  "metrics": [
+    {
+      "key": "first_task",
+      "version": 1,
+      "definitionHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "key": "d1_retention",
+      "version": 1,
+      "definitionHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "window": {
+    "version": "aggregate-baseline-v1",
+    "start": "2026-01-01T00:00:00Z",
+    "end": "2026-01-14T00:00:00Z",
+    "watermark": "2026-01-15T00:00:00Z",
+    "complete": true,
+    "recomputable": true,
+    "backend": "finite-aggregate-v1"
+  },
+  "refreshedAt": "2026-01-15T00:00:00Z",
+  "unit": "randomization_unit",
+  "license": "Apache-2.0 generated synthetic sample",
+  "privacyPolicyRef": "synthetic-no-personal-data",
+  "synthetic": true,
+  "causal": false,
+  "groups": [
+    {
+      "role": "all",
+      "units": 200,
+      "converted": 60
+    }
+  ]
+}
