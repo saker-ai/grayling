@@ -195,7 +195,7 @@ Real Saker instrumentation, pilot evidence and durable workflows remain outstand
 
 ## Quick start
 
-Requires **Go 1.27 or newer** and `make`. From a clone of this repository:
+Requires **Go 1.27.2 or newer** and `make` (see `go.mod`). From a clone of this repository:
 
 ```bash
 git clone https://github.com/saker-ai/grayling.git
