@@ -17,7 +17,7 @@ Grayling 是可自托管的功能开关、渐进发布与 A/B 实验平台，也
 
 ## 快速开始
 
-需要 **Go 1.27 或更新版本**和 `make`：
+需要 **Go 1.27.2 或更新版本**和 `make`：
 
 ```bash
 git clone https://github.com/saker-ai/grayling.git
